@@ -19,8 +19,8 @@ Testing by real CDL drivers, paid. **Open an issue** with the *Bug report* templ
   driver, first 20 drivers. Use the bug-report form and fill in *what the app showed* vs *what
   the ELD showed*, even when they match.
 - **$5 per confirmed bug**, first reporter only, cap $50 per driver. Bounty pool closes at $400.
-- Paid by Venmo within 48 hours of confirmation. When your issue is confirmed I'll comment on it and
-  tell you where to send your Venmo handle — **don't post payment handles in issues.**
+- Paid by Venmo within 48 hours of confirmation. When your issue is confirmed I'll comment on it;
+  then email your Venmo handle to **hossandbox.app@gmail.com** — **don't post payment handles in issues.**
 
 **Counts as a bug:** clocks that disagree with 49 CFR 395.1(g)/395.3 or with your ELD on the same
 inputs (if the ELD is the one that's wrong, you still get paid — we'll look at the reg together);

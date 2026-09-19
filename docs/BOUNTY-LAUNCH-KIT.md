@@ -1,6 +1,6 @@
 # HOS Sandbox — Bug Bounty Launch Kit
 
-Placeholders to fill before posting: **[PROJECT-EMAIL]** — a dedicated address (e.g. hossandbox.app@gmail.com), NOT your personal Gmail. GitHub has no private messages, so this is how testers send you their Venmo handle.
+All placeholders filled (URL, Venmo, hossandbox.app@gmail.com). Ready to post.
 
 ---
 
@@ -9,7 +9,7 @@ Placeholders to fill before posting: **[PROJECT-EMAIL]** — a dedicated address
 **What you get**
 - **$10** for a completed test report (template below) — one per driver, first 20 drivers.
 - **$5 per confirmed bug**, first reporter only. Cap **$50 per driver**. Bounty pool closes at $400.
-- Paid by **Venmo** within 48 hours of confirmation. When your issue is confirmed I'll comment on it; email your Venmo handle to [PROJECT-EMAIL] from there. Don't post payment handles in issues.
+- Paid by **Venmo** within 48 hours of confirmation. When your issue is confirmed I'll comment on it; email your Venmo handle to hossandbox.app@gmail.com from there. Don't post payment handles in issues.
 
 **What counts as a bug**
 - The app's clocks disagree with the regulation (49 CFR 395.1(g) / 395.3) or with your ELD on the same inputs. *The ELD is not automatically right — if you think the ELD is wrong, say so and we'll check the reg together. You still get paid if the app is wrong.*
