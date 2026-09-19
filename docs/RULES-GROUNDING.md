@@ -40,6 +40,12 @@ Recalculation (iii):
 - Split does NOT touch the 60/70.
 - A ≥10-hr break is dual-purpose: full reset AND can be the 7+ SB leg of a pair (if it was in SB).
 - Chaining: the second period of one pair may serve as the first period of the next pair.
+- **A ≥10h rest that comes FIRST is a reset, not a split leg.** FMCSA FAQ: a 10h off-duty period
+  pairs with a 7h+ SB only "when the 7+ consecutive hour sleeper berth period occurs prior to the
+  10 consecutive hour off-duty period." A 7h SB taken after a full reset needs its own later ≥2h
+  partner (then the anchor moves to the SB's end). Engine implements this by splitting shifts at
+  ≥10h rests and letting the terminating rest be a candidate only for the shift it closes.
+  ⚠ Some ELDs may credit the SB immediately — ask bounty testers specifically about this case.
 - Multiple possible pairings: FMCSA picks the pairing with fewest/least-severe violations
   (nominal <15 min → violation → OOS/>3hr); ties → the pairing giving the most available
   on-duty/driving time going forward. The engine must enumerate candidate pairings, not greedy-pick.

@@ -214,6 +214,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <li class={paired ? 'ok' : 'no'}>Engine confirms pairing</li>
         </ul>
         {(b1 >= 600 || b2 >= 600) && <p class="muted small">A break of 10h+ is a full reset on its own — it also pairs, per FMCSA FAQ.</p>}
+        {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && base.length > 0 && (base[base.length - 1].status === 'OFF' || base[base.length - 1].status === 'SB') && (
+          <p class="warnbox small">Break 1 runs straight into the rest you're already in, so they merge into one {dur(b1 + (t0 - [...base].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB')!.end))} rest. A rest of 10h+ is a full <b>reset</b>, and a reset can't be the first leg of a split (§395.1(g)(1)(i)(A) vs (E)). Break 2 will need its own ≥2–3h partner later; the clocks below show that honestly. To model a true split, go on duty or drive first.</p>
+        )}
       </Card>
 
       <Card title={`After Break 2 ends (${clock(endB2)})`}>

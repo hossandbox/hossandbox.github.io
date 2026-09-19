@@ -1,6 +1,6 @@
 # HOS Sandbox — Bug Bounty Launch Kit
 
-Placeholders to fill before posting: **[URL]**, **[REPORT-EMAIL]**, **[PAY-METHODS]**.
+Placeholders to fill before posting: **[PAY-METHODS]** (URL and report channel are filled in).
 
 ---
 
@@ -31,7 +31,7 @@ Placeholders to fill before posting: **[URL]**, **[REPORT-EMAIL]**, **[PAY-METHO
 
 ---
 
-## Test report template (email to [REPORT-EMAIL], subject "HOS Sandbox test")
+## Test report template (use the in-app 🐞 button, or open an issue at https://github.com/loricoestrellado-jpg/hos-sandbox/issues/new/choose)
 
 ```
 Phone + browser:            (e.g. Pixel 7 / Chrome, iPhone 13 / Safari)
@@ -73,11 +73,11 @@ What it does:
 
 The math is built from the actual CFR text and FMCSA's 2020 FAQ, not from blogs — and I found out along the way that several popular trucking sites have the split rule *wrong* (they say only the 7-hour period comes out of your 14; the reg and FMCSA say both do). That's exactly why I don't trust my own testing and want yours.
 
-**I'm paying:** $10 for a filled-out test report comparing it to your ELD on a real day, $5 for every bug you're first to find. Details and the report template at the link. If your ELD and my app disagree, I want to know either way — we'll look up the reg together.
+**I'm paying:** $10 for a filled-out test report comparing it to your ELD on a real day, $5 for every bug you're first to find. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look up the reg together.
 
 What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log anything for you. It's the napkin, not the logbook.
 
-Link: [URL] — open in Chrome/Safari, "Add to Home Screen."
+Link: https://loricoestrellado-jpg.github.io/hos-sandbox/ — open in Chrome/Safari, "Add to Home Screen."
 
 Built by one person. It's rough. Tell me where.
 
@@ -89,13 +89,13 @@ Made a free split-sleeper / recap / parking calculator for drivers. Not an ELD �
 
 Need CDL drivers to break it. **$10 to compare it against your ELD on a real day, $5 per bug you find first.**
 
-[URL] — add to home screen. Nothing leaves your phone.
+https://loricoestrellado-jpg.github.io/hos-sandbox/ — add to home screen. Nothing leaves your phone.
 
 ---
 
 ## Post 3 — Comment version (when someone in a thread asks the split question)
 
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes and what happens if you skip the second break. Not an ELD, nothing to install, nothing leaves your phone: [URL]. I'm paying drivers $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD tell me.
+Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes and what happens if you skip the second break. Not an ELD, nothing to install, nothing leaves your phone: https://loricoestrellado-jpg.github.io/hos-sandbox/. I'm paying drivers $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD tell me.
 
 ---
 
