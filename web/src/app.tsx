@@ -1,5 +1,24 @@
 import { useMemo, useState } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import { Component, type ComponentChildren } from 'preact';
+
+/** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
+class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
+  state = { err: null as string | null };
+  componentDidCatch(e: unknown) { this.setState({ err: e instanceof Error ? `${e.message}\n${(e.stack ?? '').split('\n').slice(1, 4).join('\n')}` : String(e) }); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const issue = `https://github.com/hossandbox/hossandbox.github.io/issues/new?template=bug-report.yml&title=${encodeURIComponent(`[bug] ${this.props.tab} tab crashed`)}&expected=${encodeURIComponent('Tab should render')}&actual=${encodeURIComponent(this.state.err)}&build=${encodeURIComponent(__BUILD__)}`;
+    return (
+      <div class="card warn">
+        <h3>This tab hit a bug</h3>
+        <p class="small">Your log is safe. The other tabs still work. Please report this so it gets fixed (and paid, if you're first):</p>
+        <pre class="small" style="white-space:pre-wrap">{this.state.err}</pre>
+        <a class="btn" href={issue} target="_blank" rel="noopener">🐞 Report this crash</a>
+        <button class="ghost" onClick={() => this.setState({ err: null })}>Try again</button>
+      </div>
+    );
+  }
+}
 import {
   evaluate, planTrip, planTripBoth, safeHaven, LIMITS, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
@@ -216,9 +235,11 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <li class={paired ? 'ok' : 'no'}>Engine confirms pairing</li>
         </ul>
         {(b1 >= 600 || b2 >= 600) && <p class="muted small">A break of 10h+ is a full reset on its own. If it includes 7+ consecutive hours in the sleeper it can <i>also</i> pair with a later 2h+ break — whichever helps you more (FMCSA FAQ 22, July 2026).</p>}
-        {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && base.length > 0 && (base[base.length - 1].status === 'OFF' || base[base.length - 1].status === 'SB') && (
-          <p class="warnbox small">Break 1 runs straight into the rest you're already in, so they merge into one {dur(b1 + (t0 - [...base].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB')!.end))} rest — a full <b>reset</b>. Under FMCSA FAQ 22 (July 2026) a reset can be a split leg <i>only</i> if it includes 7+ consecutive hours in the <b>sleeper</b>; this one doesn't, so Break 2 will need its own ≥2–3h partner later. The clocks below show that honestly. To model a true split, go on duty or drive first — or log the rest as sleeper.</p>
-        )}
+        {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && base.length > 0 && (base[base.length - 1].status === 'OFF' || base[base.length - 1].status === 'SB') && (() => {
+          const lastWork = [...base].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB');
+          const merged = b1 + (t0 - (lastWork ? lastWork.end : base[0].start));
+          return <p class="warnbox small">Break 1 runs straight into the rest you're already in, so they merge into one {dur(merged)} rest — a full <b>reset</b>. Under FMCSA FAQ 22 (July 2026) a reset can be a split leg <i>only</i> if it includes 7+ consecutive hours in the <b>sleeper</b>; this one doesn't, so Break 2 will need its own ≥2–3h partner later. The clocks below show that honestly. To model a true split, go on duty or drive first — or log the rest as sleeper.</p>;
+        })()}
       </Card>
 
       <Card title={`After Break 2 ends (${clock(endB2)})`}>
@@ -442,11 +463,13 @@ export function App() {
     <div class="app">
       <StatusBar ev={ev} now={now} s={s} />
       <main>
-        {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
-        {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
-        {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
-        {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
-        {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
+        <TabBoundary key={s.tab} tab={s.tab}>
+          {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
+          {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
+          {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
+          {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
+          {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
+        </TabBoundary>
       </main>
       <nav class="tabs">{tabs.map(([k, l]) => <button key={k} class={s.tab === k ? 'on' : ''} onClick={() => setState({ tab: k })}>{l}</button>)}</nav>
     </div>

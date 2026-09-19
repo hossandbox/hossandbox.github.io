@@ -72,4 +72,16 @@ setState({ tab: 'recap' }); hh = out('recap/day editor');
 console.log('day editor buttons:', (hh.match(/class="mini"/g) || []).length >= 7);
 setState({ tab: 'settings', bugEmail: 'bugs@example.com' }); hh = out('settings/bug email');
 console.log('bug button labelled:', /Report a bug<\/button>/.test(hh) || /Report a bug/.test(hh));
+
+// Regression: "Fresh start" (only an OFF segment, then Driving) + Split Lab crashed on an undefined lastWork.end (2026-09-19)
+setState({ tab: 'split', segments: [{ status: 'OFF', start: now - 600, end: now }], current: { status: 'D', since: now }, tentative: [] });
+hh = out('split/fresh-start regression');
+if (!/Break 1 runs straight into the rest/.test(hh)) throw new Error('fresh-start explanation missing');
+if (/This tab hit a bug/.test(hh)) throw new Error('Split Lab crashed on fresh-start state');
+// Every tab must render for a brand-new user (no segments at all)
+for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
+  setState({ tab, segments: [], current: { status: 'OFF', since: now - 60 }, tentative: [] });
+  hh = out(`empty-state/${tab}`);
+  if (/This tab hit a bug/.test(hh)) throw new Error(`${tab} crashed on empty state`);
+}
 console.log('OK');
