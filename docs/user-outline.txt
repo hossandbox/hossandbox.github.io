@@ -1,0 +1,80 @@
+﻿1. Core Screen Layout & Architecture
+The app is built around two high-utility workflows: Simulating a Split and Forecasting Recaps.
++-------------------------------------------------------------+
+|                      HOS SANDBOX TOP BAR                    |
+|  [ Current Status: DRIVING ]      [ 34h Reset: 18h ago ]    |
++-------------------------------------------------------------+
+|                     1. SPLIT-SLEEPER LAB                    |
+|                                                             |
+|  Current Pair Status: [ Waiting for 2nd Qualifying Break ]  |
+|                                                             |
+|  [Period A: 2h 45m Off-Duty] -----> [Period B: 7h 15m SB]   |
+|                                                             |
+|  Adjust Tentative Break (Slider):                           |
+|  [--|---------------------]  3h 15m (Off-Duty / Sleeper)   |
+|                                                             |
+|  Projected Post-Break Clocks:                               |
+|  +-------------------------+   +-------------------------+  |
+|  | Drive Time Left: 5h 30m |   | 14h Window Left: 7h 00m |  |
+|  +-------------------------+   +-------------------------+  |
+|  Anchor Point: 14h clock calculates from end of Period A    |
++-------------------------------------------------------------+
+|                     2. 8-DAY ROLLING RECAP                  |
+|                                                             |
+|  Day:    D-7   D-6   D-5   D-4   D-3   D-2   D-1  [Today]   |
+|  Hours:  9.5   8.0  10.2   0.0   7.4  11.0   8.5   (6.2)    |
+|                                                             |
+|  * 70-Hour Used: 60.8h        * Available Today: 9.2h       |
+|  * Gaining at Midnight (+D-7): +9.5 hrs                     |
+|                                                             |
+|  [+ What-If Trip Load: 550 mi / 10h Drive ]                 |
+|  Verdict: VIOLATION on Day +1 unless stopped by 18:00       |
++-------------------------------------------------------------+
+
+2. Split-Sleeper Calculation Logic (49 CFR § 395.1(g)(1))
+The 2020 FMCSA rule update requires pairing two distinct qualifying breaks that together total at least 10 hours:
+* Long Period: At least 7 consecutive hours in the Sleeper Berth (off-duty does not qualify).
+* Short Period: At least 2 consecutive hours (can be Sleeper Berth, Off-Duty, or a combination).
+* Neither period counts against the 14-hour driving window once the split is completed.
+                PAIRING TIMELINE
+=====================================================
+... [Break 1 (e.g. 3h)] === [ Intermediate Driving & On-Duty ] === [Break 2 (e.g. 7h SB)] ...
+        |                                                              |
+        +------------- RE-CALCULATION WINDOW ANCHOR -------------------+
+                      (Clock measures forward from here)
+
+Calculation Algorithm:
+1. Validate Pairing Condition: \text{Duration}(P_1) + \text{Duration}(P_2) \ge 10\text{ hours} \max(\text{Duration}_{\text{SB}}(P_1), \text{Duration}_{\text{SB}}(P_2)) \ge 7.0\text{ hours} \min(\text{Duration}(P_1), \text{Duration}(P_2)) \ge 2.0\text{ hours}
+2. Anchor Point Shift:
+   * When P_2 completes, the calculation anchor resets to the end of P_1.
+   * All on-duty/driving events before the end of P_1 are cleared from the active shift window.
+3. Remaining 11-Hour Drive Clock: \text{Drive}_{\text{available}} = 11.0 - \sum \text{Drive Hours between } \text{End}(P_1) \text{ and } \text{Start}(P_2)
+4. Remaining 14-Hour Shift Window: \text{Window Used} = \left(\text{Current Time} - \text{End}(P_1)\right) - \text{Duration}(P_2) \text{Window}_{\text{available}} = 14.0 - \text{Window Used}
+3. Rolling 70-Hour / 8-Day Recap Engine (49 CFR § 395.3(b))
+A driver operating on an 8-day schedule cannot drive after logging 70 on-duty hours across any rolling 8 consecutive days.
+Data Model:
+An array of daily totals:
+H = [h_7, h_6, h_5, h_4, h_3, h_2, h_1, h_0]
+(where h_0 is today's current accumulated on-duty time, and h_7 is the oldest day in the 8-day window)
+Real-Time Metrics:
+* Current Cycle Used: \text{Cycle}_{\text{used}} = \sum_{i=0}^{7} h_i
+* Available Driving Time Today: \text{Hours Available Today} = \min\left(11.0, \, (70.0 - \text{Cycle}_{\text{used}})\right)
+* Hours Gained at Midnight (Drop-Off): At 00:00 tomorrow, day h_7 drops off the rolling record: \text{Recap Recovery} = h_7 \text{Available Tomorrow (before today's carryover)} = 70.0 - \left(\sum_{i=0}^{6} h_i\right)
+34-Hour Restart Reset Flag:
+If any single block of continuous Off-Duty/Sleeper Berth time \ge 34.0\text{ hours} is detected, clear all previous days:
+\text{Cycle}_{\text{used}} = \sum \text{Hours since end of 34h reset}
+4. "What-If" Trip Feasibility Engine
+The planning feature allows a driver to simulate a prospective load without touching an ELD:
+Inputs:
+ - Planned Departure Time
+ - Estimated Road Distance (miles)
+ - Estimated Average Speed (default: 55 mph)
+ - Estimated Shipper/Receiver Dwell (hours on-duty)
+
+Outputs:
+ - Estimated Drive Time: Distance / Speed
+ - Required 30-Min Rest Stops: Triggered after 8 cumulative hours of driving
+ - Required Night Stoppage / Split Berth Options
+ - Projected 70-Hour Clock Balance on Day of Delivery
+
+If estimated hours push \text{Cycle}_{\text{used}} > 70.0 or the shift duration > 14.0 before arrival, the UI flags the exact transit point where a mandatory 10-hour or split break must occur.

@@ -1,0 +1,16 @@
+name: Suggestion
+description: Something you wish it did, or wording/layout that confused you. Not bounty-paid, but very wanted.
+title: "[idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would make this more useful in the truck?
+    validations:
+      required: true
+  - type: input
+    id: operation
+    attributes:
+      label: Your operation
+      placeholder: "OTR 70/8, regional, local…"

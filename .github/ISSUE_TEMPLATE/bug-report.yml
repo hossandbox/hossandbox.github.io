@@ -1,0 +1,61 @@
+name: Bug report (bounty eligible)
+description: The app's clocks disagree with the regulation or your ELD, or something is broken.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. **$5 for a confirmed bug you're first to report** (see bounty rules in the README).
+        Please don't put payment handles here — Lorico will message you after confirming.
+        HOS Sandbox is a planning scratchpad, not an ELD. Your official log governs.
+  - type: input
+    id: device
+    attributes:
+      label: Phone + browser
+      placeholder: "Pixel 7 / Chrome · iPhone 13 / Safari"
+    validations:
+      required: true
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Your operation
+      options: ["OTR 70/8", "Regional 60/7", "Local / short-haul", "Team", "Other"]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you do?
+      description: Steps, in order. Which tab, which sliders, which buttons.
+    validations:
+      required: true
+  - type: textarea
+    id: app_said
+    attributes:
+      label: What did the app show?
+      placeholder: "11-hr left 5h 30m, 14-hr left 7h 00m, anchor 14:00 …"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect (ELD reading or the regulation)?
+      description: If your ELD disagrees with the app, paste both numbers. A screenshot of the ELD helps a lot.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: Filled in automatically when you use the in-app "Report a bug" button (also on Settings → About).
+  - type: input
+    id: clocks
+    attributes:
+      label: Clocks at the time (auto-filled)
+  - type: textarea
+    id: log
+    attributes:
+      label: Log export (JSON)
+      description: Auto-filled by the in-app button, or Settings → Export JSON and paste here. This is what lets the bug be reproduced exactly.
+      render: json
