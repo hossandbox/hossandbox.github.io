@@ -40,12 +40,16 @@ Recalculation (iii):
 - Split does NOT touch the 60/70.
 - A ≥10-hr break is dual-purpose: full reset AND can be the 7+ SB leg of a pair (if it was in SB).
 - Chaining: the second period of one pair may serve as the first period of the next pair.
-- **A ≥10h rest that comes FIRST is a reset, not a split leg.** FMCSA FAQ: a 10h off-duty period
-  pairs with a 7h+ SB only "when the 7+ consecutive hour sleeper berth period occurs prior to the
-  10 consecutive hour off-duty period." A 7h SB taken after a full reset needs its own later ≥2h
-  partner (then the anchor moves to the SB's end). Engine implements this by splitting shifts at
-  ≥10h rests and letting the terminating rest be a candidate only for the shift it closes.
-  ⚠ Some ELDs may credit the SB immediately — ask bounty testers specifically about this case.
+- **A ≥10h rest that comes FIRST — updated by FMCSA FAQ 22 (effective 2026-07-01):** a 10-consecutive-hour
+  rest that *includes ≥7 consecutive hours in the sleeper berth* may EITHER reset the 11/14 OR be paired with
+  a later ≥2h off-duty/SB period, "whichever choice is most advantageous to the driver." Pairing keeps the
+  anchor at the reset's end (shift start) and excludes the later break from the 14; it cannot restore driving
+  time. A pure off-duty 10h rest (no 7h SB) is NOT covered — treat it as reset-only (the pre-2021 FAQ said a
+  10h off-duty period cannot be paired; that FAQ was rescinded 2021-02-17 and nothing replaced it for the
+  pure-OFF case). Source: fmcsa.dot.gov/regulations/hours-service/can-driver-pair-rest-period-10-consecutive-hours-includes-7-consecutive
+  Engine: the opening reset is offered as a candidate first leg when `qualifiesLongSB`; ranking picks.
+  Also: FAQ07 (3h OFF then 10h SB) was re-issued 2026-07-01 with the same answer (compliant pairing) and a
+  pointer to FAQ22. The 2020-11-19 PDF is partly superseded — prefer the guidance portal pages.
 - Multiple possible pairings: FMCSA picks the pairing with fewest/least-severe violations
   (nominal <15 min → violation → OOS/>3hr); ties → the pairing giving the most available
   on-duty/driving time going forward. The engine must enumerate candidate pairings, not greedy-pick.

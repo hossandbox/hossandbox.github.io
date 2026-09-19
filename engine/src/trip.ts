@@ -96,10 +96,12 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
       } else if (lastRestLen > 0) {
         // We just rested and still have nothing: top the rest up to a full 10h reset.
         push('OFF', Math.max(LIMITS.RESET - lastRestLen, 60), 'Extend to a full 10-hour reset');
-      } else if (input.restStrategy === 'split' && ev.shift.pendingSplitLeg && !ev.shift.pendingSplitLeg.isReset) {
+      } else if (input.restStrategy === 'split' && ev.shift.pendingSplitLeg && !(ev.shift.pendingSplitLeg.isReset && ev.binding === 'DRIVE_11')) {
+        // (a reset-as-first-leg pairing — FAQ 22 — keeps the anchor at shift start, so it can't restore driving time; skip it when the 11 binds)
         const leg = ev.shift.pendingSplitLeg;
         const need = Math.max(leg.qualifiesLongSB ? LIMITS.SPLIT_MIN_SHORT : LIMITS.SPLIT_MIN_SB, LIMITS.SPLIT_TOTAL - leg.duration);
-        push('SB', need, `Sleeper ${fmtH(need)} — pairs with the ${fmtH(leg.duration)} rest ending ${hhmm(leg.end)} (split; clocks recalc from that rest's end)`);
+        const why = leg.isReset ? `pairs with your ${fmtH(leg.duration)} sleeper reset (FMCSA FAQ 22) — excluded from the 14` : `pairs with the ${fmtH(leg.duration)} rest ending ${hhmm(leg.end)} (split; clocks recalc from that rest's end)`;
+        push(leg.qualifiesLongSB ? 'OFF' : 'SB', need, `${leg.qualifiesLongSB ? 'Off duty' : 'Sleeper'} ${fmtH(need)} — ${why}`);
       } else {
         push('OFF', LIMITS.RESET, '10-hour reset (11/14 exhausted)');
       }

@@ -190,7 +190,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   return (
     <>
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg ? 'warn' : undefined}>
-        {ev.shift.pendingSplitLeg
+        {ev.shift.pendingSplitLeg && ev.shift.pendingSplitLeg.isReset
+          ? <p><b>Your {dur(ev.shift.pendingSplitLeg.duration)} reset included 7+ hours in the sleeper.</b> Under FMCSA FAQ 22 (July 2026) a later break of 2h+ can pair with it and be <b>excluded from your 14</b> — it won't give back driving time, but it buys window. Clocks below assume the plain reset until you take that break.</p>
+          : ev.shift.pendingSplitLeg
           ? <p><b>Period A logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
           : <p class="muted">No qualifying break (≥2h) pending since your anchor at {clock(ev.shift.anchor)}.</p>}
         {ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates} interpretation(s) considered.</p>}
@@ -213,9 +215,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <li class={totalOk ? 'ok' : 'no'}>Total ≥ 10h ({dur(b1 + b2)})</li>
           <li class={paired ? 'ok' : 'no'}>Engine confirms pairing</li>
         </ul>
-        {(b1 >= 600 || b2 >= 600) && <p class="muted small">A break of 10h+ is a full reset on its own — it also pairs, per FMCSA FAQ.</p>}
+        {(b1 >= 600 || b2 >= 600) && <p class="muted small">A break of 10h+ is a full reset on its own. If it includes 7+ consecutive hours in the sleeper it can <i>also</i> pair with a later 2h+ break — whichever helps you more (FMCSA FAQ 22, July 2026).</p>}
         {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && base.length > 0 && (base[base.length - 1].status === 'OFF' || base[base.length - 1].status === 'SB') && (
-          <p class="warnbox small">Break 1 runs straight into the rest you're already in, so they merge into one {dur(b1 + (t0 - [...base].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB')!.end))} rest. A rest of 10h+ is a full <b>reset</b>, and a reset can't be the first leg of a split (§395.1(g)(1)(i)(A) vs (E)). Break 2 will need its own ≥2–3h partner later; the clocks below show that honestly. To model a true split, go on duty or drive first.</p>
+          <p class="warnbox small">Break 1 runs straight into the rest you're already in, so they merge into one {dur(b1 + (t0 - [...base].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB')!.end))} rest — a full <b>reset</b>. Under FMCSA FAQ 22 (July 2026) a reset can be a split leg <i>only</i> if it includes 7+ consecutive hours in the <b>sleeper</b>; this one doesn't, so Break 2 will need its own ≥2–3h partner later. The clocks below show that honestly. To model a true split, go on duty or drive first — or log the rest as sleeper.</p>
         )}
       </Card>
 

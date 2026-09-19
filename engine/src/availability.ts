@@ -43,6 +43,11 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   };
   const evalSpan = (span: (typeof spans)[number]) => {
     const inShift = rests.filter((r) => r.start >= span.start && (span.end === null || r.start <= span.end));
+    // FMCSA FAQ 22 (2026-07-01): a ≥10h rest that includes ≥7h consecutive SB may EITHER reset the 11/14 OR
+    // pair with a later ≥2h rest. Offer the opening reset as a candidate first leg; ranking picks whichever
+    // interpretation is most advantageous. A pure off-duty reset (no 7h SB) is not covered by FAQ 22 → not offered.
+    const opening = rests.find((r) => r.end === span.start && r.isReset && r.qualifiesLongSB);
+    if (opening) inShift.unshift(opening);
     return evaluateShift(segments, span, inShift, { asOf, config, restartSince: restartSince(span) });
   };
   for (const span of spans) shiftEvals.push(evalSpan(span).best);

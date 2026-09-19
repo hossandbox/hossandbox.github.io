@@ -136,7 +136,9 @@ export function evaluateShiftWithChain(
   }
   if (!pending && opts.rests) {
     for (const r of opts.rests) {
-      if (r.qualifiesShort && r.end <= t && r.start >= anchor && !r.isReset) pending = r;
+      if (r.qualifiesShort && r.end <= t && !r.isReset && r.start >= anchor) pending = r;
+      // FAQ 22: the opening ≥10h rest with ≥7h SB can pair with a later ≥2h rest (surfaced so the UI can say so)
+      else if (r.isReset && r.qualifiesLongSB && r.end === anchor && anchor === S) pending = pending ?? r;
     }
   }
 
