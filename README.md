@@ -1,6 +1,6 @@
 # HOS Sandbox
 
-**Open the app: https://loricoestrellado-jpg.github.io/hos-sandbox/** — in Chrome or Safari, then *Add to Home Screen*.
+**Open the app: https://hossandbox.github.io/** — in Chrome or Safari, then *Add to Home Screen*.
 
 A driver's **planning scratchpad** for FMCSA hours-of-service: split-sleeper "what-if" lab,
 60/70-hour recap forecaster, trip feasibility, clock-to-parking. Not an ELD. No ECM, no

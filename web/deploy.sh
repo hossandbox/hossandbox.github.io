@@ -17,4 +17,4 @@ git -c user.name="hos-sandbox deploy" -c user.email="deploy@users.noreply.github
 git -c user.name="hos-sandbox deploy" -c user.email="deploy@users.noreply.github.com" commit -q -m "deploy $(date -u +%Y-%m-%dT%H:%MZ)"
 git push -q --force "$REMOTE" gh-pages:gh-pages
 cd / && rm -rf "$TMP"
-echo "deployed → https://loricoestrellado-jpg.github.io/hos-sandbox/"
+echo "deployed → https://hossandbox.github.io/"

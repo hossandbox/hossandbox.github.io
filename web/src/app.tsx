@@ -35,7 +35,7 @@ const bindingLabel: Record<FullEvaluation['binding'], string> = {
   DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', BREAK_30: '30-min break due', NONE: '—',
 };
 
-const REPO = 'loricoestrellado-jpg/hos-sandbox';
+const REPO = 'hossandbox/hossandbox.github.io';
 
 /** Copies the exported state to the clipboard and opens a prefilled GitHub issue (email fallback if set). */
 function reportBug(s: State, ev: FullEvaluation) {

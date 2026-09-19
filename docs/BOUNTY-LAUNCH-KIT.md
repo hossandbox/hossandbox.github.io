@@ -31,7 +31,7 @@ Placeholders to fill before posting: **[PROJECT-EMAIL]** — a dedicated address
 
 ---
 
-## Test report template (use the in-app 🐞 button, or open an issue at https://github.com/loricoestrellado-jpg/hos-sandbox/issues/new/choose)
+## Test report template (use the in-app 🐞 button, or open an issue at https://github.com/hossandbox/hossandbox.github.io/issues/new/choose)
 
 ```
 Phone + browser:            (e.g. Pixel 7 / Chrome, iPhone 13 / Safari)
@@ -81,7 +81,7 @@ Found along the way: several popular trucking sites have the split rule *wrong* 
 
 What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log for you. It's the napkin, not the logbook.
 
-Link: https://loricoestrellado-jpg.github.io/hos-sandbox/ — open in Chrome/Safari, "Add to Home Screen."
+Link: https://hossandbox.github.io/ — open in Chrome/Safari, "Add to Home Screen."
 
 Built by one person. It's rough. Tell me where.
 
@@ -95,13 +95,13 @@ So I built one. Free, no account, no GPS, nothing leaves your phone. Sliders for
 
 Need CDL drivers to break it. **$10 to compare it against your ELD on a real day, $5 per bug you find first.**
 
-https://loricoestrellado-jpg.github.io/hos-sandbox/ — add to home screen.
+https://hossandbox.github.io/ — add to home screen.
 
 ---
 
 ## Post 3 — Comment version (when someone in a thread asks the split question)
 
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://loricoestrellado-jpg.github.io/hos-sandbox/ — I'm paying $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD, tell me.
+Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I'm paying $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD, tell me.
 
 ---
 
@@ -116,7 +116,7 @@ Verified 2026-09-19 against what's live. Don't name competitors in public posts 
 | "Every pairing, FMCSA ranking" | FMCSA FAQ ordering (fewest → nominal → violation → OOS; tie = most hours forward) implemented; splitsleepercalc rejects logs with >2 rest segments |
 | "Current with FAQ 22 (July 2026)" | fmcsa.dot.gov guidance page, effective 2026-07-01. splitsleepercalc is also current — say "most," not "all" |
 | "Trip planner runs splits" | MyCarrierVault dispatch planner FAQ: "Does it handle sleeper-berth splits? Not yet." |
-| "Open source, tested against FMCSA examples" | github.com/loricoestrellado-jpg/hos-sandbox — 27 tests; none of the others publish code |
+| "Open source, tested against FMCSA examples" | github.com/hossandbox/hossandbox.github.io — 27 tests; none of the others publish code |
 | "Free, no account, no GPS" | HOS Guard $6.99/mo or $99 lifetime; Trucker Timer uses background location |
 
 Things NOT to claim: "the only" anything (splitsleepercalc is careful and current), "FMCSA-approved" (nothing is), "replaces your ELD."
