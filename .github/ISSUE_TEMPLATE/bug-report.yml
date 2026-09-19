@@ -1,4 +1,4 @@
-name: Bug report (bounty eligible)
+name: Bug report (free beta)
 description: The app's clocks disagree with the regulation or your ELD, or something is broken.
 title: "[bug] "
 labels: ["bug", "needs-triage"]
@@ -6,8 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing. **$5 for a confirmed bug you're first to report** (see bounty rules in the README).
-        Please don't put payment handles here — when the bug is confirmed, Lorico will comment with where to send your Venmo.
+        Thanks for testing. **The first person to report a confirmed bug gets the paid App Store version free** when it launches (see the beta rules in the README).
         HOS Sandbox is a planning scratchpad, not an ELD. Your official log governs.
   - type: input
     id: device

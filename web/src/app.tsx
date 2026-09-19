@@ -11,7 +11,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
     return (
       <div class="card warn">
         <h3>This tab hit a bug</h3>
-        <p class="small">Your log is safe. The other tabs still work. Please report this so it gets fixed (and paid, if you're first):</p>
+        <p class="small">Your log is safe. The other tabs still work. Please report this — the first person to report a confirmed bug gets the paid App Store version free:</p>
         <pre class="small" style="white-space:pre-wrap">{this.state.err}</pre>
         <a class="btn" href={issue} target="_blank" rel="noopener">🐞 Report this crash</a>
         <button class="ghost" onClick={() => this.setState({ err: null })}>Try again</button>
@@ -434,7 +434,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Bug reports">
         <BugButton s={s} ev={ev} />
-        <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Bounty rules: <a href={`https://github.com/${REPO}#bug-bounty`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
+        <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
         <label>Prefer email instead? Send reports to<input type="email" placeholder="leave blank to use GitHub" value={s.bugEmail} onChange={(e) => setState({ bugEmail: (e.target as HTMLInputElement).value.trim() })} /></label>
       </Card>
       <Card title="Data">

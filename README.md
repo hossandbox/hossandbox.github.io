@@ -10,24 +10,26 @@ Property-carrying drivers, 49 CFR Part 395.
 > HOS Sandbox is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not
 > replace your record of duty status. Your official log and your carrier's ELD govern.
 
-## Bug bounty
+## Free beta — and how testers get the paid version free
 
-Testing by real CDL drivers, paid. **Open an issue** with the *Bug report* template (the in-app
-🐞 button pre-fills it).
+**The app is free while it's in beta.** No account, no payment, no ads, nothing uploaded. When the
+App Store version launches it will be a paid app; this web version becomes a free **Lite** edition.
 
-- **$10** for a completed test report comparing the app to your ELD on a real day — one per
-  driver, first 20 drivers. Use the bug-report form and fill in *what the app showed* vs *what
-  the ELD showed*, even when they match.
-- **$5 per confirmed bug**, first reporter only, cap $50 per driver. Bounty pool closes at $400.
-- Paid by Venmo within 48 hours of confirmation. When your issue is confirmed I'll comment on it;
-  then email your Venmo handle to **hossandbox.app@gmail.com** — **don't post payment handles in issues.**
+**How to help (and what you get)**
+- Drive with it for a few days and compare it to your ELD. **Open an issue** with the *Bug report*
+  template — the in-app 🐞 button pre-fills it with your clocks and log.
+- **The first person to report a confirmed bug gets the paid App Store version free** when it
+  ships (a promo code — redeem within 30 days of launch). No cash, no payout forms, nothing to
+  claim from a stranger.
+- Email **hossandbox.app@gmail.com** if you want to be on the launch list, so I can reach you when
+  the app goes live.
+- Suggestions go through the *Suggestion* template. No reward, but they shape the app.
 
 **Counts as a bug:** clocks that disagree with 49 CFR 395.1(g)/395.3 or with your ELD on the same
-inputs (if the ELD is the one that's wrong, you still get paid — we'll look at the reg together);
-crashes, lost data, dead buttons, unreadable text; anything that would earn a violation if trusted.
+inputs (if the ELD is the one that's wrong, that's worth knowing too); crashes, lost data, dead
+buttons, unreadable text; anything that would earn a violation if a driver trusted it.
 
-**Not paid (still wanted — use the *Suggestion* template):** feature requests, wording, colors,
-duplicates, and the known gaps below.
+**Not a bug (still wanted):** feature requests, wording, colors, duplicates, and the known gaps below.
 
 **Known gaps — don't report these:** property-carrying US interstate rules only (no passenger,
 Canada, Alaska, oilfield); the trip planner's split option pairs with a rest you already have or
@@ -83,7 +85,11 @@ UI can show "if you skip Break 2, you're in violation by X".
 
 - v1 (now): Split Lab, Recap, Trip (10h-reset and split strategies side by side), Clock-to-parking,
   adverse-conditions and 16-hour-day exceptions, PC / yard move, in-app bug report — PWA over Tailscale
-- v1.1: public hosting for the bounty (GitHub/Cloudflare Pages); driver-feedback fixes
+- v1.1: public hosting + free beta (GitHub Pages); driver-feedback fixes
+- v2.0 (planned): App Store release. Free download with a one-time unlock; this web version stays
+  free as a Lite edition. Needs the Apple Developer Program, a cloud iOS build (no Mac required),
+  and native features — offline storage, local notifications, a widget — because Apple rejects thin
+  website wrappers (Guideline 4.2).
 - Skipped deliberately: passenger-carrier rules (different window structure), Canada/Alaska/oilfield
 - v2: 150 air-mile geofence (needs location permission + background) — deliberately deferred
 - App Store: wrap with Capacitor or port UI to React Native/Expo; engine ports unchanged

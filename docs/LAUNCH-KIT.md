@@ -1,22 +1,22 @@
-# HOS Sandbox — Bug Bounty Launch Kit
+# HOS Sandbox — Launch Kit
 
-All placeholders filled (URL, Venmo, hossandbox.app@gmail.com). Ready to post.
+Free beta, paid App Store version later. All placeholders filled (URL, contact email). Ready to post.
 
 ---
 
-## Bounty rules (post these verbatim, or link to them)
+## Beta rules (post these verbatim, or link to them)
 
 **What you get**
-- **$10** for a completed test report (template below) — one per driver, first 20 drivers.
-- **$5 per confirmed bug**, first reporter only. Cap **$50 per driver**. Bounty pool closes at $400.
-- Paid by **Venmo** within 48 hours of confirmation. When your issue is confirmed I'll comment on it; email your Venmo handle to hossandbox.app@gmail.com from there. Don't post payment handles in issues.
+- **The paid App Store version free when it launches** if you're the first to report a confirmed bug
+  (a promo code — redeem within 30 days of launch). The app is free to use now, during beta.
+- Your name on the launch list if you email hossandbox.app@gmail.com.
 
 **What counts as a bug**
-- The app's clocks disagree with the regulation (49 CFR 395.1(g) / 395.3) or with your ELD on the same inputs. *The ELD is not automatically right — if you think the ELD is wrong, say so and we'll check the reg together. You still get paid if the app is wrong.*
+- The app's clocks disagree with the regulation (49 CFR 395.1(g) / 395.3) or with your ELD on the same inputs. *The ELD is not automatically right — if you think the ELD is wrong, say so and we'll check the reg together.*
 - Crash, freeze, lost data, button that does nothing, text you can't read on your phone.
 - Anything that would get a driver a violation if they trusted it.
 
-**What doesn't count (still want it, just not paid)**
+**What doesn't count (still want it, no reward)**
 - Feature requests, wording, colors, "I wish it did X."
 - Things already listed under Known Gaps.
 - The same bug someone already reported.
@@ -77,7 +77,7 @@ What's different, concretely:
 
 Found along the way: several popular trucking sites have the split rule *wrong* (they say only the 7-hour period comes out of your 14; the reg says both do). That's why I don't trust my own testing and want yours.
 
-**I'm paying:** $10 for a filled-out test report comparing it to your ELD on a real day, $5 for every bug you're first to find. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together, and you get paid if the app's wrong.
+**It's free while it's in beta** — and I'm not asking for money, I'm asking for your eyes. The first person to report a confirmed bug gets the paid App Store version free when it launches. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together.
 
 What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log for you. It's the napkin, not the logbook.
 
@@ -93,7 +93,7 @@ Every HOS calculator I found does one slice — recap only, or "do these two res
 
 So I built one. Free, no account, no GPS, nothing leaves your phone. Sliders for "3-hour nap now, 7 in the bunk tonight — what do I wake up with, and what am I sitting in if I bail on the 7?" Plus 70-hour recap forecast, trip planner that runs splits, and miles-to-parking with buffer lines. Current with FMCSA's July 2026 split guidance. Math is open source, tested against FMCSA's own examples.
 
-Need CDL drivers to break it. **$10 to compare it against your ELD on a real day, $5 per bug you find first.**
+Need CDL drivers to break it while it's free. **The first person to report a confirmed bug gets the paid App Store version free when it launches.**
 
 https://hossandbox.github.io/ — add to home screen.
 
@@ -101,7 +101,7 @@ https://hossandbox.github.io/ — add to home screen.
 
 ## Post 3 — Comment version (when someone in a thread asks the split question)
 
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I'm paying $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD, tell me.
+Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I want drivers to break it before it goes on the App Store, so the first person to report a confirmed bug gets the paid version free. If it disagrees with your ELD, tell me.
 
 ---
 
@@ -137,7 +137,7 @@ So I built a free tool that answers the "what if." You slide the bars — nap he
 
 It's called HOS Sandbox: https://hossandbox.github.io/
 
-Here's the favor. I'm one person, and I built this by reading the actual federal regulations — not by driving a truck for twenty years. Before I put it on the App Store I want real drivers to try to break it. **I'm paying $10 to any CDL driver who compares it to their truck's logging device for a day and tells me what they see, plus $5 for every bug they find first.** All the details are at the link.
+Here's the favor. I'm one person, and I built this by reading the actual federal regulations — not by driving a truck for twenty years. Before I put it on the App Store I want real drivers to try to break it. **It's free while it's in beta, and the first person to find a confirmed bug gets the paid version free when it launches.** All the details are at the link.
 
 If you know a driver — a friend, a cousin, your dad, the neighbor with the Peterbilt in the driveway — please send this to them or tag them here. That's all I need.
 
@@ -153,7 +153,7 @@ It answers the question every driver asks and no logging device does: "if I nap 
 
 https://hossandbox.github.io/
 
-Know a CDL driver? Send it to them — I'm paying $10 to compare it against their ELD for a day, and $5 per bug they find. Tag them below. Thank you!
+Know a CDL driver? Send it to them — it's free while it's in beta, and the first person to find a confirmed bug gets the paid version free when it launches. Tag them below. Thank you!
 
 ---
 
@@ -166,7 +166,7 @@ Tips for the personal page:
 
 ## Modmail (send before posting on r/Truckers)
 
-Hi mods — I'd like to post about a free split-sleeper/recap calculator I built (web app, not an ELD, no account, no ads, no data collection). I'm offering drivers a small payment ($10 + $5/bug) to test it against their ELDs and report mismatches. I know this brushes against the promotion rules — happy to post it however you prefer (weekly thread, flair, no link in the body, whatever works). Draft is below. Thanks for the community.
+Hi mods — I'd like to post about a free split-sleeper/recap calculator I built (web app, not an ELD, no account, no ads, no data collection). It's in free beta and I'm asking drivers to test it against their ELDs and report mismatches; the first person to report a confirmed bug gets the paid App Store version free when it launches. No money changes hands. I know this brushes against the promotion rules — happy to post it however you prefer (weekly thread, flair, no link in the body, whatever works). Draft is below. Thanks for the community.
 
 ---
 
@@ -179,6 +179,39 @@ Hi mods — I'd like to post about a free split-sleeper/recap calculator I built
 5. **r/AlphaAndBetaUsers**, **r/BetaTestersNeeded** — low-value for drivers but zero risk.
 6. Skip TikTok/YouTube until you have a 30-second screen recording of the Split Lab; then that's your best channel.
 
-## Budget
+## Cost of the beta
 
-20 testers × $10 = $200. Bugs: plan on 15–30 confirmed at $5 = $75–150. **Realistic total: $300–400.** Set a hard cap in the post ("first 20 drivers, bounty pool closes at $400") so it can't run away.
+**Zero cash.** The reward is the paid app itself, delivered by promo code, so there's no payout
+budget and nothing to run away from you. Real costs: your time, plus the Apple Developer Program
+($99/yr) when you're ready to ship.
+
+Keep the founders list under **100** — that's how many promo codes Apple gives per app version — and
+hand codes out at launch. Don't promise "free forever"; promise the launch code and the 30-day
+redeem window, which is what you can actually deliver.
+
+## Pricing & the App Store path (decide before launch)
+
+**Recommended: free download + one-time $9.99 unlock.** Split Lab free forever; Recap, Trip planner,
+parking buffers, exception toggles and offline mode behind one non-consumable in-app purchase.
+Why: free downloads rank better and collect reviews, drivers hate subscriptions, and the app has no
+server costs — so one-time pricing is sustainable. Apple takes 30%; apply to the **Small Business
+Program** (15%) since you're under $1M/yr.
+
+**Alternative: paid app at $7.99.** Simpler, but fewer installs and no free tier to convert.
+
+**Don't: subscription.** HOS Guard charges $6.99/mo or $99 lifetime and drivers complain about it
+everywhere. A subscription on a static calculator reads as a money grab.
+
+**Before you can ship:**
+1. **Apple Developer Program, $99/yr.** Required, and also required for TestFlight — so a real
+   "beta download" is a step that comes *after* the dev account, not before. The free beta today is
+   the web app.
+2. **A build.** You have no Mac, but you don't need one: Expo EAS Build or Codemagic compile iOS in
+   the cloud. The engine ports as-is (pure TypeScript, zero deps); rebuild the UI in React Native,
+   or wrap the existing one with Capacitor.
+3. **Guideline 4.2 — the real risk.** A thin wrapper around a website gets rejected for "minimum
+   functionality." The iOS app must add what the web can't: offline-first storage, local
+   notifications for clock/break deadlines, a home-screen widget, share-sheet export. Plan those
+   before you wrap.
+4. **Decide what the web becomes at launch.** Keep it as **Lite** (Log + Split Lab) or the free web
+   version cannibalizes every sale. This is why the beta copy says "free while it's in beta."
