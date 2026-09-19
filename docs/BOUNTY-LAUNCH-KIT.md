@@ -123,6 +123,47 @@ Things NOT to claim: "the only" anything (splitsleepercalc is careful and curren
 
 ---
 
+## Post 4 — Personal Facebook page (friends & family; the ask is "share with a driver you know")
+
+Attach: `docs/screenshots/split-lab.png` and `docs/screenshots/trip.png` (phone screenshots of the live app).
+
+---
+
+I built something, and I need a favor from anyone who knows a truck driver.
+
+Truckers live by a clock. Federal rules say how many hours you can drive, how long your workday can be, and how much rest you need — and the rules for "splitting" your sleep into two chunks are so confusing that drivers argue about them on forums every single day. The device in the truck records what you *did*. It doesn't tell you what happens if you take a 3-hour nap now and sleep 7 hours tonight. Guess wrong and you're either stuck at a truck stop with hours you didn't know you had, or in violation and looking at a fine.
+
+So I built a free tool that answers the "what if." You slide the bars — nap here, drive this long, sleep this long — and it shows what your clocks look like when you wake up, whether the split is legal, and how many miles you can cover before you need to be parked. No account, no subscription, no tracking. It runs on your phone from a web link.
+
+It's called HOS Sandbox: https://hossandbox.github.io/
+
+Here's the favor. I'm one person, and I built this by reading the actual federal regulations — not by driving a truck for twenty years. Before I put it on the App Store I want real drivers to try to break it. **I'm paying $10 to any CDL driver who compares it to their truck's logging device for a day and tells me what they see, plus $5 for every bug they find first.** All the details are at the link.
+
+If you know a driver — a friend, a cousin, your dad, the neighbor with the Peterbilt in the driveway — please send this to them or tag them here. That's all I need.
+
+And if you're wondering why I care about trucking rules: someone has to make the tools that make hard jobs a little easier. This one's mine. 🚛
+
+---
+
+**Shorter variant (if the long one feels like too much for your page):**
+
+I built a free app for truck drivers and need help testing it. 🚛
+
+It answers the question every driver asks and no logging device does: "if I nap 3 hours now and sleep 7 tonight, what do my hours look like tomorrow?" Slide the bars, see your clocks, see how far you can go before you have to park. Free, no account, nothing tracked.
+
+https://hossandbox.github.io/
+
+Know a CDL driver? Send it to them — I'm paying $10 to compare it against their ELD for a day, and $5 per bug they find. Tag them below. Thank you!
+
+---
+
+Tips for the personal page:
+- Post the long version once with both screenshots; use the short one if you re-share in a week.
+- Reply to every comment from a driver with the same line: "Thank you — the report form is the 🐞 button in the app."
+- If a friend asks "what's an HOS?": Hours of Service — the federal driving-time rules.
+
+---
+
 ## Modmail (send before posting on r/Truckers)
 
 Hi mods — I'd like to post about a free split-sleeper/recap calculator I built (web app, not an ELD, no account, no ads, no data collection). I'm offering drivers a small payment ($10 + $5/bug) to test it against their ELDs and report mismatches. I know this brushes against the promotion rules — happy to post it however you prefer (weekly thread, flair, no link in the body, whatever works). Draft is below. Thanks for the community.
