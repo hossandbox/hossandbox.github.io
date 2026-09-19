@@ -11,7 +11,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
     return (
       <div class="card warn">
         <h3>This tab hit a bug</h3>
-        <p class="small">Your log is safe. The other tabs still work. Please report this — the first person to report a confirmed bug gets the paid App Store version free:</p>
+        <p class="small">Your log is safe. The other tabs still work. Please report this — $5 for the first person to report a confirmed bug, plus the paid App Store version free:</p>
         <pre class="small" style="white-space:pre-wrap">{this.state.err}</pre>
         <a class="btn" href={issue} target="_blank" rel="noopener">🐞 Report this crash</a>
         <button class="ghost" onClick={() => this.setState({ err: null })}>Try again</button>

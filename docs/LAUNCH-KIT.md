@@ -7,9 +7,11 @@ Free beta, paid App Store version later. All placeholders filled (URL, contact e
 ## Beta rules (post these verbatim, or link to them)
 
 **What you get**
-- **The paid App Store version free when it launches** if you're the first to report a confirmed bug
-  (a promo code — redeem within 30 days of launch). The app is free to use now, during beta.
-- Your name on the launch list if you email hossandbox.app@gmail.com.
+- **$5 for every bug you're first to report and I confirm.** Cap $50 per driver; pool closes at $300.
+- **The paid App Store version free when it launches** (a promo code — redeem within 30 days).
+- The app is free to use now, during beta.
+- **Never post a payment handle in a public issue.** When a bug is confirmed I comment on the issue;
+  you then email your Venmo handle to hossandbox.app@gmail.com and I pay within 48 hours.
 
 **What counts as a bug**
 - The app's clocks disagree with the regulation (49 CFR 395.1(g) / 395.3) or with your ELD on the same inputs. *The ELD is not automatically right — if you think the ELD is wrong, say so and we'll check the reg together.*
@@ -77,7 +79,7 @@ What's different, concretely:
 
 Found along the way: several popular trucking sites have the split rule *wrong* (they say only the 7-hour period comes out of your 14; the reg says both do). That's why I don't trust my own testing and want yours.
 
-**It's free while it's in beta** — and I'm not asking for money, I'm asking for your eyes. The first person to report a confirmed bug gets the paid App Store version free when it launches. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together.
+**It's free while it's in beta** — and I'm asking for your eyes, not your money. $5 for every bug you're first to report and I confirm, plus the paid App Store version free when it launches. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together.
 
 What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log for you. It's the napkin, not the logbook.
 
@@ -93,7 +95,7 @@ Every HOS calculator I found does one slice — recap only, or "do these two res
 
 So I built one. Free, no account, no GPS, nothing leaves your phone. Sliders for "3-hour nap now, 7 in the bunk tonight — what do I wake up with, and what am I sitting in if I bail on the 7?" Plus 70-hour recap forecast, trip planner that runs splits, and miles-to-parking with buffer lines. Current with FMCSA's July 2026 split guidance. Math is open source, tested against FMCSA's own examples.
 
-Need CDL drivers to break it while it's free. **The first person to report a confirmed bug gets the paid App Store version free when it launches.**
+Need CDL drivers to break it while it's free. **$5 per confirmed bug (first reporter), plus the paid App Store version free when it launches.**
 
 https://hossandbox.github.io/ — add to home screen.
 
@@ -101,7 +103,7 @@ https://hossandbox.github.io/ — add to home screen.
 
 ## Post 3 — Comment version (when someone in a thread asks the split question)
 
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I want drivers to break it before it goes on the App Store, so the first person to report a confirmed bug gets the paid version free. If it disagrees with your ELD, tell me.
+Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I want drivers to break it before it goes on the App Store, so it's $5 per confirmed bug plus the paid version free. If it disagrees with your ELD, tell me.
 
 ---
 
@@ -129,31 +131,43 @@ Attach: `docs/screenshots/split-lab.png` and `docs/screenshots/trip.png` (phone 
 
 ---
 
-I built something, and I need a favor from anyone who knows a truck driver.
+Your draft, tightened — keeping your hook. "Has your ELD ever gone down and your supervisor said 'you gotta go on paper!'" is the strongest opener either of us has written: it names a moment every driver remembers. Four edits, all deliberate (explained below).
 
-Truckers live by a clock. Federal rules say how many hours you can drive, how long your workday can be, and how much rest you need — and the rules for "splitting" your sleep into two chunks are so confusing that drivers argue about them on forums every single day. The device in the truck records what you *did*. It doesn't tell you what happens if you take a 3-hour nap now and sleep 7 hours tonight. Guess wrong and you're either stuck at a truck stop with hours you didn't know you had, or in violation and looking at a fine.
+---
 
-So I built a free tool that answers the "what if." You slide the bars — nap here, drive this long, sleep this long — and it shows what your clocks look like when you wake up, whether the split is legal, and how many miles you can cover before you need to be parked. No account, no subscription, no tracking. It runs on your phone from a web link.
+Hey guys — are you a trucker, or do you know one? Has your ELD ever gone down and your supervisor said, "you gotta go on paper!"? Send this to them.
 
-It's called HOS Sandbox: https://hossandbox.github.io/
+Ask any trucker and they'll tell you HOS compliance is constant background stress. Federal rules say how many hours you can drive, how long your workday can be, and how much rest you need — and the rules for "splitting" your sleep into two chunks are so confusing that drivers argue about them on forums every single day. The device in the truck records what you *did*. It doesn't tell you what happens if you take a 3-hour nap now and sleep 7 hours tonight. Guess wrong and you're either stuck at a truck stop with hours you didn't know you had, or in violation looking at a fine.
 
-Here's the favor. I'm one person, and I built this by reading the actual federal regulations — not by driving a truck for twenty years. Before I put it on the App Store I want real drivers to try to break it. **It's free while it's in beta, and the first person to find a confirmed bug gets the paid version free when it launches.** All the details are at the link.
+So I built a free tool that answers the "what if." You slide the bars — nap here, drive this long, sleep this long — and it shows what your clocks look like when you wake up, whether the split is legal, and how many miles you can cover before you have to be parked. No account, no subscription, no tracking. It runs on your phone.
 
-If you know a driver — a friend, a cousin, your dad, the neighbor with the Peterbilt in the driveway — please send this to them or tag them here. That's all I need.
+**It's called HOS Sandbox: https://hossandbox.github.io/**
 
-And if you're wondering why I care about trucking rules: someone has to make the tools that make hard jobs a little easier. This one's mine. 🚛
+To be clear: this is not a legal paper log and it's not an ELD. When your ELD is down, you still have to do your paper RODS the way your carrier requires. This is the scratchpad you use to *plan* the day — what your hours look like before you commit to them.
+
+Here's the favor. I'm one person, and I built this by reading the actual federal regulations on top of driving for a living. Before I put it on the App Store I want real drivers to try to break it. It's free while it's in beta, and anyone who's first to report a confirmed bug gets **$5 and the paid version free** when it launches.
+
+Found a bug? Use the "Report a bug" link in the app. **Please don't post your payment info publicly** — I'll reply on your report once I confirm it, and you can send me your Venmo handle privately. 🚛
+
+---
+
+**What I changed and why:**
+- **"include your Venmo creds!" → removed.** Never collect payment handles in a public post or issue. Venmo exposes the account holder's real name, anyone can send a payment *request* against a handle, and you'd be publishing a list of drivers' identities tied to your app. The safe flow — now in the README, the issue form, and the app — is: report publicly → I confirm → handle emailed privately to hossandbox.app@gmail.com → paid within 48 h. ("Creds" also means passwords; asking for credentials in a post reads like phishing.)
+- **"driving for UPS" → "driving for a living."** Naming your employer while promoting a personal product is exactly what corporate social-media policies exist to catch, and you have a pension and a possible buyout in play. Same credibility, no exposure. Check the policy if you'd rather name them.
+- **Added the paper-log disclaimer.** When an ELD fails, §395.34 puts the driver on paper RODS. This app can't satisfy that, and a driver who thinks it does is in real trouble. One line protects both of you.
+- **"send this github link" → the app link.** Drivers want the app, not a repository. GitHub reads as techy to a Facebook audience; the app URL installs to a home screen in two taps.
 
 ---
 
 **Shorter variant (if the long one feels like too much for your page):**
 
-I built a free app for truck drivers and need help testing it. 🚛
+Hey guys — trucker, or know one? Has your ELD ever gone down and your supervisor said "you gotta go on paper!"? 🚛
 
-It answers the question every driver asks and no logging device does: "if I nap 3 hours now and sleep 7 tonight, what do my hours look like tomorrow?" Slide the bars, see your clocks, see how far you can go before you have to park. Free, no account, nothing tracked.
+I built a free tool for the question no logging device answers: "if I nap 3 hours now and sleep 7 tonight, what do my hours look like tomorrow?" Slide the bars, see your clocks, see how far you can go before you have to park. Free, no account, nothing tracked. (It's a planner, not a legal paper log — your paper RODS are still your paper RODS.)
 
 https://hossandbox.github.io/
 
-Know a CDL driver? Send it to them — it's free while it's in beta, and the first person to find a confirmed bug gets the paid version free when it launches. Tag them below. Thank you!
+Know a CDL driver? Send it to them. It's free while it's in beta, and the first to report a confirmed bug gets $5 and the paid version free. Tag them below. Thank you!
 
 ---
 
@@ -161,6 +175,7 @@ Tips for the personal page:
 - Post the long version once with both screenshots; use the short one if you re-share in a week.
 - Reply to every comment from a driver with the same line: "Thank you — the report form is the 🐞 button in the app."
 - If a friend asks "what's an HOS?": Hours of Service — the federal driving-time rules.
+- When someone reports a bug in the comments, move it to GitHub (or ask them to) so it's tracked; never ask for payment details in the thread.
 
 ---
 
@@ -181,13 +196,16 @@ Hi mods — I'd like to post about a free split-sleeper/recap calculator I built
 
 ## Cost of the beta
 
-**Zero cash.** The reward is the paid app itself, delivered by promo code, so there's no payout
-budget and nothing to run away from you. Real costs: your time, plus the Apple Developer Program
-($99/yr) when you're ready to ship.
+**Cash reward: $5 per confirmed bug**, first reporter only, cap **$50 per driver**, pool closes at
+**$300**. Plan on 10–25 confirmed bugs = $50–125; the cap is what keeps it bounded. Pay by Venmo
+within 48 hours of confirming — and only after the reporter emails their handle to
+hossandbox.app@gmail.com. Never collect a handle from a public post or issue.
 
-Keep the founders list under **100** — that's how many promo codes Apple gives per app version — and
-hand codes out at launch. Don't promise "free forever"; promise the launch code and the 30-day
-redeem window, which is what you can actually deliver.
+**Non-cash reward:** the paid app free at launch (promo code, redeem within 30 days). Keep the
+founders list under **100** — Apple's promo-code limit per app version — and don't promise "free
+forever"; promise the code and the window, which is what you can actually deliver.
+
+Real costs: the $5s above, plus the Apple Developer Program ($99/yr) when you're ready to ship.
 
 ## Pricing & the App Store path (decide before launch)
 
