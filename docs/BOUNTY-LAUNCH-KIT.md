@@ -121,46 +121,6 @@ Verified 2026-09-19 against what's live. Don't name competitors in public posts 
 
 Things NOT to claim: "the only" anything (splitsleepercalc is careful and current), "FMCSA-approved" (nothing is), "replaces your ELD."
 
-**Title:** I built a free "what-if" calculator for split sleeper / recap / parking math. Not an ELD. Need drivers to break it — I'll pay for bugs.
-
-Been reading this sub a long time. The thing that comes up over and over: the ELD tells you what you've got *right now*, but not what you'll have *after* the 3-hour nap at the receiver and the 7 in the bunk tonight. So everybody does the 8/2 and 7/3 math in their head at 2 AM and hopes.
-
-I made a scratchpad for that. It's a web app you add to your home screen. No ECM, no login, no carrier, no account, nothing leaves your phone.
-
-What it does:
-
-- **Split Lab** — sliders for break 1, drive, break 2. Tells you if the pair qualifies, what your 11 and 14 look like when you wake up, where the anchor lands, and — this is the part ELDs don't show — **what happens to you if you don't finish the second break.**
-- **Recap** — 8-day grid. Type in your last 7 days, see what drops off at each midnight, and get a yes/no on "can I take this 1,200-mile load."
-- **Clock-to-parking** — turns "2h15m left" into "you have 110 miles, park by 6:40, here's the 60/45/30-minute buffer lines."
-- **Trip** — itinerary two ways, side by side: full 10-hour resets vs. sleeper splits, with arrival times. Breaks and rests placed where the rules force them.
-- Adverse-conditions (+2h) and 16-hour short-haul day toggles, personal conveyance / yard move buttons, 60/7 or 70/8, carrier day-start hour.
-
-The math is built from the actual CFR text and FMCSA's 2020 FAQ, not from blogs — and I found out along the way that several popular trucking sites have the split rule *wrong* (they say only the 7-hour period comes out of your 14; the reg and FMCSA say both do). That's exactly why I don't trust my own testing and want yours.
-
-**I'm paying:** $10 for a filled-out test report comparing it to your ELD on a real day, $5 for every bug you're first to find. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look up the reg together.
-
-What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log anything for you. It's the napkin, not the logbook.
-
-Link: https://loricoestrellado-jpg.github.io/hos-sandbox/ — open in Chrome/Safari, "Add to Home Screen."
-
-Built by one person. It's rough. Tell me where.
-
----
-
-## Post 2 — Short form (Facebook driver groups, X/Twitter, Threads)
-
-Made a free split-sleeper / recap / parking calculator for drivers. Not an ELD — a scratchpad. Sliders for "3-hour nap now, 7 in the bunk tonight, what do I wake up with?" Plus 70-hour recap forecast and miles-to-parking.
-
-Need CDL drivers to break it. **$10 to compare it against your ELD on a real day, $5 per bug you find first.**
-
-https://loricoestrellado-jpg.github.io/hos-sandbox/ — add to home screen. Nothing leaves your phone.
-
----
-
-## Post 3 — Comment version (when someone in a thread asks the split question)
-
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes and what happens if you skip the second break. Not an ELD, nothing to install, nothing leaves your phone: https://loricoestrellado-jpg.github.io/hos-sandbox/. I'm paying drivers $5 per bug right now because I don't trust my own testing, so if it disagrees with your ELD tell me.
-
 ---
 
 ## Modmail (send before posting on r/Truckers)
