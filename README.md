@@ -92,4 +92,3 @@ UI can show "if you skip Break 2, you're in violation by X".
   website wrappers (Guideline 4.2).
 - Skipped deliberately: passenger-carrier rules (different window structure), Canada/Alaska/oilfield
 - v2: 150 air-mile geofence (needs location permission + background) — deliberately deferred
-- App Store: wrap with Capacitor or port UI to React Native/Expo; engine ports unchanged
