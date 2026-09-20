@@ -140,14 +140,25 @@ geofence is deliberately deferred to v2 (location permission + background execut
 - Keep the repo clean and the live site working.
 - Triage incoming bug reports honestly: confirm, disprove, or ask for the missing detail.
 
-**Recurring (scheduled — created 2026-09-20, all under this bot's profile)**
-| Job | Cadence | What it does |
-|---|---|---|
-| HOS: FMCSA regulation watch | Mondays 14:00 UTC (9 AM CT) | Hashes eCFR §395.1/§395.3 + FMCSA HOS guidance pages; silent unless text changed, then reports the change + affected sections |
-| HOS: repo + live-site health | Daily 13:00 UTC (8 AM CT) | Site 200s, build marker fresh, gh-pages in sync with main; silent when healthy |
-| HOS: issue triage | Fridays 15:00 UTC (10 AM CT) | Summarizes new/updated GitHub issues, replays attached logs through the engine, flags what needs Lorico's decision |
+**Recurring (scheduled — created 2026-09-20)**
 
-All three are silent on success — only speak when something changed, broke, or needs a decision.
+These run in the **default profile's live scheduler** (IDs below), NOT inside this bot's own profile:
+bot profiles on this VPS have no gateway running, so a job created under `hoss-sandbox` would never
+fire. The scripts are profile-agnostic (absolute paths), so they can be moved into this profile later
+if a dedicated gateway is installed (`hermes -p hoss-sandbox gateway install`).
+
+| Job | ID | Cadence | What it does |
+|---|---|---|---|
+| HOS: FMCSA regulation watch | `ab5e3d9df4e5` | Mon 14:00 UTC (9 AM CT) | Hashes eCFR §395.1/§395.3/§395.11/§395.34 + the title-49 issue date; silent unless the text changed, then reports what changed and the next steps |
+| HOS: repo + live-site health | `d9eb60f5cc79` | Daily 13:00 UTC (8 AM CT) | Live site + assets 200, deploy freshness vs `main` (code paths only), engine tests pass, dev mirror up; silent when healthy |
+| HOS: guidance sweep + issue triage | `762e3d6e31e0` | Fri 15:00 UTC (10 AM CT) | FMCSA guidance-portal FAQ sweep + GitHub issue triage with engine replay; `[SILENT]` when nothing is new |
+
+All three deliver to Lorico on Telegram (`telegram:8697975658`) and are silent on success — they speak
+only when something changed, broke, or needs a decision.
+
+Scripts: `/opt/data/scripts/hos-regwatch.{sh,py}` and `/opt/data/scripts/hos-health.{sh,py}` — keep
+copies in `/opt/data/.hermes/scripts/` too, since the cron executor resolves script paths there.
+Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbose` for a manual run.
 
 ---
 
