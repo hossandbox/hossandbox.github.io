@@ -118,7 +118,7 @@ Verified 2026-09-19 against what's live. Don't name competitors in public posts 
 | "Every pairing, FMCSA ranking" | FMCSA FAQ ordering (fewest → nominal → violation → OOS; tie = most hours forward) implemented; splitsleepercalc rejects logs with >2 rest segments |
 | "Current with FAQ 22 (July 2026)" | fmcsa.dot.gov guidance page, effective 2026-07-01. splitsleepercalc is also current — say "most," not "all" |
 | "Trip planner runs splits" | MyCarrierVault dispatch planner FAQ: "Does it handle sleeper-berth splits? Not yet." |
-| "Open source, tested against FMCSA examples" | github.com/hossandbox/hossandbox.github.io — 27 tests; none of the others publish code |
+| "Open source, tested against FMCSA examples" | github.com/hossandbox/hossandbox.github.io — 36 tests; none of the others publish code |
 | "Free, no account, no GPS" | HOS Guard $6.99/mo or $99 lifetime; Trucker Timer uses background location |
 
 Things NOT to claim: "the only" anything (splitsleepercalc is careful and current), "FMCSA-approved" (nothing is), "replaces your ELD."
