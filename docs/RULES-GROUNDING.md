@@ -94,8 +94,12 @@ Recalculation (iii):
   delayed departure manufactures a qualifying split leg out of the wait and can call a load legal
   on an assumption nobody made — the app inventing hours is the same failure as the app losing them.
 - Driver-facing copy never shows internal ids or timestamps: no `DRIVE_11`/`BREAK_30` in an
-  itinerary, no ISO/UTC stamp in a violation. The engine emits plain English; the UI renders clock
-  times from the minute values.
+  itinerary or a violation heading, no ISO/UTC stamp in a violation. The engine emits plain English;
+  the UI renders clock times from the minute values. The enum ids are internal and stay internal.
+- Every slider carries an exact numeric box and −/+ steppers beside it. A driver on a phone must be
+  able to type "550 miles" rather than drag a range input until it lands on 550.
+- Segment rows offer a named **Edit** action and a one-level **Undo** after an edit or delete. Edits
+  match the segment by identity so the other rows — and their delete controls — are undisturbed.
 - **Never assert what the driver wasn't asked.** With nothing logged the engine correctly returns a
   fresh 11/14/70 — arithmetic that is right, but not a fact about anyone's day. The UI labels it as
   an assumption (`isFreshLog`) on the clocks and on the trip verdict, and the wait before a future

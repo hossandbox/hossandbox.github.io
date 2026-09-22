@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
@@ -23,7 +23,7 @@ import {
   evaluate, planTrip, planTripBoth, safeHaven, normalize, LIMITS, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, DEFAULT_TRIP, type State, type TripDraft,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, DEFAULT_TRIP, type State, type TripDraft,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -35,11 +35,27 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub?:
   return <div class={`stat ${tone ?? ''}`}><div class="stat-label">{label}</div><div class="stat-value">{value}</div>{sub && <div class="stat-sub">{sub}</div>}</div>;
 }
 function Slider({ label, value, min, max, step, onChange, fmt }: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; fmt: (v: number) => string }) {
+  // Text state so the driver can clear the box and type a fresh number; the slider and the steppers
+  // write straight through. Numeric entry matters most on a phone (consumer-review-1/2).
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  const clamp = (v: number) => Math.min(max, Math.max(min, Math.round(v)));
+  const set = (v: number) => { if (Number.isFinite(v)) onChange(clamp(v)); };
   return (
-    <label class="slider">
+    <div class="slider">
       <div class="slider-head"><span>{label}</span><b>{fmt(value)}</b></div>
-      <input type="range" min={min} max={max} step={step} value={value} onInput={(e) => onChange(Number((e.target as HTMLInputElement).value))} />
-    </label>
+      <div class="slider-row">
+        <input type="range" aria-label={label} min={min} max={max} step={step} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
+        <button class="mini" aria-label={`Decrease ${label}`} onClick={() => set(value - step)}>−</button>
+        <input
+          type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value`}
+          min={min} max={max} step={step} value={text}
+          onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setText(raw); if (raw !== '' && Number.isFinite(Number(raw))) set(Number(raw)); }}
+          onBlur={() => setText(String(value))}
+        />
+        <button class="mini" aria-label={`Increase ${label}`} onClick={() => set(value + step)}>+</button>
+      </div>
+    </div>
   );
 }
 function Toggle<T extends string | boolean>({ options, value, onChange }: { options: [T, string][]; value: T; onChange: (v: T) => void }) {
@@ -48,10 +64,17 @@ function Toggle<T extends string | boolean>({ options, value, onChange }: { opti
 function ViolationList({ items, from }: { items: Violation[]; from?: number }) {
   const list = from === undefined ? items : items.filter((v) => v.start >= from);
   if (!list.length) return <p class="ok">No violations.</p>;
-  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><b>{v.kind.replace('_', ' ')}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}<br /><small>{v.detail}</small></li>)}</ul>;
+  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><b>{violationLabel[v.kind]}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}<br /><small>{v.detail}</small></li>)}</ul>;
 }
 const bindingLabel: Record<FullEvaluation['binding'], string> = {
   DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', BREAK_30: '30-min break due', NONE: '—',
+};
+/** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
+const violationLabel: Record<Violation['kind'], string> = {
+  DRIVE_11: '11-hour driving limit',
+  WINDOW_14: '14-hour duty window',
+  BREAK_30: '30-minute break',
+  CYCLE: '60/70-hour cycle limit',
 };
 
 const REPO = 'hossandbox/hossandbox.github.io';
@@ -153,6 +176,9 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
   for (const x of resolved) totals[x.status] += x.end - x.start;
 
+  const [editing, setEditing] = useState<{ orig: Segment; status: DutyStatus; start: string; end: string } | null>(null);
+  const [undo, setUndo] = useState<{ label: string; segments: Segment[]; tentative: Segment[] } | null>(null);
+
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
     const segments = [...cur.segments];
     if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note });
@@ -171,7 +197,23 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     if (a === null || b === null || b <= a) return alert('End must be after start.');
     setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b }] }));
   };
-  const del = (seg: Segment) => setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) }));
+  const desc = (seg: Segment) => `${segLabel(seg.status, seg.note)} ${clock(seg.start)} → ${clock(seg.end)}`;
+  /** One level of undo: the state before the last edit or delete. Replaced by the next action. */
+  const snapshot = (label: string) => setUndo({ label, segments: s.segments, tentative: s.tentative });
+  const del = (seg: Segment) => {
+    snapshot(`Deleted ${desc(seg)}`);
+    setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) }));
+  };
+  const beginEdit = (seg: Segment) => setEditing({ orig: seg, status: seg.status, start: toInput(seg.start), end: toInput(seg.end) });
+  const saveEdit = () => {
+    if (!editing) return;
+    const a = fromInput(editing.start), b = fromInput(editing.end);
+    if (a === null || b === null || b <= a) return alert('End must be after start.');
+    snapshot(`Edited ${desc(editing.orig)}`);
+    const next = { status: editing.status, start: a, end: b };
+    setState((cur) => applySegmentEdit(cur, editing.orig, next));
+    setEditing(null);
+  };
   const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now } }); };
 
   return (
@@ -220,8 +262,33 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           </>
         ) : (
           <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
-            <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span><button class="x" aria-label={`Delete ${segLabel(seg.status, seg.note)} ${clock(seg.start)} to ${clock(seg.end)}`} onClick={() => del(seg)}>×</button></li>
+            editing && editing.orig === seg ? (
+              <li key={i} class="editing">
+                <div class="segedit">
+                  <Toggle options={[['OFF', 'Off'], ['SB', 'SB'], ['D', 'Drive'], ['ON', 'On']]} value={editing.status} onChange={(v) => setEditing({ ...editing, status: v as DutyStatus })} />
+                  <div class="row">
+                    <label>Start<input type="datetime-local" value={editing.start} onInput={(e) => setEditing({ ...editing, start: (e.target as HTMLInputElement).value })} /></label>
+                    <label>End<input type="datetime-local" value={editing.end} onInput={(e) => setEditing({ ...editing, end: (e.target as HTMLInputElement).value })} /></label>
+                  </div>
+                  <div class="row"><button class="mini primary" onClick={saveEdit}>Save</button><button class="mini" onClick={() => setEditing(null)}>Cancel</button></div>
+                </div>
+              </li>
+            ) : (
+              <li key={i}>
+                <span class="dot" style={{ background: STATUS_COLOR[seg.status] }} />
+                <span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span>
+                <span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span>
+                <button class="mini" aria-label={`Edit ${desc(seg)}`} onClick={() => beginEdit(seg)}>Edit</button>
+                <button class="x" aria-label={`Delete ${desc(seg)}`} onClick={() => del(seg)}>×</button>
+              </li>
+            )
           ))}</ul>
+        )}
+        {undo && (
+          <div class="row undo">
+            <span class="muted small">{undo.label}.</span>
+            <button class="mini" onClick={() => { setState({ segments: undo.segments, tentative: undo.tentative }); setUndo(null); }}>Undo</button>
+          </div>
         )}
       </Card>
       <BugButton s={s} ev={ev} />
@@ -306,7 +373,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         </div>
         <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; everything before it is cleared.' : ' — no split credit.'}</p>
         <h3>Plan violations (if you complete both breaks)</h3><ViolationList items={planViol} />
-        {strictViol.length > 0 && <div class="warnbox"><b>If you skip Break 2:</b> the {dur(drive)} drive ends {clock(endDrive)} with {strictViol.map((v) => `${v.kind.replace('_', ' ')} ${dur(v.minutes)}`).join(', ')} — Break 1 only pays off once Break 2 is done.</div>}
+        {strictViol.length > 0 && <div class="warnbox"><b>If you skip Break 2:</b> the {dur(drive)} drive ends {clock(endDrive)} with {strictViol.map((v) => `${violationLabel[v.kind]} ${dur(v.minutes)}`).join(', ')} — Break 1 only pays off once Break 2 is done.</div>}
       </Card>
 
       <div class="row"><button class="primary" onClick={commit}>Put plan on log as what-if</button><button onClick={clear} disabled={!s.tentative.length}>Clear what-if</button></div>

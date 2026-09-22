@@ -199,4 +199,45 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'log' });
   console.log('assumptions + resolved timeline: OK');
 }
+// Regression (consumer-review-1/2 batch 2): exact numeric entry beside sliders, driver-facing
+// violation labels, and an edit that changes the math without disturbing other rows.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-22T17:00:00Z'); // 12:00 America/Chicago
+
+  // (a) every slider offers a numeric box and steppers, not just a drag target
+  setState({ tab: 'trip', nowOverride: T, current: null, tentative: [], segments: [], trip: { ...DEFAULT_TRIP } });
+  hh = out('trip/sliders with numeric entry');
+  if (!/class="num"/.test(hh)) throw new Error('sliders must offer direct numeric entry');
+  if (!/aria-label="Decrease Distance"/.test(hh)) throw new Error('slider stepper buttons missing');
+
+  // (b) violation labels are driver-facing, never enum ids
+  setState({
+    tab: 'log', current: null, tentative: [], segments: [
+      { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') }, // 20:00→06:00
+      { status: 'ON', start: M('2026-09-22T11:00:00Z'), end: M('2026-09-22T13:00:00Z') },  // 06:00→08:00
+      { status: 'D', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-23T03:00:00Z') },   // 08:00→22:00
+    ],
+  });
+  hh = out('log/violation wording');
+  if (!/14-hour duty window/.test(hh)) throw new Error('a window violation should read "14-hour duty window"');
+  if (/WINDOW 14|DRIVE 11|BREAK 30/.test(hh)) throw new Error('internal enum leaked into violation copy');
+  if (!/aria-label="Edit /.test(hh)) throw new Error('segment rows need a named Edit action');
+
+  // (c) the edit transform: matched by identity, so other rows keep their reference (delete and
+  // undo both depend on that) and the resolved timeline follows the change
+  const { applySegmentEdit } = await import('../src/store.ts');
+  const { normalize } = await import('../../engine/src/index.ts');
+  const off1 = { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') };
+  const drv = { status: 'D', start: M('2026-09-22T11:00:00Z'), end: T };
+  const brk = { status: 'OFF', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-22T14:00:00Z') };
+  const driveMins = (segs) => segs.filter((x) => x.status === 'D').reduce((a, x) => a + (x.end - x.start), 0);
+  if (driveMins(normalize([off1, drv, brk])) !== 300) throw new Error('precondition: 5h of driving expected');
+  const edited = applySegmentEdit({ segments: [off1, drv, brk], tentative: [] }, drv, { end: M('2026-09-22T13:00:00Z') });
+  if (edited.segments[2] !== brk) throw new Error('editing one segment must not disturb the others');
+  if (driveMins(normalize(edited.segments)) !== 120) throw new Error('the edit should change the resolved driving total');
+
+  setState({ nowOverride: null });
+  console.log('numeric entry + wording + edit: OK');
+}
 console.log('OK');

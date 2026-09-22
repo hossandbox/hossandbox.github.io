@@ -117,6 +117,15 @@ export function isFreshLog(s: State): boolean {
   return s.segments.length === 0 && s.tentative.length === 0 && !s.current;
 }
 
+/**
+ * Apply an edit to one segment, matched by identity so every other entry keeps its reference (the
+ * delete control and the undo snapshot both depend on that).
+ */
+export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>): Pick<State, 'segments' | 'tentative'> {
+  const replace = (list: Segment[]) => list.map((x) => (x === orig ? { ...x, ...next } : x));
+  return { segments: replace(s.segments), tentative: replace(s.tentative) };
+}
+
 /** Materialize the open segment up to `now` so the engine sees it. */
 export function allSegments(s: State, now: number): Segment[] {
   const out = [...s.segments];

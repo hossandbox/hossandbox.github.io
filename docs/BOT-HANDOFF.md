@@ -249,6 +249,15 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   accessible name on each segment delete button. Standing rule adopted: a guess may only make the
   plan look worse than reality, never better. Tests: 5 new smoke regressions; each was falsified
   (label removed / permissive default restored / view left unnormalized) before being accepted.
+- **Numeric entry, segment edit/undo, violation wording (2026-09-22, review backlog batch 2)**:
+  finished the reviewer's ordered list. Every `Slider` now renders an exact numeric box plus −/+
+  steppers beside the range input (the box keeps its own text state so a phone user can clear and
+  retype); violation headings use driver-facing names via `violationLabel` instead of
+  `kind.replace('_',' ')`, which was still printing "WINDOW 14"; segment rows gained a named **Edit**
+  action and a one-level **Undo** after an edit or delete. The edit transform lives in
+  `store.applySegmentEdit` and matches by identity, so other rows keep their reference and their
+  delete controls keep working — that is the invariant the smoke test pins. Remaining from the
+  suggestions: the time-zone picker and the contrast audit.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by
