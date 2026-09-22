@@ -111,8 +111,11 @@ export function evaluateShiftWithChain(
     const tD = a + Math.max(0, limits.drive - driveUsedAtA);
     if (tW < b) {
       const m = b - tW;
+      // Plain English, no ISO timestamp: the UI renders clock(v.start) → clock(v.end) itself, and a
+      // UTC string in front of a driver is meaningless (consumer-review-1/2).
+      const from = anchor === S ? 'when you came on duty' : 'the end of your first paired break';
       violations.push({ kind: 'WINDOW_14', start: tW, end: b, minutes: m, severity: severityOf(m),
-        detail: `Drove ${fmt(m)} past the ${limits.window / 60}-hour window (anchor ${new Date(anchor * 60000).toISOString()})` });
+        detail: `Drove ${fmt(m)} past the ${limits.window / 60}-hour window — the window runs from ${from}` });
     }
     if (tD < b) {
       const m = b - tD;

@@ -23,7 +23,7 @@ import {
   evaluate, planTrip, planTripBoth, safeHaven, LIMITS, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, type State,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, DEFAULT_TRIP, type State, type TripDraft,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -304,16 +304,21 @@ function DayEditor({ day, hasData, onApply }: { day: { start: number; end: numbe
   );
 }
 
-function PlanCompare({ both, from }: { both: ReturnType<typeof planTripBoth>; from: number }) {
-  const [view, setView] = useState<'reset10' | 'split'>(both.faster === 'split' ? 'split' : 'reset10');
-  const plan: TripPlan = both[view];
+function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof planTripBoth>; from: number; view?: 'reset10' | 'split' | null; onView?: (v: 'reset10' | 'split') => void }) {
+  const fallback: 'reset10' | 'split' = both.faster === 'split' ? 'split' : 'reset10';
+  const [local, setLocal] = useState<'reset10' | 'split'>(fallback);
+  // `view` provided = the caller owns the selection (Trip tab keeps it in the store, so it survives
+  // navigation). Omitted = this component owns it (Recap tab).
+  const chosen = (view === undefined ? local : view) ?? fallback;
+  const pick = (k: 'reset10' | 'split') => { if (view === undefined) setLocal(k); else onView?.(k); };
+  const plan: TripPlan = both[chosen];
   const resets = (p: TripPlan) => p.steps.filter((x) => x.segment.status !== 'D' && x.segment.status !== 'ON' && x.segment.end - x.segment.start >= 600).length;
   return (
     <>
       <div class="compare">
         {(['reset10', 'split'] as const).map((k) => {
           const p = both[k];
-          return <button key={k} class={`plancard ${view === k ? 'on' : ''} ${p.feasible ? '' : 'bad'}`} onClick={() => setView(k)}>
+          return <button key={k} class={`plancard ${chosen === k ? 'on' : ''} ${p.feasible ? '' : 'bad'}`} onClick={() => pick(k)}>
             <div class="stat-label">{k === 'reset10' ? '10-hour resets' : 'Sleeper splits'}{both.faster === k ? ' · faster' : ''}</div>
             <div class="stat-value">{clock(p.arrival)}</div>
             <div class="stat-sub">{dur(p.elapsedMinutes)} · {resets(p)} long rest{resets(p) === 1 ? '' : 's'} · {p.feasible ? 'legal' : 'PROBLEM'}</div>
@@ -391,18 +396,20 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 /* ============================================================ Trip tab */
 
 function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  const [miles, setMiles] = useState(550);
-  const [pre, setPre] = useState(30);
-  const [stopMile, setStopMile] = useState(0);
-  const [stopMin, setStopMin] = useState(0);
-  const [stopOff, setStopOff] = useState(false);
-  const [dep, setDep] = useState(toInput(now));
+  const d = s.trip;
+  const setTrip = (p: Partial<TripDraft>) => setState({ trip: { ...d, ...p } });
+  const cur = s.current?.status ?? 'OFF';
+  const untilStatus: DutyStatus = d.until === 'CURRENT' ? cur : d.until;
+  const dep = d.dep ?? toInput(now);
   const departure = fromInput(dep) ?? now;
+  const waiting = departure > now;
   const both = useMemo(() => planTripBoth(allSegments(s, now).filter((x) => !x.tentative), {
-    departure, distanceMiles: miles, mph: s.mph, preTripMinutes: pre,
-    stops: stopMin > 0 && stopMile > 0 && stopMile < miles ? [{ atMile: stopMile, minutes: stopMin, status: stopOff ? 'OFF' : 'ON', label: stopOff ? 'Stop (off duty)' : 'Stop (on duty)' }] : [],
+    departure, distanceMiles: d.miles, mph: s.mph, preTripMinutes: d.pre,
+    stops: d.stopMin > 0 && d.stopMile > 0 && d.stopMile < d.miles ? [{ atMile: d.stopMile, minutes: d.stopMin, status: d.stopOff ? 'OFF' : 'ON', label: d.stopOff ? 'Stop (off duty)' : 'Stop (on duty)' }] : [],
     config: s.config,
-  }), [s, now, departure, miles, pre, stopMile, stopMin, stopOff]);
+    // Never let the wait before departure read as an unlogged gap: say what it is, and show it.
+    ...(waiting ? { untilDeparture: { from: now, status: untilStatus, label: `${STATUS_LABEL[untilStatus]} until departure` } } : {}),
+  }), [s, now, departure, d.miles, d.pre, d.stopMile, d.stopMin, d.stopOff, untilStatus, waiting]);
   const sh = safeHaven(ev, s.mph);
 
   return (
@@ -416,15 +423,24 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <p class="muted small">Net speed (fuel, traffic, scales) is what matters — set it in Settings. Parking after 17:00 fills fast; plan the 60-min line, not the 0.</p>
       </Card>
       <Card title="Plan a run">
-        <label>Depart<input type="datetime-local" value={dep} onInput={(e) => setDep((e.target as HTMLInputElement).value)} /></label>
-        <Slider label="Distance" value={miles} min={50} max={3000} step={25} onChange={setMiles} fmt={(v) => `${v} mi`} />
-        <Slider label="Pre-trip / loading (on duty)" value={pre} min={0} max={240} step={15} onChange={setPre} fmt={dur} />
-        <Slider label="Mid-trip stop at mile" value={stopMile} min={0} max={miles} step={25} onChange={setStopMile} fmt={(v) => (v ? `${v} mi` : 'none')} />
-        <Slider label="Stop length" value={stopMin} min={0} max={480} step={15} onChange={setStopMin} fmt={dur} />
-        {stopMin > 0 && <Toggle options={[[false, 'Stop is on duty'], [true, 'Stop is off duty (can be a split leg)']]} value={stopOff} onChange={setStopOff} />}
+        <label>Depart<input type="datetime-local" value={dep} onInput={(e) => setTrip({ dep: (e.target as HTMLInputElement).value })} /></label>
+        {waiting && (
+          <>
+            <p class="muted small">That's <b>{dur(departure - now)}</b> from now. Unlogged time is not a rest — say what you'll be doing, and the itinerary will show it as an assumed row rather than quietly counting it as off duty:</p>
+            <Toggle options={[['CURRENT', `Continue ${STATUS_LABEL[cur]}`], ['OFF', 'Off duty'], ['SB', 'Sleeper'], ['ON', 'On duty']]} value={d.until} onChange={(v) => setTrip({ until: v as DutyStatus | 'CURRENT' })} />
+            <p class="muted small">Planning the wait as <b>{STATUS_LABEL[untilStatus]}</b>.{untilStatus === 'OFF' || untilStatus === 'SB' ? ' Only claim this if you really will be off duty — it can become a split leg.' : ' It earns no rest credit, so no split leg can be built out of it.'}</p>
+          </>
+        )}
+        <Slider label="Distance" value={d.miles} min={50} max={3000} step={25} onChange={(v) => setTrip({ miles: v })} fmt={(v) => `${v} mi`} />
+        <Slider label="Pre-trip / loading (on duty)" value={d.pre} min={0} max={240} step={15} onChange={(v) => setTrip({ pre: v })} fmt={dur} />
+        <Slider label="Mid-trip stop at mile" value={d.stopMile} min={0} max={d.miles} step={25} onChange={(v) => setTrip({ stopMile: v })} fmt={(v) => (v ? `${v} mi` : 'none')} />
+        <Slider label="Stop length" value={d.stopMin} min={0} max={480} step={15} onChange={(v) => setTrip({ stopMin: v })} fmt={dur} />
+        {d.stopMin > 0 && <Toggle options={[[false, 'Stop is on duty'], [true, 'Stop is off duty (can be a split leg)']]} value={d.stopOff} onChange={(v) => setTrip({ stopOff: v })} />}
+        <div class="row"><button onClick={() => setState({ trip: { ...DEFAULT_TRIP } })}>Reset plan</button></div>
+        <p class="muted small">This scenario is kept while you move between tabs.</p>
       </Card>
       <Card title="Itinerary — two ways to rest">
-        <PlanCompare both={both} from={departure} />
+        <PlanCompare both={both} from={departure} view={d.view} onView={(v) => setTrip({ view: v })} />
       </Card>
     </>
   );

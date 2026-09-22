@@ -4,12 +4,31 @@ import { DEFAULT_CONFIG } from '../../engine/src/index.ts';
 
 export interface OpenSegment { status: DutyStatus; since: number; note?: string }
 
+/**
+ * Trip-tab scenario. Kept in the store (not component state) so switching tabs does not silently
+ * throw away what the driver was comparing (consumer-review-2).
+ */
+export interface TripDraft {
+  miles: number;
+  pre: number;
+  stopMile: number;
+  stopMin: number;
+  stopOff: boolean;
+  /** datetime-local string; null follows the live clock */
+  dep: string | null;
+  /** status assumed between now and departure; 'CURRENT' = whatever the log says now */
+  until: DutyStatus | 'CURRENT';
+  /** which comparison is selected; null = whichever plan is faster */
+  view: 'reset10' | 'split' | null;
+}
+
 export interface State {
   segments: Segment[];
   tentative: Segment[];
   current: OpenSegment | null;
   config: RulesConfig;
   mph: number;
+  trip: TripDraft;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
   tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
@@ -20,10 +39,14 @@ export interface State {
 const KEY = 'hos-sandbox-v1';
 const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
 
+export const DEFAULT_TRIP: TripDraft = {
+  miles: 550, pre: 30, stopMile: 0, stopMin: 0, stopOff: false, dep: null, until: 'CURRENT', view: null,
+};
+
 const initial: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
-  mph: 55, nowOverride: null, tab: 'log', bugEmail: '',
+  mph: 55, trip: { ...DEFAULT_TRIP }, nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
@@ -31,7 +54,7 @@ function load(): State {
     const raw = localStorage.getItem(KEY);
     if (!raw) return initial;
     const s = JSON.parse(raw);
-    return { ...initial, ...s, config: { ...initial.config, ...(s.config ?? {}) } };
+    return { ...initial, ...s, config: { ...initial.config, ...(s.config ?? {}) }, trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) } };
   } catch { return initial; }
 }
 
@@ -101,5 +124,5 @@ export function segLabel(status: DutyStatus, note?: string): string {
 /** Everything a bug report needs. Kept small enough to paste into an email. */
 export function exportState(s: State): string {
   return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, nowOverride: s.nowOverride });
+    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, nowOverride: s.nowOverride, trip: s.trip });
 }

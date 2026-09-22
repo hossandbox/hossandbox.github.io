@@ -10,7 +10,7 @@ globalThis.alert = (m) => { throw new Error('alert: ' + m); };
 globalThis.__BUILD__ = 'smoke';
 
 const { App } = await import('../src/app.tsx');
-const { setState, getState, nowMin, clock } = await import('../src/store.ts');
+const { setState, getState, nowMin, clock, toInput, DEFAULT_TRIP } = await import('../src/store.ts');
 
 const now = nowMin();
 const out = (label) => {
@@ -129,5 +129,38 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/These entries overlap/.test(hh)) throw new Error('overlapping entries must be flagged to the driver');
   setState({ nowOverride: null });
   console.log('overlap repro: OK');
+}
+// Regression (consumer-review-2, 2026-09-22): (a) a delayed departure must show the assumed wait
+// rather than quietly counting it as rest, and (b) the trip scenario must survive tab navigation.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-22T17:00:00Z'); // 12:00 America/Chicago
+  setState({
+    tab: 'trip', nowOverride: T, current: { status: 'ON', since: T }, tentative: [],
+    config: { ...getState().config, cycle: '70/8' },
+    segments: [
+      { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') },
+      { status: 'D', start: M('2026-09-22T11:00:00Z'), end: T },
+    ],
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 180), miles: 900, pre: 0 },
+  });
+  hh = out('trip/delayed departure (wait On Duty)');
+  if (!/assumed, not logged/.test(hh)) throw new Error('the pre-departure wait must appear as an explicit assumed row');
+  if (!/900 mi/.test(hh)) throw new Error('trip distance not applied');
+  if (/pairs with the/.test(hh)) throw new Error('an On Duty wait must not be usable as a split leg');
+
+  setState({ trip: { ...getState().trip, until: 'OFF' } });
+  hh = out('trip/delayed departure (wait Off Duty)');
+  if (!/pairs with the/.test(hh)) throw new Error('an explicitly off-duty wait should still be eligible as a split leg');
+
+  // navigate away and back — the draft must survive
+  setState({ tab: 'recap' });
+  out('recap/from trip');
+  setState({ tab: 'trip' });
+  hh = out('trip/returned');
+  if (!/900 mi/.test(hh)) throw new Error('trip distance was discarded when switching tabs');
+  if (!/Stop|Reset plan|assumed, not logged/.test(hh)) throw new Error('trip plan did not re-render on return');
+  setState({ nowOverride: null });
+  console.log('trip departure/draft regressions: OK');
 }
 console.log('OK');

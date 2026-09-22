@@ -229,6 +229,16 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   `endB2 + 1`, so every result card was a minute late ("stop by" 09:31 for a 03:30 break, 14-hr
   balance 8h29m); now evaluated at `endB2`. Lesson: when the clocks and the visible list can
   disagree, the *display* has to say so — a silent discrepancy is how this hid.
+- **Departure-assumption + trip-draft fixes (2026-09-22, consumer-review-2)**: the retest confirmed
+  both earlier fixes on the live build and found two more. (1) Unlogged future time read as OFF, so
+  setting a departure later than "now" manufactured a 3h rest out of the wait and the split plan
+  paired its 7h sleeper with it — arrival 08:00 instead of 11:00, labelled legal, while the log said
+  On Duty. The planner now takes `untilDeparture` and shows an "assumed, not logged" itinerary row;
+  the Trip tab makes it a choice (continue current status / off / sleeper / on). (2) The Trip tab's
+  scenario lived in component state, so switching tabs silently reset departure, distance and the
+  selected comparison. Moved to the store (`State.trip`) with a Reset plan button. Tests:
+  `engine/test/tripdeparture.test.ts` (4) + two smoke regressions. Also removed the internal enum
+  ids from itinerary copy and the UTC ISO anchor stamp from violation details.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

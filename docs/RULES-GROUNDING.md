@@ -87,6 +87,15 @@ Recalculation (iii):
   `engine/test/overlap.test.ts` and the overlap cases in `web` smoke.
 - The UI must flag overlapping entries, because the row list shows the raw entries while the clocks
   use the resolved timeline — otherwise the two disagree silently.
+- **Unlogged time is not rest.** A gap in the record reads as OFF (that is what "not logged" means
+  for a driver who was not working), so any *future* time the driver hasn't decided about must
+  never be left as a gap. The trip planner takes the status the driver will actually be in until
+  departure (`TripInput.untilDeparture`) and the UI shows it as an assumed row. Left implicit, a
+  delayed departure manufactures a qualifying split leg out of the wait and can call a load legal
+  on an assumption nobody made — the app inventing hours is the same failure as the app losing them.
+- Driver-facing copy never shows internal ids or timestamps: no `DRIVE_11`/`BREAK_30` in an
+  itinerary, no ISO/UTC stamp in a violation. The engine emits plain English; the UI renders clock
+  times from the minute values.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

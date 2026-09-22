@@ -1,4 +1,4 @@
-import type { RulesConfig, Segment } from './types.ts';
+import type { DutyStatus, RulesConfig, Segment } from './types.ts';
 import { evaluate, type FullEvaluation } from './availability.ts';
 import { LIMITS } from './types.ts';
 import { nextCarrierDayStart, carrierDayStart } from './cycle.ts';
@@ -14,6 +14,15 @@ export interface TripStop {
 export interface TripInput {
   /** minute the driver goes on duty for the trip */
   departure: number;
+  /**
+   * The driver's status between `from` and `departure`.
+   *
+   * Unlogged future time is NOT a rest — a gap in a record means "not logged", and the engine
+   * reads gaps as OFF. Left implicit, a delayed departure therefore hands the driver a qualifying
+   * split leg he never took, and the plan can call a load legal on an assumption nobody made.
+   * Always pass this when `departure > now`.
+   */
+  untilDeparture?: { from: number; status: DutyStatus; label?: string };
   distanceMiles: number;
   /** net average speed incl. fuel/traffic; 55 is a realistic default */
   mph: number;
@@ -62,6 +71,17 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
   const steps: TripPlanStep[] = [];
   const warnings: string[] = [];
 
+  // Pre-departure: make the driver's status between now and departure an explicit, visible row
+  // instead of a gap. See TripInput.untilDeparture.
+  const lead: Segment[] = [];
+  if (input.untilDeparture && input.untilDeparture.from < input.departure) {
+    const u = input.untilDeparture;
+    const seg: Segment = { status: u.status, start: u.from, end: input.departure, tentative: true, note: u.label ?? 'Until departure' };
+    lead.push(seg);
+    steps.push({ segment: seg, fromMile: 0, toMile: 0, reason: `${u.label ?? 'Until departure'} — assumed, not logged` });
+  }
+  const base = [...lead, ...history];
+
   let t = input.departure;
   let mile = 0;
   let stopIdx = 0;
@@ -79,7 +99,7 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
 
   let guard = 0;
   while (mile < input.distanceMiles - 1e-9 && guard++ < 200) {
-    const ev = evaluate([...history, ...plan], { asOf: t, config: input.config });
+    const ev = evaluate([...base, ...plan], { asOf: t, config: input.config });
     const nextStopMile = stopIdx < stops.length ? stops[stopIdx].atMile : Infinity;
     const legMiles = Math.min(input.distanceMiles, nextStopMile) - mile;
     const legMinutes = Math.ceil((legMiles / mph) * 60);
@@ -117,12 +137,12 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
     } else {
       // Drive what we can, then stop; loop will insert the right rest.
       const partMiles = (ev.driveNow / 60) * mph;
-      push('D', ev.driveNow, `Drive ${Math.round(partMiles)} mi (${ev.binding} binds)`, mile + partMiles);
+      push('D', ev.driveNow, `Drive ${Math.round(partMiles)} mi (${bindingName(ev.binding, input.config)})`, mile + partMiles);
     }
   }
   if (guard >= 200) warnings.push('Planner hit its iteration limit; trip may be infeasible under current hours.');
 
-  const evaluation = evaluate([...history, ...plan], { asOf: t, config: input.config });
+  const evaluation = evaluate([...base, ...plan], { asOf: t, config: input.config });
   const tentativeViolations = evaluation.violations.filter((v) => v.start >= input.departure);
   if (tentativeViolations.length) warnings.push(`Plan contains ${tentativeViolations.length} violation(s) — check itinerary.`);
   return {
@@ -150,6 +170,17 @@ export { carrierDayStart, nextCarrierDayStart };
 
 const fmtH = (m: number) => (m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`);
 const hhmm = (m: number) => { const d = new Date(m * 60000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+/** Driver-facing name for the binding limit — the enum id (DRIVE_11, BREAK_30…) is internal, never UI copy. */
+function bindingName(b: string, cfg?: Partial<RulesConfig>): string {
+  switch (b) {
+    case 'DRIVE_11': return '11-hour driving limit';
+    case 'WINDOW_14': return '14-hour window';
+    case 'CYCLE': return cfg?.cycle === '60/7' ? '60-hour cycle' : '70-hour cycle';
+    case 'BREAK_30': return '30-minute break due';
+    default: return 'hours limit';
+  }
+}
 
 /** Plan with both rest strategies so the driver can compare arrival times. */
 export function planTripBoth(history: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; faster: 'reset10' | 'split' | 'same' } {
