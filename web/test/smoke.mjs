@@ -10,7 +10,7 @@ globalThis.alert = (m) => { throw new Error('alert: ' + m); };
 globalThis.__BUILD__ = 'smoke';
 
 const { App } = await import('../src/app.tsx');
-const { setState, getState, nowMin } = await import('../src/store.ts');
+const { setState, getState, nowMin, clock } = await import('../src/store.ts');
 
 const now = nowMin();
 const out = (label) => {
@@ -83,5 +83,51 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab, segments: [], current: { status: 'OFF', since: now - 60 }, tentative: [] });
   hh = out(`empty-state/${tab}`);
   if (/This tab hit a bug/.test(hh)) throw new Error(`${tab} crashed on empty state`);
+}
+// Regression (consumer-review-1, 2026-09-22): Split Lab evaluated the what-if plan at endB2 + 1,
+// so every result card was one minute off — "stop by" showed 09:31 and the 14-hr balance 8h 29m
+// for a break ending 03:30. All result cards must share the instant Break 2 ends.
+{
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const T = Math.floor(Date.UTC(2026, 8, 22, 17, 0) / 60000); // 2026-09-22 12:00 America/Chicago
+  const base = [
+    { status: 'OFF', start: T - 960, end: T - 360 }, // 20:00 → 06:00 CDT
+    { status: 'D', start: T - 360, end: T },         // 06:00 → 12:00 CDT
+  ];
+  setState({ tab: 'split', nowOverride: T, tentative: [], current: null, segments: base, config: { ...getState().config, cycle: '70/8' } });
+  hh = out('split/stop-by boundary');
+  // Split Lab defaults: Break 1 3h off, 30m on duty, 5h drive, Break 2 7h sleeper.
+  let t = T; const plan = [];
+  const push = (status, m, note) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
+  push('OFF', 180, 'Break 1'); push('ON', 30, 'On duty'); push('D', 300, 'Drive'); push('SB', 420, 'Break 2');
+  const endB2 = t;
+  const evm = evaluate([...base, ...plan], { asOf: endB2, config: getState().config });
+  const m = hh.match(/stop by ([^<]+)</);
+  if (!m) throw new Error('Split Lab rendered no stop-by value');
+  if (m[1] !== clock(evm.mustStopBy)) throw new Error(`Split Lab stop-by ${m[1]} != ${clock(evm.mustStopBy)} — result cards must share one evaluation instant`);
+  if (!/8h 30m/.test(hh)) throw new Error('Split Lab 14-hr balance should be 8h 30m at the end of Break 2');
+  if (m[1] !== clock(endB2 + 360)) throw new Error(`stop-by ${m[1]} should be 6h after Break 2 ends (${clock(endB2 + 360)})`);
+  setState({ nowOverride: null });
+  console.log('split stop-by boundary: OK');
+}
+// Regression (consumer-review-1, 2026-09-22): an off-duty entry dropped inside a 6h driving
+// entry must leave 5h of driving — not silently delete the tail and inflate the clocks to 9h/68h.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  setState({
+    tab: 'log', nowOverride: M('2026-09-22T17:00:00Z'), current: null, tentative: [],
+    config: { ...getState().config, cycle: '70/8' },
+    segments: [
+      { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') }, // 20:00→06:00 CDT
+      { status: 'D', start: M('2026-09-22T11:00:00Z'), end: M('2026-09-22T17:00:00Z') },   // 06:00→12:00 CDT
+      { status: 'OFF', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-22T14:00:00Z') }, // 08:00→09:00 CDT
+    ],
+  });
+  hh = out('log/overlapping entries');
+  if (/9h 00m|68h 00m/.test(hh)) throw new Error('overlapping entry inflated driving/cycle time (3h of driving vanished)');
+  if (!/65h 00m/.test(hh)) throw new Error('cycle left should be 65h — 5h driven of 70');
+  if (!/These entries overlap/.test(hh)) throw new Error('overlapping entries must be flagged to the driver');
+  setState({ nowOverride: null });
+  console.log('overlap repro: OK');
 }
 console.log('OK');

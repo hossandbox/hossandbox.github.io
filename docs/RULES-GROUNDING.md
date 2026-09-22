@@ -74,6 +74,20 @@ Recalculation (iii):
   reporting location previous 5 duty tours and this one.
 - **Personal conveyance**: off-duty; guidance-driven; out of scope for v1 engine.
 
+## Record handling — how the engine reads a log (correctness, not a CFR exception)
+- The clocks are computed from the record **as logged** — §395.8 requires an accurate RODS, and a
+  scratchpad that quietly changes what the log said is worse than no scratchpad.
+- Where two entries overlap, the **later entry wins over the time it actually covers**, and the
+  **earlier entry is split** — the part before the overlap AND the part after it are both kept. A
+  6-hour driving entry with a 1-hour off-duty entry dropped inside it leaves **5 hours of driving**,
+  not 2.
+- Truncating the earlier entry instead deletes its tail and silently inflates the available driving
+  and cycle time (measured: driving-left 5h → 9h, cycle-left 64h → 68h, "No violations"). That is
+  the exact failure a driver would trust and take a violation on. Covered by
+  `engine/test/overlap.test.ts` and the overlap cases in `web` smoke.
+- The UI must flag overlapping entries, because the row list shows the raw entries while the clocks
+  use the resolved timeline — otherwise the two disagree silently.
+
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.
 - Do NOT draw with Euclidean lat/lon; error is significant at 150 nmi across latitudes.

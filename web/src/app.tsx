@@ -122,6 +122,21 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const [end, setEnd] = useState(toInput(now));
   const segs = allSegments(s, now);
 
+  /**
+   * Overlapping raw entries. The engine resolves them (a later entry wins over the range it
+   * covers, and the earlier one is split), so the clocks above can disagree with the rows below.
+   * Say so, rather than letting a 6h row sit next to a 5h calculation.
+   */
+  const overlaps: Segment[] = [];
+  {
+    const list = [...s.segments, ...s.tentative].filter((x) => x.end > x.start).sort((a, b) => a.start - b.start || a.end - b.end);
+    let covered = -Infinity;
+    for (const x of list) {
+      if (x.start < covered) overlaps.push(x);
+      covered = Math.max(covered, x.end);
+    }
+  }
+
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
     const segments = [...cur.segments];
     if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note });
@@ -167,6 +182,14 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
       </Card>
       <Card title="Violations in record"><ViolationList items={ev.violations} /></Card>
       <Card title={`Segments (${segs.length})`}>
+        {overlaps.length > 0 && (
+          <div class="warnbox">
+            <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks above count the resolved timeline, which can be less than the rows below appear to add up to.
+            <ul class="seglist">{overlaps.map((seg, i) => (
+              <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
+            ))}</ul>
+          </div>
+        )}
         <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
           <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span><button class="x" onClick={() => del(seg)}>×</button></li>
         ))}</ul>
@@ -194,7 +217,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   push(b1s, b1, 'Break 1'); push('ON', dwell, 'On duty'); push('D', drive, 'Drive'); push(b2s, b2, 'Break 2');
   const endB1 = t0 + b1, endDrive = t0 + b1 + dwell + drive, endB2 = t;
 
-  const after = evaluate([...base, ...plan], { asOf: endB2 + 1, config: s.config });
+  // Evaluate at the instant Break 2 ends — every result card on this screen describes that
+  // moment. Using endB2 + 1 put "stop by" a minute past the stated evaluation time (consumer-review-1).
+  const after = evaluate([...base, ...plan], { asOf: endB2, config: s.config });
   const atDriveEnd = evaluate([...base, ...plan.slice(0, 3)], { asOf: endDrive, config: s.config });
   const paired = after.shift.chain.length >= 2 && after.shift.chain[after.shift.chain.length - 1].end === endB2;
   const longOk = (b1s === 'SB' && b1 >= LIMITS.SPLIT_MIN_SB) || (b2s === 'SB' && b2 >= LIMITS.SPLIT_MIN_SB);

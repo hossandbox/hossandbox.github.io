@@ -1,20 +1,36 @@
 import type { Segment, RestPeriod } from './types.ts';
 import { LIMITS } from './types.ts';
 
-/** Sort, clip overlaps (later wins), drop zero-length, merge adjacent same-status. */
+/**
+ * Sort, clip overlaps (a later entry wins over the range it actually covers), drop
+ * zero-length, merge adjacent same-status.
+ *
+ * A later entry OVERWRITES only the time it covers. The earlier segment is SPLIT, keeping
+ * both the part before the overlap and the part after it. Truncating the earlier segment
+ * instead silently deletes its tail: a 6h drive with a 1h off-duty entry dropped inside it
+ * must leave 5h of driving, not 2. Clocks are computed from the record as logged (§395.3(a)),
+ * so a small correction must never inflate the available driving or cycle time.
+ */
 export function normalize(segments: Segment[]): Segment[] {
   const sorted = segments
     .filter((s) => s.end > s.start)
     .map((s) => ({ ...s }))
     .sort((a, b) => a.start - b.start || a.end - b.end);
-  const out: Segment[] = [];
+  const placed: Segment[] = [];
   for (const s of sorted) {
-    const prev = out[out.length - 1];
-    if (prev && s.start < prev.end) {
-      // overlap: later segment wins; truncate previous
-      prev.end = s.start;
-      if (prev.end <= prev.start) out.pop();
+    const kept: Segment[] = [];
+    for (const p of placed) {
+      if (p.end <= s.start || p.start >= s.end) { kept.push(p); continue; } // no overlap
+      if (p.start < s.start) kept.push({ ...p, end: s.start });            // keep the head
+      if (p.end > s.end) kept.push({ ...p, start: s.end });                // keep the tail
     }
+    kept.push({ ...s });
+    kept.sort((a, b) => a.start - b.start || a.end - b.end);
+    placed.length = 0;
+    placed.push(...kept);
+  }
+  const out: Segment[] = [];
+  for (const s of placed) {
     const last = out[out.length - 1];
     if (last && last.status === s.status && last.end === s.start && !!last.tentative === !!s.tentative) {
       last.end = s.end;

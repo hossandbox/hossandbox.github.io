@@ -218,6 +218,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   10-hour sleeper reset as unusable as a split leg. FMCSA's July 2026 guidance says otherwise for
   resets containing 7+ sleeper hours; fixed, tested, deployed. Lesson: verify against the guidance
   *portal*, not the 2020 PDF — FAQs get rescinded and reissued.
+- **Overlap + Split-Lab fixes (2026-09-22, consumer-review-1)**: a third-party review found two
+  confirmed defects. (1) `normalize()` truncated the earlier entry on an overlap instead of
+  splitting it, so an off-duty entry added *inside* a driving entry deleted the driving after the
+  break — 6h drive + interior 1h break counted as 2h driving, inflating driving-left 5h→9h and
+  cycle-left 64h→68h, still reporting "No violations". The Log tab showed the raw 6h row while the
+  clocks used the resolved timeline, so nothing on screen disagreed. Fixed to split (tail
+  preserved) + an overlap warning on the Log tab. `engine/test/overlap.test.ts` (3 of 5 failed
+  before the fix) and two smoke regressions. (2) Split Lab evaluated its what-if plan at
+  `endB2 + 1`, so every result card was a minute late ("stop by" 09:31 for a 03:30 break, 14-hr
+  balance 8h29m); now evaluated at `endB2`. Lesson: when the clocks and the visible list can
+  disagree, the *display* has to say so — a silent discrepancy is how this hid.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

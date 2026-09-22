@@ -3,3 +3,5 @@ dist/
 dist-test/
 *.log
 .DS_Store
+# local archive of third-party reviews + scratch reproductions (not public)
+reviews/
