@@ -29,6 +29,8 @@ export interface State {
   config: RulesConfig;
   mph: number;
   trip: TripDraft;
+  /** Log tab: show the normalized timeline instead of the entries as typed */
+  logResolved: boolean;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
   tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
@@ -46,7 +48,7 @@ export const DEFAULT_TRIP: TripDraft = {
 const initial: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
-  mph: 55, trip: { ...DEFAULT_TRIP }, nowOverride: null, tab: 'log', bugEmail: '',
+  mph: 55, trip: { ...DEFAULT_TRIP }, logResolved: false, nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
@@ -105,6 +107,15 @@ export function dur(min: number): string {
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 }
 export function hrs(min: number): string { return (min / 60).toFixed(1); }
+
+/**
+ * True when nothing at all is logged, so every number on screen is an assumption rather than a
+ * reading of the driver's day. The UI must say so instead of presenting a fresh 11/14/70 as fact
+ * (consumer-review-1/2: "Explain the starting assumptions").
+ */
+export function isFreshLog(s: State): boolean {
+  return s.segments.length === 0 && s.tentative.length === 0 && !s.current;
+}
 
 /** Materialize the open segment up to `now` so the engine sees it. */
 export function allSegments(s: State, now: number): Segment[] {

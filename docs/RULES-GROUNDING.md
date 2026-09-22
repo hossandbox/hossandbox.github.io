@@ -96,6 +96,15 @@ Recalculation (iii):
 - Driver-facing copy never shows internal ids or timestamps: no `DRIVE_11`/`BREAK_30` in an
   itinerary, no ISO/UTC stamp in a violation. The engine emits plain English; the UI renders clock
   times from the minute values.
+- **Never assert what the driver wasn't asked.** With nothing logged the engine correctly returns a
+  fresh 11/14/70 — arithmetic that is right, but not a fact about anyone's day. The UI labels it as
+  an assumption (`isFreshLog`) on the clocks and on the trip verdict, and the wait before a future
+  departure defaults to On duty (no rest credit) when no current status is set. **A guess may make
+  the plan look worse than reality, never better** — being told a load doesn't fit is an annoyance;
+  being told it fits when it doesn't is a violation.
+- The Log tab can show the **resolved timeline** — the normalized record the clocks actually use,
+  including the live current segment, with per-status totals. Read-only; the entry list stays the
+  editable record.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

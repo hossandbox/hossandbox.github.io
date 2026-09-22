@@ -239,6 +239,15 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   selected comparison. Moved to the store (`State.trip`) with a Reset plan button. Tests:
   `engine/test/tripdeparture.test.ts` (4) + two smoke regressions. Also removed the internal enum
   ids from itinerary copy and the UTC ISO anchor stamp from violation details.
+- **Assumption labelling + resolved timeline (2026-09-22, review backlog batch 1)**: with nothing
+  logged the app showed a fresh 11/14/70 and a "LEGAL" trip verdict as if they described the
+  driver's day (the reviewer's "Explain the starting assumptions"). Both are now labelled as
+  assumptions via `isFreshLog`, and the pre-departure wait defaults to On duty — crediting nothing —
+  when no current status is set. Added the optional Log-tab **resolved timeline** view (normalized
+  record + per-status totals) that review 2 asked for as the follow-up to the overlap fix, and an
+  accessible name on each segment delete button. Standing rule adopted: a guess may only make the
+  plan look worse than reality, never better. Tests: 5 new smoke regressions; each was falsified
+  (label removed / permissive default restored / view left unnormalized) before being accepted.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

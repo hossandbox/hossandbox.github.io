@@ -20,10 +20,10 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, planTrip, planTripBoth, safeHaven, LIMITS, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
+  evaluate, planTrip, planTripBoth, safeHaven, normalize, LIMITS, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, DEFAULT_TRIP, type State, type TripDraft,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, DEFAULT_TRIP, type State, type TripDraft,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -91,6 +91,12 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
         <Stat label={`${ev.cycle.limit / 60}-hr left`} value={dur(ev.cycle.remaining)} />
       </div>
       {ev.driveNow > 0 && <div class="muted small">Must stop driving by <b>{clock(ev.mustStopBy)}</b>{ev.shift.pendingSplitLeg ? ' · split leg pending' : ''}{ev.shift.notes.length ? ' · exception active' : ''}</div>}
+      {isFreshLog(s) && (
+        <div class="warnbox small">
+          <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
+          Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+        </div>
+      )}
     </header>
   );
 }
@@ -137,6 +143,16 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     }
   }
 
+  const showResolved = s.logResolved;
+  const setShowResolved = (v: boolean) => setState({ logResolved: v });
+  /**
+   * The timeline the clocks actually use: overlaps already resolved, and the live "current" status
+   * materialized. Read-only — the rows in edit mode stay the record the driver typed.
+   */
+  const resolved = normalize(allSegments(s, now));
+  const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+  for (const x of resolved) totals[x.status] += x.end - x.start;
+
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
     const segments = [...cur.segments];
     if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note });
@@ -181,7 +197,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
         <div class="row"><button class="primary" onClick={add}>Add segment</button><button onClick={fresh}>Fresh start</button></div>
       </Card>
       <Card title="Violations in record"><ViolationList items={ev.violations} /></Card>
-      <Card title={`Segments (${segs.length})`}>
+      <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Segments (${s.segments.length + s.tentative.length})`}>
         {overlaps.length > 0 && (
           <div class="warnbox">
             <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks above count the resolved timeline, which can be less than the rows below appear to add up to.
@@ -190,9 +206,23 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
             ))}</ul>
           </div>
         )}
-        <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
-          <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span><button class="x" onClick={() => del(seg)}>×</button></li>
-        ))}</ul>
+        <div class="row">
+          <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Edit entries as entered' : 'Show resolved timeline'}</button>
+        </div>
+        {showResolved ? (
+          <>
+            <p class="muted small">Oldest first — this is the timeline the clocks use: overlaps already resolved, and your current status included. Read-only; switch back to edit what you typed.</p>
+            <ul class="seglist">{resolved.map((seg, i) => (
+              <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
+            ))}</ul>
+            <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
+            <p class="muted small">Set your current status with the buttons above to keep this timeline moving.</p>
+          </>
+        ) : (
+          <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
+            <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span><button class="x" aria-label={`Delete ${segLabel(seg.status, seg.note)} ${clock(seg.start)} to ${clock(seg.end)}`} onClick={() => del(seg)}>×</button></li>
+          ))}</ul>
+        )}
       </Card>
       <BugButton s={s} ev={ev} />
     </>
@@ -387,6 +417,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Verdict" value={best.feasible ? 'LEGAL' : 'NO'} tone={best.feasible ? 'good' : 'bad'} />
           <Stat label="Cycle at arrival" value={`${hrs(best.cycleRemainingAtArrival)} h`} />
         </div>
+        {isFreshLog(s) && <p class="warnbox small">This verdict assumes a fresh clock. Nothing is logged, so it doesn't know what you've already driven today or how much cycle you've used — it is not a statement about your real day. Add your duty on the <b>Log</b> tab first.</p>}
         <PlanCompare both={both} from={now} />
       </Card>
     </>
@@ -398,8 +429,18 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const d = s.trip;
   const setTrip = (p: Partial<TripDraft>) => setState({ trip: { ...d, ...p } });
-  const cur = s.current?.status ?? 'OFF';
-  const untilStatus: DutyStatus = d.until === 'CURRENT' ? cur : d.until;
+  const cur = s.current?.status ?? null;
+  // With no status logged there is nothing to "continue", and guessing OFF would hand out rest
+  // credit for time nobody said was off duty. Default to On duty: it credits nothing, so the plan
+  // can only come out pessimistic, never optimistic (consumer-review-2, concern 1).
+  const untilPick: DutyStatus | 'CURRENT' = d.until === 'CURRENT' && !cur ? 'ON' : d.until;
+  const untilStatus: DutyStatus = untilPick === 'CURRENT' ? (cur ?? 'ON') : untilPick;
+  const untilOptions: [DutyStatus | 'CURRENT', string][] = [
+    ...(cur ? [[('CURRENT') as const, `Continue ${STATUS_LABEL[cur]}`] as [DutyStatus | 'CURRENT', string]] : []),
+    ['OFF', 'Off duty'],
+    ['SB', 'Sleeper'],
+    ['ON', 'On duty'],
+  ];
   const dep = d.dep ?? toInput(now);
   const departure = fromInput(dep) ?? now;
   const waiting = departure > now;
@@ -427,8 +468,9 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         {waiting && (
           <>
             <p class="muted small">That's <b>{dur(departure - now)}</b> from now. Unlogged time is not a rest — say what you'll be doing, and the itinerary will show it as an assumed row rather than quietly counting it as off duty:</p>
-            <Toggle options={[['CURRENT', `Continue ${STATUS_LABEL[cur]}`], ['OFF', 'Off duty'], ['SB', 'Sleeper'], ['ON', 'On duty']]} value={d.until} onChange={(v) => setTrip({ until: v as DutyStatus | 'CURRENT' })} />
+            <Toggle options={untilOptions} value={untilPick} onChange={(v) => setTrip({ until: v })} />
             <p class="muted small">Planning the wait as <b>{STATUS_LABEL[untilStatus]}</b>.{untilStatus === 'OFF' || untilStatus === 'SB' ? ' Only claim this if you really will be off duty — it can become a split leg.' : ' It earns no rest credit, so no split leg can be built out of it.'}</p>
+            {!cur && <p class="warnbox small">You haven't set a current status yet, so this defaults to <b>On duty</b> until you choose — that credits no rest. Pick <b>Off duty</b> if you really will be off.</p>}
           </>
         )}
         <Slider label="Distance" value={d.miles} min={50} max={3000} step={25} onChange={(v) => setTrip({ miles: v })} fmt={(v) => `${v} mi`} />

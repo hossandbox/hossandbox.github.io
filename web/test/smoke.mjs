@@ -163,4 +163,40 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null });
   console.log('trip departure/draft regressions: OK');
 }
+// Regression (consumer-review-1/2): an assumed fresh clock must be labelled as an assumption, and
+// the Log tab must be able to show the resolved timeline the clocks actually use.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-22T17:00:00Z'); // 12:00 America/Chicago
+  const overlap = [
+    { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') }, // 20:00→06:00
+    { status: 'D', start: M('2026-09-22T11:00:00Z'), end: T },                           // 06:00→12:00
+    { status: 'OFF', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-22T14:00:00Z') }, // 08:00→09:00
+  ];
+  setState({ tab: 'log', logResolved: false, nowOverride: T, current: null, tentative: [], segments: overlap });
+  hh = out('log/resolved view off');
+  if (!/Show resolved timeline/.test(hh)) throw new Error('resolved-timeline control missing');
+  setState({ logResolved: true });
+  hh = out('log/resolved view on');
+  if (!/Resolved timeline \(4\)/.test(hh)) throw new Error('resolved timeline should show the split drive as 4 rows');
+  if (!/Driving <b>5h 00m<\/b>/.test(hh)) throw new Error('resolved totals should read 5h of driving');
+
+  // nothing logged: every number on screen is an assumption and has to say so
+  setState({ logResolved: false, segments: [], tentative: [], current: null });
+  hh = out('log/fresh (nothing logged)');
+  if (!/Assumed fresh clock/.test(hh)) throw new Error('a fresh clock must be labelled as an assumption');
+  setState({ tab: 'recap' });
+  hh = out('recap/fresh verdict');
+  if (!/This verdict assumes a fresh clock/.test(hh)) throw new Error('the LEGAL verdict must be qualified when nothing is logged');
+
+  // no current status + a future departure: the wait must not be credited as rest
+  setState({ tab: 'trip', current: null, segments: [], trip: { ...DEFAULT_TRIP, dep: toInput(T + 180) } });
+  hh = out('trip/no status, delayed departure');
+  if (!/haven't set a current status/.test(hh)) throw new Error('the conservative default must be stated');
+  if (/Continue /.test(hh)) throw new Error('with no current status there is nothing to "Continue"');
+  if (/pairs with the/.test(hh)) throw new Error('an unlogged wait must not be credited as rest');
+
+  setState({ nowOverride: null, tab: 'log' });
+  console.log('assumptions + resolved timeline: OK');
+}
 console.log('OK');
