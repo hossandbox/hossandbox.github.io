@@ -128,6 +128,13 @@ Recalculation (iii):
 - Range controls use `step=1` so the browser cannot snap the exposed value away from the real one
   (with `min=1, step=25`, typing 20 exposed 26 and the 3000 maximum was unreachable at 2976). Coarse
   increments belong on the −/+ buttons, never on the range element.
+- **Copy claims only what the app can know.** It cannot confirm a download reached the device, so it
+  says "Download requested: <file>" — never "Exported". Every claim in the UI should be traceable to
+  something the app actually observed.
+- `exportState` and `applyImportedState` are one contract: everything the export carries comes back
+  (log, settings, speed, trip scenario, report address), **except `nowOverride`** — a simulated clock
+  must never return silently and make the app lie about the time. Adding a field to one without the
+  other is the bug; the round-trip smoke test fails if they drift apart.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

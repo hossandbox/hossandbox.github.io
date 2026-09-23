@@ -109,6 +109,25 @@ export function clockFull(min: number): string {
   return `${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/**
+ * How the terminal's day roll (00:00 in `terminalTz`) reads on the device's clock, as "HH:MM".
+ * Computed from the real offsets at `at` rather than assumed, so daylight saving is handled — the
+ * LA/Chicago gap is 2 hours in summer and 2 in winter, but the US/Phoenix and UTC cases differ.
+ */
+export function terminalMidnightOnDevice(terminalTz: string, deviceTz: string, at: number): string {
+  const offset = (tz: string) => {
+    const d = new Date(at * 60000);
+    const f = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const p: Record<string, string> = {};
+    for (const part of f.formatToParts(d)) p[part.type] = part.value;
+    return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - d.getTime()) / 60000);
+  };
+  const mins = (((offset(deviceTz) - offset(terminalTz)) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+
 /** Every IANA zone the runtime knows, for the settings picker. Falls back to the common US set. */
 export const TIME_ZONES: string[] = (() => {
   try {
@@ -153,6 +172,25 @@ export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>
   return { segments: replace(s.segments), tentative: replace(s.tentative) };
 }
 
+/**
+ * Restore a state from an exported payload (see `exportState`).
+ *
+ * Everything the export carries comes back — including the trip scenario, which the old inline
+ * import dropped, so a backup/restore silently lost it. `nowOverride` is deliberately NOT restored:
+ * a simulated clock must never come back on its own and quietly make the app lie about the time.
+ */
+export function applyImportedState(cur: State, d: Partial<State>): Partial<State> {
+  return {
+    segments: d.segments ?? [],
+    tentative: d.tentative ?? [],
+    current: d.current ?? null,
+    config: { ...cur.config, ...(d.config ?? {}) },
+    mph: d.mph ?? cur.mph,
+    trip: { ...DEFAULT_TRIP, ...(d.trip ?? {}) },
+    bugEmail: typeof d.bugEmail === 'string' ? d.bugEmail : cur.bugEmail,
+  };
+}
+
 /** Materialize the open segment up to `now` so the engine sees it. */
 export function allSegments(s: State, now: number): Segment[] {
   const out = [...s.segments];
@@ -171,5 +209,5 @@ export function segLabel(status: DutyStatus, note?: string): string {
 /** Everything a bug report needs. Kept small enough to paste into an email. */
 export function exportState(s: State): string {
   return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, nowOverride: s.nowOverride, trip: s.trip });
+    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, bugEmail: s.bugEmail, nowOverride: s.nowOverride });
 }

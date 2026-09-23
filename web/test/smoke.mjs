@@ -209,7 +209,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'trip', nowOverride: T, current: null, tentative: [], segments: [], trip: { ...DEFAULT_TRIP } });
   hh = out('trip/sliders with numeric entry');
   if (!/class="num"/.test(hh)) throw new Error('sliders must offer direct numeric entry');
-  if (!/aria-label="Decrease Distance"/.test(hh)) throw new Error('slider stepper buttons missing');
+  if (!/aria-label="Decrease Distance by 25 mi"/.test(hh)) throw new Error('slider stepper buttons missing');
 
   // (b) violation labels are driver-facing, never enum ids
   setState({
@@ -345,5 +345,102 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   setState({ nowOverride: null, tab: 'log' });
   console.log('review-4 findings: OK');
+}
+// Regression (consumer-review-5): the coarse increment must be discoverable, the time-zone example
+// must be concrete, and it must be computed rather than assumed.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-23T17:00:00Z');
+  const { deviceTz, terminalMidnightOnDevice } = await import('../src/store.ts');
+
+  // (a) the −/+ buttons say what they will do
+  setState({
+    tab: 'trip', nowOverride: T, current: { status: 'ON', since: T }, tentative: [],
+    segments: [{ status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') }],
+    config: { ...getState().config, timeZone: deviceTz },
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 60), miles: 550, pre: 0, stopMile: 0, stopMin: 0 },
+  });
+  hh = out('trip/stepper increments');
+  if (!/aria-label="Increase Distance by 25 mi"/.test(hh)) throw new Error('the +/− buttons must name their increment for assistive tech');
+  if (!/aria-label="Decrease Distance by 25 mi"/.test(hh)) throw new Error('the −/+ buttons must name their increment for assistive tech');
+  if (!/>\+25<\/button>/.test(hh)) throw new Error('the increment should be visible on the button, not just in its accessible name');
+  if (!/>−25<\/button>/.test(hh)) throw new Error('the minus button should show its increment too');
+
+  // (b) the day-roll example is concrete, and matches the reviewer's own case
+  const laOnChicago = terminalMidnightOnDevice('America/Los_Angeles', 'America/Chicago', T);
+  if (laOnChicago !== '02:00') throw new Error(`00:00 America/Los_Angeles should read 02:00 on a Chicago clock, got ${laOnChicago}`);
+  // Phoenix does not observe DST, so the gap really does move — proof this is computed, not hardcoded
+  const phxSep = terminalMidnightOnDevice('America/Phoenix', 'America/Chicago', M('2026-09-23T17:00:00Z'));
+  const phxJan = terminalMidnightOnDevice('America/Phoenix', 'America/Chicago', M('2027-01-15T17:00:00Z'));
+  if (phxSep !== '02:00' || phxJan !== '01:00') throw new Error(`Phoenix/Chicago should be 02:00 in summer and 01:00 in winter, got ${phxSep}/${phxJan}`);
+
+  setState({ tab: 'recap', config: { ...getState().config, timeZone: 'America/Los_Angeles' } });
+  hh = out('recap/terminal zone example');
+  if (!/On your device clock/.test(hh)) throw new Error('the recap should give the device-clock reading of the terminal day roll');
+  // compute the expectation against THIS harness's device zone, not a hardcoded one
+  const expectedExample = terminalMidnightOnDevice('America/Los_Angeles', deviceTz, T);
+  if (!new RegExp(`that is <b>${expectedExample}</b>`).test(hh)) throw new Error(`the recap should show the concrete example (${expectedExample})`);
+
+  // (c) the export control is present; the note itself is asserted in a real browser (a click cannot
+  // be simulated in a string render — see the review-5 browser check)
+  setState({ tab: 'settings' });
+  hh = out('settings/data');
+  if (!/Export JSON/.test(hh) || !/Import JSON/.test(hh)) throw new Error('export/import controls missing');
+
+  setState({ nowOverride: null, tab: 'log' });
+  console.log('review-5 findings: OK');
+}
+// Regression (consumer-review-5): a full export -> import round trip must restore the log, the
+// settings AND the trip scenario — the old inline import silently dropped the trip.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const { exportState, applyImportedState, DEFAULT_TRIP, deviceTz: tz } = await import('../src/store.ts');
+
+  const original = {
+    ...getState(),
+    // a NON-null simulated clock, so "was it ignored?" is actually testable — with null, `??` falls
+    // through and the assertion would pass whether or not the field was restored
+    nowOverride: M('2026-01-01T00:00:00Z'),
+    segments: [
+      { status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') },
+      { status: 'D', start: M('2026-09-23T11:00:00Z'), end: M('2026-09-23T17:00:00Z') },
+    ],
+    tentative: [{ status: 'SB', start: M('2026-09-23T17:00:00Z'), end: M('2026-09-23T22:00:00Z'), tentative: true }],
+    config: { ...getState().config, cycle: '60/7', timeZone: 'America/Los_Angeles' },
+    mph: 40,
+    trip: { ...DEFAULT_TRIP, miles: 1234, pre: 45, stopMile: 600, stopMin: 90, until: 'OFF', view: 'restart34' },
+    bugEmail: 'roundtrip@example.com',
+  };
+  setState(original);
+  const payload = JSON.parse(exportState(getState()));
+
+  // import into a DIFFERENT state, as a restore would
+  setState({ segments: [], tentative: [], config: { ...getState().config, cycle: '70/8', timeZone: tz }, mph: 55, trip: { ...DEFAULT_TRIP }, bugEmail: '' });
+  setState((cur) => applyImportedState(cur, payload));
+  const restored = getState();
+
+  const checks = [
+    ['segments', restored.segments.length === 2 && restored.segments[0].start === original.segments[0].start],
+    ['tentative', restored.tentative.length === 1],
+    ['cycle', restored.config.cycle === '60/7'],
+    ['time zone', restored.config.timeZone === 'America/Los_Angeles'],
+    ['speed', restored.mph === 40],
+    ['trip distance', restored.trip.miles === 1234],
+    ['trip stop', restored.trip.stopMile === 600 && restored.trip.stopMin === 90],
+    ['trip view', restored.trip.view === 'restart34'],
+    ['report email', restored.bugEmail === 'roundtrip@example.com'],
+  ];
+  const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);
+  if (failed.length) throw new Error(`export/import round trip lost: ${failed.join(', ')}`);
+
+  // a simulated clock must NOT come back on its own — the payload carries one, so this is a real test
+  const MY_CLOCK = M('2026-09-23T17:00:00Z');
+  setState({ nowOverride: MY_CLOCK });
+  setState((cur) => applyImportedState(cur, payload));
+  if (getState().nowOverride !== MY_CLOCK) throw new Error('import must not silently restore a simulated clock');
+  if (payload.nowOverride !== original.nowOverride) throw new Error('the payload should have carried a simulated clock for this check to mean anything');
+
+  setState({ nowOverride: null, segments: [], tentative: [], trip: { ...DEFAULT_TRIP }, config: { ...getState().config, timeZone: tz, cycle: '70/8' }, mph: 55, bugEmail: '' });
+  console.log('export/import round trip: OK');
 }
 console.log('OK');

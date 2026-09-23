@@ -283,6 +283,19 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   terminal in a different zone from the device, every clock time (device zone) sat next to a carrier
   day roll (terminal zone) with nothing saying so; both zones are now named on the banner and the
   recap table. Export/import now report their outcome in the UI instead of failing silently.
+- **Stepper labels, honest export copy, computed zone example (2026-09-23, consumer-review-5)**: no
+  new functional failures; the round confirmed the previous fixes, including the arrow-key path
+  (20 → 21, no 25-mile jump). Three wording/discoverability items fixed: the −/+ buttons now show
+  their increment and name it for assistive tech ("−25" / "aria-label=Decrease Distance by 25 mi");
+  export says "Download requested: <file>" instead of claiming the file landed, because a silent
+  download failure and a success are indistinguishable from inside the page; and the recap's
+  time-zone sentence now gives a concrete computed example (00:00 America/Los_Angeles reads as 02:00
+  on a Chicago clock) instead of an abstract one. **Building the round-trip test found two real
+  bugs**: the import dropped the trip scenario that the export carried, and the export never wrote
+  `bugEmail` while the import tried to restore it. Both fixed, with `exportState`/`applyImportedState`
+  now a single tested contract. Two of my own test assertions were also found vacuous by
+  falsification (a plus-button check that never looked at the minus button; a `nowOverride` check
+  using `null`, where `??` made it unfalsifiable) and were tightened.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

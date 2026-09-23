@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, TIME_ZONES, deviceTz, DEFAULT_TRIP, type State, type TripDraft,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, DEFAULT_TRIP, type State, type TripDraft,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -61,14 +61,14 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
             min=1/step=25 even the maximum (3000) was unreachable at 2976 (consumer-review-4). The
             −/+ buttons keep the coarse increment. */}
         <input type="range" aria-label={`${label}${unit ? ` (${unit})` : ''}`} min={min} max={max} step={1} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
-        <button class="mini" aria-label={`Decrease ${label}`} onClick={() => set(value - step)}>−</button>
+        <button class="mini" title={`Decrease by ${step}${unit ? ` ${unit}` : ''}`} aria-label={`Decrease ${label} by ${step}${unit ? ` ${unit}` : ''}`} onClick={() => set(value - step)}>−{step}</button>
         <input
           type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value${unit ? ` in ${unit}` : ''}`}
           min={min} max={max} step={1} value={text}
           onInput={(e) => typed((e.target as HTMLInputElement).value)}
           onBlur={() => setText(String(value))}
         />
-        <button class="mini" aria-label={`Increase ${label}`} onClick={() => set(value + step)}>+</button>
+        <button class="mini" title={`Increase by ${step}${unit ? ` ${unit}` : ''}`} aria-label={`Increase ${label} by ${step}${unit ? ` ${unit}` : ''}`} onClick={() => set(value + step)}>+{step}</button>
       </div>
       {note && <div class="warnbox small">{note}</div>}
     </div>
@@ -534,7 +534,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Available" value={`${hrs(ev.cycle.remaining)} h`} tone={ev.cycle.remaining < 120 ? 'bad' : ''} />
           {ev.cycle.restartEnd !== null && <Stat label="Last 34h restart" value={clock(ev.cycle.restartEnd)} />}
         </div>
-        <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> The clock times in this table are <b>your device zone ({deviceTz})</b> — a different basis from the day roll above, so a terminal-midnight recap can read as {String(s.config.dayStartHour).padStart(2, '0')}:00 only on your own clock.</>}</p>
+        <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)}</b> — the times in this table use your device zone.</>}</p>
       </Card>
       <Card title="Hours coming back">
         <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
@@ -643,15 +643,16 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
     const blob = new Blob([exportState(s)], { type: 'application/json' });
     const name = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`;
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
-    // Say what happened: a download that silently fails looks identical to one that worked.
-    setIoNote(`Exported ${s.segments.length} logged segment(s) and ${s.tentative.length} what-if row(s) to ${name}. If no file arrived, your browser is blocking downloads from this page.`);
+    // Say only what is knowable: the app asked the browser for a download. Whether the file landed is
+    // not ours to claim — a silent failure and a success look identical from in here (consumer-review-5).
+    setIoNote(`Download requested: ${name} (${s.segments.length} logged segment(s), ${s.tentative.length} what-if row(s)). Check your browser's downloads — the app cannot confirm the file reached your device.`);
   };
   const importJson = (e: Event) => {
     const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
     f.text().then((t) => {
       const d = JSON.parse(t);
-      setState({ segments: d.segments ?? [], tentative: d.tentative ?? [], current: d.current ?? null, config: { ...c, ...(d.config ?? {}) }, mph: d.mph ?? s.mph });
-      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}.`);
+      setState((cur) => applyImportedState(cur, d));
+      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.`);
     }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
   };
   return (
