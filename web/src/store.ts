@@ -39,7 +39,8 @@ export interface State {
 }
 
 const KEY = 'hos-sandbox-v1';
-const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
+/** The browser's zone — what every `clock()` on screen renders in, which may differ from the terminal. */
+export const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
 
 export const DEFAULT_TRIP: TripDraft = {
   miles: 550, pre: 30, stopMile: 0, stopMin: 0, stopOff: false, dep: null, until: 'CURRENT', view: null,

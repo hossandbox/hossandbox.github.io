@@ -15,7 +15,10 @@ Property-carrying drivers only (passenger rules differ and are OUT OF SCOPE for 
   Short-haul (§395.1(e)(1)/(e)(2)) drivers are exempt.
 - **60/7 and 70/8** (b): no driving after 60 on-duty hrs in 7 days (carrier not 7-day) or 70 in
   8 days (carrier operates every day). Rolling window.
-- **34-hr restart** (c): any 7/8-day period may end with ≥34 consecutive hrs off duty.
+- **34-hr restart** (c): any 7/8-day period may end with ≥34 consecutive hrs off duty. It ALSO
+  satisfies the (a)(1) 10-hour daily rest — 34 consecutive hours off duty is by definition ≥10. Never
+  describe the restart as doing "nothing" for the 11/14: its distinctive benefit is resetting the
+  60/70, and it happens to cover the daily reset at the same time (consumer-review-4, finding 2).
 
 ## Split sleeper berth — §395.1(g)(1)(ii)-(iii)  ⚠️ THE PART THE WEB GETS WRONG
 Qualifying pair:
@@ -119,6 +122,12 @@ Recalculation (iii):
   would make `Intl.DateTimeFormat` throw inside the engine and blank every tab.
 - Plans running past a week print **calendar dates**, not just a weekday, because "Wed 08:00" stops
   being unambiguous once the week repeats.
+- **A range input's exposed value must equal the real value.** `clock()` renders in the *device*
+  zone while carrier days and recap returns are computed in `config.timeZone`; when those differ the
+  UI must say so, because a terminal-midnight recap does not read as 00:00 on the device clock.
+- Range controls use `step=1` so the browser cannot snap the exposed value away from the real one
+  (with `min=1, step=25`, typing 20 exposed 26 and the 3000 maximum was unreachable at 2976). Coarse
+  increments belong on the −/+ buttons, never on the range element.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

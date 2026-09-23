@@ -301,4 +301,49 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'log' });
   console.log('review-3 findings: OK');
 }
+// Regression (consumer-review-4): the range control's exposed value must equal the real value, the
+// restart explanation must not dismiss the daily reset, and a terminal zone that differs from the
+// device zone must be labelled.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-23T17:00:00Z');
+  const base = [
+    { status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') },
+    { status: 'D', start: M('2026-09-23T11:00:00Z'), end: T },
+  ];
+  const { deviceTz } = await import('../src/store.ts');
+
+  // (a) a coarse step makes the browser snap the control to min + k*step: 20 reads as 26, and with
+  // min=1/step=25 even the 3000 max was unreachable at 2976. step=1 makes every integer reachable.
+  setState({
+    tab: 'trip', nowOverride: T, current: { status: 'ON', since: T }, tentative: [], segments: base,
+    config: { ...getState().config, cycle: '70/8', timeZone: deviceTz },
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 60), miles: 20, pre: 0, stopMile: 0, stopMin: 0 },
+  });
+  hh = out('trip/distance control steps');
+  if (!/min="1"/.test(hh) || !/max="3000"/.test(hh)) throw new Error('distance range should span 1–3000');
+  if (/step="25"/.test(hh)) throw new Error('a coarse range step desynchronises the control from the typed value');
+  if (!/step="1"/.test(hh)) throw new Error('range and number inputs must step by 1 so every value is reachable');
+
+  // (b) the restart does satisfy the daily reset — the old copy claimed otherwise
+  setState({
+    tab: 'trip', current: { status: 'OFF', since: T }, config: { ...getState().config, cycle: '60/7', timeZone: deviceTz },
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 180), miles: 3000, pre: 0, until: 'OFF', view: 'restart34' },
+  });
+  hh = out('trip/restart explanation');
+  if (!/also satisfies the daily reset/.test(hh)) throw new Error('the restart also satisfies the 10-hour daily reset and the note must say so');
+  if (/does nothing for the 11\/14/.test(hh)) throw new Error('the old misleading restart wording is still present');
+
+  // (c) a terminal zone that differs from the device zone must be labelled, and must not cry wolf
+  setState({ tab: 'log', config: { ...getState().config, timeZone: 'America/Los_Angeles' } });
+  hh = out('log/terminal zone differs');
+  if (!/Two time zones in play/.test(hh)) throw new Error('a terminal zone that differs from the device zone must be explained');
+  if (!/America\/Los_Angeles/.test(hh) || !new RegExp(deviceTz.replace(/[/.]/g, '\\$&')).test(hh)) throw new Error('both zones should be named');
+  setState({ config: { ...getState().config, timeZone: deviceTz } });
+  hh = out('log/same zone');
+  if (/Two time zones in play/.test(hh)) throw new Error('no zone note is needed when the zones agree');
+
+  setState({ nowOverride: null, tab: 'log' });
+  console.log('review-4 findings: OK');
+}
 console.log('OK');

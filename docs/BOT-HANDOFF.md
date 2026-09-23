@@ -272,6 +272,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   calendar dates, a past departure is labelled a reconstruction, duration fields carry `min`/`mi`
   units, and the segment forms validate inline rather than through `alert()`. Tests: 4 engine
   (`tripstrategies`) + 6 smoke regressions; every one falsified before acceptance.
+- **Slider/ARIA mismatch, restart wording, time-zone basis (2026-09-23, consumer-review-4)**: the
+  retest confirmed all three fixes from the previous round. (1) The Distance range exposed a
+  different value from the number box and the itinerary: with `min=1, step=25` the browser snaps a
+  range input to `min + k*step`, so 20 read as 26, 45 as 51, 550 as 551, and 3000 was **unreachable**
+  at 2976 — reproduced in a real browser against the live build before fixing. Range and number inputs
+  now step by 1; the coarse increment stays on the −/+ buttons. (2) The restart note claimed a
+  34-hour restart "does nothing for the 11/14" — wrong: 34 consecutive hours off duty also satisfies
+  the §395.3(a)(1) 10-hour daily reset. Reworded and recorded in RULES-GROUNDING. (3) With the home
+  terminal in a different zone from the device, every clock time (device zone) sat next to a carrier
+  day roll (terminal zone) with nothing saying so; both zones are now named on the banner and the
+  recap table. Export/import now report their outcome in the UI instead of failing silently.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

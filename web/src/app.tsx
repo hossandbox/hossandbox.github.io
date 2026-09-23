@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, TIME_ZONES, DEFAULT_TRIP, type State, type TripDraft,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, TIME_ZONES, deviceTz, DEFAULT_TRIP, type State, type TripDraft,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -56,11 +56,15 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
     <div class="slider">
       <div class="slider-head"><span>{label}{unit && <span class="muted"> · {unit}</span>}</span><b>{fmt(value)}</b></div>
       <div class="slider-row">
-        <input type="range" aria-label={`${label}${unit ? ` (${unit})` : ''}`} min={min} max={max} step={step} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
+        {/* step=1 on both inputs so the range's exposed value always equals the real value. A coarse
+            step makes the browser snap the control to min + k*step — 20 reads as 26, and with
+            min=1/step=25 even the maximum (3000) was unreachable at 2976 (consumer-review-4). The
+            −/+ buttons keep the coarse increment. */}
+        <input type="range" aria-label={`${label}${unit ? ` (${unit})` : ''}`} min={min} max={max} step={1} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
         <button class="mini" aria-label={`Decrease ${label}`} onClick={() => set(value - step)}>−</button>
         <input
           type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value${unit ? ` in ${unit}` : ''}`}
-          min={min} max={max} step={step} value={text}
+          min={min} max={max} step={1} value={text}
           onInput={(e) => typed((e.target as HTMLInputElement).value)}
           onBlur={() => setText(String(value))}
         />
@@ -153,6 +157,11 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
         <div class="warnbox small">
           <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
           Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+        </div>
+      )}
+      {s.config.timeZone !== deviceTz && (
+        <div class="muted small">
+          <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
         </div>
       )}
     </header>
@@ -479,7 +488,7 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
       {plan.warnings.map((w, i) => <p key={i} class="warnbox">{w}</p>)}
       <ViolationList items={plan.evaluation.violations} from={from} />
       {chosen === 'split' && <p class="muted small">The split plan only works if you actually log the rests exactly as shown — the shorter one must be ≥2h off duty or sleeper, and the sleeper must be ≥7h *consecutive*. Anything less and the plan collapses to the 10-hour version.</p>}
-      {chosen === 'restart34' && <p class="muted small">A 34-hour restart only appears when the 60/70-hour cycle is what's stopping you — it resets the cycle but does nothing for the 11/14. It's always available under §395.3(c), so compare it against waiting for recap hours, which can take days.</p>}
+      {chosen === 'restart34' && <p class="muted small">A 34-hour restart resets the 60/70-hour cycle (§395.3(c)) and, being far more than 10 consecutive hours off duty, <b>also satisfies the daily reset</b> (§395.3(a)(1)). This option takes it where the <b>cycle</b> is what limits your trip; compare its arrival time against waiting for recap hours, which can take days.</p>}
     </>
   );
 }
@@ -525,7 +534,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Available" value={`${hrs(ev.cycle.remaining)} h`} tone={ev.cycle.remaining < 120 ? 'bad' : ''} />
           {ev.cycle.restartEnd !== null && <Stat label="Last 34h restart" value={clock(ev.cycle.restartEnd)} />}
         </div>
-        <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.</p>
+        <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> The clock times in this table are <b>your device zone ({deviceTz})</b> — a different basis from the day roll above, so a terminal-midnight recap can read as {String(s.config.dayStartHour).padStart(2, '0')}:00 only on your own clock.</>}</p>
       </Card>
       <Card title="Hours coming back">
         <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
@@ -628,14 +637,22 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
 function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const c = s.config;
+  const [ioNote, setIoNote] = useState<string | null>(null);
   const setC = (p: Partial<typeof c>) => setState({ config: { ...c, ...p } });
   const exportJson = () => {
     const blob = new Blob([exportState(s)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+    const name = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    // Say what happened: a download that silently fails looks identical to one that worked.
+    setIoNote(`Exported ${s.segments.length} logged segment(s) and ${s.tentative.length} what-if row(s) to ${name}. If no file arrived, your browser is blocking downloads from this page.`);
   };
   const importJson = (e: Event) => {
     const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
-    f.text().then((t) => { const d = JSON.parse(t); setState({ segments: d.segments ?? [], tentative: d.tentative ?? [], current: d.current ?? null, config: { ...c, ...(d.config ?? {}) }, mph: d.mph ?? s.mph }); });
+    f.text().then((t) => {
+      const d = JSON.parse(t);
+      setState({ segments: d.segments ?? [], tentative: d.tentative ?? [], current: d.current ?? null, config: { ...c, ...(d.config ?? {}) }, mph: d.mph ?? s.mph });
+      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}.`);
+    }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
   };
   return (
     <>
@@ -658,6 +675,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Data">
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
+        {ioNote && <p class="muted small">{ioNote}</p>}
         <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
