@@ -307,6 +307,10 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   New `web/test/contrast.mjs` parses the real palette and gates both themes at WCAG AA inside
   `npm run smoke`. Two of my own assertions were caught vacuous by falsification again (a theme
   default asserted *after* the test set it, and a hidden-versus-removed button test) and were fixed.
+  **Outdoor verification: done** — Lorico confirmed the day theme reads well in direct sunlight on
+  his own phone (2026-09-23). That was the one item no tool here could check, so treat the day theme
+  as verified in sunlight, not merely measured. The night theme's outdoor case is still untested
+  (it is the worse case by design, which is why day exists).
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by
