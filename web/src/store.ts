@@ -18,8 +18,8 @@ export interface TripDraft {
   dep: string | null;
   /** status assumed between now and departure; 'CURRENT' = whatever the log says now */
   until: DutyStatus | 'CURRENT';
-  /** which comparison is selected; null = whichever plan is faster */
-  view: 'reset10' | 'split' | null;
+  /** which comparison is selected; null = whichever plan is fastest */
+  view: 'reset10' | 'split' | 'restart34' | null;
 }
 
 export interface State {
@@ -94,11 +94,37 @@ export function fromInput(s: string): number | null {
   return isNaN(t) ? null : Math.floor(t / 60000);
 }
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export function clock(min: number, withDay = true): string {
   if (!isFinite(min)) return '—';
   const d = new Date(min * 60000);
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   return withDay ? `${DOW[d.getDay()]} ${hm}` : hm;
+}
+/** Like clock(), but with the calendar date — for plans that run past a week, where the weekday repeats. */
+export function clockFull(min: number): string {
+  if (!isFinite(min)) return '—';
+  const d = new Date(min * 60000);
+  return `${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}, ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** Every IANA zone the runtime knows, for the settings picker. Falls back to the common US set. */
+export const TIME_ZONES: string[] = (() => {
+  try {
+    const v = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone');
+    if (Array.isArray(v) && v.length) return v;
+  } catch { /* older runtime */ }
+  return ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles',
+    'America/Anchorage', 'Pacific/Honolulu', 'America/Toronto', 'America/Winnipeg', 'America/Edmonton',
+    'America/Vancouver', 'UTC'];
+})();
+
+/**
+ * An invalid zone makes `Intl.DateTimeFormat` throw inside the engine, which would blank every tab.
+ * Nothing may reach `config.timeZone` unless it passes this.
+ */
+export function isValidTimeZone(tz: string): boolean {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
 }
 export function dur(min: number): string {
   if (!isFinite(min)) return '∞';

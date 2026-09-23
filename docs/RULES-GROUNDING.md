@@ -109,6 +109,16 @@ Recalculation (iii):
 - The Log tab can show the **resolved timeline** — the normalized record the clocks actually use,
   including the live current segment, with per-status totals. Read-only; the entry list stays the
   editable record.
+- **Offer every rest strategy side by side.** `planTripAll` returns the 10-hour-reset, sleeper-split
+  *and* 34-hour-restart plans, because waiting for recap hours can cost a day or more while a restart
+  is always available under §395.3(c). The restart plan is identical to the reset plan unless the
+  60/70 is what binds — never collapse the two, or the driver never sees the shorter wait.
+- **Inputs are validated, never silently substituted.** Out-of-range typed values are refused with a
+  message; a stop past the destination is reported (by the planner, in `plan.warnings`) and kept in
+  the control rather than dropped or clamped. An invalid IANA time zone is refused outright — it
+  would make `Intl.DateTimeFormat` throw inside the engine and blank every tab.
+- Plans running past a week print **calendar dates**, not just a weekday, because "Wed 08:00" stops
+  being unambiguous once the week repeats.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

@@ -240,4 +240,65 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null });
   console.log('numeric entry + wording + edit: OK');
 }
+// Regression (consumer-review-3): stop/distance consistency, short distances, the 34-hour restart
+// comparison, the time-zone picker and inline validation.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-23T17:00:00Z'); // Sep 23 12:00 America/Chicago
+  const base = [
+    { status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') },
+    { status: 'D', start: M('2026-09-23T11:00:00Z'), end: T },
+  ];
+
+  // (a) the reviewer's repro: 3000-mile route with a stop at 2500, then shrink to 550
+  setState({
+    tab: 'trip', nowOverride: T, current: { status: 'ON', since: T }, tentative: [], segments: base,
+    config: { ...getState().config, cycle: '70/8' }, logResolved: false,
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 180), miles: 550, pre: 0, stopMile: 2500, stopMin: 120, until: 'CURRENT' },
+  });
+  hh = out('trip/stop past destination');
+  if (!/Your stop is past the destination/.test(hh)) throw new Error('a stop beyond the route must be explained, not dropped');
+  if (!/past the 550-mile destination/.test(hh)) throw new Error('the itinerary should carry the planner warning too');
+  if (!/Move stop to mile 550/.test(hh)) throw new Error('the fix should be one tap away');
+  if (!/2500 mi<\/b>/.test(hh)) throw new Error('the stop control must display the value it is explaining (2500 mi), not silently clamp it');
+
+  // (b) a 20-mile local move is a real trip — it must not silently become 50
+  setState({ trip: { ...getState().trip, miles: 20, stopMile: 0, stopMin: 0 } });
+  hh = out('trip/short local run');
+  if (!/20 mi/.test(hh)) throw new Error('a 20-mile run must be represented as 20 miles');
+  if (!/min="1"/.test(hh)) throw new Error('the distance control must accept short runs, not floor them at 50');
+
+  // (c) the third comparison card, and the 34-hour restart offered for a cycle-bound long haul
+  setState({
+    tab: 'trip', current: { status: 'OFF', since: T }, segments: base, config: { ...getState().config, cycle: '60/7' },
+    trip: { ...DEFAULT_TRIP, dep: toInput(T + 180), miles: 3000, pre: 0, until: 'OFF' },
+  });
+  hh = out('trip/long haul, three strategies');
+  if (!/34-hour restart/.test(hh)) throw new Error('the restart comparison must be offered');
+  if (!/10-hour resets/.test(hh) || !/Sleeper splits/.test(hh)) throw new Error('the other two strategies must remain');
+  if (!/three ways to rest/.test(hh)) throw new Error('the itinerary heading should no longer say two ways');
+  if (!/34-hour restart — resets the 60\/70 cycle/.test(hh)) throw new Error('the restart plan must actually take a 34-hour restart');
+
+  // (d) the time-zone picker exists, and an invalid zone is refused rather than crashing every tab
+  setState({ tab: 'settings', nowOverride: T, config: { ...getState().config, timeZone: 'America/Chicago' } });
+  hh = out('settings/time zone');
+  if (!/list="tz-list"/.test(hh) || !/<datalist id="tz-list">/.test(hh)) throw new Error('time zones need a picker, not a bare text field');
+  if (/isn't a time-zone name/.test(hh)) throw new Error('an untouched valid zone must not warn');
+  const { isValidTimeZone } = await import('../src/store.ts');
+  if (!isValidTimeZone('America/Chicago') || isValidTimeZone('Mars/Olympus')) throw new Error('zone validation must accept real zones and refuse fake ones');
+
+  // (e) validation is inline, so it can be seen — and alert() is stubbed to throw in this harness
+  setState({
+    tab: 'log', current: null, tentative: [], logResolved: false,
+    segments: [{ status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') }],
+  });
+  hh = out('log/segment list');
+  if (!/aria-label="Edit /.test(hh)) throw new Error('segment rows need a named Edit action');
+  setState({ tab: 'trip', trip: { ...DEFAULT_TRIP, dep: toInput(T - 180) } });
+  hh = out('trip/past departure');
+  if (!/in the past/.test(hh)) throw new Error('a past departure must be labelled, not silently accepted');
+
+  setState({ nowOverride: null, tab: 'log' });
+  console.log('review-3 findings: OK');
+}
 console.log('OK');

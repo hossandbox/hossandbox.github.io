@@ -9,7 +9,7 @@ Read this first, then `README.md`, then `docs/RULES-GROUNDING.md` before changin
 
 A driver's **planning scratchpad** for FMCSA hours-of-service. It answers "what if" before the
 driver commits anything to the official log: split-sleeper pairing, 70-hour recap forecasting,
-trip feasibility under both rest strategies, and clock-to-parking range.
+trip feasibility under all three rest strategies (10h reset / sleeper split / 34-hour restart), and clock-to-parking range.
 
 **It is not** an ELD, not FMCSA-registered, not a legal paper log. When an ELD fails, §395.34 still
 requires the driver's own paper RODS. Never write copy that implies otherwise.
@@ -70,8 +70,8 @@ engine/            pure TypeScript rules engine, zero deps — this is the produ
   src/shift.ts       shift evaluation: 11/14 limits, split chains, pending leg
   src/cycle.ts       60/7 and 70/8 rolling cycle + recap drop-off
   src/availability.ts evaluate(): clocks, binding limit, mustStopBy, violations, safeHaven()
-  src/trip.ts        planTrip / planTripBoth (reset10 vs split, side by side)
-  test/*.test.ts     full suite incl. overlap, tripdeparture, faq22, exceptions
+  src/trip.ts        planTrip / planTripAll (reset10 vs split vs restart34, side by side)
+  test/*.test.ts     full suite incl. overlap, tripdeparture, tripstrategies, faq22, exceptions
 web/               Preact PWA
   src/store.ts       localStorage state (key: hos-sandbox-v1)
   src/app.tsx        tabs: Log · Split Lab · Recap · Trip · Settings + TabBoundary error card
@@ -258,6 +258,20 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   `store.applySegmentEdit` and matches by identity, so other rows keep their reference and their
   delete controls keep working — that is the invariant the smoke test pins. Remaining from the
   suggestions: the time-zone picker and the contrast audit.
+- **Stop/distance consistency, short runs, 34-hour restart comparison (2026-09-23, consumer-review-3)**:
+  the retest confirmed everything from batches 1–2 and found two input defects plus a planner gap.
+  (1) Shrinking a route below a configured stop silently dropped the stop and its dwell time from the
+  plan, while the control displayed a value outside its own range (max 550, value 2500). The planner
+  now reports a stop past the destination in `plan.warnings`, the UI explains it and offers
+  move/clear in one tap, and the control holds the value it is describing. (2) The Trip distance
+  floor of 50 miles silently rewrote a 20-mile local move; the floor is now 1 mile, and typed
+  out-of-range values are **refused with a message instead of clamped**. (3) `planTripBoth` became
+  `planTripAll`, adding a 34-hour-restart plan — the reviewer measured a 47h recap wait against a
+  13h-shorter restart and the app offered no way to see it. Also: the time-zone field is a guarded
+  picker (an invalid zone would throw inside `Intl` and blank every tab), plans past a week print
+  calendar dates, a past departure is labelled a reconstruction, duration fields carry `min`/`mi`
+  units, and the segment forms validate inline rather than through `alert()`. Tests: 4 engine
+  (`tripstrategies`) + 6 smoke regressions; every one falsified before acceptance.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

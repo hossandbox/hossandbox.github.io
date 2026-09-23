@@ -31,7 +31,7 @@ export interface TripInput {
   /** planned dwell stops (receiver, fuel) */
   stops?: TripStop[];
   /** how to regain hours when the daily clocks run out */
-  restStrategy?: 'reset10' | 'split';
+  restStrategy?: 'reset10' | 'split' | 'restart34';
   config?: Partial<RulesConfig>;
 }
 
@@ -111,8 +111,14 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
       if (ev.binding === 'BREAK_30') {
         push('OFF', LIMITS.BREAK_LEN, '30-minute break (8h driving rule)');
       } else if (ev.binding === 'CYCLE') {
-        const rest = waitForCycle(ev, t);
-        push('OFF', rest.minutes, rest.reason);
+        // §395.3(c): any 7/8-day period may end with ≥34 consecutive hours off duty. Waiting for
+        // recap hours can be much longer, so the two are worth comparing side by side.
+        if (input.restStrategy === 'restart34') {
+          push('OFF', LIMITS.RESTART, '34-hour restart — resets the 60/70 cycle (§395.3(c))');
+        } else {
+          const rest = waitForCycle(ev, t);
+          push('OFF', rest.minutes, rest.reason);
+        }
       } else if (lastRestLen > 0) {
         // We just rested and still have nothing: top the rest up to a full 10h reset.
         push('OFF', Math.max(LIMITS.RESET - lastRestLen, 60), 'Extend to a full 10-hour reset');
@@ -141,6 +147,12 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
     }
   }
   if (guard >= 200) warnings.push('Planner hit its iteration limit; trip may be infeasible under current hours.');
+  // A stop past the destination is not in the plan — say so rather than dropping it silently.
+  for (const st of stops) {
+    if (st.atMile > input.distanceMiles + 1e-9) {
+      warnings.push(`The ${st.label || 'stop'} at mile ${Math.round(st.atMile)} is past the ${Math.round(input.distanceMiles)}-mile destination, so it is not in this plan.`);
+    }
+  }
 
   const evaluation = evaluate([...base, ...plan], { asOf: t, config: input.config });
   const tentativeViolations = evaluation.violations.filter((v) => v.start >= input.departure);
@@ -182,10 +194,24 @@ function bindingName(b: string, cfg?: Partial<RulesConfig>): string {
   }
 }
 
-/** Plan with both rest strategies so the driver can compare arrival times. */
-export function planTripBoth(history: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; faster: 'reset10' | 'split' | 'same' } {
-  const reset10 = planTrip(history, { ...input, restStrategy: 'reset10' });
-  const split = planTrip(history, { ...input, restStrategy: 'split' });
-  const faster = split.arrival < reset10.arrival ? 'split' : split.arrival > reset10.arrival ? 'reset10' : 'same';
-  return { reset10, split, faster };
+export type TripStrategy = 'reset10' | 'split' | 'restart34';
+export const TRIP_STRATEGIES: TripStrategy[] = ['reset10', 'split', 'restart34'];
+
+/**
+ * Plan every rest strategy so the driver can compare arrival times.
+ *
+ * The 34-hour restart only differs when the CYCLE binds — otherwise it plans identically to the
+ * 10-hour reset — but that is exactly where it matters: waiting for recap hours can cost a day or
+ * more, and a restart is always available instead (§395.3(c)). Never collapse the two into one
+ * itinerary; show the driver both waits.
+ */
+export function planTripAll(history: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; restart34: TripPlan; faster: TripStrategy | 'same' } {
+  const plans = {
+    reset10: planTrip(history, { ...input, restStrategy: 'reset10' }),
+    split: planTrip(history, { ...input, restStrategy: 'split' }),
+    restart34: planTrip(history, { ...input, restStrategy: 'restart34' }),
+  };
+  const best = Math.min(plans.reset10.arrival, plans.split.arrival, plans.restart34.arrival);
+  const winners = TRIP_STRATEGIES.filter((k) => plans[k].arrival === best);
+  return { ...plans, faster: winners.length === 1 ? winners[0] : 'same' };
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, planTrip, planTripBoth, localToMinute, type Segment, type DutyStatus } from '../src/index.ts';
+import { evaluate, planTrip, planTripAll, localToMinute, type Segment, type DutyStatus } from '../src/index.ts';
 
 const TZ = 'America/Chicago';
 const DAY0 = localToMinute(2026, 9, 14, 0, TZ);
@@ -54,7 +54,7 @@ test('16-hour short-haul exception: window 16, driving still 11, once per 7 days
 test('trip planner split strategy: uses a receiver OFF break as the short leg and a 7h sleeper instead of a 10h reset', () => {
   // Fresh at 06:00, 1000 mi at 55 mph, 3h OFF at the receiver at mile 450.
   const input = { departure: at(0, 6), distanceMiles: 1000, mph: 55, stops: [{ atMile: 450, minutes: 180, status: 'OFF' as const, label: 'Receiver (off duty)' }], config: { timeZone: TZ } };
-  const both = planTripBoth([fresh(0, 6)], input);
+  const both = planTripAll([fresh(0, 6)], input);
   assert.ok(both.reset10.feasible && both.split.feasible, [...both.reset10.warnings, ...both.split.warnings].join('; '));
   assert.equal(both.reset10.evaluation.violations.length, 0);
   assert.equal(both.split.evaluation.violations.length, 0);

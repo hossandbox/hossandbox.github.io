@@ -94,7 +94,7 @@ button.on-outline { box-shadow: inset 0 0 0 2px var(--accent); color: #fff; }
 button.mini { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 .dayedit { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; }
 .dayedit label { margin: 0; font-size: 11px; } .dayedit input.hrs { width: 58px; margin-top: 2px; }
-.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 10px; }
 .plancard { text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
 .plancard.on { border-color: var(--accent); background: #7c5cff18; }
 .plancard.bad .stat-value { color: var(--bad); }

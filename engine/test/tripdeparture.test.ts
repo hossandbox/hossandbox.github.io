@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, planTripBoth } from '../src/index.ts';
+import { evaluate, planTripAll } from '../src/index.ts';
 import type { Segment } from '../src/types.ts';
 
 /** consumer-review-2 (GPT 6 Astra, 2026-09-22). Times are America/Chicago (CDT, UTC-5). */
@@ -14,7 +14,7 @@ const history: Segment[] = [
   { status: 'D', start: M('2026-09-22T11:00:00Z'), end: now },                          // 06:00→12:00 CDT
 ];
 const trip = (until: { from: number; status: 'OFF' | 'SB' | 'ON'; label?: string }) =>
-  planTripBoth(history, { departure, distanceMiles: 550, mph: 55, preTripMinutes: 0, config: CFG, untilDeparture: until });
+  planTripAll(history, { departure, distanceMiles: 550, mph: 55, preTripMinutes: 0, config: CFG, untilDeparture: until });
 
 test('trip planner: waiting at the shipper ON DUTY earns no rest credit', () => {
   const both = trip({ from: now, status: 'ON', label: 'On duty until departure' });
@@ -35,7 +35,7 @@ test('trip planner: an explicitly logged OFF-duty wait IS a legitimate split leg
 });
 
 test('trip planner: departing now adds no pre-departure row', () => {
-  const both = planTripBoth(history, {
+  const both = planTripAll(history, {
     departure: now, distanceMiles: 550, mph: 55, preTripMinutes: 0, config: CFG,
     untilDeparture: { from: now, status: 'ON' },
   });

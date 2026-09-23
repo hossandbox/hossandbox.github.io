@@ -45,7 +45,7 @@ engine/   Pure TypeScript rules engine. Zero dependencies. This is the product.
   src/shift.ts        split-sleeper chain enumeration + FMCSA-preferred ranking, 30-min break
   src/cycle.ts        carrier-day arithmetic (tz + day start hour), 60/7 & 70/8, 34h restart, forecast
   src/availability.ts evaluate(): current clocks, binding limit, mustStopBy, violations; safeHaven()
-  src/trip.ts         greedy trip planner (10h resets, 30-min breaks, recap waits, 34h fallback)
+  src/trip.ts         greedy trip planner (10h resets, 30-min breaks, recap waits, 34h-restart comparison)
   test/engine.test.ts 19 tests incl. FMCSA worked examples — `npm test`
 web/      Preact PWA (mobile-first). Imports the engine directly.
   src/store.ts        localStorage state, time helpers
@@ -83,7 +83,7 @@ UI can show "if you skip Break 2, you're in violation by X".
 
 ## Roadmap
 
-- v1 (now): Split Lab, Recap, Trip (10h-reset and split strategies side by side), Clock-to-parking,
+- v1 (now): Split Lab, Recap, Trip (10h-reset, sleeper-split and 34-hour-restart strategies side by side), Clock-to-parking,
   adverse-conditions and 16-hour-day exceptions, PC / yard move, in-app bug report — PWA over Tailscale
 - v1.1: public hosting + free beta (GitHub Pages); driver-feedback fixes
 - v2.0 (planned): App Store release. Free download with a one-time unlock; this web version stays
