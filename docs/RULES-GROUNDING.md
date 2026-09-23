@@ -144,6 +144,21 @@ Recalculation (iii):
   black to white — inverting a palette wholesale is how you ship unreadable text.
 - Never indicate selection with **opacity**: dimming the "I am now…" chips dropped their labels to
   2.23:1. Use a ring at full contrast instead.
+- **A current status is not history.** Tapping "Driving" says what is happening *now*; it says
+  nothing about the days behind it. The incomplete-basis disclosure stays until the driver explicitly
+  acknowledges the record starts here (or the log genuinely reaches back a full day). Unknown past
+  days must never look like confirmed zero-hour days — `historyBasis()` is the single source.
+- **Every planning screen's scenario persists.** Trip, Split Lab and the Recap load checker keep
+  their inputs in the store, because looking at the Log tab must never rewrite the numbers the driver
+  is comparing. Clearing one is an explicit action, never a side effect of navigation.
+- **A plan's violations are not the driver's violations.** Violations carry `tentative`; the Log tab
+  shows "Violations in your log" and "This plan would violate" separately. Never file a what-if under
+  a heading that reads as though the driver has already violated.
+- **Arrival is not unloading.** `arrival` includes a trailing dwell; `driveEnd` is the wheels-stop
+  time. Any number that depends on which hour you mean has to name the event it belongs to.
+- **Every slider's rejected input says so.** A blank field, a browser-refused value ("3,500" reads as
+  empty in a number input — check `validity.badInput`), and an out-of-range entry all leave the
+  stored value alone, so all three must say what happened and what is still in effect.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

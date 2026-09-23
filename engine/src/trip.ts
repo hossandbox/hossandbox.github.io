@@ -45,6 +45,8 @@ export interface TripPlanStep {
 export interface TripPlan {
   feasible: boolean;
   arrival: number;
+  /** when the last driving step ends — the wheels-stop time. `arrival` includes any trailing dwell. */
+  driveEnd: number;
   elapsedMinutes: number;
   steps: TripPlanStep[];
   warnings: string[];
@@ -160,6 +162,8 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
   return {
     feasible: mile >= input.distanceMiles - 1e-9 && tentativeViolations.length === 0,
     arrival: t,
+    // A trailing dwell (receiver unload) is part of the itinerary but is not "arrival".
+    driveEnd: [...plan].reverse().find((s) => s.status === 'D')?.end ?? t,
     elapsedMinutes: t - input.departure,
     steps, warnings,
     cycleRemainingAtArrival: evaluation.cycle.remaining,

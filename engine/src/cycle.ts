@@ -147,7 +147,7 @@ export function cycleViolations(segments: Segment[], rests: RestPeriod[], cfg: R
       const t = a + Math.max(0, limit - usedAtA);
       if (t < b) {
         const m = b - t;
-        out.push({ kind: 'CYCLE', start: t, end: b, minutes: m, severity: severityOf(m),
+        out.push({ kind: 'CYCLE', start: t, end: b, minutes: m, severity: severityOf(m), tentative: !!s.tentative,
           detail: `Drove ${fmt(m)} after reaching the ${limit / 60}-hour cycle limit` });
       }
       a = b;

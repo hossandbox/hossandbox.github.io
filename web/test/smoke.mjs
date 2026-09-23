@@ -187,7 +187,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/Assumed fresh clock/.test(hh)) throw new Error('a fresh clock must be labelled as an assumption');
   setState({ tab: 'recap' });
   hh = out('recap/fresh verdict');
-  if (!/This verdict assumes a fresh clock/.test(hh)) throw new Error('the LEGAL verdict must be qualified when nothing is logged');
+  if (!/This verdict rests on an incomplete basis/.test(hh)) throw new Error('the LEGAL verdict must be qualified when nothing is logged');
 
   // no current status + a future departure: the wait must not be credited as rest
   setState({ tab: 'trip', current: null, segments: [], trip: { ...DEFAULT_TRIP, dep: toInput(T + 180) } });
@@ -481,5 +481,78 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   setState({ nowOverride: null, tab: 'log' });
   console.log('theme + contrast wiring: OK');
+}
+// Regression (consumer-review-6): scenario persistence on every planning screen, a history
+// disclosure that survives tapping a status, arrival split from unloading, hypothetical violations
+// kept apart from recorded ones, and selected states exposed to assistive tech.
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const T = M('2026-09-23T17:00:00Z');
+  const { DEFAULT_SPLIT, DEFAULT_LOADCHECK } = await import('../src/store.ts');
+  const reset = { nowOverride: T, current: null, segments: [], tentative: [], historyAcknowledged: false };
+
+  // (1) Split Lab — the reviewer's repro: set "Then drive" to 210, visit Log, come back
+  setState({ ...reset, tab: 'split', split: { ...DEFAULT_SPLIT, drive: 210 } });
+  hh = out('split/210 min drive');
+  if (!/3h 30m/.test(hh)) throw new Error('Split Lab should show the 210-minute drive as 3h 30m');
+  setState({ tab: 'log' }); out('log/from split');
+  setState({ tab: 'split' });
+  hh = out('split/returned from Log');
+  if (!/3h 30m/.test(hh)) throw new Error('Split Lab discarded the plan when the tab changed');
+
+  // (2) Recap load checker — 200 miles, no dwell
+  setState({ ...reset, tab: 'recap', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 0 } });
+  hh = out('recap/200 mi, no dwell');
+  if (!/200 mi/.test(hh)) throw new Error('Recap should show the 200-mile load');
+  setState({ tab: 'trip' }); out('trip/from recap');
+  setState({ tab: 'recap' });
+  hh = out('recap/returned');
+  // pin the slider HEAD specifically: "200 mi" also appears in the itinerary, so a loose match
+  // would pass even if the field had been reset
+  if (!/Load distance[\s\S]{0,60}?<b>200 mi<\/b>/.test(hh)) throw new Error('Recap discarded the load when the tab changed');
+
+  // (3) the disclosure must outlive a status tap, and survive navigation
+  setState({ ...reset, tab: 'log' });
+  hh = out('log/nothing logged');
+  if (!/Assumed fresh clock/.test(hh)) throw new Error('an empty app must say it is assuming a fresh clock');
+  setState({ current: { status: 'D', since: T } });
+  hh = out('log/after tapping Driving');
+  if (!/History incomplete/.test(hh)) throw new Error('tapping a status is a statement about now, not about the days behind it');
+  if (/Assumed fresh clock/.test(hh)) throw new Error('the fresh-clock wording should give way to the incomplete-history one');
+  setState({ tab: 'trip' });
+  hh = out('trip/with a status but no history');
+  if (!/History incomplete/.test(hh)) throw new Error('the incomplete basis must follow the driver to other tabs');
+  setState({ historyAcknowledged: true });
+  hh = out('trip/after acknowledging');
+  if (/History incomplete|Assumed fresh clock/.test(hh)) throw new Error('an explicit acknowledgement should stop the disclosure');
+
+  // (4) arrival is not unloading
+  setState({ ...reset, current: { status: 'ON', since: T }, segments: [
+      { status: 'OFF', start: M('2026-09-23T03:30:00Z'), end: M('2026-09-23T13:30:00Z') },
+      { status: 'D', start: M('2026-09-23T13:30:00Z'), end: T },
+    ], historyAcknowledged: true, tab: 'recap', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 120 } });
+  hh = out('recap/arrive vs unload');
+  if (!/Arrive — wheels stop/.test(hh)) throw new Error('the card must distinguish wheels-stop from unloading');
+  if (!/Unloaded by/.test(hh)) throw new Error('unloading completion needs its own label');
+  if (!/Cycle left after unloading/.test(hh)) throw new Error('the cycle figure must say which event it belongs to');
+
+  // (5) a what-if must not be reported as a violation already committed
+  setState({ ...reset, tab: 'log', historyAcknowledged: true, segments: [
+      { status: 'OFF', start: M('2026-09-23T03:30:00Z'), end: M('2026-09-23T13:30:00Z') },
+      { status: 'D', start: M('2026-09-23T13:30:00Z'), end: T },
+    ], tentative: [{ status: 'D', start: T, end: T + 720, tentative: true, note: 'what-if' }] });
+  hh = out('log/what-if violations');
+  if (!/Violations in your log/.test(hh)) throw new Error('recorded violations need their own heading');
+  if (!/This plan would violate/.test(hh)) throw new Error('hypothetical violations must be shown separately');
+  if (!/not from duty you have logged/.test(hh)) throw new Error('the plan section must say nothing has happened yet');
+
+  // (6) selected state must exist for assistive tech
+  setState({ ...reset, tab: 'split' });
+  hh = out('split/toggle selected state');
+  if (!/aria-pressed="true"/.test(hh)) throw new Error('rest-type controls must expose their selected state');
+  if (!/aria-pressed="false"/.test(hh)) throw new Error('the unselected half of a toggle must say so too');
+
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false });
+  console.log('review-6 findings: OK');
 }
 console.log('OK');

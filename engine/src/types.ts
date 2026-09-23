@@ -91,6 +91,11 @@ export interface Violation {
   /** FMCSA severity per 2020 FAQ: nominal <15m, violation, egregious >3h */
   severity: 'nominal' | 'violation' | 'egregious';
   detail: string;
+  /**
+   * True when this violation comes from a tentative ("what-if") row rather than the logged record.
+   * The UI must never show a plan's violation under a heading that says the driver has violated.
+   */
+  tentative?: boolean;
 }
 
 /** The interpretation of a shift under one particular choice of split-sleeper chain. */

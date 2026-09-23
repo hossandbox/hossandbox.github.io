@@ -311,6 +311,20 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   his own phone (2026-09-23). That was the one item no tool here could check, so treat the day theme
   as verified in sunlight, not merely measured. The night theme's outdoor case is still untested
   (it is the worse case by design, which is why day exists).
+- **Scenario persistence, history basis, violation provenance (2026-09-23, consumer-review-6)**: the
+  first pass that reviewed the product as a *workflow* rather than one fix at a time, and it found the
+  same class of bug in two more places. Split Lab and the Recap load checker kept their scenarios in
+  component state, so a glance at the Log tab silently reset them (the Trip tab had already been
+  fixed) — both now live in the store. `isFreshLog` counted a current status as history, so tapping
+  "Driving" dismissed the disclosure and unknown past days looked like confirmed zero-hour days; it
+  became `historyBasis()` (fresh / incomplete / known), with an explicit acknowledgement to clear it.
+  Violations now carry `tentative`, so the Log tab separates "Violations in your log" from "This plan
+  would violate" instead of filing a what-if as something the driver did. Added `driveEnd` (wheels
+  stop) alongside `arrival` (which includes trailing dwell) and labelled the cycle figure with the
+  event it belongs to. Toggles expose `aria-pressed`. Slider rejection now also covers a blank field
+  and a browser-refused value, both of which had been reverting silently. Tests: 4 engine
+  (`reporting`) + 6 smoke regressions; falsification caught a fourth loose assertion of mine (a Recap
+  check that matched "200 mi" in the itinerary rather than the field).
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by

@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, DEFAULT_TRIP, type State, type TripDraft, type Theme,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -43,12 +43,23 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
   const clamp = (v: number) => Math.min(max, Math.max(min, Math.round(v)));
   const set = (v: number) => { if (Number.isFinite(v)) onChange(clamp(v)); };
   /** Typed values are validated, never silently substituted — a 20-mile run must not become 50. */
-  const typed = (raw: string) => {
-    setText(raw);
-    if (raw === '') { setNote(null); return; }
+  const typed = (el: HTMLInputElement) => {
+    const raw = el.value;
+    const keep = `Still using ${fmt(value)}.`;
+    if (raw === '') {
+      // Empty covers two cases: the driver cleared the box, and the browser refusing text it cannot
+      // parse ("3,500" reads as empty in a number input). Both leave the stored value alone, and
+      // silently reverting is how a driver ends up reading the OLD route believing they changed it
+      // (consumer-review-6, finding 4).
+      setText('');
+      setNote(el.validity?.badInput
+        ? `That isn't a number this field can read — try 3500 rather than 3,500. ${keep}`
+        : `Enter ${min}–${max}${unit ? ` ${unit}` : ''}. ${keep}`);
+      return;
+    }
     const n = Number(raw);
-    if (!Number.isFinite(n)) { setNote('Enter a number.'); return; }
-    if (n < min || n > max) { setNote(`Supported range is ${min}–${max}${unit ? ` ${unit}` : ''}. Your entry was not applied.`); return; }
+    if (!Number.isFinite(n)) { setNote(`Enter a number. ${keep}`); return; }
+    if (n < min || n > max) { setNote(`Enter ${min}–${max}${unit ? ` ${unit}` : ''} — your entry was not applied. ${keep}`); return; }
     setNote(null);
     onChange(Math.round(n));
   };
@@ -65,7 +76,7 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
         <input
           type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value${unit ? ` in ${unit}` : ''}`}
           min={min} max={max} step={1} value={text}
-          onInput={(e) => typed((e.target as HTMLInputElement).value)}
+          onInput={(e) => typed(e.target as HTMLInputElement)}
           onBlur={() => setText(String(value))}
         />
         <button class="mini" title={`Increase by ${step}${unit ? ` ${unit}` : ''}`} aria-label={`Increase ${label} by ${step}${unit ? ` ${unit}` : ''}`} onClick={() => set(value + step)}>+{step}</button>
@@ -75,7 +86,9 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
   );
 }
 function Toggle<T extends string | boolean>({ options, value, onChange }: { options: [T, string][]; value: T; onChange: (v: T) => void }) {
-  return <div class="toggle">{options.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}</div>;
+  // aria-pressed so the selected state exists for assistive tech, not only as a CSS class
+  // (consumer-review-6, finding 6).
+  return <div class="toggle" role="group">{options.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => onChange(v)}>{l}</button>)}</div>;
 }
 /**
  * Time-zone picker. The text is held locally and only applied once it names a real zone: an invalid
@@ -138,6 +151,7 @@ function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
 /* ============================================================ status bar */
 
 function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) {
+  const hist = historyBasis(s, now);
   const status = s.current?.status ?? 'OFF';
   const tone = ev.driveNow <= 0 ? 'bad' : ev.driveNow < 60 ? 'warn' : 'good';
   return (
@@ -156,10 +170,19 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
         <Stat label={`${ev.cycle.limit / 60}-hr left`} value={dur(ev.cycle.remaining)} />
       </div>
       {ev.driveNow > 0 && <div class="muted small">Must stop driving by <b>{clock(ev.mustStopBy)}</b>{ev.shift.pendingSplitLeg ? ' · split leg pending' : ''}{ev.shift.notes.length ? ' · exception active' : ''}</div>}
-      {isFreshLog(s) && (
+      {hist !== 'known' && (
         <div class="warnbox small">
-          <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
-          Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+          {hist === 'fresh' ? (
+            <>
+              <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
+              Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+            </>
+          ) : (
+            <>
+              <b>History incomplete — estimates only.</b> You have a current status but nothing behind it, so these numbers still assume you started from zero. Duty you haven't entered cannot be counted.{' '}
+              <button class="mini" onClick={() => setState({ historyAcknowledged: true })}>It really does start here</button>
+            </>
+          )}
         </div>
       )}
       {s.config.timeZone !== deviceTz && (
@@ -268,7 +291,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     setState((cur) => applySegmentEdit(cur, editing.orig, next));
     setEditing(null);
   };
-  const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now } }); };
+  const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now }, historyAcknowledged: true }); };
 
   return (
     <>
@@ -293,7 +316,13 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
         {formError && <div class="warnbox small">{formError}</div>}
         <div class="row"><button class="primary" onClick={add}>Add segment</button><button onClick={fresh}>Fresh start</button></div>
       </Card>
-      <Card title="Violations in record"><ViolationList items={ev.violations} /></Card>
+      <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
+      {ev.violations.some((v) => v.tentative) && (
+        <Card title="This plan would violate" tone="warn">
+          <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
+          <ViolationList items={ev.violations.filter((v) => v.tentative)} />
+        </Card>
+      )}
       <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Segments (${s.segments.length + s.tentative.length})`}>
         {overlaps.length > 0 && (
           <div class="warnbox">
@@ -355,12 +384,10 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 /* ============================================================ Split Lab */
 
 function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  const [b1, setB1] = useState(180);
-  const [b1s, setB1s] = useState<'OFF' | 'SB'>('OFF');
-  const [dwell, setDwell] = useState(30);
-  const [drive, setDrive] = useState(300);
-  const [b2, setB2] = useState(420);
-  const [b2s, setB2s] = useState<'OFF' | 'SB'>('SB');
+  // The what-if lives in the store: a detour to the Log tab used to reset the plan being compared.
+  const sd = s.split;
+  const setSplit = (p: Partial<SplitDraft>) => setState({ split: { ...sd, ...p } });
+  const { b1, b1s, dwell, drive, b2, b2s } = sd;
 
   const base = useMemo(() => allSegments(s, now).filter((x) => !x.tentative), [s, now]);
   const t0 = Math.max(now, ...base.map((x) => x.end));
@@ -397,12 +424,12 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
       <Card title="What if… (starts at the end of your log)">
         <p class="muted small">Plan begins {clock(t0)}.</p>
-        <Toggle options={[['OFF', 'Break 1: Off duty'], ['SB', 'Break 1: Sleeper']]} value={b1s} onChange={setB1s} />
-        <Slider label="Break 1 length" value={b1} min={0} max={600} step={15} onChange={setB1} fmt={dur} unit="min" />
-        <Slider label="Then on-duty (dock, fuel)" value={dwell} min={0} max={240} step={15} onChange={setDwell} fmt={dur} unit="min" />
-        <Slider label="Then drive" value={drive} min={0} max={660} step={15} onChange={setDrive} fmt={dur} unit="min" />
-        <Toggle options={[['SB', 'Break 2: Sleeper'], ['OFF', 'Break 2: Off duty']]} value={b2s} onChange={setB2s} />
-        <Slider label="Break 2 length" value={b2} min={0} max={600} step={15} onChange={setB2} fmt={dur} unit="min" />
+        <Toggle options={[['OFF', 'Break 1: Off duty'], ['SB', 'Break 1: Sleeper']]} value={b1s} onChange={(v) => setSplit({ b1s: v })} />
+        <Slider label="Break 1 length" value={b1} min={0} max={600} step={15} onChange={(v) => setSplit({ b1: v })} fmt={dur} unit="min" />
+        <Slider label="Then on-duty (dock, fuel)" value={dwell} min={0} max={240} step={15} onChange={(v) => setSplit({ dwell: v })} fmt={dur} unit="min" />
+        <Slider label="Then drive" value={drive} min={0} max={660} step={15} onChange={(v) => setSplit({ drive: v })} fmt={dur} unit="min" />
+        <Toggle options={[['SB', 'Break 2: Sleeper'], ['OFF', 'Break 2: Off duty']]} value={b2s} onChange={(v) => setSplit({ b2s: v })} />
+        <Slider label="Break 2 length" value={b2} min={0} max={600} step={15} onChange={(v) => setSplit({ b2: v })} fmt={dur} unit="min" />
       </Card>
 
       <Card title="Does it pair?" tone={paired ? 'good' : 'bad'}>
@@ -427,7 +454,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel[after.binding]} />
           <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clock(after.mustStopBy)}`} />
         </div>
-        <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; everything before it is cleared.' : ' — no split credit.'}</p>
+        <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
         <h3>Plan violations (if you complete both breaks)</h3><ViolationList items={planViol} />
         {strictViol.length > 0 && <div class="warnbox"><b>If you skip Break 2:</b> the {dur(drive)} drive ends {clock(endDrive)} with {strictViol.map((v) => `${violationLabel[v.kind]} ${dur(v.minutes)}`).join(', ')} — Break 1 only pays off once Break 2 is done.</div>}
       </Card>
@@ -474,9 +501,17 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
   // Past a week the weekday repeats, so "Wed 08:00" stops being unambiguous. Show the date.
   const showDates = Math.max(...TRIP_STRATEGIES.map((k) => both[k].arrival)) - from > 7 * 1440;
   const at = showDates ? clockFull : clock;
+  const sameArrival = both.reset10.arrival === both.split.arrival && both.split.arrival === both.restart34.arrival;
+  const [expandSame, setExpandSame] = useState(false);
   const resets = (p: TripPlan) => p.steps.filter((x) => x.segment.status !== 'D' && x.segment.status !== 'ON' && x.segment.end - x.segment.start >= 600).length;
   return (
     <>
+      {sameArrival && !expandSame ? (
+        <div class="row undo">
+          <span class="muted small">All three ways to rest arrive at <b>{at(both.reset10.arrival)}</b> — the rest strategy makes no difference to this run.</span>
+          <button class="mini" onClick={() => setExpandSame(true)}>Compare anyway</button>
+        </div>
+      ) : (
       <div class="compare">
         {TRIP_STRATEGIES.map((k) => {
           const p = both[k];
@@ -487,6 +522,7 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
           </button>;
         })}
       </div>
+      )}
       <ol class="itin">{plan.steps.map((st, i) => <li key={i}><span class="dot" style={{ background: STATUS_COLOR[st.segment.status] }} /><span><b>{at(st.segment.start)}</b> {st.reason}</span><span class="muted">{dur(st.segment.end - st.segment.start)}{st.segment.status === 'D' ? ` · mi ${Math.round(st.fromMile)}→${Math.round(st.toMile)}` : ''}</span></li>)}</ol>
       {plan.warnings.map((w, i) => <p key={i} class="warnbox">{w}</p>)}
       <ViolationList items={plan.evaluation.violations} from={from} />
@@ -497,9 +533,11 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
 }
 
 function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  const [miles, setMiles] = useState(1200);
-  const [dwell, setDwell] = useState(120);
-  const [dwellOff, setDwellOff] = useState(false);
+  // The scenario lives in the store: navigating away used to silently reset the load being checked.
+  const lc = s.loadCheck;
+  const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
+  const { miles, dwell, dwellOff } = lc;
+  const hist = historyBasis(s, now);
   const days = ev.cycle.days;
   const applyDay = (dayStart: number, dayEnd: number) => (drive: number, on: number, startHour: number) => {
     setState((cur) => {
@@ -543,14 +581,16 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
       </Card>
       <Card title="Can I take this load?" tone={best.feasible ? 'good' : 'bad'}>
-        <Slider label="Load distance" value={miles} min={1} max={3000} step={50} onChange={setMiles} fmt={(v) => `${v} mi`} unit="mi" />
-        <Slider label="Receiver dwell" value={dwell} min={0} max={480} step={30} onChange={setDwell} fmt={dur} unit="min" />
-        <Toggle options={[[false, 'Dwell on duty'], [true, 'Dwell off duty (relieved)']]} value={dwellOff} onChange={setDwellOff} />
+        <Slider label="Load distance" value={miles} min={1} max={3000} step={50} onChange={(v) => setLoad({ miles: v })} fmt={(v) => `${v} mi`} unit="mi" />
+        <Slider label="Receiver dwell" value={dwell} min={0} max={480} step={30} onChange={(v) => setLoad({ dwell: v })} fmt={dur} unit="min" />
+        <Toggle options={[[false, 'Dwell on duty'], [true, 'Dwell off duty (relieved)']]} value={dwellOff} onChange={(v) => setLoad({ dwellOff: v })} />
         <div class="clocks">
           <Stat label="Verdict" value={best.feasible ? 'LEGAL' : 'NO'} tone={best.feasible ? 'good' : 'bad'} />
-          <Stat label="Cycle at arrival" value={`${hrs(best.cycleRemainingAtArrival)} h`} />
+          <Stat label="Arrive — wheels stop" value={clock(best.driveEnd)} />
+          {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clock(best.arrival)} />}
+          <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={`${hrs(best.cycleRemainingAtArrival)} h`} />
         </div>
-        {isFreshLog(s) && <p class="warnbox small">This verdict assumes a fresh clock. Nothing is logged, so it doesn't know what you've already driven today or how much cycle you've used — it is not a statement about your real day. Add your duty on the <b>Log</b> tab first.</p>}
+        {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm on the Log tab that the record starts here.</p>}
         <PlanCompare both={both} from={now} />
       </Card>
     </>

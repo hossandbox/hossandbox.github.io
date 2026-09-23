@@ -114,12 +114,12 @@ export function evaluateShiftWithChain(
       // Plain English, no ISO timestamp: the UI renders clock(v.start) → clock(v.end) itself, and a
       // UTC string in front of a driver is meaningless (consumer-review-1/2).
       const from = anchor === S ? 'when you came on duty' : 'the end of your first paired break';
-      violations.push({ kind: 'WINDOW_14', start: tW, end: b, minutes: m, severity: severityOf(m),
+      violations.push({ kind: 'WINDOW_14', start: tW, end: b, minutes: m, severity: severityOf(m), tentative: !!seg.tentative,
         detail: `Drove ${fmt(m)} past the ${limits.window / 60}-hour window — the window runs from ${from}` });
     }
     if (tD < b) {
       const m = b - tD;
-      violations.push({ kind: 'DRIVE_11', start: tD, end: b, minutes: m, severity: severityOf(m),
+      violations.push({ kind: 'DRIVE_11', start: tD, end: b, minutes: m, severity: severityOf(m), tentative: !!seg.tentative,
         detail: `Drove ${fmt(m)} past the ${limits.drive / 60}-hour driving limit` });
     }
   }
@@ -226,7 +226,7 @@ export function breakViolations(segments: Segment[], config: RulesConfig): Viola
       if (len > allowed) {
         const start = s.start + allowed;
         const m = s.end - start;
-        out.push({ kind: 'BREAK_30', start, end: s.end, minutes: m, severity: severityOf(m),
+        out.push({ kind: 'BREAK_30', start, end: s.end, minutes: m, severity: severityOf(m), tentative: !!s.tentative,
           detail: `Drove ${fmt(m)} beyond 8 hours without a 30-minute break` });
       }
       cum += len;

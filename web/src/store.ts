@@ -29,6 +29,16 @@ export interface State {
   config: RulesConfig;
   mph: number;
   trip: TripDraft;
+  /** Split Lab scenario — persisted so switching tabs does not rewrite the driver's plan. */
+  split: SplitDraft;
+  /** Recap "can I take this load?" scenario — same reason. */
+  loadCheck: LoadCheckDraft;
+  /**
+   * The driver has explicitly confirmed the record starts here. Until then the app keeps disclosing
+   * that its picture of past duty is incomplete — tapping a status is a statement about NOW, not
+   * about the days behind it.
+   */
+  historyAcknowledged: boolean;
   /** Log tab: show the normalized timeline instead of the entries as typed */
   logResolved: boolean;
   /** night (default) or day; see applyTheme */
@@ -48,11 +58,25 @@ export const DEFAULT_TRIP: TripDraft = {
   miles: 550, pre: 30, stopMile: 0, stopMin: 0, stopOff: false, dep: null, until: 'CURRENT', view: null,
 };
 
+/** Split Lab scenario. Kept in the store so a trip to the Log tab cannot rewrite the plan. */
+export interface SplitDraft {
+  b1: number; b1s: 'OFF' | 'SB';
+  dwell: number;
+  drive: number;
+  b2: number; b2s: 'OFF' | 'SB';
+}
+export const DEFAULT_SPLIT: SplitDraft = { b1: 180, b1s: 'OFF', dwell: 30, drive: 300, b2: 420, b2s: 'SB' };
+
+/** Recap "can I take this load?" scenario. */
+export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean }
+export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false };
+
 /** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
 export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
-  mph: 55, trip: { ...DEFAULT_TRIP }, logResolved: false, theme: 'night', nowOverride: null, tab: 'log', bugEmail: '',
+  mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
+  historyAcknowledged: false, logResolved: false, theme: 'night', nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
@@ -60,7 +84,11 @@ function load(): State {
     const raw = localStorage.getItem(KEY);
     if (!raw) return INITIAL_STATE;
     const s = JSON.parse(raw);
-    return { ...INITIAL_STATE, ...s, config: { ...INITIAL_STATE.config, ...(s.config ?? {}) }, trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) } };
+    return { ...INITIAL_STATE, ...s,
+      config: { ...INITIAL_STATE.config, ...(s.config ?? {}) },
+      trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
+      split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
+      loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) } };
   } catch { return INITIAL_STATE; }
 }
 
@@ -157,13 +185,20 @@ export function dur(min: number): string {
 }
 export function hrs(min: number): string { return (min / 60).toFixed(1); }
 
+export type HistoryBasis = 'fresh' | 'incomplete' | 'known';
+
 /**
- * True when nothing at all is logged, so every number on screen is an assumption rather than a
- * reading of the driver's day. The UI must say so instead of presenting a fresh 11/14/70 as fact
- * (consumer-review-1/2: "Explain the starting assumptions").
+ * How much the app actually knows about the driver's past duty.
+ *
+ * A current status is a statement about NOW, not about the days behind it: tapping "Driving" must
+ * not turn unknown past days into confirmed zero-hour days (consumer-review-6). Only an explicit
+ * acknowledgement — or a record that genuinely reaches back a full day — makes the basis 'known'.
  */
-export function isFreshLog(s: State): boolean {
-  return s.segments.length === 0 && s.tentative.length === 0 && !s.current;
+export function historyBasis(s: State, now: number): HistoryBasis {
+  if (s.historyAcknowledged) return 'known';
+  if (s.segments.length === 0 && s.tentative.length === 0 && !s.current) return 'fresh';
+  if (s.segments.length > 0 && now - Math.min(...s.segments.map((x) => x.start)) >= 1440) return 'known';
+  return 'incomplete';
 }
 
 /**
