@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, DEFAULT_TRIP, type State, type TripDraft,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, isFreshLog, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, DEFAULT_TRIP, type State, type TripDraft, type Theme,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -144,7 +144,10 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
     <header class="top">
       <div class="top-row">
         <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - s.current.since)}` : ''}</span>
-        <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+        <span class="top-right">
+          <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => setState({ theme: s.theme === 'day' ? 'night' : 'day' })}>{s.theme === 'day' ? '☾' : '☀'}</button>
+        </span>
       </div>
       <div class="clocks">
         <Stat label="Drive now" value={dur(ev.driveNow)} sub={`limited by ${bindingLabel[ev.binding]}`} tone={tone} />
@@ -181,7 +184,7 @@ function Grid({ segments, from, to }: { segments: Segment[]; from: number; to: n
       {Array.from({ length: hours + 1 }, (_, i) => { const m = from + (i * (to - from)) / hours; return <line key={i} x1={x(m)} x2={x(m)} y1={10} y2={H - 6} class={i % 6 === 0 ? 'grid-tick major' : 'grid-tick'} />; })}
       {segments.filter((s) => s.end > from && s.start < to).map((s, i) => {
         const y = 12 + rows.indexOf(s.status) * rowH + 9;
-        return <line key={i} x1={x(s.start)} x2={x(s.end)} y1={y} y2={y} stroke={STATUS_COLOR[s.status]} stroke-width={6} stroke-dasharray={s.tentative ? '4 3' : undefined} />;
+        return <line key={i} class={`s-${s.status}`} x1={x(s.start)} x2={x(s.end)} y1={y} y2={y} stroke-width={6} stroke-dasharray={s.tentative ? '4 3' : undefined} />;
       })}
     </svg>
   );
@@ -666,6 +669,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
+        <label>Screen<Toggle options={[['night', 'Night (default)'], ['day', 'Day — for sunlight']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
+        <p class="muted small">Night is the default. Day flips to a light screen for reading in sunlight — a dark screen is the worst case outdoors. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header for when you step out of the cab.</p>
         <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
       </Card>
@@ -695,6 +700,7 @@ declare const __BUILD__: string;
 export function App() {
   const s = useStore();
   const now = useNow();
+  useEffect(() => { applyTheme(s.theme); }, [s.theme]);
   const ev = useMemo(() => evaluate(allSegments(s, now), { asOf: now, config: s.config }), [s, now]);
   const tabs: [State['tab'], string][] = [['log', 'Log'], ['split', 'Split Lab'], ['recap', 'Recap'], ['trip', 'Trip'], ['settings', 'Settings']];
   return (

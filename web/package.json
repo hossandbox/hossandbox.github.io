@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "node build.mjs",
     "serve": "node server.mjs",
-    "smoke": "esbuild test/smoke.mjs --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=preact --define:__BUILD__='\"smoke\"' --outfile=dist-test/smoke.mjs --log-level=warning && node dist-test/smoke.mjs"
+    "smoke": "node test/contrast.mjs && esbuild test/smoke.mjs --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=preact --define:__BUILD__='\"smoke\"' --outfile=dist-test/smoke.mjs --log-level=warning && node dist-test/smoke.mjs",
+    "contrast": "node test/contrast.mjs"
   },
   "keywords": [],
   "author": "",

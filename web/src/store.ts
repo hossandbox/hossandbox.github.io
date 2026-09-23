@@ -31,6 +31,8 @@ export interface State {
   trip: TripDraft;
   /** Log tab: show the normalized timeline instead of the entries as typed */
   logResolved: boolean;
+  /** night (default) or day; see applyTheme */
+  theme: Theme;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
   tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
@@ -46,19 +48,20 @@ export const DEFAULT_TRIP: TripDraft = {
   miles: 550, pre: 30, stopMile: 0, stopMin: 0, stopOff: false, dep: null, until: 'CURRENT', view: null,
 };
 
-const initial: State = {
+/** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
+export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
-  mph: 55, trip: { ...DEFAULT_TRIP }, logResolved: false, nowOverride: null, tab: 'log', bugEmail: '',
+  mph: 55, trip: { ...DEFAULT_TRIP }, logResolved: false, theme: 'night', nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return initial;
+    if (!raw) return INITIAL_STATE;
     const s = JSON.parse(raw);
-    return { ...initial, ...s, config: { ...initial.config, ...(s.config ?? {}) }, trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) } };
-  } catch { return initial; }
+    return { ...INITIAL_STATE, ...s, config: { ...INITIAL_STATE.config, ...(s.config ?? {}) }, trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) } };
+  } catch { return INITIAL_STATE; }
 }
 
 let state: State = load();
@@ -199,7 +202,21 @@ export function allSegments(s: State, now: number): Segment[] {
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };
-export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: '#8a94a6', SB: '#7c5cff', D: '#2ecc71', ON: '#f5a623' };
+export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', SB: 'var(--accent)', D: 'var(--good)', ON: 'var(--warn)' };
+
+/**
+ * 'night' is the product default and needs no attribute — `:root` carries the night palette.
+ * 'day' sets `data-theme="day"` on the document root. Not part of the export: this is a
+ * device preference, like `logResolved`, and a restored backup should not change how your screen
+ * looks.
+ */
+export type Theme = 'night' | 'day';
+export function applyTheme(t: Theme) {
+  if (typeof document === 'undefined') return; // the node test harness has no DOM
+  const root = document.documentElement;
+  if (t === 'day') root.setAttribute('data-theme', 'day');
+  else root.removeAttribute('data-theme');
+}
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };
 export function segLabel(status: DutyStatus, note?: string): string {

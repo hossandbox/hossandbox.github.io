@@ -135,6 +135,15 @@ Recalculation (iii):
   (log, settings, speed, trip scenario, report address), **except `nowOverride`** — a simulated clock
   must never return silently and make the app lie about the time. Adding a field to one without the
   other is the bug; the round-trip smoke test fails if they drift apart.
+- **Contrast is verified, not eyeballed.** `web/test/contrast.mjs` parses the real palette out of
+  `styles.css` and fails the suite if any documented pair drops below WCAG AA (4.5:1 for text, 3:1
+  for graphics), for both themes. It reads the colours rather than copying them, so a palette change
+  cannot pass by being made in one place only.
+- **Night is the product default; day is an opt-in for sunlight**, where a dark screen is the worst
+  case. The status colours are re-tuned for light rather than inverted, and `--chip-ink` flips from
+  black to white — inverting a palette wholesale is how you ship unreadable text.
+- Never indicate selection with **opacity**: dimming the "I am now…" chips dropped their labels to
+  2.23:1. Use a ring at full contrast instead.
 
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.

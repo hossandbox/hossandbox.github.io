@@ -83,7 +83,7 @@ UI can show "if you skip Break 2, you're in violation by X".
 
 ## Roadmap
 
-- v1 (now): Split Lab, Recap, Trip (10h-reset, sleeper-split and 34-hour-restart strategies side by side), Clock-to-parking,
+- v1 (now): Split Lab, Recap, Trip (10h-reset, sleeper-split and 34-hour-restart strategies side by side), Clock-to-parking, day/night screen theme (both palettes contrast-checked),
   adverse-conditions and 16-hour-day exceptions, PC / yard move, in-app bug report — PWA over Tailscale
 - v1.1: public hosting + free beta (GitHub Pages); driver-feedback fixes
 - v2.0 (planned): App Store release. Free download with a one-time unlock; this web version stays

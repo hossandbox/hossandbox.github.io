@@ -75,7 +75,7 @@ engine/            pure TypeScript rules engine, zero deps — this is the produ
 web/               Preact PWA
   src/store.ts       localStorage state (key: hos-sandbox-v1)
   src/app.tsx        tabs: Log · Split Lab · Recap · Trip · Settings + TabBoundary error card
-  build.mjs, server.mjs, deploy.sh, test/smoke.mjs
+  build.mjs, server.mjs, deploy.sh, test/smoke.mjs, test/contrast.mjs (WCAG gate)
 docs/              RULES-GROUNDING.md · LAUNCH-KIT.md · BOT-HANDOFF.md (this file) · user-outline.txt
 .github/ISSUE_TEMPLATE/   bug-report.yml · suggestion.yml · config.yml
 ```
@@ -296,6 +296,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   now a single tested contract. Two of my own test assertions were also found vacuous by
   falsification (a plus-button check that never looked at the minus button; a `nowOverride` check
   using `null`, where `??` made it unfalsifiable) and were tightened.
+- **Contrast audit, night/day theme (2026-09-23)**: ran the WCAG audit nobody had run. The dark
+  palette mostly passed, but the four unselected **"I am now…" chips were 2.23–3.66:1** — they were
+  dimmed with `opacity: .55`, which fails in any palette; selection is now a ring at full contrast.
+  Also fixed: muted text inside a warnbox (4.33), white on the accent button (4.35), dark on the
+  selected sleeper chip (4.41). Added an opt-in **day theme** for sunlight (night stays the default,
+  per Lorico), with the status colours re-tuned rather than inverted and `--chip-ink` flipped to
+  white. Status colours now come from CSS variables so chips theme automatically — but note the SVG
+  grid can't take `var()` in a presentation attribute, so it uses `.s-OFF/.s-SB/.s-D/.s-ON` classes.
+  New `web/test/contrast.mjs` parses the real palette and gates both themes at WCAG AA inside
+  `npm run smoke`. Two of my own assertions were caught vacuous by falsification again (a theme
+  default asserted *after* the test set it, and a hidden-versus-removed button test) and were fixed.
 - **Error boundary added (2026-09-20)**: a crash in one tab used to blank the whole app. Now a
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by
