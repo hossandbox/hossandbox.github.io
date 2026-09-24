@@ -67,9 +67,14 @@ test('trip planner split strategy: uses a receiver OFF break as the short leg an
   assert.equal(ev.shift.chain.length, 2);
 });
 
-test('trip planner split strategy falls back to a 10h reset when nothing can pair', () => {
+test('trip planner split strategy opens a split when the driver has nothing to pair with', () => {
+  // This assertion used to be "falls back to a 10h reset when nothing can pair" — which is exactly
+  // what stress-test 2.7 reported as a defect: the "Sleeper splits" plan came out identical to the
+  // reset plan for a fresh driver, and the UI then told him the rest strategy "makes no difference".
+  // A split is the app's headline case, so the planner now opens one with a 7h sleeper long leg.
   const plan = planTrip([fresh(0, 6)], { departure: at(0, 6), distanceMiles: 1000, mph: 55, restStrategy: 'split', config: { timeZone: TZ } });
   assert.ok(plan.feasible);
-  assert.ok(plan.steps.some((s) => s.reason.startsWith('10-hour reset')));
+  assert.ok(plan.steps.some((s) => s.reason.includes('opens a split')), 'the split plan should open a split, not fall back to a reset');
+  assert.ok(!plan.steps.some((s) => s.reason.startsWith('10-hour reset')), 'no 10h reset should be needed');
   assert.equal(plan.evaluation.violations.length, 0);
 });

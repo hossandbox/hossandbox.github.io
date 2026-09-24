@@ -12,10 +12,24 @@ import { LIMITS } from './types.ts';
  * so a small correction must never inflate the available driving or cycle time.
  */
 export function normalize(segments: Segment[]): Segment[] {
+  // Entry order when the rows carry it: a correction must beat the row it corrects. Without it
+  // (an imported or legacy record) keep the original start-time ordering, unchanged.
+  const hasOrder = segments.some((s) => Number.isFinite(s.createdAt as number));
   const sorted = segments
-    .filter((s) => s.end > s.start)
-    .map((s) => ({ ...s }))
-    .sort((a, b) => a.start - b.start || a.end - b.end);
+    .map((s, i) => ({ s, i }))
+    // Finite numbers only: an imported record with ISO strings or nulls used to slip through the
+    // `end > start` test by string comparison and then throw "Invalid time value" from deep inside
+    // the engine (stress-test 2.8).
+    .filter((x) => Number.isFinite(x.s.start) && Number.isFinite(x.s.end) && x.s.end > x.s.start)
+    .sort((a, b) => {
+      if (hasOrder) {
+        const ao = Number.isFinite(a.s.createdAt as number) ? (a.s.createdAt as number) : a.i;
+        const bo = Number.isFinite(b.s.createdAt as number) ? (b.s.createdAt as number) : b.i;
+        if (ao !== bo) return ao - bo;
+      }
+      return a.s.start - b.s.start || a.s.end - b.s.end;
+    })
+    .map((x) => ({ ...x.s }));
   const placed: Segment[] = [];
   for (const s of sorted) {
     const kept: Segment[] = [];
@@ -58,10 +72,32 @@ export const WORK = new Set(['D', 'ON']);
 export const DRIVE = new Set(['D']);
 
 /**
+ * Intervals inside the record that no segment covers — unlogged time.
+ *
+ * restPeriods() merges a gap into the surrounding rest, so an unlogged hole is currently read as OFF
+ * and can manufacture a qualifying 10-hour reset: a driver whose phone died mid-shift, or who deleted
+ * a row, reads a fresh clock he never earned. The gap itself is surfaced here so the UI can say what
+ * it is assuming instead of quietly deciding the driver was resting (stress-test 2.5).
+ *
+ * Pass `through` to include the open interval from the last segment to a later minute (usually now).
+ */
+export function gaps(segments: Segment[], through?: number): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = [];
+  let prevEnd: number | null = null;
+  for (const s of segments) {
+    if (prevEnd !== null && s.start > prevEnd) out.push({ start: prevEnd, end: s.start });
+    prevEnd = prevEnd === null ? s.end : Math.max(prevEnd, s.end);
+  }
+  if (through !== undefined && prevEnd !== null && through > prevEnd) out.push({ start: prevEnd, end: through });
+  return out;
+}
+
+/**
  * Merge contiguous OFF/SB segments into RestPeriods, computing the longest
  * contiguous SB run (the 7h leg must be *consecutive* sleeper-berth time).
  * Gaps in the record are treated as OFF (a gap is unlogged time; the driver
- * was not working).
+ * was not working) — the conservative reading for a planning tool, but one the
+ * UI must disclose: see gaps() above.
  */
 export function restPeriods(segments: Segment[]): RestPeriod[] {
   const out: RestPeriod[] = [];

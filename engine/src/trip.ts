@@ -32,6 +32,11 @@ export interface TripInput {
   stops?: TripStop[];
   /** how to regain hours when the daily clocks run out */
   restStrategy?: 'reset10' | 'split' | 'restart34';
+  /**
+   * Length of the sleeper period to open a split with when the planner has to create one and the
+   * driver has no ≥2h rest logged to pair with. Defaults to the 7h minimum long leg.
+   */
+  splitFirstLeg?: number;
   config?: Partial<RulesConfig>;
 }
 
@@ -82,7 +87,14 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
     lead.push(seg);
     steps.push({ segment: seg, fromMile: 0, toMile: 0, reason: `${u.label ?? 'Until departure'} — assumed, not logged` });
   }
-  const base = [...lead, ...history];
+  // History starting at or after departure has not happened by the time wheels roll. Planning from it
+  // let a future-dated sleeper row overwrite the plan's own driving, so an illegal run read
+  // "feasible/LEGAL" (stress-test 2.1). Tentative rows are plans and stay in.
+  const past = history.filter((s) => s.tentative || s.start < input.departure);
+  if (past.length !== history.length) {
+    warnings.push(`${history.length - past.length} logged row(s) dated after your departure are ignored — you cannot have already logged time you have not driven.`);
+  }
+  const base = [...lead, ...past];
 
   let t = input.departure;
   let mile = 0;
@@ -124,6 +136,14 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
       } else if (lastRestLen > 0) {
         // We just rested and still have nothing: top the rest up to a full 10h reset.
         push('OFF', Math.max(LIMITS.RESET - lastRestLen, 60), 'Extend to a full 10-hour reset');
+      } else if (input.restStrategy === 'split' && !ev.shift.pendingSplitLeg) {
+        // Nothing to pair with: open a split. A split is this app's headline case, and without this
+        // branch the "Sleeper splits" plan came out byte-identical to the 10-hour reset for a driver
+        // who had no rests logged — and the UI then told him the choice "makes no difference"
+        // (stress-test 2.7). 7h is the shortest sleeper period that can serve as the long leg
+        // (§395.1(g)(1)(ii)(B)), so it is the earliest possible pairing.
+        const leg = input.splitFirstLeg ?? LIMITS.SPLIT_MIN_SB;
+        push('SB', leg, `Sleeper ${fmtH(leg)} — opens a split (long leg, §395.1(g)(1)(ii)(B))`);
       } else if (input.restStrategy === 'split' && ev.shift.pendingSplitLeg && !(ev.shift.pendingSplitLeg.isReset && ev.binding === 'DRIVE_11')) {
         // (a reset-as-first-leg pairing — FAQ 22 — keeps the anchor at shift start, so it can't restore driving time; skip it when the 11 binds)
         const leg = ev.shift.pendingSplitLeg;
@@ -210,11 +230,17 @@ export const TRIP_STRATEGIES: TripStrategy[] = ['reset10', 'split', 'restart34']
  * itinerary; show the driver both waits.
  */
 export function planTripAll(history: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; restart34: TripPlan; faster: TripStrategy | 'same' } {
-  const plans = {
-    reset10: planTrip(history, { ...input, restStrategy: 'reset10' }),
-    split: planTrip(history, { ...input, restStrategy: 'split' }),
-    restart34: planTrip(history, { ...input, restStrategy: 'restart34' }),
-  };
+  const reset10 = planTrip(history, { ...input, restStrategy: 'reset10' });
+  const restart34 = planTrip(history, { ...input, restStrategy: 'restart34' });
+  // The split plan has to choose how long to sleep when it opens a split itself: 7h pairs soonest,
+  // but 8h can leave a better position on the 11/14 afterwards. Plan both and keep the earlier
+  // arrival — and only pay for the second simulation when a split was actually created.
+  const withLeg = (m: number) => planTrip(history, { ...input, restStrategy: 'split', splitFirstLeg: m });
+  const first = withLeg(LIMITS.SPLIT_MIN_SB);
+  const opened = first.steps.some((s) => s.reason.includes('opens a split'));
+  const second = opened ? withLeg(LIMITS.SPLIT_MIN_SB + 60) : null;
+  const split = second && second.arrival < first.arrival ? second : first;
+  const plans = { reset10, split, restart34 };
   const best = Math.min(plans.reset10.arrival, plans.split.arrival, plans.restart34.arrival);
   const winners = TRIP_STRATEGIES.filter((k) => plans[k].arrival === best);
   return { ...plans, faster: winners.length === 1 ? winners[0] : 'same' };

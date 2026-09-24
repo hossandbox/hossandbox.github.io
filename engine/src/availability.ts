@@ -1,6 +1,6 @@
 import type { Availability, RulesConfig, Segment, ShiftEvaluation, Violation } from './types.ts';
 import { DEFAULT_CONFIG } from './types.ts';
-import { normalize, restPeriods, shifts } from './timeline.ts';
+import { normalize, restPeriods, shifts, gaps } from './timeline.ts';
 import { evaluateShift, breakViolations } from './shift.ts';
 import { evaluateCycle, cycleViolations } from './cycle.ts';
 
@@ -19,6 +19,21 @@ export interface FullEvaluation extends Availability {
   shifts: ShiftEvaluation[];
   segments: Segment[];
   config: RulesConfig;
+  /**
+   * Non-tentative rows dated after `asOf`. A driver cannot have already logged the future, so these
+   * are excluded from every clock and reported so the UI can say so rather than dropping them quietly.
+   */
+  futureLogged: Segment[];
+  /**
+   * Rows that could not be read as duty time at all (non-finite or backwards times). Dropped rather
+   * than thrown on, and reported so an import can name what it rejected (stress-test 2.8).
+   */
+  invalid: Segment[];
+  /**
+   * Unlogged intervals inside the record. A gap is read as OFF to compute clocks, which can
+   * manufacture a reset the driver never took — the UI must disclose it (stress-test 2.5).
+   */
+  gaps: { start: number; end: number }[];
 }
 
 /**
@@ -27,8 +42,18 @@ export interface FullEvaluation extends Availability {
  */
 export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvaluation {
   const config: RulesConfig = { ...DEFAULT_CONFIG, ...(opts.config ?? {}) };
-  const segments = normalize(raw);
-  const asOf = opts.asOf ?? (segments.length ? segments[segments.length - 1].end : Math.floor(Date.now() / 60000));
+  const readable = (s: Segment) => Number.isFinite(s?.start) && Number.isFinite(s?.end) && s.end > s.start;
+  const invalid = raw.filter((s) => !readable(s));
+  const normalized = normalize(invalid.length ? raw.filter(readable) : raw);
+  const asOf = opts.asOf ?? (normalized.length ? normalized[normalized.length - 1].end : Math.floor(Date.now() / 60000));
+  // A non-tentative row dated in the future has not happened. Left in the record it merged with the
+  // preceding gap into a phantom ≥10h rest and handed the driver a fresh clock — and because
+  // planTrip() re-evaluates as it advances through time, the same row could overwrite the plan's own
+  // driving and make an illegal run read "feasible" (stress-test 2.1). Tentative rows are plans and
+  // stay in; what is dropped here is reported back so it is never discarded in silence.
+  // Strictly `>`: a row starting exactly at asOf has begun and is in progress, not future-dated.
+  const futureLogged = normalized.filter((s) => !s.tentative && s.start > asOf);
+  const segments = futureLogged.length ? normalized.filter((s) => s.tentative || s.start <= asOf) : normalized;
   const rests = restPeriods(segments);
   const spans = shifts(segments, rests);
 
@@ -51,9 +76,14 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
     return evaluateShift(segments, span, inShift, { asOf, config, restartSince: restartSince(span) });
   };
   for (const span of spans) shiftEvals.push(evalSpan(span).best);
-  // Pick the shift containing asOf (or the last one).
+  // Pick the shift containing asOf (or the latest one that has actually begun).
   let idx = spans.findIndex((s) => s.start <= asOf && (s.end === null || asOf < s.end));
-  if (idx < 0) idx = spans.length - 1;
+  if (idx < 0) {
+    // asOf can sit outside every span: before the record starts, inside a ≥10h reset between two
+    // shifts, or past the end. Fall back to the newest span that has begun — never forward to one
+    // that has not, which is what handed out the fresh clock in stress-test 2.1.
+    for (let i = spans.length - 1; i >= 0; i--) { if (spans[i].start <= asOf) { idx = i; break; } }
+  }
   if (idx < 0) {
     // empty record: fresh driver
     const emptySpan = { start: asOf, end: null, terminatingRest: null };
@@ -91,6 +121,7 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   return {
     asOf, shift, cycle, driveNow, binding, mustStopBy: asOf + driveNow, violations,
     noSplit: current.noSplit, candidates: current.candidates, shifts: shiftEvals, segments, config,
+    futureLogged, invalid, gaps: gaps(segments, asOf),
   };
 }
 

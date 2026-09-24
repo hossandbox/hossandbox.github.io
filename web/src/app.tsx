@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, cycleBasis, applyDayPatch, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -116,8 +116,11 @@ function TimeZoneField({ value, onChange }: { value: string; onChange: (v: strin
 function ViolationList({ items, from }: { items: Violation[]; from?: number }) {
   const list = from === undefined ? items : items.filter((v) => v.start >= from);
   if (!list.length) return <p class="ok">No violations.</p>;
-  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><b>{violationLabel[v.kind]}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}<br /><small>{v.detail}</small></li>)}</ul>;
+  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><b>{violationLabel[v.kind]}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}{' '}<span class="sev" title="Size only says how much time is involved — any of these can be cited.">{severityWord[v.severity]}</span><br /><small>{v.detail}</small></li>)}</ul>;
 }
+/** Severity in the driver's words. The internal enum says "nominal", which reads as "acceptable" —
+ *  nothing short of zero hours is acceptable; it is simply less (stress-test 2.8). */
+const severityWord: Record<Violation['severity'], string> = { nominal: 'minor', violation: 'over', egregious: 'well over' };
 const bindingLabel: Record<FullEvaluation['binding'], string> = {
   DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', BREAK_30: '30-min break due', NONE: '—',
 };
@@ -183,6 +186,25 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
               <button class="mini" onClick={() => setState({ historyAcknowledged: true })}>It really does start here</button>
             </>
           )}
+        </div>
+      )}
+      {meaningfulGaps(ev.gaps).length > 0 && (
+        <div class="warnbox small">
+          <b>Unlogged time is being counted as off duty.</b>{' '}
+          {meaningfulGaps(ev.gaps).map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} — {dur(meaningfulGaps(ev.gaps).reduce((a, g) => a + (g.end - g.start), 0))} in total.
+          A hole in the record can look like a rest you never took, so a reset or a split may be resting on it. Fill it in on the <b>Log</b> tab to be sure.
+        </div>
+      )}
+      {ev.invalid.length > 0 && (
+        <div class="warnbox small">
+          <b>{ev.invalid.length} entr{ev.invalid.length === 1 ? 'y' : 'ies'} could not be read and {ev.invalid.length === 1 ? 'is' : 'are'} being ignored.</b>{' '}
+          A row needs a real start and end time. Re-enter {ev.invalid.length === 1 ? 'it' : 'them'} on the <b>Log</b> tab.
+        </div>
+      )}
+      {ev.futureLogged.length > 0 && (
+        <div class="warnbox small">
+          <b>{ev.futureLogged.length} entr{ev.futureLogged.length === 1 ? 'y is' : 'ies are'} dated in the future and {ev.futureLogged.length === 1 ? 'is' : 'are'} being ignored.</b>{' '}
+          You cannot have already logged time that has not happened, so it is left out of every clock. Fix the date on the <b>Log</b> tab, or make it a what-if if you meant to plan it.
         </div>
       )}
       {s.config.timeZone !== deviceTz && (
@@ -254,7 +276,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
     const segments = [...cur.segments];
-    if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note });
+    if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: stamp() });
     return { segments, current: { status: st, since: now, note } };
   });
   const toggleException = (key: 'adverseShifts' | 'sixteenHourShifts') => setState((cur) => {
@@ -270,7 +292,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     if (a === null || b === null) { setFormError('Enter a valid start and end.'); return; }
     if (b <= a) { setFormError('End must be after start.'); return; }
     setFormError(null);
-    setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b }] }));
+    setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b, createdAt: stamp() }] }));
   };
   const desc = (seg: Segment) => `${segLabel(seg.status, seg.note)} ${clock(seg.start)} → ${clock(seg.end)}`;
   /** One level of undo: the state before the last edit or delete. Replaced by the next action. */
@@ -537,27 +559,19 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const lc = s.loadCheck;
   const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
   const { miles, dwell, dwellOff } = lc;
-  const hist = historyBasis(s, now);
+  const hist = cycleBasis(s, now, ev.cycle.windowDays);
+  const firstLogged = s.segments.length ? Math.min(...s.segments.map((x) => x.start)) : null;
   const days = ev.cycle.days;
+  // The patch is a pure store function so the clipping rule is unit-testable (stress-test 2.4).
   const applyDay = (dayStart: number, dayEnd: number) => (drive: number, on: number, startHour: number) => {
-    setState((cur) => {
-      const keep = cur.segments.filter((x) => x.end <= dayStart || x.start >= dayEnd);
-      let t = dayStart + startHour * 60;
-      const segs: Segment[] = [];
-      // pre-trip on-duty, then driving split around a 30-min break if needed, then post-trip on-duty
-      const onPre = Math.min(on, 0.5), onPost = on - onPre;
-      if (onPre > 0) { segs.push({ status: 'ON', start: t, end: t + Math.round(onPre * 60), note: 'recap entry' }); t += Math.round(onPre * 60); }
-      if (drive > 8) {
-        segs.push({ status: 'D', start: t, end: t + 480, note: 'recap entry' }); t += 480;
-        segs.push({ status: 'OFF', start: t, end: t + 30, note: 'recap entry' }); t += 30;
-        segs.push({ status: 'D', start: t, end: t + Math.round((drive - 8) * 60), note: 'recap entry' }); t += Math.round((drive - 8) * 60);
-      } else if (drive > 0) { segs.push({ status: 'D', start: t, end: t + Math.round(drive * 60), note: 'recap entry' }); t += Math.round(drive * 60); }
-      if (onPost > 0) { segs.push({ status: 'ON', start: t, end: t + Math.round(onPost * 60), note: 'recap entry' }); t += Math.round(onPost * 60); }
-      return { segments: [...keep, ...segs].sort((a, b) => a.start - b.start) };
-    });
+    setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp()) }));
   };
   const both = useMemo(() => planTripAll(allSegments(s, now), { departure: now, distanceMiles: miles, mph: s.mph, stops: dwell ? [{ atMile: miles, minutes: dwell, status: dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [], config: s.config }), [s, now, miles, dwell, dwellOff]);
   const best = both[both.faster === 'split' ? 'split' : 'reset10'];
+  // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
+  // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
+  const openGaps = meaningfulGaps(ev.gaps);
+  const provisional = openGaps.length > 0;
 
   return (
     <>
@@ -567,7 +581,9 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
             const isToday = i === days.length - 1;
             const hasData = s.segments.some((x) => x.start < d.end && x.end > d.start);
             return <tr key={d.label} class={isToday ? 'today' : ''}><td>{isToday ? 'Today' : `D-${days.length - 1 - i}`}<br /><small class="muted">{d.label}</small></td><td><b>{hrs(d.onDuty)}</b> h</td>
-              <td>{!isToday && <DayEditor day={d} hasData={hasData} onApply={applyDay(d.start, d.end)} />}</td></tr>;
+              <td>{!isToday && firstLogged !== null && d.end <= firstLogged
+                ? <small class="muted" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small>
+                : !isToday && <DayEditor day={d} hasData={hasData} onApply={applyDay(d.start, d.end)} />}</td></tr>;
           })}
         </tbody></table>
         <div class="clocks">
@@ -585,11 +601,12 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <Slider label="Receiver dwell" value={dwell} min={0} max={480} step={30} onChange={(v) => setLoad({ dwell: v })} fmt={dur} unit="min" />
         <Toggle options={[[false, 'Dwell on duty'], [true, 'Dwell off duty (relieved)']]} value={dwellOff} onChange={(v) => setLoad({ dwellOff: v })} />
         <div class="clocks">
-          <Stat label="Verdict" value={best.feasible ? 'LEGAL' : 'NO'} tone={best.feasible ? 'good' : 'bad'} />
+          <Stat label={provisional ? 'Verdict (provisional)' : 'Verdict'} value={best.feasible ? 'LEGAL' : 'NO'} tone={best.feasible ? 'good' : 'bad'} />
           <Stat label="Arrive — wheels stop" value={clock(best.driveEnd)} />
           {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clock(best.arrival)} />}
           <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={`${hrs(best.cycleRemainingAtArrival)} h`} />
         </div>
+        {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
         {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm on the Log tab that the record starts here.</p>}
         <PlanCompare both={both} from={now} />
       </Card>

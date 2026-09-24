@@ -17,6 +17,13 @@ export interface Segment {
   note?: string;
   /** true when this segment is a tentative "what-if" entry, not something that happened */
   tentative?: boolean;
+  /**
+   * Monotonic entry key: when the driver entered this row. Overlap resolution needs to know which
+   * entry is NEWER, not which starts later — a correction typed over a logged row otherwise lost to
+   * the row it was correcting, silently discarding forgotten driving (stress-test 2.3).
+   * Absent on imported/legacy rows, where normalize() falls back to its start-time ordering.
+   */
+  createdAt?: number;
 }
 
 export interface RulesConfig {

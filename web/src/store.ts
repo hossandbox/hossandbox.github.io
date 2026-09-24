@@ -113,7 +113,10 @@ export const nowMin = () => Math.floor(Date.now() / 60000);
 export function useNow(): number {
   const s = useStore();
   const [n, setN] = useState(nowMin());
-  useEffect(() => { const id = setInterval(() => setN(nowMin()), 30000); return () => clearInterval(id); }, []);
+  // The app works in whole minutes, so a 30s tick recomputed every planning screen twice per
+  // meaningful change — and each tick re-runs planTripAll (stress-test 2.2). One minute is the
+  // finest thing any readout can show, so tick at the point where the displayed value can change.
+  useEffect(() => { const id = setInterval(() => setN(nowMin()), 60000); return () => clearInterval(id); }, []);
   return s.nowOverride ?? n;
 }
 export function toInput(min: number): string {
@@ -202,12 +205,93 @@ export function historyBasis(s: State, now: number): HistoryBasis {
 }
 
 /**
+ * Basis for the CYCLE specifically.
+ *
+ * The daily clocks only need a shift's worth of record, but the 60/70-hour cycle is measured over the
+ * whole carrier window: a driver who installs the app with 60 hours already on his cycle sees ~56h
+ * available after one day of use and, under the 24-hour test above, no warning at all (stress-test
+ * 2.6). Treat the cycle as known only once the record genuinely spans the window, or the driver
+ * confirms.
+ */
+export function cycleBasis(s: State, now: number, windowDays: number): HistoryBasis {
+  if (s.historyAcknowledged) return 'known';
+  if (s.segments.length === 0 && s.tentative.length === 0 && !s.current) return 'fresh';
+  if (s.segments.length > 0 && now - Math.min(...s.segments.map((x) => x.start)) >= windowDays * 1440) return 'known';
+  return 'incomplete';
+}
+
+/**
+ * A gap only changes an answer once it is long enough to serve as a split leg (≥2h, §395.1(g)(1)(ii)(A))
+ * or to stack into a reset. Disclosing every hole would nag about the ordinary case of going off duty
+ * and opening the app an hour later, which teaches the driver to ignore the warning that matters.
+ */
+export const MEANINGFUL_GAP_MINUTES = 120;
+export function meaningfulGaps(gapsIn: { start: number; end: number }[]): { start: number; end: number }[] {
+  return gapsIn.filter((g) => g.end - g.start >= MEANINGFUL_GAP_MINUTES);
+}
+
+/**
+ * Monotonic entry key for a row the driver just added or edited.
+ *
+ * Date.now() alone can repeat inside one interaction, and a phone clock can step backwards; overlap
+ * resolution only needs the ORDER to be correct, so keep a counter that never goes back.
+ */
+let lastStamp = 0;
+export function stamp(): number {
+  const t = Date.now();
+  lastStamp = t > lastStamp ? t : lastStamp + 1;
+  return lastStamp;
+}
+
+/**
+ * Write a day's drive + on-duty hours as real segments, leaving the rest of the record intact.
+ *
+ * The original filter dropped every segment that *touched* the day — including the part of it that
+ * belongs to the neighbouring day. Setting Monday therefore erased 3h of Tuesday's on-duty time and
+ * handed back 3h of cycle (stress-test 2.4). Straddling rows are clipped to the day boundary now, and
+ * generated rows are clamped inside the day instead of spilling past it.
+ */
+export function applyDayPatch(
+  segments: Segment[], dayStart: number, dayEnd: number,
+  drive: number, on: number, startHour: number, createdAt: number,
+): Segment[] {
+  const kept: Segment[] = [];
+  for (const x of segments) {
+    if (x.end <= dayStart || x.start >= dayEnd) { kept.push(x); continue; } // outside the day
+    if (x.start < dayStart) kept.push({ ...x, end: dayStart });             // keep its earlier part
+    if (x.end > dayEnd) kept.push({ ...x, start: dayEnd });                 // keep its later part
+  }
+  const segs: Segment[] = [];
+  let t = dayStart + startHour * 60;
+  const add = (status: DutyStatus, minutes: number) => {
+    if (minutes <= 0) return;
+    const start = t;
+    const end = Math.min(t + minutes, dayEnd); // a 13h day entered at 23:00 must not spill out of it
+    if (end > start) segs.push({ status, start, end, note: 'recap entry', createdAt });
+    t += minutes;
+  };
+  // pre-trip on-duty, then driving split around a 30-min break if needed, then post-trip on-duty
+  const onPre = Math.min(on, 0.5);
+  add('ON', Math.round(onPre * 60));
+  if (drive > 8) {
+    add('D', 480);
+    add('OFF', 30);
+    add('D', Math.round((drive - 8) * 60));
+  } else {
+    add('D', Math.round(drive * 60));
+  }
+  add('ON', Math.round((on - onPre) * 60));
+  return [...kept, ...segs].sort((a, b) => a.start - b.start);
+}
+
+/**
  * Apply an edit to one segment, matched by identity so every other entry keeps its reference (the
  * delete control and the undo snapshot both depend on that).
  */
 export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>): Pick<State, 'segments' | 'tentative'> {
-  const replace = (list: Segment[]) => list.map((x) => (x === orig ? { ...x, ...next } : x));
-  return { segments: replace(s.segments), tentative: replace(s.tentative) };
+  // An edit is a new entry: stamp it so it wins over the row it corrects rather than losing to it.
+  const bump = (list: Segment[]) => list.map((x) => (x === orig ? { ...x, ...next, createdAt: stamp() } : x));
+  return { segments: bump(s.segments), tentative: bump(s.tentative) };
 }
 
 /**

@@ -555,4 +555,81 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false });
   console.log('review-6 findings: OK');
 }
+// Regression (Opus 5.5 stress-test): the recap day-editor must clip, not delete; gaps, future-dated
+// rows and cycle completeness must be visible; severity must not read as "acceptable".
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const { applyDayPatch } = await import('../src/store.ts');
+
+  // 2.4 — setting a day must not erase the neighbouring day's hours
+  const dayStart = M('2026-09-14T00:00:00Z');
+  const dayEnd = M('2026-09-15T00:00:00Z');
+  const straddle = { status: 'D', start: M('2026-09-14T20:00:00Z'), end: M('2026-09-15T03:00:00Z') };
+  const out1 = applyDayPatch([straddle], dayStart, dayEnd, 4, 0, 20, 111);
+  const nextDayDrive = out1.filter((x) => x.start >= dayEnd).reduce((a, x) => a + (x.end - x.start), 0);
+  if (nextDayDrive !== 180) throw new Error(`the next day kept ${nextDayDrive}m of driving, expected 180m — a straddling row was deleted instead of clipped`);
+  const inDay = out1.filter((x) => x.start >= dayStart && x.end <= dayEnd).reduce((a, x) => a + (x.end - x.start), 0);
+  if (inDay !== 240) throw new Error(`the edited day holds ${inDay}m, expected the requested 240m`);
+
+  // 2.4b — generated rows stay inside the day they were entered for
+  const out2 = applyDayPatch([], dayStart, dayEnd, 13, 2, 23, 222);
+  if (out2.some((x) => x.end > dayEnd)) throw new Error('a recap entry spilled past the day it was entered for');
+
+  // 2.5 — a hole big enough to change an answer is disclosed; a small one is not
+  const D5 = { status: 'D', start: M('2026-09-15T06:00:00Z'), end: M('2026-09-15T11:00:00Z') };
+  const now2130 = M('2026-09-15T21:30:00Z');
+  // a 2h hole could be a split leg, so it is disclosed
+  setState({ nowOverride: now2130, tab: 'recap', segments: [D5, { status: 'OFF', start: M('2026-09-15T13:00:00Z'), end: now2130 }], tentative: [], current: null, historyAcknowledged: true });
+  hh = out('recap/2h hole');
+  if (!/Unlogged time is being counted as off duty/.test(hh)) throw new Error('a 2h hole must be disclosed on screen');
+  if (!/Verdict \(provisional\)/.test(hh)) throw new Error('a verdict resting on an unlogged hole must be marked provisional');
+  // a 30-minute hole cannot, and nagging about it teaches the driver to ignore the warning that matters
+  setState({ segments: [D5, { status: 'OFF', start: M('2026-09-15T11:30:00Z'), end: now2130 }] });
+  hh = out('recap/30min hole');
+  if (/Unlogged time is being counted/.test(hh)) throw new Error('a 30-minute hole must not raise the gap warning');
+  if (/Verdict \(provisional\)/.test(hh)) throw new Error('a 30-minute hole must not make the verdict provisional');
+  // and it clears once the record covers the hole
+  setState({ segments: [D5, { status: 'OFF', start: M('2026-09-15T11:00:00Z'), end: now2130 }] });
+  hh = out('recap/hole filled');
+  if (/Unlogged time is being counted/.test(hh)) throw new Error('the gap warning should clear once the hole is filled');
+
+  // 2.1 — a future-dated entry is excluded and said so
+  setState({ nowOverride: M('2026-09-15T10:00:00Z'), tab: 'log', historyAcknowledged: true, current: null, segments: [
+      { status: 'OFF', start: M('2026-09-14T20:00:00Z'), end: M('2026-09-15T06:00:00Z') },
+      { status: 'ON', start: M('2026-09-15T06:00:00Z'), end: M('2026-09-15T10:00:00Z') },
+      { status: 'SB', start: M('2026-09-15T20:00:00Z'), end: M('2026-09-16T06:00:00Z') },
+    ] });
+  hh = out('log/with a future-dated row');
+  if (!/dated in the future and is being ignored/.test(hh)) throw new Error('a future-dated entry must be reported, not silently dropped');
+
+  // 2.8 — severity must not read as "acceptable", and the evaluation must survive a bad timestamp
+  setState({ nowOverride: M('2026-09-15T10:00:00Z'), tab: 'log', segments: [
+      { status: 'OFF', start: M('2026-09-15T00:00:00Z'), end: M('2026-09-15T10:00:00Z') },
+      { status: 'D', start: M('2026-09-15T10:00:00Z'), end: M('2026-09-15T21:30:00Z') },
+    ], current: null });
+  hh = out('log/with violations');
+  if (!/class="sev"/.test(hh)) throw new Error('a violation should carry its size in the driver\'s words');
+  if (!/>well over</.test(hh) && !/>over</.test(hh)) throw new Error('severity wording missing');
+  setState({ segments: [...[], { status: 'D', start: '2026-09-15T06:00', end: '2026-09-15T08:00' }] });
+  hh = out('log/with an unreadable row');
+  if (/This tab hit a bug/.test(hh)) throw new Error('an unreadable row crashed the tab');
+  if (!/could not be read and is being ignored/.test(hh)) throw new Error('an unreadable row must be reported, not silently dropped');
+
+  // 2.6 — the cycle needs its whole window. A record spanning three days is past the old 24-hour
+  // test but nowhere near the 8-day window, so it must still say the cycle is an assumption.
+  const threeDays = [
+    { status: 'ON', start: M('2026-09-13T22:00:00Z'), end: M('2026-09-14T02:00:00Z') },
+    { status: 'ON', start: M('2026-09-15T22:00:00Z'), end: M('2026-09-16T02:00:00Z') },
+  ];
+  setState({ nowOverride: M('2026-09-16T12:00:00Z'), tab: 'recap', segments: threeDays, current: null, historyAcknowledged: false });
+  hh = out('recap/three days of record');
+  if (!/incomplete basis/.test(hh)) throw new Error('a 3-day record must not claim to know an 8-day cycle');
+  if (!/not logged — counted as 0h/.test(hh)) throw new Error('days before the record starts must be marked as counted-zero');
+  setState({ historyAcknowledged: true });
+  hh = out('recap/after acknowledging');
+  if (/incomplete basis/.test(hh)) throw new Error('an explicit confirmation should clear the cycle warning');
+
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [] });
+  console.log('stress-test findings: OK');
+}
 console.log('OK');

@@ -26,14 +26,28 @@ function localParts(minute: number, tz: string) {
 
 /** Minutes since epoch for local wall time (y,m,d,h) in tz. Handles DST via two-pass correction. */
 export function localToMinute(y: number, m: number, d: number, h: number, tz: string): number {
-  let guess = Math.floor(Date.UTC(y, m - 1, d, h) / 60000);
-  for (let i = 0; i < 2; i++) {
-    const p = localParts(guess, tz);
-    const asUtc = Math.floor(Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) / 60000);
-    const target = Math.floor(Date.UTC(y, m - 1, d, h) / 60000);
-    guess += target - asUtc;
+  const target = Math.floor(Date.UTC(y, m - 1, d, h) / 60000);
+  const at = (minute: number) => {
+    const p = localParts(minute, tz);
+    return { asUtc: Math.floor(Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) / 60000) };
+  };
+  let guess = target;
+  const seen = new Set<number>();
+  for (let i = 0; i < 6; i++) {
+    seen.add(guess);
+    const { asUtc } = at(guess);
+    if (asUtc === target) return guess; // the wall time exists
+    const next = guess + (target - asUtc);
+    if (seen.has(next)) break; // oscillating: this wall time never appears on the clock
+    guess = next;
   }
-  return guess;
+  // Spring-forward gap. The requested wall time does not exist on this date (02:00 on the transition
+  // day, when the clock jumps 02:00 → 03:00), so the fixed-point iteration cannot settle. Resolve it
+  // FORWARD to the first real instant after the gap: that is when the driver's clock actually reads.
+  // The old code landed an hour early, which made the carrier day before the change 23 hours long and
+  // shifted every day's boundaries around it (stress-test 2.8).
+  const ascending = [...seen].sort((a, b) => a - b);
+  return ascending.find((x) => at(x).asUtc >= target) ?? ascending[ascending.length - 1];
 }
 
 /** Start minute of the carrier day containing `minute`. */

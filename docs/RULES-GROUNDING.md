@@ -160,6 +160,31 @@ Recalculation (iii):
   empty in a number input — check `validity.badInput`), and an out-of-range entry all leave the
   stored value alone, so all three must say what happened and what is still in effect.
 
+## Engine invariants the stress-test rounds established
+
+- **A row dated in the future is not history.** A non-tentative entry starting after `asOf` has not
+  happened; treating it as record merges it with the preceding gap into a phantom ≥10h rest (a fresh
+  clock the driver never earned) and can overwrite a plan's own driving so an illegal run reads
+  feasible. Tentative rows are plans and stay. Whatever is excluded gets reported on screen.
+- **Overlap resolution is by entry order, not by start time.** `Segment.createdAt` is a monotonic entry
+  key; `normalize()` places rows in it when present and falls back to (start, end) for imported records.
+  Without it a correction lost to the row it corrected — including forgotten driving.
+- **The split-chain search is bounded and errs downward.** `enumerateChains` keeps the most recent
+  `MAX_CHAIN_RESTS` candidates and stops at `MAX_CHAINS` *before* descending. Fewer rests in a chain
+  means smaller exclusions and an earlier anchor — fewer available hours, never more.
+- **Unlogged time is read as OFF, and must be disclosed.** That is the conservative reading, but it can
+  manufacture a reset no one took, so `evaluate()` returns `gaps` and the UI shows them. Only gaps ≥2h
+  are worth interrupting a driver for (below that it is just "went off duty and opened the app").
+- **The 60/70 cycle needs its whole carrier window before it can call the history known.** `cycleBasis`
+  (window days) is separate from `historyBasis` (a shift's worth) for exactly this reason.
+- **The "Sleeper splits" strategy must be able to CREATE a split.** Pairing only with an existing rest
+  made it identical to the 10h reset for a fresh driver, and the UI then said the choice made no
+  difference. It opens a 7h sleeper long leg (or 8h if that plans earlier).
+- **A carrier day start that falls in the DST spring-forward gap resolves FORWARD**, to the first real
+  instant after the gap. Resolving early made the preceding day 23h and shifted every boundary near it.
+- **Segment times must be finite numbers.** `normalize()` drops rows that are not; `evaluate()` reports
+  them as `invalid` so an import can name what it rejected instead of throwing from deep inside.
+
 ## Geometry for the 150 air-mile circle
 - Great-circle (haversine) distance from terminal, threshold 150 nautical miles = 277,800 m.
 - Do NOT draw with Euclidean lat/lon; error is significant at 150 nmi across latitudes.

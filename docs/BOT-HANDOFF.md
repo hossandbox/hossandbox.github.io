@@ -311,6 +311,31 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   his own phone (2026-09-23). That was the one item no tool here could check, so treat the day theme
   as verified in sunlight, not merely measured. The night theme's outdoor case is still untested
   (it is the worse case by design, which is why day exists).
+- **Opus 5.5 stress-test (2026-09-24, build 2026-09-24 00:00)**: the most substantive review so far —
+  it recovered the TypeScript from the source map, replayed the engine in Node, and shipped a
+  regression file. Every claim reproduced exactly: T1–T5 failed, R1–R7 passed, T6 **crashed the process
+  with OOM**. The reviewer's file is archived at `reviews/opus-5.5-stress-test.pdf` (+ `.txt`), the
+  standalone reproduction at `reviews/stress-regressions-original.ts`, and the suite version is
+  `engine/test/stress-regressions.test.ts`.
+  - *Critical* — a future-dated non-tentative row merged with the gap before it into a phantom ≥10h
+    rest and handed out a fresh clock; `evaluate()` then picked the *future* span as "current"
+    (its `findIndex` fallback went to `spans.length - 1`), and `planTrip()` let the same row overwrite
+    the plan's own driving, so an illegal run read feasible/LEGAL. Fixed at all three points; dropped
+    rows are disclosed.
+  - *Critical* — `enumerateChains` capped nothing (the slice ran after the recursion had built the
+    array), so 12 days of continuous splits exhausted a 512 MB heap. Bounded properly, plus an O(log n)
+    driving-minutes lookup to replace a per-segment scan. 90 days went 5.5s → 1.9s.
+  - *High* — overlap resolution by start time discarded corrections; `Segment.createdAt` now decides.
+  - *High* — the Recap day editor deleted whole segments crossing midnight, erasing the neighbouring
+    day's on-duty hours; now clips. Extracted to `applyDayPatch` so it is unit-testable.
+  - *Medium* — gaps, cycle completeness (8 carrier days, not 24h), and a split strategy that can
+    actually create a split; *Low* — import validation, DST spring-forward day start, severity wording.
+  - Tests: 21 new engine tests (65 total) + 11 smoke regressions. Falsified every one; two "did not
+    bite" and both were **my own weak assertions**, not the code — a 2.6 check that a 24-hour record
+    satisfied, and a falsification harness whose mutations broke *typecheck* so smoke never ran.
+  - Still open from this brief: deeper history pruning / a Web Worker for the planner (six-month
+    records still take ~2s to evaluate), a "replace with what?" prompt on delete, and the §4 feature
+    gaps (appointment windows, fuel stop as break, team driving, parking along the route).
 - **Scenario persistence, history basis, violation provenance (2026-09-23, consumer-review-6)**: the
   first pass that reviewed the product as a *workflow* rather than one fix at a time, and it found the
   same class of bug in two more places. Split Lab and the Recap load checker kept their scenarios in

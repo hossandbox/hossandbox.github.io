@@ -1,7 +1,6 @@
 import type { RestPeriod, RulesConfig, Segment, ShiftEvaluation, Violation } from './types.ts';
 import { LIMITS } from './types.ts';
 import type { ShiftSpan } from './timeline.ts';
-import { minutesOf, DRIVE } from './timeline.ts';
 
 export function severityOf(minutes: number): Violation['severity'] {
   if (minutes < 15) return 'nominal';
@@ -17,15 +16,34 @@ export function pairQualifies(a: RestPeriod, b: RestPeriod): boolean {
 }
 
 /**
+ * How many candidate rests the chain search will consider, and how many chains it will build.
+ *
+ * A chain of n qualifying rests has up to 2^n sub-chains, and this app's headline case is a driver
+ * splitting for a week: 12 days of 7/3 splits produced tens of thousands of chains and then died
+ * with an out-of-memory crash at 512 MB, because the old 5,000 cap was applied to the array the
+ * recursion had already finished building — so it bounded nothing (stress-test 2.2).
+ *
+ * The anchor (§395.1(g)(1)(iii)(A)) is set by the MOST RECENT completed pair, and exclusions are
+ * counted only from the anchor forward, so rests older than the last handful cannot change today's
+ * clocks. Trimming the candidate list cannot inflate a driver's hours: with fewer rests in a chain,
+ * exclusions shrink and the anchor falls back toward shift start — both make the remaining time
+ * smaller, never larger. If these bounds ever bite, the result errs toward fewer available hours.
+ */
+const MAX_CHAIN_RESTS = 12;
+const MAX_CHAINS = 3000;
+
+/**
  * Enumerate every chain r1<r2<...<rk (k≥2) of rests where each consecutive pair qualifies.
  * The empty chain (no split used) is always a candidate. Rests may be skipped — extra
  * breaks are simply ordinary off-duty (FMCSA FAQ 2020-11-19).
  */
 export function enumerateChains(rests: RestPeriod[]): RestPeriod[][] {
-  const cands = rests.filter((r) => r.qualifiesShort);
+  const all = rests.filter((r) => r.qualifiesShort);
+  const cands = all.length > MAX_CHAIN_RESTS ? all.slice(-MAX_CHAIN_RESTS) : all;
   const out: RestPeriod[][] = [[]];
   const rec = (chain: RestPeriod[], fromIdx: number) => {
     for (let i = fromIdx; i < cands.length; i++) {
+      if (out.length >= MAX_CHAINS) return; // checked before descending, so the cap actually bounds work
       const r = cands[i];
       if (chain.length === 0) {
         rec([r], i + 1);
@@ -37,8 +55,7 @@ export function enumerateChains(rests: RestPeriod[]): RestPeriod[][] {
     }
   };
   rec([], 0);
-  // safety valve: absurd records
-  return out.length > 5000 ? out.slice(0, 5000) : out;
+  return out;
 }
 
 /**
@@ -72,6 +89,38 @@ function excludedMinutes(chain: RestPeriod[], from: number, to: number, strictAt
   return total;
 }
 
+/**
+ * O(log n) "how many minutes of DRIVE lie in [from, to)".
+ *
+ * evaluateShiftWithChain asks this once per driving segment for every candidate chain, so on a long
+ * record (six months of legal logs is well over a thousand segments) the cost was quadratic and the
+ * Trip tab took seconds to redraw (stress-test 2.2). Segments are sorted and non-overlapping after
+ * normalize(), so prefix sums answer exactly the same question without scanning.
+ */
+function driveLookup(segments: Segment[]): (from: number, to: number) => number {
+  const dr = segments.filter((s) => s.status === 'D');
+  const starts = dr.map((s) => s.start);
+  const ends = dr.map((s) => s.end);
+  const cum = new Float64Array(dr.length + 1);
+  for (let i = 0; i < dr.length; i++) cum[i + 1] = cum[i] + (dr[i].end - dr[i].start);
+  /** first index whose key[i] >= x */
+  const firstAtLeast = (key: number[], x: number) => {
+    let lo = 0, hi = key.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (key[m] < x) lo = m + 1; else hi = m; }
+    return lo;
+  };
+  return (from, to) => {
+    if (to <= from || dr.length === 0) return 0;
+    const lo = firstAtLeast(ends, from + 1);  // first segment ending after `from`
+    const hi = firstAtLeast(starts, to);      // first segment starting at/after `to`
+    if (hi <= lo) return 0;
+    let total = cum[hi] - cum[lo];
+    if (dr[lo].start < from) total -= from - dr[lo].start;
+    if (dr[hi - 1].end > to) total -= dr[hi - 1].end - to;
+    return total;
+  };
+}
+
 export interface ShiftEvalOptions {
   /** evaluate clocks as of this minute (defaults to end of shift record) */
   asOf: number;
@@ -98,6 +147,7 @@ export function evaluateShiftWithChain(
   const E = span.end ?? Infinity;
   const violations: Violation[] = [];
   const { limits, notes } = shiftLimits(span, opts);
+  const driveIn = driveLookup(segments);
 
   for (const seg of segments) {
     if (seg.status !== 'D') continue;
@@ -106,7 +156,7 @@ export function evaluateShiftWithChain(
     if (b <= a) continue;
     const anchor = anchorAt(chain, S, a);
     const windowUsedAtA = (a - anchor) - excludedMinutes(chain, anchor, a, null);
-    const driveUsedAtA = minutesOf(segments, DRIVE, anchor, a);
+    const driveUsedAtA = driveIn(anchor, a);
     const tW = a + Math.max(0, limits.window - windowUsedAtA);
     const tD = a + Math.max(0, limits.drive - driveUsedAtA);
     if (tW < b) {
@@ -128,7 +178,7 @@ export function evaluateShiftWithChain(
   const t = Math.min(opts.asOf, E === Infinity ? opts.asOf : E);
   const anchor = anchorAt(chain, S, t);
   const windowUsed = Math.max(0, (t - anchor) - excludedMinutes(chain, anchor, t, t));
-  const driveUsed = minutesOf(segments, DRIVE, anchor, t);
+  const driveUsed = driveIn(anchor, t);
 
   // Pending leg: most recent completed chain rest whose successor has not completed;
   // failing that, the most recent ≥2h rest since the anchor that isn't paired yet —
