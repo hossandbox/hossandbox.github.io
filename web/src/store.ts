@@ -2,7 +2,13 @@ import { useEffect, useState } from 'preact/hooks';
 import type { Segment, RulesConfig, DutyStatus } from '../../engine/src/index.ts';
 import { DEFAULT_CONFIG } from '../../engine/src/index.ts';
 
-export interface OpenSegment { status: DutyStatus; since: number; note?: string }
+/**
+ * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
+ * live row as an entry made at that moment, so a correction typed later still wins, while a row typed
+ * earlier (e.g. "off 08:00 → 22:00" before dispatch called) can no longer hide live driving
+ * (stress-test round 2, §2.1).
+ */
+export interface OpenSegment { status: DutyStatus; since: number; note?: string; createdAt?: number }
 
 /**
  * Trip-tab scenario. Kept in the store (not component state) so switching tabs does not silently
@@ -244,6 +250,16 @@ export function stamp(): number {
 }
 
 /**
+ * Does a Recap "set" entry fit inside its carrier day? applyDayPatch() clamps at the day's end, so an
+ * entry that doesn't fit must be refused up front — silently recording 1h of a 15h day understated the
+ * cycle by 14h (stress-test round 2, §2.5). Day length is 23/24/25h across DST.
+ */
+export function dayPatchOverflow(dayStart: number, dayEnd: number, drive: number, on: number, startHour: number): number {
+  const need = startHour * 60 + Math.round(on * 60) + Math.round(drive * 60) + (drive > 8 ? 30 : 0);
+  return Math.max(0, need - (dayEnd - dayStart));
+}
+
+/**
  * Write a day's drive + on-duty hours as real segments, leaving the rest of the record intact.
  *
  * The original filter dropped every segment that *touched* the day — including the part of it that
@@ -316,7 +332,8 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
 /** Materialize the open segment up to `now` so the engine sees it. */
 export function allSegments(s: State, now: number): Segment[] {
   const out = [...s.segments];
-  if (s.current && now > s.current.since) out.push({ status: s.current.status, start: s.current.since, end: now, note: s.current.note ?? 'current' });
+  // A live status saved before entries were stamped has no tap time; treat it as the newest entry.
+  if (s.current && now > s.current.since) out.push({ status: s.current.status, start: s.current.since, end: now, note: s.current.note ?? 'current', createdAt: s.current.createdAt ?? Number.MAX_SAFE_INTEGER });
   return [...out, ...s.tentative];
 }
 

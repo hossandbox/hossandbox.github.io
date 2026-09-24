@@ -25,6 +25,13 @@ export interface FullEvaluation extends Availability {
    */
   futureLogged: Segment[];
   /**
+   * Non-tentative rows that began at or before `asOf` but were logged to end after it ("off 08:00 →
+   * 22:00" typed at 08:01). The part after `asOf` has not happened; it is cut off at `asOf` for every
+   * clock, and reported (with its ORIGINAL end) so the UI can say so. Left in, it merged into a
+   * phantom rest and, once rows carried entry stamps, overwrote live driving (stress-test round 2, §2.1).
+   */
+  clippedFuture: Segment[];
+  /**
    * Rows that could not be read as duty time at all (non-finite or backwards times). Dropped rather
    * than thrown on, and reported so an import can name what it rejected (stress-test 2.8).
    */
@@ -53,7 +60,13 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   // stay in; what is dropped here is reported back so it is never discarded in silence.
   // Strictly `>`: a row starting exactly at asOf has begun and is in progress, not future-dated.
   const futureLogged = normalized.filter((s) => !s.tentative && s.start > asOf);
-  const segments = futureLogged.length ? normalized.filter((s) => s.tentative || s.start <= asOf) : normalized;
+  const kept = futureLogged.length ? normalized.filter((s) => s.tentative || s.start <= asOf) : normalized;
+  // The present is as far as the record goes: a logged row that runs past asOf is cut there. The
+  // original row is reported, never altered in storage. Re-normalize so merges see the clipped ends.
+  const clippedFuture = kept.filter((s) => !s.tentative && s.end > asOf);
+  const segments = clippedFuture.length
+    ? normalize(kept.map((s) => (!s.tentative && s.end > asOf ? { ...s, end: asOf } : s)))
+    : kept;
   const rests = restPeriods(segments);
   const spans = shifts(segments, rests);
 
@@ -121,7 +134,10 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   return {
     asOf, shift, cycle, driveNow, binding, mustStopBy: asOf + driveNow, violations,
     noSplit: current.noSplit, candidates: current.candidates, shifts: shiftEvals, segments, config,
-    futureLogged, invalid, gaps: gaps(segments, asOf),
+    futureLogged, clippedFuture, invalid,
+    // Only holes that can still change an answer: inside the cycle window or the current shift. A hole
+    // from months ago made every verdict "provisional" forever (stress-test round 2, §2.6).
+    gaps: gaps(segments, asOf).filter((g) => g.end > Math.min(cycle.days[0]?.start ?? asOf, shift.shiftStart)),
   };
 }
 

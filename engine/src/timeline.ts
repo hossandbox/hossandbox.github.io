@@ -14,7 +14,16 @@ import { LIMITS } from './types.ts';
 export function normalize(segments: Segment[]): Segment[] {
   // Entry order when the rows carry it: a correction must beat the row it corrects. Without it
   // (an imported or legacy record) keep the original start-time ordering, unchanged.
+  // Ordering contract when any row carries an entry stamp:
+  //  • stamped rows are placed in stamp order (newer wins an overlap);
+  //  • unstamped LOGGED rows (legacy / imported) are older than any stamped row, in array order;
+  //  • unstamped TENTATIVE rows (the planner's own plan, Split Lab what-ifs) are placed last. A plan
+  //    must never be silently overwritten by history it overlaps — that is how a straddling row made
+  //    an illegal run read "feasible" (stress-test round 2, §2.1). The live status row is stamped by
+  //    the store with the moment it was tapped.
   const hasOrder = segments.some((s) => Number.isFinite(s.createdAt as number));
+  const orderOf = (s: Segment, i: number) =>
+    Number.isFinite(s.createdAt as number) ? (s.createdAt as number) : s.tentative ? Number.MAX_VALUE : i;
   const sorted = segments
     .map((s, i) => ({ s, i }))
     // Finite numbers only: an imported record with ISO strings or nulls used to slip through the
@@ -23,8 +32,8 @@ export function normalize(segments: Segment[]): Segment[] {
     .filter((x) => Number.isFinite(x.s.start) && Number.isFinite(x.s.end) && x.s.end > x.s.start)
     .sort((a, b) => {
       if (hasOrder) {
-        const ao = Number.isFinite(a.s.createdAt as number) ? (a.s.createdAt as number) : a.i;
-        const bo = Number.isFinite(b.s.createdAt as number) ? (b.s.createdAt as number) : b.i;
+        const ao = orderOf(a.s, a.i);
+        const bo = orderOf(b.s, b.i);
         if (ao !== bo) return ao - bo;
       }
       return a.s.start - b.s.start || a.s.end - b.s.end;

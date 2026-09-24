@@ -99,8 +99,13 @@ test('the chain search is bounded: a long split history does not blow up the hea
   const parts: [Segment['status'], number][] = [];
   for (let i = 0; i < 30; i++) parts.push(...day);
   const s = seq('2026-06-01T06:00', parts);
+  const t0 = performance.now();
   const ev = evaluate(s, { asOf: s[s.length - 1].end, config: cfg });
-  assert.ok(ev.candidates <= 3000, `chain count ${ev.candidates} should stay bounded`);
+  const ms = performance.now() - t0;
+  // The search is now an exact DP over every rest (round 2, §2.2): the work is polynomial even though
+  // the number of interpretations it covers is astronomically large, so bound the time, not the count.
+  assert.ok(ms < 2000, `30 days of splits took ${ms.toFixed(0)}ms`);
+  assert.ok(ev.candidates > 3000, 'every interpretation is covered, not a trimmed subset');
 });
 
 test('the driving-minutes lookup is exactly equivalent to a direct scan', () => {

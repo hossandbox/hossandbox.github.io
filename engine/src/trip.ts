@@ -1,7 +1,9 @@
 import type { DutyStatus, RulesConfig, Segment } from './types.ts';
 import { evaluate, type FullEvaluation } from './availability.ts';
 import { LIMITS } from './types.ts';
-import { nextCarrierDayStart, carrierDayStart } from './cycle.ts';
+import { nextCarrierDayStart, carrierDayStart, cycleParams } from './cycle.ts';
+import { normalize, restPeriods } from './timeline.ts';
+import { DEFAULT_CONFIG } from './types.ts';
 
 export interface TripStop {
   /** miles from origin */
@@ -90,10 +92,19 @@ export function planTrip(history: Segment[], input: TripInput): TripPlan {
   // History starting at or after departure has not happened by the time wheels roll. Planning from it
   // let a future-dated sleeper row overwrite the plan's own driving, so an illegal run read
   // "feasible/LEGAL" (stress-test 2.1). Tentative rows are plans and stay in.
-  const past = history.filter((s) => s.tentative || s.start < input.departure);
-  if (past.length !== history.length) {
-    warnings.push(`${history.length - past.length} logged row(s) dated after your departure are ignored — you cannot have already logged time you have not driven.`);
+  const before = history.filter((s) => s.tentative || s.start < input.departure);
+  if (before.length !== history.length) {
+    warnings.push(`${history.length - before.length} logged row(s) dated after your departure are ignored — you cannot have already logged time you have not driven.`);
   }
+  // A logged row that began before departure but runs past it is cut at departure: the plan owns the
+  // time from departure on. Filtering by start alone let such a row overwrite the plan's own driving
+  // (stress-test round 2, §2.1).
+  const straddling = before.filter((s) => !s.tentative && s.end > input.departure).length;
+  if (straddling) warnings.push(`${straddling} logged row(s) running past your departure are cut off at departure.`);
+  const past = pruneHistory(
+    straddling ? before.map((s) => (!s.tentative && s.end > input.departure ? { ...s, end: input.departure } : s)) : before,
+    input.departure, input.config,
+  );
   const base = [...lead, ...past];
 
   let t = input.departure;
@@ -202,6 +213,37 @@ function waitForCycle(ev: FullEvaluation, t: number): { minutes: number; reason:
   return { minutes: LIMITS.RESTART, reason: '34-hour restart (no recap hours within forecast)' };
 }
 
+
+/**
+ * Drop history that cannot affect any clock at or after `from` (stress-test round 2, §2.4).
+ *
+ * The 11, the 14, the 30-minute break and the split anchor all live inside the current shift; the
+ * 60/70 cycle looks back `windowDays` carrier days, and a 34-hour restart only matters if it ends
+ * inside that window. So everything before the start of the last ≥10h rest that begins on or before
+ * (window start − 1 day) is dead weight. Cutting at the START of such a rest keeps it whole — its
+ * length, its sleeper run, whether it is a restart — so shift boundaries after it are unchanged.
+ * Tentative rows are never dropped. A record with no such rest is returned unchanged.
+ */
+export function pruneHistory(history: Segment[], from: number, config?: Partial<RulesConfig>): Segment[] {
+  if (history.length < 50) return history;
+  const cfg = { ...DEFAULT_CONFIG, ...(config ?? {}) };
+  const { windowDays } = cycleParams(cfg);
+  let winStart = carrierDayStart(from, cfg);
+  for (let i = 0; i < windowDays + 1; i++) winStart = carrierDayStart(winStart - 1, cfg);
+  const logged = normalize(history.filter((s) => !s.tentative && s.start < from));
+  const rests = restPeriods(logged);
+  let cut: number | null = null;
+  for (const r of rests) if (r.isReset && r.start <= winStart) cut = r.start;
+  if (cut === null) return history;
+  const c = cut;
+  const kept = history.filter((s) => s.tentative || s.end > c).map((s) => (!s.tentative && s.start < c ? { ...s, start: c } : s));
+  // A rest that opens with unlogged time (gaps read as OFF) would shrink when the row before it goes;
+  // pin its start with an explicit OFF so the kept rest is exactly as long as before.
+  const firstStart = Math.min(...kept.filter((s) => !s.tentative).map((s) => s.start));
+  if (isFinite(firstStart) && firstStart > c) kept.push({ status: 'OFF', start: c, end: firstStart, note: 'pruned-boundary' });
+  return kept;
+}
+
 export { carrierDayStart, nextCarrierDayStart };
 
 const fmtH = (m: number) => (m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`);
@@ -229,7 +271,8 @@ export const TRIP_STRATEGIES: TripStrategy[] = ['reset10', 'split', 'restart34']
  * more, and a restart is always available instead (§395.3(c)). Never collapse the two into one
  * itinerary; show the driver both waits.
  */
-export function planTripAll(history: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; restart34: TripPlan; faster: TripStrategy | 'same' } {
+export function planTripAll(fullHistory: Segment[], input: TripInput): { reset10: TripPlan; split: TripPlan; restart34: TripPlan; faster: TripStrategy | 'same' } {
+  const history = pruneHistory(fullHistory, input.untilDeparture?.from ?? input.departure, input.config);
   const reset10 = planTrip(history, { ...input, restStrategy: 'reset10' });
   const restart34 = planTrip(history, { ...input, restStrategy: 'restart34' });
   // The split plan has to choose how long to sleep when it opens a split itself: 7h pairs soonest,

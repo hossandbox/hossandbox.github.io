@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, cycleBasis, applyDayPatch, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -207,6 +207,12 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
           You cannot have already logged time that has not happened, so it is left out of every clock. Fix the date on the <b>Log</b> tab, or make it a what-if if you meant to plan it.
         </div>
       )}
+      {ev.clippedFuture.length > 0 && (
+        <div class="warnbox small">
+          <b>{ev.clippedFuture.length} entr{ev.clippedFuture.length === 1 ? 'y runs' : 'ies run'} past now.</b>{' '}
+          {ev.clippedFuture.map((x) => `${segLabel(x.status, x.note)} ${clock(x.start)} → ${clock(x.end)}`).join(', ')}. Only the part up to now is counted — the rest hasn't happened. Shorten {ev.clippedFuture.length === 1 ? 'it' : 'them'} on the <b>Log</b> tab, or tap your status when it changes.
+        </div>
+      )}
       {s.config.timeZone !== deviceTz && (
         <div class="muted small">
           <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
@@ -276,8 +282,10 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
     const segments = [...cur.segments];
-    if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: stamp() });
-    return { segments, current: { status: st, since: now, note } };
+    // The closed row keeps the stamp from when it was tapped, so a correction typed while it was live
+    // still wins over it after it closes.
+    if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: cur.current.createdAt ?? stamp() });
+    return { segments, current: { status: st, since: now, note, createdAt: stamp() } };
   });
   const toggleException = (key: 'adverseShifts' | 'sixteenHourShifts') => setState((cur) => {
     const list = new Set(cur.config[key] ?? []);
@@ -291,6 +299,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     const a = fromInput(start), b = fromInput(end);
     if (a === null || b === null) { setFormError('Enter a valid start and end.'); return; }
     if (b <= a) { setFormError('End must be after start.'); return; }
+    if (b > now) { setFormError(`End is after now (${clock(now)}). This log is for time that has happened — use Split Lab or Trip to plan ahead, or tap your status above when it changes.`); return; }
     setFormError(null);
     setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b, createdAt: stamp() }] }));
   };
@@ -307,13 +316,14 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     const a = fromInput(editing.start), b = fromInput(editing.end);
     if (a === null || b === null) { setEditError('Enter a valid start and end.'); return; }
     if (b <= a) { setEditError('End must be after start.'); return; }
+    if (b > now) { setEditError(`End is after now (${clock(now)}). Logged time can only run up to now.`); return; }
     setEditError(null);
     snapshot(`Edited ${desc(editing.orig)}`);
     const next = { status: editing.status, start: a, end: b };
     setState((cur) => applySegmentEdit(cur, editing.orig, next));
     setEditing(null);
   };
-  const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now }, historyAcknowledged: true }); };
+  const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true }); };
 
   return (
     <>
@@ -441,7 +451,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           : ev.shift.pendingSplitLeg
           ? <p><b>Period A logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
           : <p class="muted">No qualifying break (≥2h) pending since your anchor at {clock(ev.shift.anchor)}.</p>}
-        {ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates} interpretation(s) considered.</p>}
+        {ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
       </Card>
 
       <Card title="What if… (starts at the end of your log)">
@@ -494,14 +504,21 @@ function DayEditor({ day, hasData, onApply }: { day: { start: number; end: numbe
   const [on, setOn] = useState(2);
   const [startH, setStartH] = useState(6);
   const [open, setOpen] = useState(false);
-  if (!open) return <button class="mini" onClick={() => setOpen(true)}>{hasData ? 'edit' : 'set'}</button>;
+  const [err, setErr] = useState<string | null>(null);
+  if (!open) return <button class="mini" onClick={() => { setErr(null); setOpen(true); }}>{hasData ? 'edit' : 'set'}</button>;
+  const apply = () => {
+    const over = dayPatchOverflow(day.start, day.end, drive, on, startH);
+    if (over > 0) { setErr(`That runs ${dur(over)} past the end of ${day.label}. Start earlier or enter fewer hours — put the rest on the next day.`); return; }
+    if (!hasData || confirm(`Replace everything logged on ${day.label}?`)) { onApply(drive, on, startH); setOpen(false); }
+  };
   return (
     <div class="dayedit">
       <label>Drive h<input type="number" class="hrs" min={0} max={13} step={0.25} value={drive} onInput={(e) => setDrive(Number((e.target as HTMLInputElement).value))} /></label>
       <label>On h<input type="number" class="hrs" min={0} max={14} step={0.25} value={on} onInput={(e) => setOn(Number((e.target as HTMLInputElement).value))} /></label>
       <label>Start<input type="number" class="hrs" min={0} max={23} step={1} value={startH} onInput={(e) => setStartH(Number((e.target as HTMLInputElement).value))} /></label>
-      <button class="mini primary" onClick={() => { if (!hasData || confirm(`Replace everything logged on ${day.label}?`)) { onApply(drive, on, startH); setOpen(false); } }}>OK</button>
+      <button class="mini primary" onClick={apply}>OK</button>
       <button class="mini" onClick={() => setOpen(false)}>✕</button>
+      {err && <div class="warnbox small">{err}</div>}
     </div>
   );
 }
@@ -581,9 +598,9 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
             const isToday = i === days.length - 1;
             const hasData = s.segments.some((x) => x.start < d.end && x.end > d.start);
             return <tr key={d.label} class={isToday ? 'today' : ''}><td>{isToday ? 'Today' : `D-${days.length - 1 - i}`}<br /><small class="muted">{d.label}</small></td><td><b>{hrs(d.onDuty)}</b> h</td>
-              <td>{!isToday && firstLogged !== null && d.end <= firstLogged
-                ? <small class="muted" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small>
-                : !isToday && <DayEditor day={d} hasData={hasData} onApply={applyDay(d.start, d.end)} />}</td></tr>;
+              <td>{!isToday && firstLogged !== null && d.end <= firstLogged && <><small class="muted" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small><br /></>}
+                {/* The badge says the day counts as zero; the editor is how you fix that (stress-test round 2, §2.3). */}
+                {!isToday && <DayEditor day={d} hasData={hasData} onApply={applyDay(d.start, d.end)} />}</td></tr>;
           })}
         </tbody></table>
         <div class="clocks">
@@ -686,6 +703,9 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <div class="row"><button onClick={() => setState({ trip: { ...DEFAULT_TRIP } })}>Reset plan</button></div>
         <p class="muted small">This scenario is kept while you move between tabs.</p>
       </Card>
+      {meaningfulGaps(ev.gaps).length > 0 && (
+        <p class="warnbox small"><b>Provisional.</b> {meaningfulGaps(ev.gaps).map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {meaningfulGaps(ev.gaps).length === 1 ? 'is' : 'are'} unlogged and counted as off duty, so a "legal" below may rest on a break you never took. Fill {meaningfulGaps(ev.gaps).length === 1 ? 'it' : 'them'} in on the <b>Log</b> tab.</p>
+      )}
       <Card title="Itinerary — three ways to rest">
         <PlanCompare both={both} from={departure} view={d.view} onView={(v) => setTrip({ view: v })} />
       </Card>

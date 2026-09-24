@@ -212,8 +212,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/aria-label="Decrease Distance by 25 mi"/.test(hh)) throw new Error('slider stepper buttons missing');
 
   // (b) violation labels are driver-facing, never enum ids
+  // "now" sits after the drive ends: a logged row can only count up to now (round 2, §2.1), and this
+  // check is about the wording of a violation that has already happened.
   setState({
-    tab: 'log', current: null, tentative: [], segments: [
+    tab: 'log', nowOverride: M('2026-09-23T04:00:00Z'), current: null, tentative: [], segments: [
       { status: 'OFF', start: M('2026-09-22T01:00:00Z'), end: M('2026-09-22T11:00:00Z') }, // 20:00→06:00
       { status: 'ON', start: M('2026-09-22T11:00:00Z'), end: M('2026-09-22T13:00:00Z') },  // 06:00→08:00
       { status: 'D', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-23T03:00:00Z') },   // 08:00→22:00
@@ -603,7 +605,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/dated in the future and is being ignored/.test(hh)) throw new Error('a future-dated entry must be reported, not silently dropped');
 
   // 2.8 — severity must not read as "acceptable", and the evaluation must survive a bad timestamp
-  setState({ nowOverride: M('2026-09-15T10:00:00Z'), tab: 'log', segments: [
+  // "now" after the drive ends: only time up to now counts (round 2, §2.1)
+  setState({ nowOverride: M('2026-09-15T21:30:00Z'), tab: 'log', segments: [
       { status: 'OFF', start: M('2026-09-15T00:00:00Z'), end: M('2026-09-15T10:00:00Z') },
       { status: 'D', start: M('2026-09-15T10:00:00Z'), end: M('2026-09-15T21:30:00Z') },
     ], current: null });
@@ -631,5 +634,71 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [] });
   console.log('stress-test findings: OK');
+}
+
+// Regression (stress-test round 2, retest of build 2026-09-24 21:25).
+{
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const { allSegments, dayPatchOverflow, INITIAL_STATE } = await import('../src/store.ts');
+  const cfg = { cycle: '70/8', dayStartHour: 0, timeZone: 'UTC', shortHaul: false };
+  const ms = (m) => m * 60000;
+
+  // §2.1 U1a/U1b — "off 08:00 → 22:00" typed at 08:01, then Driving tapped at 10:00. The live driving must count.
+  const rows = [
+    { status: 'OFF', start: M('2026-09-14T20:00:00Z'), end: M('2026-09-15T06:00:00Z'), createdAt: ms(M('2026-09-15T06:00:00Z')) },
+    { status: 'ON', start: M('2026-09-15T06:00:00Z'), end: M('2026-09-15T08:00:00Z'), createdAt: ms(M('2026-09-15T08:00:00Z')) },
+    { status: 'OFF', start: M('2026-09-15T08:00:00Z'), end: M('2026-09-15T22:00:00Z'), createdAt: ms(M('2026-09-15T08:01:00Z')) },
+    { status: 'OFF', start: M('2026-09-15T08:00:00Z'), end: M('2026-09-15T10:00:00Z'), createdAt: ms(M('2026-09-15T10:00:00Z')) },
+  ];
+  const live = { status: 'D', since: M('2026-09-15T10:00:00Z'), createdAt: ms(M('2026-09-15T10:00:00Z')) };
+  for (const [iso, left] of [['2026-09-15T13:00:00Z', 480], ['2026-09-15T21:00:00Z', 0]]) {
+    const t = M(iso);
+    const ev = evaluate(allSegments({ ...INITIAL_STATE, segments: rows, current: live }, t), { asOf: t, config: cfg });
+    if (ev.shift.driveRemaining !== left) throw new Error(`live driving not counted: 11-hr left ${ev.shift.driveRemaining}m at ${iso}, expected ${left}m`);
+    if (left === 0 && !ev.violations.some((v) => v.kind === 'WINDOW_14')) throw new Error('11h of live driving past the 14 must show a WINDOW_14 violation');
+  }
+  // a legacy live status (saved before tap stamps existed) is still treated as the newest entry
+  {
+    const t = M('2026-09-15T13:00:00Z');
+    const ev = evaluate(allSegments({ ...INITIAL_STATE, segments: rows, current: { status: 'D', since: live.since } }, t), { asOf: t, config: cfg });
+    if (ev.shift.driveRemaining !== 480) throw new Error('an unstamped (legacy) live status must not lose to older rows');
+  }
+  // …and a correction typed AFTER the tap still wins over the live row
+  {
+    const t = M('2026-09-15T13:00:00Z');
+    const fuel = { status: 'ON', start: M('2026-09-15T11:00:00Z'), end: M('2026-09-15T11:30:00Z'), createdAt: ms(M('2026-09-15T12:00:00Z')) };
+    const ev = evaluate(allSegments({ ...INITIAL_STATE, segments: [...rows, fuel], current: live }, t), { asOf: t, config: cfg });
+    if (ev.shift.driveRemaining !== 510) throw new Error(`a later correction inside the live period must win: 11-hr left ${ev.shift.driveRemaining}m, expected 510m`);
+  }
+
+  // §2.1 — the row running past now is disclosed on screen
+  setState({ nowOverride: M('2026-09-15T10:00:00Z'), tab: 'log', historyAcknowledged: true, current: null, segments: rows.slice(0, 3) });
+  let hh = out('log/row running past now');
+  if (!/runs past now/.test(hh)) throw new Error('a row running past now must be reported');
+
+  // §2.3 — days before the record starts keep the badge AND the set button
+  setState({ nowOverride: M('2026-09-16T12:00:00Z'), tab: 'recap', historyAcknowledged: false, current: null,
+    segments: [{ status: 'ON', start: M('2026-09-16T06:00:00Z'), end: M('2026-09-16T10:00:00Z') }] });
+  hh = out('recap/one day logged');
+  const badges = (hh.match(/not logged — counted as 0h/g) || []).length;
+  const setButtons = (hh.match(/>set</g) || []).length;
+  if (badges < 7) throw new Error(`expected 7 counted-zero days, saw ${badges}`);
+  if (setButtons < 7) throw new Error(`days before the record must keep their set button (saw ${setButtons})`);
+
+  // §2.5 — an entry that doesn't fit in its day is refused, not truncated
+  const d0 = M('2026-09-14T00:00:00Z'), d1 = M('2026-09-15T00:00:00Z');
+  if (dayPatchOverflow(d0, d1, 13, 2, 23) !== 14 * 60 + 30) throw new Error('13h drive + 2h on at 23:00 overflows the day by 14h30');
+  if (dayPatchOverflow(d0, d1, 8, 2, 6) !== 0) throw new Error('8h drive + 2h on at 06:00 fits');
+
+  // §2.6 — the Trip tab says when its verdicts rest on an unlogged hole
+  const now2130 = M('2026-09-15T21:30:00Z');
+  setState({ nowOverride: now2130, tab: 'trip', historyAcknowledged: true, current: null,
+    segments: [{ status: 'D', start: M('2026-09-15T06:00:00Z'), end: M('2026-09-15T11:00:00Z') }, { status: 'OFF', start: M('2026-09-15T13:00:00Z'), end: now2130 }] });
+  hh = out('trip/2h hole');
+  if (!/Provisional\./.test(hh)) throw new Error('Trip must mark its verdicts provisional when a relevant hole exists');
+
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
+  console.log('stress-test round 2: OK');
 }
 console.log('OK');

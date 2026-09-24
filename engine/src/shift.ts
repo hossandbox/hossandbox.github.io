@@ -309,16 +309,162 @@ export function rankEvaluations(evals: ShiftEvaluation[]): ShiftEvaluation {
 }
 
 /** Evaluate a shift under every candidate chain and return the FMCSA-preferred one. */
+/**
+ * Evaluate a shift under every split-sleeper interpretation and return the FMCSA-preferred one.
+ *
+ * Exact dynamic programme over the qualifying rests (stress-test round 2, §2.2).
+ *
+ * Why this is exact without enumerating chains: under a chain c1<c2<…, a driving piece that starts
+ * after c_j (and before c_{j+1}) is judged with anchor = end of c_{j-1} (or shift start when j<2) and
+ * exactly one exclusion, c_j itself (see anchorAt / excludedMinutes). So the violations a chain
+ * produces are a sum of costs that depend only on consecutive pairs (c_{j-1}, c_j) — a DP over the
+ * state "last two chain rests". The ranking (egregious → over → minor → most time forward) is
+ * lexicographic, which is compatible with summing, and the forward time at `asOf` depends only on the
+ * state active at `asOf`, so it enters the sum exactly once per chain as a fourth component.
+ *
+ * The previous version enumerated chains and kept only the last 12 rests, which bounded the work but
+ * judged all older driving with no split credit — 14 days of legal 8/2 splits showed 40 "well over"
+ * violations that never happened. This version considers every rest in the shift in O(n³) time.
+ */
+const MAX_DP_RESTS = 200; // absurd-record safety valve only; realistic shifts have well under 60
+
+type Cost = [number, number, number, number]; // egregious, over, minor, −forward
+const ZERO: Cost = [0, 0, 0, 0];
+const add = (a: Cost, b: Cost): Cost => [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
+const sub = (a: Cost, b: Cost): Cost => [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+const less = (a: Cost, b: Cost) => {
+  for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+};
+
 export function evaluateShift(
   segments: Segment[],
   span: ShiftSpan,
   restsInShift: RestPeriod[],
   opts: ShiftEvalOptions,
 ): { best: ShiftEvaluation; noSplit: ShiftEvaluation; candidates: number } {
-  const chains = enumerateChains(restsInShift);
-  const evals = chains.map((c) => evaluateShiftWithChain(segments, span, c, { ...opts, rests: restsInShift }));
-  const noSplit = evals[0];
-  return { best: rankEvaluations(evals), noSplit, candidates: chains.length };
+  const withRests = { ...opts, rests: restsInShift };
+  const noSplit = evaluateShiftWithChain(segments, span, [], withRests);
+  const all = restsInShift.filter((r) => r.qualifiesShort);
+  const cands = all.length > MAX_DP_RESTS ? all.slice(-MAX_DP_RESTS) : all;
+  const n = cands.length;
+  if (n < 2) return { best: noSplit, noSplit, candidates: 1 };
+
+  const S = span.start;
+  const E = span.end ?? Infinity;
+  const t = Math.min(opts.asOf, E === Infinity ? opts.asOf : E);
+  const { limits } = shiftLimits(span, withRests);
+  const driveIn = driveLookup(segments);
+
+  // Driving pieces clipped to the shift, in time order.
+  const pieces: { a: number; b: number }[] = [];
+  for (const seg of segments) {
+    if (seg.status !== 'D') continue;
+    const a = Math.max(seg.start, S), b = Math.min(seg.end, E);
+    if (b > a) pieces.push({ a, b });
+  }
+  pieces.sort((x, y) => x.a - y.a);
+  const firstAtOrAfter = (x: number) => {
+    let lo = 0, hi = pieces.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (pieces[m].a < x) lo = m + 1; else hi = m; }
+    return lo;
+  };
+  /** violation counts for one piece — the same arithmetic as evaluateShiftWithChain */
+  const pieceCost = (anchor: number, excl: number, p: { a: number; b: number }): Cost => {
+    const c: Cost = [0, 0, 0, 0];
+    const bump = (m: number) => { const sv = severityOf(m); c[sv === 'egregious' ? 0 : sv === 'violation' ? 1 : 2]++; };
+    const tW = p.a + Math.max(0, limits.window - ((p.a - anchor) - excl));
+    const tD = p.a + Math.max(0, limits.drive - driveIn(anchor, p.a));
+    if (tW < p.b) bump(p.b - tW);
+    if (tD < p.b) bump(p.b - tD);
+    return c;
+  };
+  /** prefix sums of piece costs under a fixed (anchor, excl), from piece k0 on */
+  const prefixFrom = (anchor: number, excl: number, k0: number): Cost[] => {
+    const out: Cost[] = [ZERO];
+    for (let k = k0; k < pieces.length; k++) out.push(add(out[out.length - 1], pieceCost(anchor, excl, pieces[k])));
+    return out;
+  };
+  const emptyPre = prefixFrom(S, 0, 0);
+  const emptyUpTo = (x: number): Cost => emptyPre[firstAtOrAfter(x)];
+
+  // State (pi, ci): the chain's last two rests are cands[pi], cands[ci] (pi = -1: ci is the first).
+  const statePre = new Map<number, { k0: number; pre: Cost[] }>();
+  const key = (pi: number, ci: number) => (pi + 1) * (n + 1) + ci;
+  const stateCost = (pi: number, ci: number, until: number): Cost => {
+    const k = key(pi, ci);
+    let st = statePre.get(k);
+    if (!st) {
+      const c = cands[ci];
+      const anchor = pi < 0 ? S : cands[pi].end;
+      const excl = c.start >= anchor ? c.duration : 0;
+      const k0 = firstAtOrAfter(c.end);
+      st = { k0, pre: prefixFrom(anchor, excl, k0) };
+      statePre.set(k, st);
+    }
+    const kEnd = Math.max(st.k0, until === Infinity ? pieces.length : firstAtOrAfter(until));
+    return st.pre[kEnd - st.k0];
+  };
+  const fwdCache = new Map<number, number>();
+  const fwd = (pi: number, ci: number): number => {
+    const k = pi === -2 ? -1 : key(pi, ci);
+    let v = fwdCache.get(k);
+    if (v === undefined) {
+      const ev = pi === -2 ? noSplit : evaluateShiftWithChain(segments, span, pi < 0 ? [cands[ci]] : [cands[pi], cands[ci]], withRests);
+      v = ev.driveRemaining + ev.windowRemaining;
+      fwdCache.set(k, v);
+    }
+    return v;
+  };
+  const F = (pi: number, ci: number): Cost => [0, 0, 0, -fwd(pi, ci)];
+
+  const best = new Map<number, { cost: Cost; back: number; count: number }>();
+  for (let ci = 0; ci < n; ci++) {
+    let cost = emptyUpTo(cands[ci].start);
+    if (cands[ci].end > t) cost = add(cost, F(-2, -1)); // nothing completed by asOf: the no-split clocks are active
+    best.set(key(-1, ci), { cost, back: -1, count: 1 });
+  }
+  // Process states in order of their last rest so every predecessor is final before it is extended.
+  let winner: { cost: Cost; pi: number; ci: number } = { cost: add(emptyPre[pieces.length], F(-2, -1)), pi: -2, ci: -1 };
+  let chainsCount = 1;
+  for (let ci = 0; ci < n; ci++) {
+    for (let pi = -1; pi < ci; pi++) {
+      const cur = best.get(key(pi, ci));
+      if (!cur) continue;
+      const c = cands[ci];
+      if (pi >= 0) {
+        // a complete chain may end here
+        let total = add(cur.cost, stateCost(pi, ci, Infinity));
+        if (c.end <= t) total = add(total, F(pi, ci));
+        if (less(total, winner.cost)) winner = { cost: total, pi, ci };
+        chainsCount = Math.min(999_999, chainsCount + cur.count);
+      }
+      for (let ni = ci + 1; ni < n; ni++) {
+        if (!pairQualifies(c, cands[ni])) continue;
+        let cost = add(cur.cost, stateCost(pi, ci, cands[ni].start));
+        if (c.end <= t && cands[ni].end > t) cost = add(cost, F(pi, ci));
+        const k = key(ci, ni);
+        const prev = best.get(k);
+        if (!prev) best.set(k, { cost, back: pi, count: cur.count });
+        else {
+          prev.count = Math.min(999_999, prev.count + cur.count);
+          if (less(cost, prev.cost)) { prev.cost = cost; prev.back = pi; }
+        }
+      }
+    }
+  }
+
+  if (winner.pi === -2) return { best: noSplit, noSplit, candidates: chainsCount };
+  // Rebuild the winning chain from back-pointers.
+  const chain: RestPeriod[] = [];
+  let pi = winner.pi, ci = winner.ci;
+  while (ci >= 0) {
+    chain.unshift(cands[ci]);
+    const back = best.get(key(pi, ci))!.back;
+    ci = pi; pi = back;
+    if (ci < 0) break;
+  }
+  return { best: evaluateShiftWithChain(segments, span, chain, withRests), noSplit, candidates: chainsCount };
 }
 
 export function fmt(min: number): string {
