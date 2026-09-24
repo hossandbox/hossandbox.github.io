@@ -48,9 +48,9 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
     const keep = `Still using ${fmt(value)}.`;
     if (raw === '') {
       // Empty covers two cases: the driver cleared the box, and the browser refusing text it cannot
-      // parse ("3,500" reads as empty in a number input). Both leave the stored value alone, and
-      // silently reverting is how a driver ends up reading the OLD route believing they changed it
-      // (consumer-review-6, finding 4).
+      // parse (a number input reports an empty value for "3,500"). `badInput` flags the second case
+      // when the browser sets it; either way the stored value is untouched, and silently reverting is
+      // how a driver ends up reading the OLD route believing they changed it (consumer-review-6, #4).
       setText('');
       setNote(el.validity?.badInput
         ? `That isn't a number this field can read — try 3500 rather than 3,500. ${keep}`
