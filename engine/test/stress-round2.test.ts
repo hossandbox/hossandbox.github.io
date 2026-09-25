@@ -80,10 +80,24 @@ test('U2b a real violation inside a long split run is still caught', () => {
   assert.equal(d11.length, 1); assert.equal(d11[0].minutes, 60);
 });
 
-// Exactness guard: the DP must pick the same interpretation as brute-force enumeration.
-test('U2c DP chain selection equals brute force on 1500 random shifts', () => {
+// Exactness guard: the DP must pick the SAME interpretation as brute-force enumeration ranked by
+// rankEvaluations() — compared on everything the driver sees, not just the rank. The round-2 version
+// compared rank signatures only and missed that tied readings (21% of shifts) were resolved by loop
+// order, differently from the old code in ~0.5% of shifts.
+const visible = (e: { anchor: number; driveRemaining: number; windowRemaining: number; pendingSplitLeg: RestPeriod | null; chain: RestPeriod[]; violations: { kind: string; start: number; minutes: number }[] }) =>
+  JSON.stringify([e.anchor, e.driveRemaining, e.windowRemaining, e.pendingSplitLeg?.start ?? null, e.chain.map((r) => r.start), e.violations.map((v) => [v.kind, v.start, v.minutes])]);
+function randomRecord(rnd: () => number) {
+  const pick = <T,>(a: readonly T[]) => a[Math.floor(rnd() * a.length)];
+  let t = 29_800_000 + Math.floor(rnd() * 1440); const segs: Segment[] = [];
+  for (let i = 0, m = 4 + Math.floor(rnd() * 20); i < m; i++) {
+    const st = pick(['D', 'D', 'SB', 'OFF', 'ON'] as const);
+    const d = H(pick(st === 'D' ? [1, 2, 3, 4, 5, 6] : st === 'SB' ? [2, 3, 7, 7.5, 8, 9.5] : st === 'OFF' ? [0.5, 2, 2.5, 3, 10, 12] : [0.5, 1, 2]));
+    segs.push({ status: st, start: t, end: t + d, tentative: rnd() < 0.1 }); t += d;
+  }
+  return { segs, t };
+}
+test('U2c DP chain selection equals brute force on full visible output (1500 random records)', () => {
   let seed = 4242; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
   const all = (rests: RestPeriod[]) => {
     const c = rests.filter((r) => r.qualifiesShort); const out: RestPeriod[][] = [[]];
     const rec = (ch: RestPeriod[], i0: number) => { for (let i = i0; i < c.length; i++) {
@@ -91,16 +105,9 @@ test('U2c DP chain selection equals brute force on 1500 random shifts', () => {
       else if (pairQualifies(ch[ch.length - 1], c[i])) { const nx = [...ch, c[i]]; out.push(nx); rec(nx, i + 1); } } };
     rec([], 0); return out;
   };
-  const sig = (e: { violations: { severity: string }[]; driveRemaining: number; windowRemaining: number }) =>
-    ['egregious', 'violation', 'nominal'].map((k) => e.violations.filter((v) => v.severity === k).length).join() + `|${e.driveRemaining}|${e.windowRemaining}`;
   let n = 0;
   for (let k = 0; k < 1500; k++) {
-    let t = 29_800_000 + Math.floor(rnd() * 1440); const segs: Segment[] = [];
-    for (let i = 0, m = 4 + Math.floor(rnd() * 20); i < m; i++) {
-      const st = pick(['D', 'D', 'SB', 'OFF', 'ON'] as const);
-      const d = H(pick(st === 'D' ? [1, 2, 3, 4, 5, 6] : st === 'SB' ? [2, 3, 7, 7.5, 8, 9.5] : st === 'OFF' ? [0.5, 2, 2.5, 3, 10, 12] : [0.5, 1, 2]));
-      segs.push({ status: st, start: t, end: t + d, tentative: rnd() < 0.1 }); t += d;
-    }
+    const { segs, t } = randomRecord(rnd);
     const norm = normalize(segs); const rests = restPeriods(norm);
     for (const span of shifts(norm, rests)) {
       const inShift = rests.filter((r) => r.start >= span.start && (span.end === null || r.start <= span.end));
@@ -110,10 +117,52 @@ test('U2c DP chain selection equals brute force on 1500 random shifts', () => {
       const opts = { asOf, config: cfg, rests: inShift };
       const brute = rankEvaluations(all(inShift).map((c) => evaluateShiftWithChain(norm, span, c, opts)));
       const dp = evaluateShift(norm, span, inShift, { asOf, config: cfg }).best;
-      assert.equal(sig(dp), sig(brute), `case ${k}`); n++;
+      assert.equal(visible(dp), visible(brute), `case ${k}`); n++;
     }
   }
   assert.ok(n > 1500, `compared ${n} shifts`);
+});
+
+// ---- Tie-break addendum: the order itself, and stability ----
+test('U5 tie-break order after the four legal criteria: least over now, fewer minutes over, shorter rest to finish the split', () => {
+  const r = (start: number, duration: number, long: boolean) => ({ start, end: start + duration, duration, longestSB: long ? duration : 0, isReset: false, qualifiesShort: true, qualifiesLongSB: long, isRestart: false }) as RestPeriod;
+  // clocks kept self-consistent: remaining = limit − used, clamped at 0
+  const clocks = (driveUsed: number, windowUsed: number) => ({ limits: { drive: 660, window: 840 }, driveUsed, windowUsed,
+    driveRemaining: Math.max(0, 660 - driveUsed), windowRemaining: Math.max(0, 840 - windowUsed) });
+  const base = { ...clocks(360, 540), anchor: 0, chain: [] as RestPeriod[] };
+  const v = (m: number) => ({ kind: 'WINDOW_14', start: 0, end: m, minutes: m, severity: 'violation', tentative: false });
+  const a = { ...base, violations: [v(40)], pendingSplitLeg: r(0, 180, false) } as any;
+  const b = { ...base, violations: [v(20)], pendingSplitLeg: r(0, 180, false) } as any;
+  assert.equal(rankEvaluations([a, b]), b, 'fewer minutes over wins');
+  const c = { ...base, violations: [v(20)], pendingSplitLeg: r(0, 480, true) } as any; // needs 2h, not 7h
+  assert.equal(rankEvaluations([b, c]), c, 'shorter rest to complete the split wins');
+  const worse = { ...c, ...clocks(361, 540) } as any; // one minute less forward time
+  assert.equal(rankEvaluations([worse, a]), a, 'a tie-break never outranks forward time');
+  // Both out of hours: forward time is 0 for both, so criterion 4 cannot separate them.
+  const out15 = { ...a, ...clocks(700, 855) } as any;  // 40 + 15 min over right now
+  const out90 = { ...b, ...clocks(700, 930) } as any;  // 40 + 90 min over right now, fewer minutes over in total
+  assert.equal(out15.driveRemaining + out15.windowRemaining, 0);
+  assert.equal(out90.driveRemaining + out90.windowRemaining, 0);
+  assert.equal(rankEvaluations([out90, out15]), out15, 'least over right now wins before total minutes over');
+});
+test('U6 input order does not change the answer', () => {
+  let seed = 99; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let k = 0; k < 200; k++) {
+    const { segs, t } = randomRecord(rnd);
+    const shuffled = [...segs].sort(() => rnd() - 0.5);
+    const a = evaluate(segs, { asOf: t, config: cfg }), b = evaluate(shuffled, { asOf: t, config: cfg });
+    assert.equal(visible(b.shift), visible(a.shift), `record ${k}`);
+    assert.deepEqual(b.violations.map((x) => [x.kind, x.start, x.minutes]), a.violations.map((x) => [x.kind, x.start, x.minutes]));
+  }
+});
+test('U7 with no new entries, the anchor never flips back and forth as time passes', () => {
+  let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let k = 0; k < 150; k++) {
+    const { segs, t } = randomRecord(rnd);
+    const seen: number[] = [];
+    for (let m = segs[0].start + 600; m < t; m += 15) seen.push(evaluate(segs, { asOf: m, config: cfg }).shift.anchor);
+    for (let i = 2; i < seen.length; i++) assert.ok(!(seen[i] === seen[i - 2] && seen[i] !== seen[i - 1]), `record ${k} flipped at step ${i}`);
+  }
 });
 
 // ---- §2.6 — only gaps that can still change an answer are reported ----

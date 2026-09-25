@@ -288,24 +288,57 @@ export function breakViolations(segments: Segment[], config: RulesConfig): Viola
   return out;
 }
 
-/** FMCSA ordering: fewest/least-severe violations; tie → most available time forward. */
+/**
+ * Rest still needed to complete a split from this interpretation's pending leg — the same formula the
+ * trip planner uses. No pending leg: a full 10-hour reset is the only way back.
+ */
+export function splitNeed(e: ShiftEvaluation): number {
+  const l = e.pendingSplitLeg;
+  if (!l) return LIMITS.RESET;
+  return Math.max(l.qualifiesLongSB ? LIMITS.SPLIT_MIN_SHORT : LIMITS.SPLIT_MIN_SB, LIMITS.RESET - l.duration);
+}
+
+/** Drive + window headroom at asOf WITHOUT clamping at zero: negative = that far over. */
+export function headroom(e: ShiftEvaluation): number {
+  return (e.limits.drive - e.driveUsed) + (e.limits.window - e.windowUsed);
+}
+
+/**
+ * The FMCSA-preferred interpretation, then a fixed tie-break (stress-test round 2, tie-break addendum).
+ *
+ * Legal ranking — never reorder: 1 fewest egregious, 2 fewest over, 3 fewest minor, 4 most drive+window
+ * time left at asOf.
+ * Tie-break — only among interpretations equal on 1–4, so it can never change a legal outcome, only
+ * which equally-compliant reading the app explains and plans from:
+ *   5 least over the limits right now — criterion 4 continued below zero: drive+window headroom
+ *     without clamping. Once every reading is out of hours, 4 is 0 for all of them and loses the
+ *     difference; without 5 the displayed anchor jumped back to a simpler chain as time passed;
+ *   6 fewest total minutes over (compliance first);
+ *   7 shortest rest still needed to complete a split (the easiest next move for the driver);
+ *   8 fewest rests in the chain (the simplest reading);
+ *   9 earliest-first: compare the chains' rests in time order; the one using the earlier rest wins.
+ * Measured before this existed: 21% of shifts tie on 1–4, and in 9% the tied readings disagreed on the
+ * anchor, the pending leg or the violation details — decided by loop order. evaluateShift()'s DP
+ * implements exactly this order; a property test holds the two together on full output.
+ */
 export function rankEvaluations(evals: ShiftEvaluation[]): ShiftEvaluation {
   const score = (e: ShiftEvaluation) => {
-    let egregious = 0, viol = 0, nominal = 0;
+    let egregious = 0, viol = 0, nominal = 0, minutes = 0;
     for (const v of e.violations) {
       if (v.severity === 'egregious') egregious++;
       else if (v.severity === 'violation') viol++;
       else nominal++;
+      minutes += v.minutes;
     }
-    return { egregious, viol, nominal, forward: e.driveRemaining + e.windowRemaining };
+    return [egregious, viol, nominal, -(e.driveRemaining + e.windowRemaining), -headroom(e), minutes, splitNeed(e), e.chain.length];
   };
-  return evals.reduce((best, e) => {
-    const a = score(best), b = score(e);
-    if (b.egregious !== a.egregious) return b.egregious < a.egregious ? e : best;
-    if (b.viol !== a.viol) return b.viol < a.viol ? e : best;
-    if (b.nominal !== a.nominal) return b.nominal < a.nominal ? e : best;
-    return b.forward > a.forward ? e : best;
-  });
+  const better = (b: ShiftEvaluation, a: ShiftEvaluation) => {
+    const sb = score(b), sa = score(a);
+    for (let k = 0; k < sb.length; k++) if (sb[k] !== sa[k]) return sb[k] < sa[k];
+    for (let k = 0; k < b.chain.length; k++) if (b.chain[k].start !== a.chain[k].start) return b.chain[k].start < a.chain[k].start;
+    return false;
+  };
+  return evals.reduce((best, e) => (better(e, best) ? e : best));
 }
 
 /** Evaluate a shift under every candidate chain and return the FMCSA-preferred one. */
@@ -328,13 +361,21 @@ export function rankEvaluations(evals: ShiftEvaluation[]): ShiftEvaluation {
  */
 const MAX_DP_RESTS = 200; // absurd-record safety valve only; realistic shifts have well under 60
 
-type Cost = [number, number, number, number]; // egregious, over, minor, −forward
-const ZERO: Cost = [0, 0, 0, 0];
-const add = (a: Cost, b: Cost): Cost => [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
-const sub = (a: Cost, b: Cost): Cost => [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+/**
+ * DP cost, compared lexicographically — the rankEvaluations() order:
+ * [egregious, over, minor, −forward, −headroom, minutes over, split need, chain length] + canonical.
+ * Components 0–2 and 5 are sums over driving pieces; 3, 4 and 6 are added once, from the state
+ * active at asOf; 7 is +1 per chain rest; `canon` makes "earliest-first" additive: −Σ 2^(n−1−i) over the
+ * chain's rest indices (for equal-length chains, the one containing the earliest rest of the
+ * symmetric difference has the larger sum — exactly time-ordered lexicographic comparison).
+ */
+interface Cost { v: number[]; canon: bigint }
+const NV = 8;
+const ZERO: Cost = { v: new Array(NV).fill(0), canon: 0n };
+const add = (a: Cost, b: Cost): Cost => ({ v: a.v.map((x, i) => x + b.v[i]), canon: a.canon + b.canon });
 const less = (a: Cost, b: Cost) => {
-  for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i] < b[i];
-  return false;
+  for (let i = 0; i < NV; i++) if (a.v[i] !== b.v[i]) return a.v[i] < b.v[i];
+  return a.canon < b.canon;
 };
 
 export function evaluateShift(
@@ -371,8 +412,8 @@ export function evaluateShift(
   };
   /** violation counts for one piece — the same arithmetic as evaluateShiftWithChain */
   const pieceCost = (anchor: number, excl: number, p: { a: number; b: number }): Cost => {
-    const c: Cost = [0, 0, 0, 0];
-    const bump = (m: number) => { const sv = severityOf(m); c[sv === 'egregious' ? 0 : sv === 'violation' ? 1 : 2]++; };
+    const c: Cost = { v: new Array(NV).fill(0), canon: 0n };
+    const bump = (m: number) => { const sv = severityOf(m); c.v[sv === 'egregious' ? 0 : sv === 'violation' ? 1 : 2]++; c.v[5] += m; };
     const tW = p.a + Math.max(0, limits.window - ((p.a - anchor) - excl));
     const tD = p.a + Math.max(0, limits.drive - driveIn(anchor, p.a));
     if (tW < p.b) bump(p.b - tW);
@@ -405,22 +446,26 @@ export function evaluateShift(
     const kEnd = Math.max(st.k0, until === Infinity ? pieces.length : firstAtOrAfter(until));
     return st.pre[kEnd - st.k0];
   };
-  const fwdCache = new Map<number, number>();
-  const fwd = (pi: number, ci: number): number => {
+  // What the driver sees at asOf depends only on the state active then — the chain's last two rests
+  // completed by asOf (or none). The partial chain reproduces its clocks and pending leg exactly.
+  const activeCache = new Map<number, Cost>();
+  const F = (pi: number, ci: number): Cost => {
     const k = pi === -2 ? -1 : key(pi, ci);
-    let v = fwdCache.get(k);
-    if (v === undefined) {
+    let c = activeCache.get(k);
+    if (!c) {
       const ev = pi === -2 ? noSplit : evaluateShiftWithChain(segments, span, pi < 0 ? [cands[ci]] : [cands[pi], cands[ci]], withRests);
-      v = ev.driveRemaining + ev.windowRemaining;
-      fwdCache.set(k, v);
+      c = { v: [0, 0, 0, -(ev.driveRemaining + ev.windowRemaining), -headroom(ev), 0, splitNeed(ev), 0], canon: 0n };
+      activeCache.set(k, c);
     }
-    return v;
+    return c;
   };
-  const F = (pi: number, ci: number): Cost => [0, 0, 0, -fwd(pi, ci)];
+  /** entering a chain rest: +1 length, and its earliest-first weight */
+  const bigN = BigInt(n);
+  const R = (ci: number): Cost => ({ v: [0, 0, 0, 0, 0, 0, 0, 1], canon: -(1n << (bigN - 1n - BigInt(ci))) });
 
   const best = new Map<number, { cost: Cost; back: number; count: number }>();
   for (let ci = 0; ci < n; ci++) {
-    let cost = emptyUpTo(cands[ci].start);
+    let cost = add(emptyUpTo(cands[ci].start), R(ci));
     if (cands[ci].end > t) cost = add(cost, F(-2, -1)); // nothing completed by asOf: the no-split clocks are active
     best.set(key(-1, ci), { cost, back: -1, count: 1 });
   }
@@ -441,7 +486,7 @@ export function evaluateShift(
       }
       for (let ni = ci + 1; ni < n; ni++) {
         if (!pairQualifies(c, cands[ni])) continue;
-        let cost = add(cur.cost, stateCost(pi, ci, cands[ni].start));
+        let cost = add(add(cur.cost, stateCost(pi, ci, cands[ni].start)), R(ni));
         if (c.end <= t && cands[ni].end > t) cost = add(cost, F(pi, ci));
         const k = key(ci, ni);
         const prev = best.get(k);
