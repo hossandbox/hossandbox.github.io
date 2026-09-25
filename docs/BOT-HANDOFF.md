@@ -56,6 +56,14 @@ bash /opt/data/scripts/ts-serve-hos.sh status
 Deploy discipline: `npm test` + `npm run smoke` clean **before** `deploy.sh`. A rule change needs a
 test that fails before it and passes after.
 
+`deploy.sh` builds from the **working tree** and then **force-pushes** the result, so it now refuses to
+run unless the tree is clean **and** `HEAD == origin/main` (raised by Opus 5.5, 2026-09-25). That means
+the order is always: **commit → push → deploy**. Without the gate, an uncommitted or untracked file
+went live untested, and a commit that was not yet pushed published code `main` did not have — the live
+site stopped being reproducible from the repo. If it refuses, fix the state; do not bypass the check.
+The deploy commit records the source SHA (`deploy <UTC> from <sha>`), so a live build traces back to a
+commit — check `git log -1 origin/gh-pages` to see what is actually live.
+
 Note: GitHub Pages serves assets with a ~10-minute `max-age`. A browser can show a stale bundle
 after a deploy — verify with cache disabled before concluding a fix "didn't work".
 
