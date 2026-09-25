@@ -311,6 +311,28 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   his own phone (2026-09-23). That was the one item no tool here could check, so treat the day theme
   as verified in sunlight, not merely measured. The night theme's outdoor case is still untested
   (it is the worse case by design, which is why day exists).
+- **Opus 5.5 stress-test round 2 (2026-09-25, base 9bef933)**: delivered as a PDF instruction sheet plus
+  a `git format-patch` commit (`reviews/claudia-hos-sandbox-round2.patch`), applied with `git am`.
+  External code, so it was scanned for anything out of place, applied on a backup ref
+  (`backup-pre-round2`), and verified independently rather than trusted.
+  - *Critical §2.1* — round 1's fix only dropped rows that **started** after `asOf`; a row that started
+    before now and ended after it still counted in full. OFF 08:00→22:00 opened at 10:00 gave a fresh
+    14-hour window. Reproduced (14.00h) and confirmed fixed (12.00h) with `reviews/repro-round2.ts`.
+    Rows are now clipped at `asOf`/departure and reported as `clippedFuture`.
+  - *High §2.2* — **my round-1 trim fabricated violations.** A brute-force comparison
+    (`reviews/verify-round2.ts`) showed the trimmed search reporting 17 violations including four
+    "well over" where exhaustive enumeration found 12 with none worse than "over". `evaluateShift` is
+    now an exact DP over all rests; the same comparison reports the DP matching brute force on all
+    6514 chains.
+  - *Independent verification*: my own DP-vs-brute-force check on 240 random shifts found **0
+    differences in the ranking criteria** (severity counts and clocks) and 2 equal-ranked ties broken
+    differently — the same interpretation quality, a different chain, so the *reported minutes* of one
+    violation differ. Not a correctness defect; worth knowing if a driver ever compares two runs.
+  - *Caught in my own harness, twice*: my first comparison showed 34 "mismatches" that were entirely
+    my fault — I had not mirrored `evalSpan`'s FAQ-22 opening-rest candidate, nor skipped trials where
+    the fresh-rest override rewrites the clocks. Corrected before drawing a conclusion.
+  - Tests: engine 76/76 (was 65), smoke green with the round-2 block. `enumerateChains` is kept for
+    reference/tests but is no longer on the evaluation path.
 - **Opus 5.5 stress-test (2026-09-24, build 2026-09-24 00:00)**: the most substantive review so far —
   it recovered the TypeScript from the source map, replayed the engine in Node, and shipped a
   regression file. Every claim reproduced exactly: T1–T5 failed, R1–R7 passed, T6 **crashed the process

@@ -169,12 +169,28 @@ Recalculation (iii):
 - **Overlap resolution is by entry order, not by start time.** `Segment.createdAt` is a monotonic entry
   key; `normalize()` places rows in it when present and falls back to (start, end) for imported records.
   Without it a correction lost to the row it corrected — including forgotten driving.
-- **The split-chain search is bounded and errs downward.** `enumerateChains` keeps the most recent
-  `MAX_CHAIN_RESTS` candidates and stops at `MAX_CHAINS` *before* descending. Fewer rests in a chain
-  means smaller exclusions and an earlier anchor — fewer available hours, never more.
+- **The split-chain search must be EXACT — do not bound or trim it.** `evaluateShift` is a dynamic
+  programme over every qualifying rest (state = the chain's last two rests), exact in O(n³), with
+  `MAX_DP_RESTS` as an absurd-record valve only. Round 1 trimmed the candidate list to the 12 most
+  recent rests and I argued the trim "errs downward, never upward" — the clocks did, but the
+  *violations* did not: judging older driving with no split credit made the ranking pick a worse
+  interpretation, and 7 days of legal 8/2 splits showed four phantom "well over" violations that
+  never happened. Fewer available hours is conservative; **inventing a violation is not.** `U2c`
+  compares the DP against brute force on 1,500 random shifts — if you change `anchorAt` or
+  `excludedMinutes`, `pieceCost`/`stateCost` must change to match, and U2c failing is the guard doing
+  its job, not a flaky test.
+- **A logged row never counts past "now".** Clipping happens in `evaluate()` (reported as
+  `clippedFuture`) and in `planTrip()` at departure. Round 1 only dropped rows that *started* after
+  `asOf`, so a row that started before now and ended after it still counted in full — OFF 08:00→22:00
+  opened at 10:00 handed the driver a fresh 14-hour window. Fix the class, not the test.
+- **`normalize()` ordering contract:** stamped rows by stamp; unstamped logged rows count as older
+  than any stamped row; unstamped **tentative** rows go last, so a plan is never overwritten by
+  history it overlaps. The live status carries the stamp of the moment it was tapped
+  (`OpenSegment.createdAt`), so a correction typed during a status still wins.
 - **Unlogged time is read as OFF, and must be disclosed.** That is the conservative reading, but it can
   manufacture a reset no one took, so `evaluate()` returns `gaps` and the UI shows them. Only gaps ≥2h
   are worth interrupting a driver for (below that it is just "went off duty and opened the app").
+  `gaps` is limited to the current shift and the cycle window — an ancient hole is not actionable.
 - **The 60/70 cycle needs its whole carrier window before it can call the history known.** `cycleBasis`
   (window days) is separate from `historyBasis` (a shift's worth) for exactly this reason.
 - **The "Sleeper splits" strategy must be able to CREATE a split.** Pairing only with an existing rest
