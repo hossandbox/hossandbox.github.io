@@ -445,41 +445,64 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, segments: [], tentative: [], trip: { ...DEFAULT_TRIP }, config: { ...getState().config, timeZone: tz, cycle: '70/8' }, mph: 55, bugEmail: '' });
   console.log('export/import round trip: OK');
 }
-// Regression (night/day theme + contrast): night must stay the default, the palette must not drift
+// Regression (day/night theme + contrast): day must stay the default, the palette must not drift
 // out of WCAG AA, and status chips must follow the theme rather than carrying hardcoded hexes.
 {
   const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
   const T = M('2026-09-23T17:00:00Z');
   const { applyTheme, STATUS_COLOR, deviceTz, INITIAL_STATE } = await import('../src/store.ts');
 
-  // night is the product default — a day theme is opt-in, never something the app picks for you.
+  // Day is the product default (Lorico, 2026-09-25 — he drives in daylight; night is the opt-in).
   // Assert the FRESH-INSTALL default, not the current value: asserting a value the test just set
   // would pass no matter what the default actually was.
-  if (INITIAL_STATE.theme !== 'night') throw new Error(`a fresh install must start in night, got ${INITIAL_STATE.theme}`);
+  if (INITIAL_STATE.theme !== 'day') throw new Error(`a fresh install must start in day, got ${INITIAL_STATE.theme}`);
 
-  setState({ theme: 'night', tab: 'log', nowOverride: T, current: { status: 'ON', since: T },
+  setState({ theme: 'day', tab: 'log', nowOverride: T, current: { status: 'ON', since: T },
     segments: [{ status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') }],
     config: { ...getState().config, timeZone: deviceTz } });
 
-  hh = out('log/night, theme control');
-  if (!/aria-label="Switch to day theme"/.test(hh)) throw new Error('the header needs a one-tap theme switch');
+  hh = out('log/day, theme control');
+  if (!/aria-label="Switch to night theme"/.test(hh)) throw new Error('the header needs a one-tap theme switch');
   if (!/style="background:var\(--/.test(hh)) throw new Error('status chips must use theme variables, not hardcoded hexes');
   for (const k of ['OFF', 'SB', 'D', 'ON']) {
     if (!STATUS_COLOR[k].startsWith('var(--')) throw new Error(`${k} chip colour is not theme-aware: ${STATUS_COLOR[k]}`);
   }
 
-  setState({ theme: 'day' });
-  hh = out('log/day, theme control');
-  if (!/aria-label="Switch to night theme"/.test(hh)) throw new Error('the header switch must offer the way back');
+  setState({ theme: 'night' });
+  hh = out('log/night, theme control');
+  if (!/aria-label="Switch to day theme"/.test(hh)) throw new Error('the header switch must offer the way back');
 
   setState({ tab: 'settings', theme: 'night' });
   hh = out('settings/screen theme');
-  if (!/Night \(default\)/.test(hh) || !/Day — for sunlight/.test(hh)) throw new Error('the settings control must name both themes');
+  if (!/Day \(default\)/.test(hh) || !/Night/.test(hh)) throw new Error('the settings control must name both themes');
   if (!/contrast-checked against WCAG AA/.test(hh)) throw new Error('the setting should say the palettes are contrast-checked');
 
   // applyTheme must not explode when there is no DOM (the node harness has none)
   applyTheme('day');
   applyTheme('night');
+
+  // With a DOM it must also move the browser chrome, or the address bar keeps the wrong colour after
+  // a toggle. Minimal stub: only what applyTheme touches.
+  {
+    const attrs = { theme: null, meta: null };
+    globalThis.document = {
+      documentElement: {
+        setAttribute: (k, v) => { if (k === 'data-theme') attrs.theme = v; },
+        removeAttribute: (k) => { if (k === 'data-theme') attrs.theme = null; },
+      },
+      querySelector: (sel) => (sel === 'meta[name="theme-color"]' ? { setAttribute: (k, v) => { if (k === 'content') attrs.meta = v; } } : null),
+    };
+    try {
+      applyTheme('night');
+      if (attrs.theme !== null) throw new Error(`night must clear data-theme, got ${attrs.theme}`);
+      if (attrs.meta !== '#0f1420') throw new Error(`night must set the dark chrome colour, got ${attrs.meta}`);
+      applyTheme('day');
+      if (attrs.theme !== 'day') throw new Error(`day must set data-theme=day, got ${attrs.theme}`);
+      if (attrs.meta !== '#f2f5fa') throw new Error(`day must set the light chrome colour, got ${attrs.meta}`);
+    } finally {
+      delete globalThis.document;
+    }
+  }
 
   setState({ nowOverride: null, tab: 'log' });
   console.log('theme + contrast wiring: OK');

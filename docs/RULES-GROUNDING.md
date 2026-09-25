@@ -139,9 +139,15 @@ Recalculation (iii):
   `styles.css` and fails the suite if any documented pair drops below WCAG AA (4.5:1 for text, 3:1
   for graphics), for both themes. It reads the colours rather than copying them, so a palette change
   cannot pass by being made in one place only.
-- **Night is the product default; day is an opt-in for sunlight**, where a dark screen is the worst
-  case. The status colours are re-tuned for light rather than inverted, and `--chip-ink` flips from
-  black to white — inverting a palette wholesale is how you ship unreadable text.
+- **Day is the product default; night is the opt-in** (Lorico, 2026-09-25 — he drives in daylight, and
+  a dark screen is the worst case outdoors). The status colours are re-tuned for light rather than
+  inverted, and `--chip-ink` flips from black to white — inverting a palette wholesale is how you ship
+  unreadable text. The default lives in **three** places that must agree: `INITIAL_STATE.theme`,
+  `data-theme` on `<html>` in `index.html` (without it a fresh install paints the `:root` night
+  palette for the first frames and then flips — a visible flash), and the `theme-color` meta.
+  `applyTheme()` keeps `theme-color` in step at runtime, so a toggle moves the browser chrome too.
+  `contrast.mjs` asserts all three, which is the point: a default expressed in one place and assumed in
+  another is how the wrong theme ships.
 - Never indicate selection with **opacity**: dimming the "I am now…" chips dropped their labels to
   2.23:1. Use a ring at full contrast instead.
 - **A current status is not history.** Tapping "Driving" says what is happening *now*; it says

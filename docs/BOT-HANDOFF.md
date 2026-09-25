@@ -300,7 +300,7 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   palette mostly passed, but the four unselected **"I am now…" chips were 2.23–3.66:1** — they were
   dimmed with `opacity: .55`, which fails in any palette; selection is now a ring at full contrast.
   Also fixed: muted text inside a warnbox (4.33), white on the accent button (4.35), dark on the
-  selected sleeper chip (4.41). Added an opt-in **day theme** for sunlight (night stays the default,
+  selected sleeper chip (4.41). Added a **day theme** for sunlight, and as of 2026-09-25 **day is the
   per Lorico), with the status colours re-tuned rather than inverted and `--chip-ink` flipped to
   white. Status colours now come from CSS variables so chips theme automatically — but note the SVG
   grid can't take `var()` in a presentation attribute, so it uses `.s-OFF/.s-SB/.s-D/.s-ON` classes.

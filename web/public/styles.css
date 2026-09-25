@@ -1,5 +1,6 @@
 :root {
-  /* Night is the product's default. Every pair below is verified by web/test/contrast.mjs against
+  /* Night is the opt-in palette; DAY is the product default (set on <html> so a fresh install never
+     flashes the dark palette). Every pair below is verified by web/test/contrast.mjs against
      WCAG AA — change a colour and the suite fails instead of drifting silently. */
   --bg: #0f1420; --panel: #161d2c; --panel2: #1d2637; --line: #273247; --tick: #3a4661;
   --text: #e8edf5; --muted: #9aa4b8; --good: #2ecc71; --warn: #f5a623; --bad: #ff5c5c;

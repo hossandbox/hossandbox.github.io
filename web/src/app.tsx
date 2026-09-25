@@ -746,8 +746,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
-        <label>Screen<Toggle options={[['night', 'Night (default)'], ['day', 'Day — for sunlight']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
-        <p class="muted small">Night is the default. Day flips to a light screen for reading in sunlight — a dark screen is the worst case outdoors. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header for when you step out of the cab.</p>
+        <label>Screen<Toggle options={[['day', 'Day (default)'], ['night', 'Night']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
+        <p class="muted small">Day is the default — it is the readable one outdoors, which is where most planning happens. Night flips to the dark palette for low light. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
         <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
       </Card>

@@ -89,7 +89,20 @@ function audit(name, V) {
 
 const night = vars(':root {');
 const day = vars(':root[data-theme="day"]');
-const failures = [...audit('night (default)', night), ...audit('day', day)];
+const failures = [...audit('day (default)', day), ...audit('night', night)];
+
+// The shell has to carry the default theme itself. Left to JS, a fresh install paints the :root
+// (night) palette for the first frames and then flips to day — a visible flash of the wrong theme.
+// The browser chrome must start on the default background too; applyTheme keeps it in step at runtime.
+const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+const htmlTheme = html.match(/<html[^>]*\bdata-theme="([^"]+)"/)?.[1];
+if (htmlTheme !== 'day') {
+  failures.push(`  index.html must set data-theme="day" on <html> (got ${htmlTheme ?? 'nothing'}) — a fresh install would flash the night palette`);
+}
+const metaColor = html.match(/<meta name="theme-color" content="([^"]+)"/)?.[1];
+if (metaColor !== day['--bg']) {
+  failures.push(`  index.html theme-color ${metaColor} must match the day --bg ${day['--bg']}`);
+}
 
 if (failures.length) {
   console.error('\nWCAG AA contrast failures:\n' + failures.join('\n'));

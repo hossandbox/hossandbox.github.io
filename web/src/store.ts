@@ -47,7 +47,7 @@ export interface State {
   historyAcknowledged: boolean;
   /** Log tab: show the normalized timeline instead of the entries as typed */
   logResolved: boolean;
-  /** night (default) or day; see applyTheme */
+  /** day (default, Lorico 2026-09-25 — he drives in daylight) or night; see applyTheme */
   theme: Theme;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
@@ -82,7 +82,7 @@ export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
-  historyAcknowledged: false, logResolved: false, theme: 'night', nowOverride: null, tab: 'log', bugEmail: '',
+  historyAcknowledged: false, logResolved: false, theme: 'day', nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
@@ -352,6 +352,10 @@ export function applyTheme(t: Theme) {
   const root = document.documentElement;
   if (t === 'day') root.setAttribute('data-theme', 'day');
   else root.removeAttribute('data-theme');
+  // Keep the browser chrome (address bar, status bar, PWA title bar) on the ACTIVE palette. Hardcoded
+  // in index.html it would show a dark strip above the light app on a fresh install.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', t === 'day' ? '#f2f5fa' : '#0f1420');
 }
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };
