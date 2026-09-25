@@ -103,6 +103,13 @@ const metaColor = html.match(/<meta name="theme-color" content="([^"]+)"/)?.[1];
 if (metaColor !== day['--bg']) {
   failures.push(`  index.html theme-color ${metaColor} must match the day --bg ${day['--bg']}`);
 }
+// Third place the default lives: the PWA manifest drives the install splash and the standalone chrome.
+const manifest = JSON.parse(readFileSync(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
+for (const key of ['background_color', 'theme_color']) {
+  if (manifest[key] !== day['--bg']) {
+    failures.push(`  manifest ${key} ${manifest[key]} must match the day --bg ${day['--bg']} — otherwise the installed app splashes dark onto a light UI`);
+  }
+}
 
 if (failures.length) {
   console.error('\nWCAG AA contrast failures:\n' + failures.join('\n'));
