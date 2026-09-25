@@ -311,6 +311,26 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   his own phone (2026-09-23). That was the one item no tool here could check, so treat the day theme
   as verified in sunlight, not merely measured. The night theme's outdoor case is still untested
   (it is the worse case by design, which is why day exists).
+- **Tie-break addendum (2026-09-25, base a3b3abf)**: `reviews/claudia-hos-sandbox-tiebreak.patch`,
+  applied with `git am` on backup ref `backup-pre-tiebreak`. Turns "which of two equally compliant
+  readings do we show" from loop order into a written, tested order (criteria 5–9 in
+  RULES-GROUNDING). Verified byte-identical to the author's: **all three post-image blob hashes match
+  the patch's own `index` lines** (`bd096ce`, `f7ab134`, `e854d5c`).
+  - *The sheet's SHA-256 is truncated.* It prints 62 hex characters, not 64; the value is a prefix of
+    the real file's hash. Don't "fail" a patch on it — but do get the raw file, because the two copies
+    differed: the clipboard paste had downgraded four comment dashes (U+2013/2212 → ASCII `-`) plus a
+    missing trailing newline. **Comments only — no code byte differed**, which the `index` blob hashes
+    prove end to end. Taildrop is the reliable channel.
+  - *Perf tests are unusable as a gate on this box (2 GB RAM / 4 vCPU).* Full suite, same machine:
+    pre-patch **71/76 pass, 5 fail** (U4 4005ms, chain-search 5989ms, all three U2 2332–2640ms);
+    post-patch **78/79 pass, 1 fail** (U4 2966ms). Every failure is a `performance.now()` wall-clock
+    budget — no logic assertion fails. U4 measures **349–420ms when its file runs alone**, ~1% apart
+    between old and new code (417 vs 414ms isolated). So: not a regression, pre-existing, and the
+    tie-break patch *improves* it. **Judge this suite by its logic assertions; re-measure a perf
+    failure in isolation before calling it a defect.** The proper fix (calibrate the budget against a
+    reference workload instead of hardcoding milliseconds) is not done yet.
+  - Independent check (`reviews/verify-tiebreak.ts`): 5,000 evaluations old vs new, comparing severity
+    counts, clocks and the visible reading.
 - **Opus 5.5 stress-test round 2 (2026-09-25, base 9bef933)**: delivered as a PDF instruction sheet plus
   a `git format-patch` commit (`reviews/claudia-hos-sandbox-round2.patch`), applied with `git am`.
   External code, so it was scanned for anything out of place, applied on a backup ref

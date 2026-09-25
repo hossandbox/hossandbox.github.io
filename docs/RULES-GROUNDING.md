@@ -179,6 +179,27 @@ Recalculation (iii):
   compares the DP against brute force on 1,500 random shifts — if you change `anchorAt` or
   `excludedMinutes`, `pieceCost`/`stateCost` must change to match, and U2c failing is the guard doing
   its job, not a flaky test.
+- **Ties are resolved by a written rule, never by loop order.** FMCSA ranks interpretations by
+  compliance — 1 fewest egregious, 2 fewest over, 3 fewest minor, 4 most drive+window time left — and
+  says nothing about which of two *equally compliant* readings to show. That choice therefore has to be
+  fixed, documented and tested, or it silently changes with code order. Order: 1–4 as above, then
+  **5 least over the limits right now** (drive+window headroom *unclamped* — criterion 4 continued below
+  zero), **6 fewest total minutes over**, **7 shortest rest still needed to finish a split**,
+  **8 fewest rests in the chain**, **9 earliest-first by rest start**. `rankEvaluations()` is the
+  reference; `evaluateShift()`'s DP carries the same order as an 8-component cost plus an additive
+  `canon` key (`−Σ 2^(n−1−i)` over chain indices), and `U2c` holds the two together **on full visible
+  output** — anchor, clocks, pending leg, chain, and each violation's kind/start/minutes. The earlier
+  signature-only comparison is exactly why tied readings could resolve differently unnoticed. Adding or
+  reordering a criterion means changing both, plus `U5`. **Do not move 6 ahead of 5:** once every
+  reading is out of hours criterion 4 is 0 for all of them and loses the difference, so the displayed
+  anchor flickers as time passes — `U7` is what catches that.
+- **Ties were ~21% of random shifts**, and in about 9% of those the tied readings showed the driver
+  different things (anchor, pending split leg, violation minutes). Measured effect of the fixed order:
+  ~6% of readings change visibly while the **legal verdict — severity counts and every clock — is
+  identical**; of the changed violation-minute totals the direction is overwhelmingly downward, and the
+  few that rise are the deliberate 5-before-6 trade (a stable, current picture matters more to a driver
+  who is already out of hours than the lowest historical total). If a driver compares a screenshot from
+  before this change, expect the anchor or a violation's minutes to differ while the verdict does not.
 - **A logged row never counts past "now".** Clipping happens in `evaluate()` (reported as
   `clippedFuture`) and in `planTrip()` at departure. Round 1 only dropped rows that *started* after
   `asOf`, so a row that started before now and ended after it still counted in full — OFF 08:00→22:00
