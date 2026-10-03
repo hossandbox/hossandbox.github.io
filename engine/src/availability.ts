@@ -1,8 +1,8 @@
 import type { Availability, RulesConfig, Segment, ShiftEvaluation, Violation } from './types.ts';
 import { DEFAULT_CONFIG } from './types.ts';
 import { normalize, restPeriods, shifts, gaps } from './timeline.ts';
-import { evaluateShift, breakViolations, shiftLimits } from './shift.ts';
-import { evaluateCycle, cycleViolations } from './cycle.ts';
+import { evaluateShift, breakViolations, shiftLimits, exceptionKeyFor } from './shift.ts';
+import { evaluateCycle, cycleViolations, carrierDayStart } from './cycle.ts';
 
 export interface EvaluateOptions {
   asOf?: number;
@@ -72,10 +72,25 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
 
   const shiftEvals: ShiftEvaluation[] = [];
   let current: ReturnType<typeof evaluateShift>;
-  /** for §395.1(o): did a ≥34h restart end after the most recent earlier 16-hour shift? */
-  const restartSince = (span: { start: number }, openFrom?: number) => {
-    // keys inside the opening rest belong to this shift, not to an earlier one
-    const prior = (config.sixteenHourShifts ?? []).filter((s) => s < (openFrom ?? span.start));
+  /**
+   * §395.1(o)(3): "has not taken this exemption within the previous 6 consecutive days, except when the
+   * driver has begun a new 7- or 8-consecutive day period with ... 34 or more consecutive hours" off.
+   * A 7/8-day period runs in carrier days (§395.2: it begins "at the time designated by the motor carrier
+   * for a 24-hour period"), so the look-back is the current carrier day plus the 6 before it — not a
+   * rolling 144h, which let a Monday use be claimed again on Sunday (QA report M5).
+   *
+   * A use is the START of a shift the exception was claimed for. The stored key can sit inside the rest
+   * before that shift (possibly the previous calendar day); dating the use by the key would push it out
+   * of the look-back and make the check permissive again. Every claimed shift counts as taken.
+   */
+  const openFromOf = (span: { start: number }) => rests.find((r) => r.end === span.start && r.isReset)?.start;
+  const sixteenUses = (config.sixteenHourShifts ?? []).length
+    ? spans.filter((sp) => exceptionKeyFor(config.sixteenHourShifts, sp, openFromOf(sp)) !== null).map((sp) => sp.start)
+    : [];
+  const sixteenEligible = (span: { start: number }) => {
+    let from = carrierDayStart(span.start, config);
+    for (let i = 0; i < 6; i++) from = carrierDayStart(from - 1, config); // DST-safe: step by carrier days
+    const prior = sixteenUses.filter((u) => u < span.start && u >= from);
     if (!prior.length) return true;
     const last = Math.max(...prior);
     return rests.some((r) => r.isRestart && r.start >= last && r.end <= span.start);
@@ -88,7 +103,7 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
     const opening = rests.find((r) => r.end === span.start && r.isReset && r.qualifiesLongSB);
     if (opening) inShift.unshift(opening);
     const openFrom = rests.find((r) => r.end === span.start && r.isReset)?.start;
-    return evaluateShift(segments, span, inShift, { asOf, config, restartSince: restartSince(span, openFrom), openFrom });
+    return evaluateShift(segments, span, inShift, { asOf, config, sixteenEligible: sixteenEligible(span), openFrom });
   };
   for (const span of spans) shiftEvals.push(evalSpan(span).best);
   // Pick the shift containing asOf (or the latest one that has actually begun).
@@ -117,7 +132,7 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
     // shift before the rest, and its adverse 13/16 used to carry into the fresh clock. Exceptions
     // flagged during the rest are keyed to a minute inside it and map to the next shift.
     const next = { start: restNow.end };
-    const { limits, notes, keys } = shiftLimits(next, { asOf, config, openFrom: restNow.start, restartSince: restartSince(next, restNow.start) });
+    const { limits, notes, keys } = shiftLimits(next, { asOf, config, openFrom: restNow.start, sixteenEligible: sixteenEligible(next) });
     shift = { ...shift, anchor: asOf, driveUsed: 0, windowUsed: 0, driveRemaining: limits.drive, windowRemaining: limits.window,
       driveSinceBreak: 0, breakRemaining: config.shortHaul ? Infinity : 480, pendingSplitLeg: null,
       limits, notes, exceptionKey: asOf, exceptionKeys: keys };

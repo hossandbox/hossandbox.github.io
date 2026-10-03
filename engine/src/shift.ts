@@ -127,8 +127,12 @@ export interface ShiftEvalOptions {
   config: RulesConfig;
   /** all rests in this shift (used to surface an unpaired pending leg) */
   rests?: RestPeriod[];
-  /** true when a ≥34h restart ended after any earlier 16-hour-exception shift (eligibility reset) */
-  restartSince?: boolean;
+  /**
+   * §395.1(o)(3) eligibility for this shift, decided by evaluate(): false when the exception was taken in
+   * this carrier day or the 6 before it with no 34-hour restart since. Undefined (direct callers that have
+   * no record) falls back to a rolling 6-day check on the stored keys.
+   */
+  sixteenEligible?: boolean;
   /**
    * Start of the ≥10h rest that opened this shift. An exception key stored while the driver was in
    * that rest (any minute from here to the shift start) belongs to this shift: during a rest the
@@ -248,10 +252,15 @@ export function shiftLimits(span: Pick<ShiftSpan, 'start'>, opts: ShiftEvalOptio
   const sixteen = keys.sixteen !== null;
   if (adverse) { drive += 120; window += 120; notes.push('Adverse driving conditions declared: 13-hour driving / 16-hour window (§395.1(b)(1)).'); }
   if (sixteen) {
-    window += 120;
-    notes.push('16-hour short-haul exception claimed: window extended to 16h, driving still 11h (§395.1(o)). Requires release at your normal work reporting location for this and the previous 5 duty tours.');
-    const prior = (opts.config.sixteenHourShifts ?? []).filter((s) => s !== keys.sixteen && s < span.start && s >= span.start - 6 * 1440);
-    if (prior.length && !opts.restartSince) notes.push('⚠ 16-hour exception already used within the previous 6 days and no 34-hour restart since — not eligible today.');
+    const eligible = opts.sixteenEligible
+      ?? !(opts.config.sixteenHourShifts ?? []).some((k) => k !== keys.sixteen && k < span.start && k >= span.start - 6 * 1440);
+    if (eligible) {
+      window += 120;
+      notes.push('16-hour short-haul exception claimed: window extended to 16h, driving still 11h (§395.1(o)). Requires release at your normal work reporting location for this and the previous 5 duty tours.');
+    } else {
+      // An ineligible claim must not extend the window: warning while showing 16h overstated legal time.
+      notes.push('⚠ 16-hour exception already taken this carrier day or in the 6 before it, with no 34-hour restart since — not eligible, so the window stays 14 hours (§395.1(o)(3)).');
+    }
   }
   return { limits: { drive, window }, notes, keys };
 }
