@@ -20,7 +20,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
+  evaluate, driveAgainAt, pruneHistory, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
   useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
@@ -165,6 +165,80 @@ function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
 
 /* ============================================================ status bar */
 
+/** Minutes of unbroken rest (OFF/SB) that ended exactly when the current status began. */
+function restBefore(s: State, now: number): number {
+  if (!s.current) return 0;
+  const rows = normalize(allSegments(s, now)).filter((r) => !r.tentative);
+  let cursor = s.current.since, total = 0;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r.end > cursor) continue; // the live row, and anything after it
+    if (r.end < cursor || (r.status !== 'OFF' && r.status !== 'SB')) break;
+    total += r.end - r.start; cursor = r.start;
+  }
+  return total;
+}
+
+/**
+ * Out of driving hours: say WHEN driving comes back and WHAT is still allowed. Round 4, reported by
+ * a driver: after a 14-hour day nothing on screen said when he could drive again, and tapping On duty
+ * after 6 hours off reset the only rest number on screen (the status timer) without saying the rest
+ * had ended — or that on-duty work was allowed all along.
+ *
+ * The time comes from the engine (driveAgainAt), so a 30-min break, a sleeper split and the 60/70
+ * cycle are all answered by the same rules that drive the clocks — never a hard-coded "10 hours".
+ */
+function RestLine({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+  const status = s.current?.status ?? 'OFF';
+  const resting = status === 'OFF' || status === 'SB';
+  const { off, sb, before } = useMemo(() => {
+    // Right after tapping On duty or Driving the new row is 0 minutes long, so the engine still sees the
+    // rest as unbroken and would promise the old time. The tap is the driver's intent: count it as begun.
+    const t = !resting && s.current ? Math.max(now, s.current.since + 1) : now;
+    // History older than the cycle window cannot change the answer (the same cut the Trip planner uses,
+    // checked against the unpruned answer on 60 long records); it more than halves the cost.
+    const segs = pruneHistory(allSegments(s, t), t, s.config), opts = { asOf: t, config: s.config };
+    return {
+      off: driveAgainAt(segs, opts, status === 'SB' ? 'SB' : 'OFF'),
+      sb: resting ? null : driveAgainAt(segs, opts, 'SB'),
+      before: resting ? 0 : restBefore(s, now),
+    };
+    // While resting, the answer is a fixed clock time that only a new entry can move, so it is not
+    // recomputed every minute; on duty or driving it moves with the clock.
+  }, [s.segments, s.current, s.config, resting ? 0 : now]);
+  const cycleWord = `${ev.cycle.limit / 60}-hour`;
+  const when = (t: number) => <><b>{clock(t)}</b> ({dur(t - now)} from now)</>;
+  const lead = status === 'D' ? <b>No driving time left — stop driving. </b> : null;
+  if (off === null) {
+    return <div class="warnbox small">{lead}<b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</div>;
+  }
+  if (ev.binding === 'BREAK_30') {
+    return (
+      <div class="warnbox small">{lead}<b>30-min break needed.</b> You can drive again at {when(off)}. Any 30 minutes in a row
+        without driving counts — off duty, sleeper, or on-duty work like fueling.</div>
+    );
+  }
+  if (ev.binding === 'CYCLE') {
+    return (
+      <div class="warnbox small">{lead}<b>Out of {cycleWord} hours.</b> {resting ? 'If you stay off duty, you' : 'Go off duty now and you'} can
+        drive again at {when(off)}. On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</div>
+    );
+  }
+  if (resting) {
+    return (
+      <div class="warnbox small"><b>You can drive again at {clock(off)}</b> — {dur(off - now)} from now, if you stay {status === 'SB' ? 'in the sleeper' : 'off duty'}.{' '}
+        Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</div>
+    );
+  }
+  return (
+    <div class="warnbox small">{lead ?? <b>Out of driving hours. </b>}On-duty work is allowed; driving is not.{' '}
+      Go off duty now and you can drive again at {when(off)}.
+      {sb !== null && sb < off && <> In the sleeper berth instead: {when(sb)} — that completes a split.</>}
+      {before >= 30 && before < 600 && <> Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</>}
+    </div>
+  );
+}
+
 function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: State; inert?: boolean }) {
   const hist = historyBasis(s, now);
   const status = s.current?.status ?? 'OFF';
@@ -184,6 +258,7 @@ function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: 
         <Stat label={`${ev.shift.limits.window / 60}-hr left`} value={dur(ev.shift.windowRemaining)} />
         <Stat label={`${ev.cycle.limit / 60}-hr left`} value={dur(ev.cycle.remaining)} />
       </div>
+      {ev.driveNow <= 0 && <RestLine s={s} now={now} ev={ev} />}
       {ev.driveNow > 0 && <div class="muted small">Must stop driving by <b>{clock(ev.mustStopBy)}</b>{ev.shift.pendingSplitLeg ? ' · split leg pending' : ''}{ev.shift.notes.length ? ' · exception active' : ''}</div>}
       {hist !== 'known' && (
         <div class="warnbox small">

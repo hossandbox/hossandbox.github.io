@@ -801,4 +801,46 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/>Day</.test(sx) || !/>Night</.test(sx)) throw new Error('the theme toggle must read Day and Night');
   console.log('reported break label + startup disclaimer + toggle words: OK');
 }
+// --- round 4, reported by a driver: "After off duty driving 14 hours yesterday. I don't see any timer
+// for 10 hours rest. If I clicked 'on duty' the timer for off duty rest... It should let me get on duty.
+// Rest 6 hours only." Out of hours, the status bar must say WHEN driving comes back, and that on-duty
+// work is allowed; going on duty mid-rest must say the rest has ended.
+{
+  const T = Math.floor(Date.UTC(2026, 9, 3, 14, 0) / 60000);
+  const day = [
+    { status: 'OFF', start: T - 2400, end: T - 1200 }, { status: 'ON', start: T - 1200, end: T - 1140 },
+    { status: 'D', start: T - 1140, end: T - 840 }, { status: 'OFF', start: T - 840, end: T - 810 },
+    { status: 'D', start: T - 810, end: T - 450 }, { status: 'ON', start: T - 450, end: T - 360 },
+  ];
+  const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  // 6h into the rest after a 14-hour day
+  setState({ nowOverride: T, tab: 'log', historyAcknowledged: true, segments: day, current: { status: 'OFF', since: T - 360 } });
+  let r = txt(out('log/resting 6h after a 14h day'));
+  if (!r.includes(`You can drive again at ${clock(T + 240)}`)) throw new Error('resting out of hours: the status bar must say when driving comes back');
+  if (!/4h 00m from now/.test(r)) throw new Error('resting out of hours: the countdown must show the time left (4h 00m)');
+  if (!/Going on duty before then is allowed/.test(r)) throw new Error('the driver must be told on-duty work is allowed while resting');
+  // the moment he taps On duty after 6 hours off
+  setState({ segments: [...day, { status: 'OFF', start: T - 360, end: T }], current: { status: 'ON', since: T } });
+  r = txt(out('log/tapped on duty after 6h off'));
+  if (!/On-duty work is allowed; driving is not/.test(r)) throw new Error('on duty out of hours: say on-duty work is allowed and driving is not');
+  if (r.includes(`drive again at ${clock(T + 240)}`)) throw new Error('going on duty ended the rest: the old drive-again time must not survive the tap');
+  if (!/6h 00m off before this does not count toward the 10 hours/.test(r)) throw new Error('going on duty mid-rest must say the rest no longer counts');
+  if (!/short half of a sleeper split/.test(r)) throw new Error('a 2h+ rest can still be half of a split, and must be described that way');
+  if (!/In the sleeper berth instead/.test(r)) throw new Error('when the sleeper is faster (a split), offer it');
+  // a full 10 hours: no rest line at all
+  setState({ nowOverride: T + 240, segments: day, current: { status: 'OFF', since: T - 360 } });
+  r = txt(out('log/rested 10h'));
+  if (/drive again at/.test(r)) throw new Error('with driving time available there is nothing to wait for');
+  // 8h straight driving, then 10 min fueling: the break is 20 min away, and on-duty counts toward it
+  setState({ nowOverride: T + 10, segments: [{ status: 'OFF', start: T - 1080, end: T - 480 }, { status: 'D', start: T - 480, end: T }], current: { status: 'ON', since: T } });
+  r = txt(out('log/break needed, fueling'));
+  if (!/30-min break needed/.test(r) || !r.includes(`drive again at ${clock(T + 30)}`)) throw new Error('break case: say a break is needed and when it clears (fueling counts)');
+  if (!/on-duty work like fueling/.test(r)) throw new Error('break case: on-duty time counts toward the 30 minutes and the driver must be told');
+  // driving with no time left
+  setState({ nowOverride: T + 90, segments: [...day, { status: 'OFF', start: T - 360, end: T }, { status: 'ON', start: T, end: T + 60 }], current: { status: 'D', since: T + 60 } });
+  r = txt(out('log/driving out of hours'));
+  if (!/No driving time left — stop driving/.test(r)) throw new Error('driving out of hours must say stop driving');
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
+  console.log('round 4 (when can I drive again): OK');
+}
 console.log('OK');

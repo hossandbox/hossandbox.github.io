@@ -141,6 +141,52 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   };
 }
 
+/**
+ * When can the driver drive again if they rest from `asOf` on, in `rest` status, without a break?
+ *
+ * Answered by the engine itself: the record is extended with a rest row from `asOf` and the earliest
+ * minute with driving time is found. That makes it right for every limit, not just the 10-hour reset:
+ * a 30-min break, a sleeper split completing early, or 60/70 hours rolling off. Returns `asOf` when the
+ * driver can already drive, and null when even `horizon` minutes of rest are not enough.
+ *
+ * Driving time is NOT monotone over a rest, so this is not a plain binary search: after exactly 8h of
+ * driving, a 30-min break brings driving back, the 14-hour window then runs out mid-rest, and driving
+ * returns only at 10h. What does hold: while resting, every limit either stays put or counts down,
+ * except at discrete moments when the rest qualifies for something (30 min, a split leg, 10h, 34h, a
+ * cycle day rolling off). So driving can only come back at one of those moments. The search walks the
+ * rest in `step`-minute strides comparing a state signature that is constant between such moments,
+ * pins each change to the minute, and returns the first one with driving time.
+ *
+ * Tentative "what-if" rows are ignored: this answers "if I rest now", not what a plan says.
+ */
+export function driveAgainAt(raw: Segment[], opts: EvaluateOptions & { asOf: number }, rest: 'OFF' | 'SB' = 'OFF', horizon = 36 * 60, step = 60): number | null {
+  const logged = raw.filter((s) => !s.tentative);
+  const { asOf } = opts;
+  const at = (d: number) => evaluate(d === 0 ? logged : [...logged, { status: rest, start: asOf, end: asOf + d }], { ...opts, asOf: asOf + d });
+  // Constant between qualifying moments. Three regimes for the 14-hour window while resting:
+  //  - a fresh shift has not started yet (anchor at "now"): one state, not a new one every minute;
+  //  - this rest is a leg of the chosen split: the window is paused, so its elapsed time is fixed;
+  //  - otherwise the window keeps running, so its elapsed time is fixed relative to the rest.
+  const sig = (e: FullEvaluation, d: number) => {
+    const sh = e.shift, fresh = sh.anchor >= asOf + d;
+    const paused = !fresh && sh.chain.some((r) => r.start <= asOf && r.end >= asOf + d);
+    const win = fresh ? 'fresh' : paused ? `paused:${sh.windowUsed}` : sh.windowUsed - d;
+    return [fresh ? 'fresh' : sh.anchor, sh.driveUsed, win, sh.breakRemaining, e.cycle.remaining, sh.limits.drive, sh.limits.window].join();
+  };
+  let a = 0, ea = at(0);
+  if (ea.driveNow > 0) return asOf;
+  let sa = sig(ea, 0);
+  while (a < horizon) {
+    const b = Math.min(a + step, horizon), eb = at(b);
+    if (sig(eb, b) === sa) { a = b; continue; } // nothing qualified in (a, b]: driving cannot have come back
+    let lo = a, hi = b, ehi = eb;                // first minute in (a, b] where the state changes
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1, em = at(mid); if (sig(em, mid) === sa) lo = mid; else { hi = mid; ehi = em; } }
+    if (ehi.driveNow > 0) return asOf + hi;
+    a = hi; sa = sig(ehi, hi);
+  }
+  return null;
+}
+
 /** Clock-to-parking: how far can I legally drive from `asOf` at `mph` net? */
 export function safeHaven(ev: FullEvaluation, mph: number) {
   const miles = (ev.driveNow / 60) * mph;
