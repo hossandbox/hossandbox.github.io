@@ -627,8 +627,17 @@ const STRATEGY_LABEL: Record<TripStrategy, string> = {
   restart34: '34-hour restart',
 };
 
+/**
+ * The plan that arrives first; ties go to the simplest (10-hour resets, then split, then 34h restart).
+ * planTripAll's `faster` is 'same' whenever ANY two plans tie, so "'same' → reset10" picked the slower
+ * 10-hour plan when split and 34h restart tied ahead of it (review of the QA patch, M3).
+ */
+export function earliestStrategy(both: Record<TripStrategy, TripPlan>): TripStrategy {
+  return TRIP_STRATEGIES.reduce<TripStrategy>((a, k) => (both[k].arrival < both[a].arrival ? k : a), TRIP_STRATEGIES[0]);
+}
+
 function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof planTripAll>; from: number; view?: TripStrategy | null; onView?: (v: TripStrategy) => void }) {
-  const fallback: TripStrategy = both.faster === 'same' ? 'reset10' : both.faster;
+  const fallback: TripStrategy = earliestStrategy(both);
   const [local, setLocal] = useState<TripStrategy>(fallback);
   // `view` provided = the caller owns the selection (Trip tab keeps it in the store, so it survives
   // navigation). Omitted = this component owns it (Recap tab).
@@ -685,7 +694,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp()) }));
   };
   const both = useMemo(() => planTripAll(allSegments(s, now), { departure: now, distanceMiles: miles, mph: s.mph, stops: dwell ? [{ atMile: miles, minutes: dwell, status: dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [], config: s.config }), [s, now, miles, dwell, dwellOff]);
-  const best = both[both.faster === 'same' ? 'reset10' : both.faster];
+  const best = both[earliestStrategy(both)];
   // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
   // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
   const openGaps = meaningfulGaps(ev.gaps);
@@ -816,14 +825,20 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
 /* ============================================================ Settings */
 
+/** Ask the browser to download the export; returns the file name. */
+function downloadExport(s: State): string {
+  const blob = new Blob([exportState(s)], { type: 'application/json' });
+  const name = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`;
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  return name;
+}
+
 function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
   const setC = (p: Partial<typeof c>) => setState({ config: { ...c, ...p } });
   const exportJson = () => {
-    const blob = new Blob([exportState(s)], { type: 'application/json' });
-    const name = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`;
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    const name = downloadExport(s);
     // Say only what is knowable: the app asked the browser for a download. Whether the file landed is
     // not ours to claim — a silent failure and a success look identical from in here (consumer-review-5).
     setIoNote(`Download requested: ${name} (${s.segments.length} logged segment(s), ${s.tentative.length} what-if row(s)). Check your browser's downloads — the app cannot confirm the file reached your device.`);
@@ -844,8 +859,9 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         setIoNote('Import cancelled. Nothing was changed.');
         return;
       }
+      const badZone = typeof d.config?.timeZone === 'string' && !isValidTimeZone(d.config.timeZone) ? d.config.timeZone : null;
       setState((cur) => applyImportedState(cur, d));
-      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.`);
+      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.${badZone ? ` The file's time zone "${badZone}" is not valid, so your home terminal zone stayed ${getState().config.timeZone}.` : ''}`);
     }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
   };
   return (
@@ -938,7 +954,12 @@ export function App() {
           <p class="small">Your log is still saved. The error was:</p>
           <pre class="small" style="white-space:pre-wrap">{result.err}</pre>
           <p class="small">Resetting the rules settings (cycle, carrier day, time zone, exceptions) usually fixes this and keeps your log.</p>
-          <button class="primary" onClick={() => setState({ config: { ...INITIAL_STATE.config } })}>Reset settings</button>
+          <div class="row">
+            <button class="primary" onClick={() => setState({ config: { ...INITIAL_STATE.config } })}>Reset settings</button>
+            {/* If a reset does not fix it, the driver must still be able to get the log out: it is not
+                the bug's to keep (review of the QA patch). */}
+            <button onClick={() => downloadExport(s)}>Export my log</button>
+          </div>
         </div>
       </main></div>
     );

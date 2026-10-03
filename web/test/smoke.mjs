@@ -868,4 +868,31 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ config: keep });
   console.log('import validation + bad time zone: OK');
 }
+// --- review of the QA patch (Daniel Tam): fixes on top of it
+{
+  const { earliestStrategy } = await import('../src/app.tsx');
+  const { parseSaved, isValidTimeZone: validTz } = await import('../src/store.ts');
+  const { readFileSync } = await import('node:fs');
+  const P = (a) => ({ arrival: a });
+  const pick = (r, sp, x) => earliestStrategy({ reset10: P(r), split: P(sp), restart34: P(x) });
+  if (pick(10, 5, 5) !== 'split') throw new Error('split and 34h tied ahead of 10-hour resets: the earliest must win, not the slower reset10');
+  if (pick(10, 9, 5) !== 'restart34') throw new Error('a strictly faster 34h restart must be picked (M3)');
+  if (pick(5, 5, 5) !== 'reset10') throw new Error('a three-way tie goes to the simplest plan');
+  // a bad saved zone is replaced AND the driver is asked again — never moved silently
+  const bad = parseSaved(JSON.stringify({ segments: [], config: { timeZone: 'Central' }, tzChosen: true, themeChosen: true }));
+  if (!validTz(bad.config.timeZone)) throw new Error('an invalid saved zone reached the state');
+  if (bad.tzChosen) throw new Error('an invalid saved zone must bring back the zone prompt, not be replaced silently');
+  const good = parseSaved(JSON.stringify({ segments: [], config: { timeZone: 'America/Chicago' }, tzChosen: true, themeChosen: true }));
+  if (!good.tzChosen || good.config.timeZone !== 'America/Chicago') throw new Error('a valid saved zone must be kept as chosen');
+  // the recovery card can always get the log out
+  const keep2 = getState().config;
+  setState({ config: { ...keep2, timeZone: 'Central' } });
+  const rc = render(h(App, {}));
+  if (!/Export my log/.test(rc)) throw new Error('the recovery card must offer to export the log');
+  setState({ config: keep2 });
+  // offline cache covers every icon the manifest names
+  const sw = readFileSync('public/sw.js', 'utf8'), mf = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'));
+  for (const ic of mf.icons) { const f = './' + ic.src.replace(/^\.\//, ''); if (!sw.includes(`'${f}'`)) throw new Error(`sw.js does not precache manifest icon ${ic.src}`); }
+  console.log('QA patch review fixes: OK');
+}
 console.log('OK');

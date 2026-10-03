@@ -117,8 +117,12 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
 }
 
 function load(): State {
+  try { return parseSaved(localStorage.getItem(KEY)); } catch { return INITIAL_STATE; }
+}
+
+/** What load() does with the saved string (exported so tests can exercise it without a reload). */
+export function parseSaved(raw: string | null): State {
   try {
-    const raw = localStorage.getItem(KEY);
     if (!raw) return INITIAL_STATE;
     const s = JSON.parse(raw);
     const merged: State = { ...INITIAL_STATE, ...s,
@@ -126,6 +130,9 @@ function load(): State {
       trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
       split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
       loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) } };
+    // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
+    // every day boundary without a word, so ask again through the first-run zone prompt instead.
+    if (typeof s.config?.timeZone === 'string' && s.config.timeZone !== merged.config.timeZone) merged.tzChosen = false;
     // Legacy save: night was the DEFAULT when it was written, so a stored 'night' far more often means
     // "never touched it" than "chose night" — and `themeChosen` did not exist yet to tell them apart
     // (round-3 item 2). Move it to the new day default once, and raise a notice rather than rewriting
