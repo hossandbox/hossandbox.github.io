@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
@@ -133,7 +133,7 @@ const bindingWord: Record<Exclude<FullEvaluation['binding'], 'BREAK_30'>, string
   DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', NONE: '—',
 };
 function bindingLabel(ev: FullEvaluation): string {
-  if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : '8-hour driving rule';
+  if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : `8-hour rule (30-min break in ${dur(ev.shift.breakRemaining)})`;
   return bindingWord[ev.binding];
 }
 /** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
@@ -165,12 +165,12 @@ function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
 
 /* ============================================================ status bar */
 
-function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) {
+function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: State; inert?: boolean }) {
   const hist = historyBasis(s, now);
   const status = s.current?.status ?? 'OFF';
   const tone = ev.driveNow <= 0 ? 'bad' : ev.driveNow < 60 ? 'warn' : 'good';
   return (
-    <header class="top">
+    <header class="top" inert={inert}>
       <div class="top-row">
         <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - s.current.since)}` : ''}</span>
         <span class="top-right">
@@ -790,6 +790,9 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
  * Shown on every launch: the driver who needs to read it is not the one who read it last week.
  */
 function Disclaimer({ onClose }: { onClose: () => void }) {
+  // Move focus into the dialog: keyboard and screen-reader users start on its only control.
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => { btn.current?.focus(); }, []);
   return (
     <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
       <div class="modal">
@@ -797,7 +800,7 @@ function Disclaimer({ onClose }: { onClose: () => void }) {
         <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
         <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
         <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
-        <button onClick={onClose}>I understand</button>
+        <button ref={btn} onClick={onClose}>I understand</button>
       </div>
     </div>
   );
@@ -816,8 +819,8 @@ export function App() {
   return (
     <div class="app">
       {disclaimer && <Disclaimer onClose={() => setDisclaimer(false)} />}
-      <StatusBar ev={ev} now={now} s={s} />
-      <main>
+      <StatusBar ev={ev} now={now} s={s} inert={disclaimer} />
+      <main inert={disclaimer}>
         <TabBoundary key={s.tab} tab={s.tab}>
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
@@ -826,7 +829,7 @@ export function App() {
           {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
         </TabBoundary>
       </main>
-      <nav class="tabs">{tabs.map(([k, l]) => <button key={k} class={s.tab === k ? 'on' : ''} onClick={() => setState({ tab: k })}>{l}</button>)}</nav>
+      <nav class="tabs" inert={disclaimer}>{tabs.map(([k, l]) => <button key={k} class={s.tab === k ? 'on' : ''} onClick={() => setState({ tab: k })}>{l}</button>)}</nav>
     </div>
   );
 }

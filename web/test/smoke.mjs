@@ -741,8 +741,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     { status: 'OFF', start: t - 34, end: t },      // 34-minute break — qualifies
   ] });
   const bx = out('log/after a qualifying break');
-  if (!/limited by 8-hour driving rule/.test(bx)) throw new Error('after a qualifying break the binding label must not claim a break is due');
+  if (!/limited by 8-hour rule \(30-min break in 8h 00m\)/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break, not claim one is due');
   if (/30-min break due/.test(bx)) throw new Error('the label still says a break is due after the driver took one');
+
+  // Approaching 8 hours with no break: the label must still say "break" (round-3 finding — the first
+  // fix dropped the word until the counter hit zero, the moment the driver most needs it).
+  setState({ segments: [{ status: 'D', start: t - 465, end: t }] });
+  const ax = out('log/break 15 min away');
+  if (!/limited by 8-hour rule \(30-min break in 15m\)/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
+  if (/30-min break due/.test(ax)) throw new Error('a break 15 min away is not yet due');
 
   // The other half: once the counter has genuinely run out, it must still say so.
   setState({ segments: [{ status: 'D', start: t - 500, end: t }] });
@@ -754,6 +761,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/HOS Sandbox is a planning scratchpad/.test(dx)) throw new Error('the startup disclaimer must appear at launch');
   if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
   if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
+  // While the dialog is open nothing behind it can take focus or be read as current (round-3 finding).
+  for (const tag of ['header', 'main', 'nav']) {
+    if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`<${tag}> must be inert while the disclaimer is open`);
+  }
 
   // The theme toggle reads in words. `>Day<` matches only the Settings toggle: the header switch
   // renders as "☀ Day", which has the glyph between the bracket and the word.
