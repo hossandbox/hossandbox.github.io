@@ -13,6 +13,14 @@ Property-carrying drivers only (passenger rules differ and are OUT OF SCOPE for 
 - **30-min break** (a)(3)(ii): no driving once >8 cumulative hrs driving have passed without a
   ≥30-min consecutive non-driving interruption (off, SB, or on-duty-not-driving all count).
   Short-haul (§395.1(e)(1)/(e)(2)) drivers are exempt.
+- **Wording of the break rule when it is the binding limit.** The break headroom (480 min from the
+  last qualifying interruption) is often the *binding* limit even when no break is outstanding: a
+  qualifying break resets the counter, so the driver then has a full 8 h of fresh break headroom,
+  which is less than the drive time left if the break came before ~3 h of driving. Calling that
+  "30-min break due" is arithmetically right and plainly false to a driver who has just taken one
+  (reported 2026-10-03). The label reads "30-min break due" only once the counter has actually run
+  out (`breakRemaining <= 0`), and "8-hour driving rule" otherwise. Clocks and violations are
+  unaffected — this is display only.
 - **60/7 and 70/8** (b): no driving after 60 on-duty hrs in 7 days (carrier not 7-day) or 70 in
   8 days (carrier operates every day). Rolling window.
 - **34-hr restart** (c): any 7/8-day period may end with ≥34 consecutive hrs off duty. It ALSO
