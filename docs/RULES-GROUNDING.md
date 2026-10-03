@@ -81,8 +81,25 @@ Recalculation (iii):
 ## Other exceptions to model (v1 = flag/annotate only, not full engine)
 - **Adverse driving** §395.1(b)(1): +2 hrs driving AND window (13/16) if conditions unknown at
   dispatch. Not usable on same day as… (verify before implementing).
-- **16-hr short-haul** §395.1(o): once per 7 days (or after a 34 restart), if released at
-  reporting location previous 5 duty tours and this one.
+- **16-hr short-haul** §395.1(o) — **modelled in the engine, not just flagged.** Extends the 14-hour
+  window to 16 if the driver was released at the normal reporting location for the previous 5 duty
+  tours and this one, and §395.1(o)(3): *"The driver has not taken this exemption within the previous
+  6 consecutive days, except when the driver has begun a new 7- or 8-consecutive day period with the
+  beginning of any off-duty period of 34 or more consecutive hours as allowed by § 395.3(c)."*
+  (eCFR, verified 2026-10-03: <https://www.ecfr.gov/current/title-49/subtitle-B/chapter-III/subchapter-B/part-395/subpart-A/section-395.1>)
+  - The look-back is **carrier days, not a rolling 144 h** — `carrierDayStart(shift)` stepped back 6
+    more carrier days (`engine/src/availability.ts`). §395.2 begins a 7/8-day period at the time the
+    carrier designates for a 24-hour period, so the window has to move with the carrier day and with
+    DST. A rolling 144 h let a Monday 06:00 use be claimed again Sunday 07:00, and across the November
+    change the gap is 146 h. Falsified: reverting to 144 h fails 5 of the 7 tests in
+    `engine/test/sixteen-hour.test.ts`.
+  - A use is **dated by the start of the shift it was claimed for**, never by the stored key. Since a
+    key can sit inside the rest the evening before, dating by key pushes the use out of the look-back
+    and makes the check permissive again — the wrong direction.
+  - An **ineligible claim does not extend the window**: the 16-hr box stays ticked, the clocks stay
+    14 h, and a note explains why. It previously kept 16 h, overstating legal time by 2 hours.
+  - Eligibility is computed once in `evaluate()` (`sixteenEligible`) and passed to `shiftLimits()`; the
+    old rolling check survives only as a fallback for direct callers that have no record.
 - **Personal conveyance**: off-duty; guidance-driven; out of scope for v1 engine.
 
 ## Record handling — how the engine reads a log (correctness, not a CFR exception)
