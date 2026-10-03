@@ -1,7 +1,7 @@
 import type { Availability, RulesConfig, Segment, ShiftEvaluation, Violation } from './types.ts';
 import { DEFAULT_CONFIG } from './types.ts';
 import { normalize, restPeriods, shifts, gaps } from './timeline.ts';
-import { evaluateShift, breakViolations } from './shift.ts';
+import { evaluateShift, breakViolations, shiftLimits } from './shift.ts';
 import { evaluateCycle, cycleViolations } from './cycle.ts';
 
 export interface EvaluateOptions {
@@ -73,8 +73,9 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   const shiftEvals: ShiftEvaluation[] = [];
   let current: ReturnType<typeof evaluateShift>;
   /** for §395.1(o): did a ≥34h restart end after the most recent earlier 16-hour shift? */
-  const restartSince = (span: { start: number }) => {
-    const prior = (config.sixteenHourShifts ?? []).filter((s) => s < span.start);
+  const restartSince = (span: { start: number }, openFrom?: number) => {
+    // keys inside the opening rest belong to this shift, not to an earlier one
+    const prior = (config.sixteenHourShifts ?? []).filter((s) => s < (openFrom ?? span.start));
     if (!prior.length) return true;
     const last = Math.max(...prior);
     return rests.some((r) => r.isRestart && r.start >= last && r.end <= span.start);
@@ -86,7 +87,8 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
     // interpretation is most advantageous. A pure off-duty reset (no 7h SB) is not covered by FAQ 22 → not offered.
     const opening = rests.find((r) => r.end === span.start && r.isReset && r.qualifiesLongSB);
     if (opening) inShift.unshift(opening);
-    return evaluateShift(segments, span, inShift, { asOf, config, restartSince: restartSince(span) });
+    const openFrom = rests.find((r) => r.end === span.start && r.isReset)?.start;
+    return evaluateShift(segments, span, inShift, { asOf, config, restartSince: restartSince(span, openFrom), openFrom });
   };
   for (const span of spans) shiftEvals.push(evalSpan(span).best);
   // Pick the shift containing asOf (or the latest one that has actually begun).
@@ -110,8 +112,15 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
   const restNow = rests.find((r) => r.start <= asOf && asOf <= r.end);
   let shift = current.best;
   if (restNow && asOf - restNow.start >= 600) {
-    shift = { ...shift, anchor: asOf, driveUsed: 0, windowUsed: 0, driveRemaining: shift.limits.drive, windowRemaining: shift.limits.window,
-      driveSinceBreak: 0, breakRemaining: config.shortHaul ? Infinity : 480, pendingSplitLeg: null };
+    // The fresh clock belongs to the shift AFTER this rest, so its limits are that shift's, never the
+    // previous one's: when a what-if row stretches the rest past asOf, the fallback above picks the
+    // shift before the rest, and its adverse 13/16 used to carry into the fresh clock. Exceptions
+    // flagged during the rest are keyed to a minute inside it and map to the next shift.
+    const next = { start: restNow.end };
+    const { limits, notes, keys } = shiftLimits(next, { asOf, config, openFrom: restNow.start, restartSince: restartSince(next, restNow.start) });
+    shift = { ...shift, anchor: asOf, driveUsed: 0, windowUsed: 0, driveRemaining: limits.drive, windowRemaining: limits.window,
+      driveSinceBreak: 0, breakRemaining: config.shortHaul ? Infinity : 480, pendingSplitLeg: null,
+      limits, notes, exceptionKey: asOf, exceptionKeys: keys };
   }
 
   const cycle = evaluateCycle(segments, rests, asOf, config, opts.forecastDays ?? 4);

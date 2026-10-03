@@ -7,7 +7,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   componentDidCatch(e: unknown) { this.setState({ err: e instanceof Error ? `${e.message}\n${(e.stack ?? '').split('\n').slice(1, 4).join('\n')}` : String(e) }); }
   render() {
     if (!this.state.err) return this.props.children;
-    const issue = `https://github.com/hossandbox/hossandbox.github.io/issues/new?template=bug-report.yml&title=${encodeURIComponent(`[bug] ${this.props.tab} tab crashed`)}&expected=${encodeURIComponent('Tab should render')}&actual=${encodeURIComponent(this.state.err)}&build=${encodeURIComponent(__BUILD__)}`;
+    const issue = `https://github.com/hossandbox/hossandbox.github.io/issues/new?template=bug-report.yml&title=${encodeURIComponent(`[bug] ${this.props.tab} tab crashed`)}&expected=${encodeURIComponent('Tab should render')}&app_said=${encodeURIComponent(this.state.err)}&build=${encodeURIComponent(__BUILD__)}`;
     return (
       <div class="card warn">
         <h3>This tab hit a bug</h3>
@@ -23,7 +23,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -149,6 +149,8 @@ const REPO = 'hossandbox/hossandbox.github.io';
 /** Copies the exported state to the clipboard and opens a prefilled GitHub issue (email fallback if set). */
 function reportBug(s: State, ev: FullEvaluation) {
   const json = exportState(s);
+  // GitHub rejects issue URLs past ~8 KB (414/500), and the log is URL-encoded at roughly 1.5×, so
+  // only a short log rides in the URL; anything longer goes via the clipboard (bug report C4).
   const clocks = `drive now ${dur(ev.driveNow)} (${ev.binding}) · ${ev.shift.limits.drive / 60}-hr left ${dur(ev.shift.driveRemaining)} · ${ev.shift.limits.window / 60}-hr left ${dur(ev.shift.windowRemaining)} · cycle left ${dur(ev.cycle.remaining)}`;
   navigator.clipboard?.writeText(json).catch(() => {});
   if (s.bugEmail) {
@@ -156,7 +158,7 @@ function reportBug(s: State, ev: FullEvaluation) {
     location.href = `mailto:${s.bugEmail}?subject=${encodeURIComponent('HOS Sandbox bug')}&body=${encodeURIComponent(body)}`;
     return;
   }
-  const q = new URLSearchParams({ template: 'bug-report.yml', title: '[bug] ', build: __BUILD__, clocks, log: json.length < 6000 ? json : '(log too long — it is on your clipboard; paste it here)' });
+  const q = new URLSearchParams({ template: 'bug-report.yml', title: '[bug] ', build: __BUILD__, clocks, log: json.length < 2500 ? json : '(log too long — it is on your clipboard; paste it here)' });
   window.open(`https://github.com/${REPO}/issues/new?${q}`, '_blank', 'noopener');
 }
 function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
@@ -368,20 +370,25 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const [editError, setEditError] = useState<string | null>(null);
 
   const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
+    // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
+    // could drop the status being closed (bug report C5/L3).
+    const now = cur.nowOverride ?? nowMin();
     const segments = [...cur.segments];
     // The closed row keeps the stamp from when it was tapped, so a correction typed while it was live
     // still wins over it after it closes.
     if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: cur.current.createdAt ?? stamp() });
     return { segments, current: { status: st, since: now, note, createdAt: stamp() } };
   });
+  // Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
+  // storing it orphaned the flag a minute later (bug report C3). exceptionKey is stable for the shift.
   const toggleException = (key: 'adverseShifts' | 'sixteenHourShifts') => setState((cur) => {
     const list = new Set(cur.config[key] ?? []);
-    const k = ev.shift.shiftStart;
-    list.has(k) ? list.delete(k) : list.add(k);
+    const matched = key === 'adverseShifts' ? ev.shift.exceptionKeys.adverse : ev.shift.exceptionKeys.sixteen;
+    if (matched !== null) list.delete(matched); else list.add(ev.shift.exceptionKey);
     return { config: { ...cur.config, [key]: [...list] } };
   });
-  const adverseOn = (s.config.adverseShifts ?? []).includes(ev.shift.shiftStart);
-  const sixteenOn = (s.config.sixteenHourShifts ?? []).includes(ev.shift.shiftStart);
+  const adverseOn = ev.shift.exceptionKeys.adverse !== null;
+  const sixteenOn = ev.shift.exceptionKeys.sixteen !== null;
   const add = () => {
     const a = fromInput(start), b = fromInput(end);
     if (a === null || b === null) { setFormError('Enter a valid start and end.'); return; }
@@ -459,7 +466,10 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
             <p class="muted small">Oldest first — this is the timeline the clocks use: overlaps already resolved, and your current status included. Read-only; switch back to edit what you typed.</p>
             <ul class="seglist">{resolved.map((seg, i) => (
               <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
-            ))}</ul>
+            ))}
+            {s.current && now <= s.current.since && (
+              <li><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span>{segLabel(s.current.status, s.current.note)}</span><span class="muted">since {clock(s.current.since)} · just started</span></li>
+            )}</ul>
             <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
             <p class="muted small">Set your current status with the buttons above to keep this timeline moving.</p>
           </>
@@ -629,6 +639,9 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
   const showDates = Math.max(...TRIP_STRATEGIES.map((k) => both[k].arrival)) - from > 7 * 1440;
   const at = showDates ? clockFull : clock;
   const sameArrival = both.reset10.arrival === both.split.arrival && both.split.arrival === both.restart34.arrival;
+  // `faster` is 'same' on any tie, which left no card labelled when two plans tied and the third was
+  // slower; label every plan that shares the earliest arrival instead.
+  const earliest = Math.min(...TRIP_STRATEGIES.map((k) => both[k].arrival));
   const [expandSame, setExpandSame] = useState(false);
   const resets = (p: TripPlan) => p.steps.filter((x) => x.segment.status !== 'D' && x.segment.status !== 'ON' && x.segment.end - x.segment.start >= 600).length;
   return (
@@ -643,7 +656,7 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
         {TRIP_STRATEGIES.map((k) => {
           const p = both[k];
           return <button key={k} class={`plancard ${chosen === k ? 'on' : ''} ${p.feasible ? '' : 'bad'}`} onClick={() => pick(k)}>
-            <div class="stat-label">{STRATEGY_LABEL[k]}{both.faster === k ? ' · fastest' : ''}</div>
+            <div class="stat-label">{STRATEGY_LABEL[k]}{!sameArrival && p.arrival === earliest ? ' · fastest' : ''}</div>
             <div class="stat-value">{at(p.arrival)}</div>
             <div class="stat-sub">{dur(p.elapsedMinutes)} · {resets(p)} long rest{resets(p) === 1 ? '' : 's'} · {p.feasible ? 'legal' : 'PROBLEM'}</div>
           </button>;
@@ -672,7 +685,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp()) }));
   };
   const both = useMemo(() => planTripAll(allSegments(s, now), { departure: now, distanceMiles: miles, mph: s.mph, stops: dwell ? [{ atMile: miles, minutes: dwell, status: dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [], config: s.config }), [s, now, miles, dwell, dwellOff]);
-  const best = both[both.faster === 'split' ? 'split' : 'reset10'];
+  const best = both[both.faster === 'same' ? 'reset10' : both.faster];
   // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
   // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
   const openGaps = meaningfulGaps(ev.gaps);
@@ -816,9 +829,21 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
     setIoNote(`Download requested: ${name} (${s.segments.length} logged segment(s), ${s.tentative.length} what-if row(s)). Check your browser's downloads — the app cannot confirm the file reached your device.`);
   };
   const importJson = (e: Event) => {
-    const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0];
+    input.value = ''; // so choosing the same file again fires another change event
+    if (!f) return;
     f.text().then((t) => {
       const d = JSON.parse(t);
+      // Validate first: a JSON file that isn't an export used to replace the log with nothing (C1).
+      const problem = importProblem(d);
+      if (problem) { setIoNote(`Could not import ${f.name}: ${problem}`); return; }
+      const cur = getState();
+      const have = cur.segments.length + cur.tentative.length + (cur.current ? 1 : 0);
+      if (have > 0 && !confirm(`Replace your ${cur.segments.length} logged segment(s) and ${cur.tentative.length} what-if row(s) with ${d.segments.length} segment(s) from ${f.name}? This cannot be undone.`)) {
+        setIoNote('Import cancelled. Nothing was changed.');
+        return;
+      }
       setState((cur) => applyImportedState(cur, d));
       setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.`);
     }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
@@ -828,7 +853,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
         <label>Carrier day starts at<select value={c.dayStartHour} onChange={(e) => setC({ dayStartHour: Number((e.target as HTMLSelectElement).value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
-        <label>Home terminal time zone<TimeZoneField value={c.timeZone} onChange={(v) => setC({ timeZone: v })} /></label>
+        <TimeZoneField value={c.timeZone} onChange={(v) => setC({ timeZone: v })} />
         <label class="check"><input type="checkbox" checked={c.shortHaul} onChange={(e) => setC({ shortHaul: (e.target as HTMLInputElement).checked })} /> Short-haul (§395.1(e)) — no 30-min break rule</label>
         <p class="muted small">Adverse-conditions and 16-hour-day exceptions are per shift — toggle them on the Log tab.</p>
       </Card>
@@ -847,7 +872,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       <Card title="Data">
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
         {ioNote && <p class="muted small">{ioNote}</p>}
-        <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
+        <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">
@@ -898,7 +923,26 @@ export function App() {
   // Startup disclaimer — dismissed for this session only; a fresh launch shows it again.
   const [disclaimer, setDisclaimer] = useState(true);
   useEffect(() => { applyTheme(s.theme); }, [s.theme]);
-  const ev = useMemo(() => evaluate(allSegments(s, now), { asOf: now, config: s.config }), [s, now]);
+  // evaluate() runs outside every tab's error boundary, so a throw here used to blank the whole app on
+  // every launch (bug report C2). Catch it and offer a way out instead.
+  const result = useMemo(() => {
+    try { return { ev: evaluate(allSegments(s, now), { asOf: now, config: s.config }), err: null }; }
+    catch (e) { return { ev: null, err: e instanceof Error ? e.message : String(e) }; }
+  }, [s, now]);
+  const ev = result.ev;
+  if (!ev) {
+    return (
+      <div class="app"><main>
+        <div class="card warn">
+          <h3>HOS Sandbox could not calculate your clocks</h3>
+          <p class="small">Your log is still saved. The error was:</p>
+          <pre class="small" style="white-space:pre-wrap">{result.err}</pre>
+          <p class="small">Resetting the rules settings (cycle, carrier day, time zone, exceptions) usually fixes this and keeps your log.</p>
+          <button class="primary" onClick={() => setState({ config: { ...INITIAL_STATE.config } })}>Reset settings</button>
+        </div>
+      </main></div>
+    );
+  }
   const tabs: [State['tab'], string][] = [['log', 'Log'], ['split', 'Split Lab'], ['recap', 'Recap'], ['trip', 'Trip'], ['settings', 'Settings']];
   return (
     <div class="app">

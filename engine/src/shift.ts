@@ -129,6 +129,20 @@ export interface ShiftEvalOptions {
   rests?: RestPeriod[];
   /** true when a ≥34h restart ended after any earlier 16-hour-exception shift (eligibility reset) */
   restartSince?: boolean;
+  /**
+   * Start of the ≥10h rest that opened this shift. An exception key stored while the driver was in
+   * that rest (any minute from here to the shift start) belongs to this shift: during a rest the
+   * open shift's start is "now" and moves every minute, so a key equal to it would be orphaned.
+   */
+  openFrom?: number;
+}
+
+/** The stored exception key, if any, that flags the shift `span` (see ShiftEvalOptions.openFrom). */
+export function exceptionKeyFor(keys: number[] | undefined, span: { start: number }, openFrom?: number): number | null {
+  for (const k of keys ?? []) {
+    if (k === span.start || (openFrom !== undefined && k >= openFrom && k <= span.start)) return k;
+  }
+  return null;
 }
 
 /**
@@ -146,7 +160,7 @@ export function evaluateShiftWithChain(
   const S = span.start;
   const E = span.end ?? Infinity;
   const violations: Violation[] = [];
-  const { limits, notes } = shiftLimits(span, opts);
+  const { limits, notes, keys } = shiftLimits(span, opts);
   const driveIn = driveLookup(segments);
 
   for (const seg of segments) {
@@ -212,6 +226,8 @@ export function evaluateShiftWithChain(
     pendingSplitLeg: pending,
     limits,
     notes,
+    exceptionKey: S,
+    exceptionKeys: keys,
   };
 }
 
@@ -221,19 +237,23 @@ export function evaluateShiftWithChain(
  * §395.1(o) 16-hour short-haul: window 14→16, driving unchanged; once per 7 days unless a
  * 34h restart intervened, and only if released at the normal work reporting location.
  */
-export function shiftLimits(span: ShiftSpan, opts: ShiftEvalOptions): { limits: { drive: number; window: number }; notes: string[] } {
+export function shiftLimits(span: Pick<ShiftSpan, 'start'>, opts: ShiftEvalOptions): { limits: { drive: number; window: number }; notes: string[]; keys: { adverse: number | null; sixteen: number | null } } {
   let drive = LIMITS.DRIVE, window = LIMITS.WINDOW;
   const notes: string[] = [];
-  const adverse = (opts.config.adverseShifts ?? []).includes(span.start);
-  const sixteen = (opts.config.sixteenHourShifts ?? []).includes(span.start);
+  const keys = {
+    adverse: exceptionKeyFor(opts.config.adverseShifts, span, opts.openFrom),
+    sixteen: exceptionKeyFor(opts.config.sixteenHourShifts, span, opts.openFrom),
+  };
+  const adverse = keys.adverse !== null;
+  const sixteen = keys.sixteen !== null;
   if (adverse) { drive += 120; window += 120; notes.push('Adverse driving conditions declared: 13-hour driving / 16-hour window (§395.1(b)(1)).'); }
   if (sixteen) {
     window += 120;
     notes.push('16-hour short-haul exception claimed: window extended to 16h, driving still 11h (§395.1(o)). Requires release at your normal work reporting location for this and the previous 5 duty tours.');
-    const prior = (opts.config.sixteenHourShifts ?? []).filter((s) => s < span.start && s >= span.start - 6 * 1440);
+    const prior = (opts.config.sixteenHourShifts ?? []).filter((s) => s !== keys.sixteen && s < span.start && s >= span.start - 6 * 1440);
     if (prior.length && !opts.restartSince) notes.push('⚠ 16-hour exception already used within the previous 6 days and no 34-hour restart since — not eligible today.');
   }
-  return { limits: { drive, window }, notes };
+  return { limits: { drive, window }, notes, keys };
 }
 
 /** 30-minute break rule §395.3(a)(3)(ii): status as of t. */

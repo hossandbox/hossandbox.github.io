@@ -99,13 +99,30 @@ export const INITIAL_STATE: State = {
   tzChosen: false, nowOverride: null, tab: 'log', bugEmail: '',
 };
 
+/**
+ * A config the engine can run on. An invalid zone makes Intl.DateTimeFormat throw inside evaluate(),
+ * and once saved it blanked the app on every launch (bug report C2), so anything read from storage or
+ * an imported file passes through here: bad fields fall back to the device zone / defaults.
+ */
+export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallback: RulesConfig = INITIAL_STATE.config): RulesConfig {
+  const cfg = { ...fallback, ...(c && typeof c === 'object' ? c : {}) };
+  if (typeof cfg.timeZone !== 'string' || !isValidTimeZone(cfg.timeZone)) cfg.timeZone = isValidTimeZone(fallback.timeZone) ? fallback.timeZone : deviceTz;
+  if (!Number.isInteger(cfg.dayStartHour) || cfg.dayStartHour < 0 || cfg.dayStartHour > 23) cfg.dayStartHour = 0;
+  if (cfg.cycle !== '60/7' && cfg.cycle !== '70/8') cfg.cycle = '70/8';
+  const nums = (v: unknown) => (Array.isArray(v) ? v.filter((x) => Number.isFinite(x)) : []);
+  cfg.adverseShifts = nums(cfg.adverseShifts);
+  cfg.sixteenHourShifts = nums(cfg.sixteenHourShifts);
+  cfg.shortHaul = !!cfg.shortHaul;
+  return cfg;
+}
+
 function load(): State {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return INITIAL_STATE;
     const s = JSON.parse(raw);
     const merged: State = { ...INITIAL_STATE, ...s,
-      config: { ...INITIAL_STATE.config, ...(s.config ?? {}) },
+      config: sanitizeConfig(s.config),
       trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
       split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
       loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) } };
@@ -153,9 +170,19 @@ export function useNow(): number {
   const [n, setN] = useState(nowMin());
   // The app works in whole minutes, so a 30s tick recomputed every planning screen twice per
   // meaningful change — and each tick re-runs planTripAll (stress-test 2.2). One minute is the
-  // finest thing any readout can show, so tick at the point where the displayed value can change.
-  useEffect(() => { const id = setInterval(() => setN(nowMin()), 60000); return () => clearInterval(id); }, []);
-  return s.nowOverride ?? n;
+  // finest thing any readout can show, so tick at the point where the displayed value can change:
+  // on the minute boundary, not 60s after mount, which lagged the wall clock by up to a minute and
+  // backdated status taps (bug report C5/L3). A phone that slept also re-reads the clock on wake.
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout>;
+    const schedule = () => { id = setTimeout(() => { setN(nowMin()); schedule(); }, 60000 - (Date.now() % 60000) + 20); };
+    schedule();
+    const wake = () => setN(nowMin());
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', wake);
+    return () => { clearTimeout(id); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', wake); };
+  }, []);
+  // Any render (e.g. right after a status tap) reads the real minute, never a stale tick.
+  return s.nowOverride ?? Math.max(n, nowMin());
 }
 export function toInput(min: number): string {
   const d = new Date(min * 60000);
@@ -329,6 +356,11 @@ export function applyDayPatch(
     add('D', Math.round(drive * 60));
   }
   add('ON', Math.round((on - onPre) * 60));
+  // The rest of the day is off duty: "set" replaces the whole day, and leaving it unlogged raised the
+  // "unlogged time" warning and a provisional verdict for a day the driver had just filled in (L1).
+  const off = (start: number, end: number) => { if (end > start) segs.push({ status: 'OFF', start, end, note: 'recap entry', createdAt }); };
+  const workEnd = Math.min(t, dayEnd);
+  if (segs.length) { off(dayStart, segs[0].start); off(workEnd, dayEnd); } else off(dayStart, dayEnd);
   return [...kept, ...segs].sort((a, b) => a.start - b.start);
 }
 
@@ -354,11 +386,45 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
     segments: d.segments ?? [],
     tentative: d.tentative ?? [],
     current: d.current ?? null,
-    config: { ...cur.config, ...(d.config ?? {}) },
+    config: sanitizeConfig(d.config, cur.config),
     mph: d.mph ?? cur.mph,
     trip: { ...DEFAULT_TRIP, ...(d.trip ?? {}) },
     bugEmail: typeof d.bugEmail === 'string' ? d.bugEmail : cur.bugEmail,
   };
+}
+
+const STATUSES = new Set(['OFF', 'SB', 'D', 'ON']);
+const rowProblem = (x: unknown): string | null => {
+  if (!x || typeof x !== 'object') return 'is not an entry';
+  const r = x as Record<string, unknown>;
+  if (typeof r.status !== 'string' || !STATUSES.has(r.status)) return 'has no valid duty status';
+  if (!Number.isFinite(r.start) || !Number.isFinite(r.end)) return 'has no valid start/end time';
+  if ((r.end as number) <= (r.start as number)) return 'ends before it starts';
+  return null;
+};
+
+/**
+ * Check that a file is an HOS Sandbox export before it is allowed to replace anything. A JSON file
+ * without a `segments` array used to import as an empty log, silently wiping the driver's record
+ * (bug report C1). Returns a driver-facing reason, or null when the payload is usable.
+ */
+export function importProblem(d: unknown): string | null {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'This is not an HOS Sandbox export (expected a JSON object).';
+  const o = d as Record<string, unknown>;
+  if (!Array.isArray(o.segments)) return 'This is not an HOS Sandbox export: it has no "segments" list.';
+  if (o.tentative !== undefined && !Array.isArray(o.tentative)) return 'The "tentative" field is not a list.';
+  for (const [name, list] of [['segments', o.segments], ['tentative', (o.tentative ?? []) as unknown[]]] as const) {
+    for (let i = 0; i < list.length; i++) {
+      const p = rowProblem(list[i]);
+      if (p) return `Entry ${i + 1} in "${name}" ${p}. Nothing was imported.`;
+    }
+  }
+  if (o.current !== undefined && o.current !== null) {
+    const c = o.current as Record<string, unknown>;
+    if (typeof c !== 'object' || typeof c.status !== 'string' || !STATUSES.has(c.status) || !Number.isFinite(c.since)) return 'The current status in this file is not valid. Nothing was imported.';
+  }
+  if (o.config !== undefined && (o.config === null || typeof o.config !== 'object')) return 'The settings in this file are not valid. Nothing was imported.';
+  return null;
 }
 
 /** Materialize the open segment up to `now` so the engine sees it. */

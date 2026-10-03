@@ -599,7 +599,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const out1 = applyDayPatch([straddle], dayStart, dayEnd, 4, 0, 20, 111);
   const nextDayDrive = out1.filter((x) => x.start >= dayEnd).reduce((a, x) => a + (x.end - x.start), 0);
   if (nextDayDrive !== 180) throw new Error(`the next day kept ${nextDayDrive}m of driving, expected 180m — a straddling row was deleted instead of clipped`);
-  const inDay = out1.filter((x) => x.start >= dayStart && x.end <= dayEnd).reduce((a, x) => a + (x.end - x.start), 0);
+  const inDay = out1.filter((x) => x.start >= dayStart && x.end <= dayEnd && x.status !== 'OFF').reduce((a, x) => a + (x.end - x.start), 0);
+  // L1 — the rest of a "set" day is written as off duty, so the day leaves no unlogged hole
+  const covered = out1.filter((x) => x.start >= dayStart && x.end <= dayEnd).reduce((a, x) => a + (x.end - x.start), 0);
+  if (covered !== dayEnd - dayStart) throw new Error(`a recap "set" day covers ${covered}m of ${dayEnd - dayStart}m — the rest must be off duty, not unlogged`);
   if (inDay !== 240) throw new Error(`the edited day holds ${inDay}m, expected the requested 240m`);
 
   // 2.4b — generated rows stay inside the day they were entered for
@@ -842,5 +845,27 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/No driving time left — stop driving/.test(r)) throw new Error('driving out of hours must say stop driving');
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('round 4 (when can I drive again): OK');
+}
+// Regression (bug report C1/C2): an import must be validated before it replaces anything, and a bad
+// time zone must never reach the engine — from a file or from storage.
+{
+  const { importProblem, sanitizeConfig, applyImportedState, deviceTz: tz } = await import('../src/store.ts');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  for (const bad of [{ foo: 1 }, [], null, 42, { segments: {} }, { segments: [{ status: 'X', start: 1, end: 2 }] }, { segments: [{ status: 'D', start: 5, end: 2 }] }, { segments: [], tentative: 'x' }, { segments: [], current: { status: 'D' } }]) {
+    if (!importProblem(bad)) throw new Error(`import accepted a non-export: ${JSON.stringify(bad)}`);
+  }
+  if (importProblem({ segments: [{ status: 'D', start: 10, end: 20 }], tentative: [], current: null, config: {} })) throw new Error('a valid export was rejected');
+  const cfg = sanitizeConfig({ timeZone: 'Central', dayStartHour: 99, cycle: 'x' });
+  if (cfg.timeZone !== getState().config.timeZone && cfg.timeZone !== tz) throw new Error('an invalid time zone survived sanitizeConfig');
+  if (cfg.dayStartHour !== 0 || cfg.cycle !== '70/8') throw new Error('sanitizeConfig left a bad day start / cycle');
+  const imported = applyImportedState(getState(), { segments: [], config: { timeZone: 'Central' } });
+  evaluate([], { asOf: now, config: imported.config }); // must not throw
+  // a bad zone already in state must not blank the app: it renders the recovery card instead
+  const keep = getState().config;
+  setState({ config: { ...keep, timeZone: 'Central' } });
+  hh = render(h(App, {}));
+  if (!/could not calculate your clocks/.test(hh) || !/Reset settings/.test(hh)) throw new Error('an engine error must show the recovery card, not throw');
+  setState({ config: keep });
+  console.log('import validation + bad time zone: OK');
 }
 console.log('OK');

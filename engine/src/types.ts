@@ -129,6 +129,14 @@ export interface ShiftEvaluation {
   limits: { drive: number; window: number };
   /** exceptions applied and any eligibility warnings */
   notes: string[];
+  /**
+   * The minute the UI stores in adverseShifts / sixteenHourShifts to flag THIS shift. Normally the
+   * shift start; while the driver is in a ≥10h rest it is a minute inside that rest, which the engine
+   * maps to the shift that follows the rest (see shiftLimits), so the flag survives the rest.
+   */
+  exceptionKey: number;
+  /** the stored keys that matched this shift (null = not declared), so the UI can clear the right one */
+  exceptionKeys: { adverse: number | null; sixteen: number | null };
 }
 
 export interface CycleDay {

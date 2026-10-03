@@ -78,3 +78,38 @@ test('trip planner split strategy opens a split when the driver has nothing to p
   assert.ok(!plan.steps.some((s) => s.reason.startsWith('10-hour reset')), 'no 10h reset should be needed');
   assert.equal(plan.evaluation.violations.length, 0);
 });
+
+test('an exception flagged during a ≥10h rest sticks to the next shift (C3)', () => {
+  // Shift 06:00-18:00 day0, then OFF from 18:00. At 05:00 day1 (11h into the rest) the driver flags
+  // adverse conditions for the coming shift. During a ≥10h rest the open shift starts at "now", so the
+  // key the UI stores must keep matching as time passes and once driving starts.
+  const day0 = [fresh(0, 6), ...log(0, 6, [['D', 10], ['OFF', 10.5], ['D', 17], ['ON', 18]])];
+  const rest = (endH: number): Segment => ({ status: 'OFF', start: at(0, 18), end: at(1, endH) });
+  const inRest = evaluate([...day0, rest(5)], { asOf: at(1, 5), config: { timeZone: TZ } });
+  const key = inRest.shift.exceptionKey;
+  assert.ok(key > at(0, 18) && key <= at(1, 5), 'the key is a minute inside the rest');
+  const cfg = { timeZone: TZ, adverseShifts: [key] };
+  for (const later of [at(1, 5) + 1, at(1, 6)]) {
+    const ev = evaluate([...day0, rest((later - DAY0 - 1440) / 60)], { asOf: later, config: cfg });
+    assert.equal(ev.shift.exceptionKeys.adverse, key, 'still flagged a minute (and an hour) later');
+    assert.equal(ev.shift.limits.drive, 13 * 60);
+    assert.equal(ev.shift.driveRemaining, 13 * 60, 'the fresh clock shows the extended limit');
+  }
+  // Next shift drives 12.5h with a break: legal under adverse conditions, a DRIVE_11 violation without.
+  const day1 = [...day0, rest(6), ...log(1, 6, [['D', 13], ['OFF', 13.5], ['D', 19]])];
+  const flagged = evaluate(day1, { asOf: at(1, 19), config: cfg });
+  assert.equal(flagged.shift.limits.drive, 13 * 60);
+  assert.equal(flagged.violations.filter((v) => v.kind === 'DRIVE_11').length, 0);
+  const plain = evaluate(day1, { asOf: at(1, 19), config: { timeZone: TZ } });
+  assert.ok(plain.violations.some((v) => v.kind === 'DRIVE_11'));
+  // and the previous shift is NOT extended by it
+  assert.equal(flagged.shifts[flagged.shifts.length - 2].limits.drive, 11 * 60);
+});
+
+test('a what-if rest past asOf does not carry the previous shift\'s adverse limits into the fresh clock (L2)', () => {
+  const day0 = [fresh(0, 6), ...log(0, 6, [['D', 10], ['OFF', 10.5], ['D', 16]])];
+  const segs: Segment[] = [...day0, { status: 'OFF', start: at(0, 16), end: at(1, 3) }, { status: 'OFF', start: at(1, 3), end: at(1, 5), tentative: true }];
+  const ev = evaluate(segs, { asOf: at(1, 3), config: { timeZone: TZ, adverseShifts: [at(0, 6)] } });
+  assert.equal(ev.shift.driveRemaining, 11 * 60);
+  assert.equal(ev.shift.windowRemaining, 14 * 60);
+});
