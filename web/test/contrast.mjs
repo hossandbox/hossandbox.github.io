@@ -5,7 +5,8 @@
  * threshold. It reads the colours rather than duplicating them, so a palette change cannot pass by
  * being made in only one of the two places. Run by `npm run smoke`.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
 
@@ -108,6 +109,39 @@ const manifest = JSON.parse(readFileSync(new URL('../public/manifest.webmanifest
 for (const key of ['background_color', 'theme_color']) {
   if (manifest[key] !== day['--bg']) {
     failures.push(`  manifest ${key} ${manifest[key]} must match the day --bg ${day['--bg']} — otherwise the installed app splashes dark onto a light UI`);
+  }
+}
+// Android crops an installed app's icon to whatever shape the launcher uses. With no maskable icon it
+// falls back to shrinking the artwork onto a white circle; with one whose corners are rounded or
+// transparent, the crop shows them. So assert one exists, at the size Play wants, and genuinely
+// full-bleed — measured from the pixels rather than taken on trust.
+const maskable = (manifest.icons ?? []).filter((i) => String(i.purpose ?? '').split(/\s+/).includes('maskable'));
+if (!maskable.length) {
+  failures.push('  manifest declares no maskable icon — Android will shrink the artwork onto a white circle');
+}
+for (const icon of maskable) {
+  const file = new URL(`../public/${String(icon.src).replace(/^\.\//, '')}`, import.meta.url);
+  if (!existsSync(file)) { failures.push(`  maskable icon ${icon.src} is declared but missing`); continue; }
+  const png = readFileSync(file);
+  if (png.subarray(1, 4).toString('latin1') !== 'PNG') { failures.push(`  maskable icon ${icon.src} is not a PNG`); continue; }
+  const w = png.readUInt32BE(16), h = png.readUInt32BE(20);
+  if (w !== 512 || h !== 512) failures.push(`  maskable icon ${icon.src} is ${w}x${h}, Play wants 512x512`);
+  const colorType = png[25];
+  if (colorType !== 6 && colorType !== 2) { failures.push(`  maskable icon ${icon.src} has unexpected PNG colour type ${colorType}`); continue; }
+  // Colour type 2 has no alpha channel, so every pixel is opaque by construction. Type 6 carries
+  // alpha, and a transparent corner is exactly the defect the launcher's mask exposes.
+  if (colorType === 6) {
+    // First pixel of the first scanline: every PNG filter degenerates to raw there (no left/up
+    // neighbour), so these bytes are the literal corner colour.
+    let idat = Buffer.alloc(0);
+    for (let o = 8; o + 8 <= png.length;) {
+      const len = png.readUInt32BE(o), type = png.subarray(o + 4, o + 8).toString('latin1');
+      if (type === 'IDAT') idat = Buffer.concat([idat, png.subarray(o + 8, o + 8 + len)]);
+      o += 12 + len;
+      if (type === 'IEND') break;
+    }
+    const alpha = inflateSync(idat)[4];
+    if (alpha !== 255) failures.push(`  maskable icon ${icon.src} has a transparent corner (alpha ${alpha}) — the launcher's mask would show through where the icon should be solid`);
   }
 }
 

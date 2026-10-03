@@ -185,12 +185,39 @@ const legalWeeks = (weeks: number) => {
   const parts: [Segment['status'], number][] = []; for (let i = 0; i < weeks; i++) parts.push(...wk);
   return seq('2026-03-02T06:00', parts);
 };
-test('U4 planTripAll on 26 weeks of legal history < 1000ms', () => {
-  const s = legalWeeks(26);
+/**
+ * Machine-speed reference, measured in the same run. An absolute wall-clock budget says nothing about
+ * the code: this test failed at 1009ms against a 1000ms budget on a busy box while the algorithm was
+ * unchanged, and passed at ~350ms on a quiet one. Comparing against a reference measured now makes the
+ * budget track the machine instead of assuming one.
+ */
+function referenceWork(): number {
+  const t0 = performance.now();
+  let x = 0;
+  for (let i = 0; i < 30_000_000; i++) x = (x + i * 2654435761) >>> 0;
+  if (x === 1.5) throw new Error('unreachable — keeps the loop from being optimised away');
+  return performance.now() - t0;
+}
+const timePlanAll = (weeks: number): number => {
+  const s = legalWeeks(weeks);
   const t0 = performance.now();
   planTripAll(s, { departure: s[s.length - 1].end, distanceMiles: 2400, mph: 55, preTripMinutes: 30, config: cfg });
-  const took = performance.now() - t0;
-  assert.ok(took < 1000, `took ${took.toFixed(0)}ms`);
+  return performance.now() - t0;
+};
+// §2.4's actual claim, asserted directly: 8.7x the record must not cost meaningfully more. This is
+// independent of machine speed, so a slow or busy box cannot make it flap — and a per-record
+// regression (pruning stopped working) fails it on any machine.
+test('U4 planTripAll cost does not grow with the length of the record', () => {
+  const short = timePlanAll(3);
+  const long = timePlanAll(26);
+  assert.ok(long < short * 2 + 150, `26 weeks took ${long.toFixed(0)}ms vs ${short.toFixed(0)}ms for 3 weeks — cost is tracking record length`);
+});
+// The wall-clock guard, now calibrated against this machine rather than an assumed one.
+test('U4c planTripAll within a measured multiple of machine speed', () => {
+  const ref = referenceWork();
+  const took = timePlanAll(26);
+  const budget = Math.max(600, ref * 12);
+  assert.ok(took < budget, `took ${took.toFixed(0)}ms; budget ${budget.toFixed(0)}ms (machine reference ${ref.toFixed(0)}ms)`);
 });
 test('U4b pruning never changes a plan', () => {
   for (const weeks of [3, 8, 26]) {

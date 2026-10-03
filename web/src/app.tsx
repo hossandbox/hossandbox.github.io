@@ -23,7 +23,7 @@ import {
   evaluate, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -175,7 +175,7 @@ function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: 
         <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - s.current.since)}` : ''}</span>
         <span class="top-right">
           <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
-          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => setState({ theme: s.theme === 'day' ? 'night' : 'day' })}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
+          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => chooseTheme(s.theme === 'day' ? 'night' : 'day')}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
         </span>
       </div>
       <div class="clocks">
@@ -527,7 +527,8 @@ function DayEditor({ day, hasData, onApply }: { day: { start: number; end: numbe
     <div class="dayedit">
       <label>Drive h<input type="number" class="hrs" min={0} max={13} step={0.25} value={drive} onInput={(e) => setDrive(Number((e.target as HTMLInputElement).value))} /></label>
       <label>On h<input type="number" class="hrs" min={0} max={14} step={0.25} value={on} onInput={(e) => setOn(Number((e.target as HTMLInputElement).value))} /></label>
-      <label>Start<input type="number" class="hrs" min={0} max={23} step={1} value={startH} onInput={(e) => setStartH(Number((e.target as HTMLInputElement).value))} /></label>
+      <label>Start (h after day start)<input type="number" class="hrs" min={0} max={23} step={1} value={startH} onInput={(e) => setStartH(Number((e.target as HTMLInputElement).value))} /></label>
+      <span class="muted small">{Number.isFinite(startH) ? clock(day.start + startH * 60) : '—'}</span>
       <button class="mini primary" onClick={apply}>OK</button>
       <button class="mini" onClick={() => setOpen(false)}>✕</button>
       {err && <div class="warnbox small">{err}</div>}
@@ -758,7 +759,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
-        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
+        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={s.theme} onChange={(v) => chooseTheme(v as Theme)} /></label>
         <p class="muted small">Day is the default — it is the readable one outdoors, which is where most planning happens. Night flips to the dark palette for low light. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
         <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
@@ -789,9 +790,10 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
  * record of duty status — and a driver who believes otherwise will treat a scratchpad as evidence.
  * Shown on every launch: the driver who needs to read it is not the one who read it last week.
  */
-function Disclaimer({ onClose }: { onClose: () => void }) {
+function Disclaimer({ onClose, tz, needsTz }: { onClose: (tz?: string) => void; tz: string; needsTz: boolean }) {
   // Move focus into the dialog: keyboard and screen-reader users start on its only control.
   const btn = useRef<HTMLButtonElement>(null);
+  const [choice, setChoice] = useState(tz);
   useEffect(() => { btn.current?.focus(); }, []);
   return (
     <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
@@ -800,7 +802,14 @@ function Disclaimer({ onClose }: { onClose: () => void }) {
         <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
         <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
         <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
-        <button ref={btn} onClick={onClose}>I understand</button>
+        {needsTz && (
+          <>
+            <h3>Where is your home terminal?</h3>
+            <p class="small">Every clock here is worked out in your <b>terminal's</b> time zone. It is set to your phone's zone right now (<b>{tz}</b>), which is wrong if you set the app up somewhere else — it would move every day boundary and the whole recap.</p>
+            <TimeZoneField value={choice} onChange={setChoice} />
+          </>
+        )}
+        <button ref={btn} onClick={() => onClose(needsTz ? choice : undefined)}>I understand</button>
       </div>
     </div>
   );
@@ -818,9 +827,17 @@ export function App() {
   const tabs: [State['tab'], string][] = [['log', 'Log'], ['split', 'Split Lab'], ['recap', 'Recap'], ['trip', 'Trip'], ['settings', 'Settings']];
   return (
     <div class="app">
-      {disclaimer && <Disclaimer onClose={() => setDisclaimer(false)} />}
+      {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
       <StatusBar ev={ev} now={now} s={s} inert={disclaimer} />
       <main inert={disclaimer}>
+        {s.themeNotice && (
+          <div class="card warn">
+            <div class="row">
+              <span class="small">Switched to the <b>Day</b> theme — it is the new default. The header switch or Settings will put it back to Night.</span>
+              <button class="mini" onClick={() => setState({ themeNotice: false })}>Got it</button>
+            </div>
+          </div>
+        )}
         <TabBoundary key={s.tab} tab={s.tab}>
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}

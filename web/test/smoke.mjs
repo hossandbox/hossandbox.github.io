@@ -1,5 +1,6 @@
 // Node-side smoke test: render every tab with a stubbed DOM, exercising store transitions.
 import { render } from 'preact-render-to-string';
+import { readFile } from 'node:fs/promises';
 import { h } from 'preact';
 
 // minimal browser globals
@@ -765,6 +766,33 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   for (const tag of ['header', 'main', 'nav']) {
     if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`<${tag}> must be inert while the disclaimer is open`);
   }
+
+  // First-run: the terminal zone is asked for, not silently inherited from the phone (round-3 item 3).
+  // A driver who set the app up on the road got the phone's zone, which moves every day boundary and
+  // the whole recap.
+  setState({ tzChosen: false });
+  const fz = out('first-run terminal zone');
+  if (!/Where is your home terminal\?/.test(fz)) throw new Error('a fresh install must be asked where its terminal is, not handed the phone zone');
+  if (!/Home terminal time zone/.test(fz)) throw new Error('the first-run question must offer the zone picker');
+  if (!/phone's zone right now/.test(fz)) throw new Error('the first-run question must say which zone it is using until told otherwise');
+  setState({ tzChosen: true });
+  const fz2 = out('terminal zone already confirmed');
+  if (/Where is your home terminal\?/.test(fz2)) throw new Error('once the zone is confirmed the app must stop asking');
+  if (!/HOS Sandbox is a planning scratchpad/.test(fz2)) throw new Error('the disclaimer itself must still show on every launch');
+
+  // A legacy save (night was the default when it was written) is moved to the new day default ONCE and
+  // says so — never silently (round-3 item 2).
+  setState({ themeNotice: true });
+  if (!/Switched to the <b>Day<\/b> theme/.test(out('legacy night save'))) throw new Error('a legacy night save must be moved to the day default with a visible notice');
+  setState({ themeNotice: false });
+  if (/Switched to the <b>Day<\/b> theme/.test(out('migration notice dismissed'))) throw new Error('the migration notice must clear once acknowledged');
+
+  // The day editor renders only after its "set"/"edit" button is clicked, which a render harness cannot
+  // do — so this is a source-level check, not a render check (round-3 item 5). "Start" is hours after
+  // the day start (store.applyDayPatch: dayStart + startHour*60), which is clock time only when the
+  // carrier day begins at midnight.
+  const appSrc = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  if (!/Start \(h after day start\)/.test(appSrc)) throw new Error('the Start field must be labelled as hours after the day start, not a clock time');
 
   // The theme toggle reads in words. `>Day<` matches only the Settings toggle: the header switch
   // renders as "☀ Day", which has the glyph between the bracket and the word.

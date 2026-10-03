@@ -49,6 +49,19 @@ export interface State {
   logResolved: boolean;
   /** day (default, Lorico 2026-09-25 — he drives in daylight) or night; see applyTheme */
   theme: Theme;
+  /**
+   * The driver picked a theme by hand. Recorded so a later change of default can tell "chose night"
+   * from "never touched it" — before this flag, a stored 'night' was ambiguous (round-3 item 2).
+   */
+  themeChosen: boolean;
+  /** True once, if a legacy save (night was then the default) was moved to the new day default. */
+  themeNotice: boolean;
+  /**
+   * The driver has confirmed the home terminal time zone. Until then the app is using the phone's
+   * zone, which is wrong for a driver who installed while on the road — and a wrong zone silently
+   * moves day boundaries and corrupts the recap. So it is asked for rather than assumed (round-3 item 3).
+   */
+  tzChosen: boolean;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
   tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
@@ -82,7 +95,8 @@ export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
-  historyAcknowledged: false, logResolved: false, theme: 'day', nowOverride: null, tab: 'log', bugEmail: '',
+  historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
+  tzChosen: false, nowOverride: null, tab: 'log', bugEmail: '',
 };
 
 function load(): State {
@@ -90,11 +104,20 @@ function load(): State {
     const raw = localStorage.getItem(KEY);
     if (!raw) return INITIAL_STATE;
     const s = JSON.parse(raw);
-    return { ...INITIAL_STATE, ...s,
+    const merged: State = { ...INITIAL_STATE, ...s,
       config: { ...INITIAL_STATE.config, ...(s.config ?? {}) },
       trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
       split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
       loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) } };
+    // Legacy save: night was the DEFAULT when it was written, so a stored 'night' far more often means
+    // "never touched it" than "chose night" — and `themeChosen` did not exist yet to tell them apart
+    // (round-3 item 2). Move it to the new day default once, and raise a notice rather than rewriting
+    // the driver's screen in silence.
+    if (!('themeChosen' in s) && merged.theme === 'night') {
+      merged.theme = 'day';
+      merged.themeNotice = true;
+    }
+    return merged;
   } catch { return INITIAL_STATE; }
 }
 
@@ -108,6 +131,15 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   localStorage.setItem(KEY, JSON.stringify(state));
   subs.forEach((f) => f());
 }
+
+/**
+ * The driver picked a theme by hand (header switch or Settings). Sets the flag that keeps an explicit
+ * choice distinguishable from a default nobody ever touched, so a future default change can honour it.
+ */
+export function chooseTheme(t: Theme) { setState({ theme: t, themeChosen: true }); }
+
+/** The driver confirmed where their home terminal is. Until this is set the zone is the phone's. */
+export function chooseTimeZone(tz: string) { setState({ tzChosen: true, config: { ...state.config, timeZone: tz } }); }
 export function useStore(): State {
   const [, tick] = useState(0);
   useEffect(() => { const f = () => tick((n) => n + 1); subs.add(f); return () => { subs.delete(f); }; }, []);

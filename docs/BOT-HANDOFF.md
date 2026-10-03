@@ -411,3 +411,25 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   crashing tab shows a card with a one-tap crash report, and the smoke test covers fresh-start and
   empty-state renders for every tab. The bug that prompted it was self-inflicted and found by
   screenshotting the app for the Facebook post.
+- **Round-3 retest — the five reviewed items (2026-10-03)**: the third-party retest raised five items
+  and Lorico approved all five.
+  1. **Maskable icon.** The old 512×512 had rounded corners, so Android would have shrunk the artwork
+     onto a white circle. `web/public/icon-maskable-512.png` is full-bleed with the clock artwork
+     inside the central 80% safe zone; the contrast gate measures its corners from the pixels rather
+     than trusting the claim.
+  2. **`themeChosen`.** Night used to be the default *and* the stored value, so a saved `night` could
+     mean "chose night" or "never touched it" — and there was no way to tell. The flag now separates
+     them. A legacy save is moved to the new day default **once, with a visible notice** — never in
+     silence, because silently rewriting a stored preference is how you lose a driver's trust.
+  3. **The terminal zone is asked for, not assumed.** It silently took the phone's zone, which for a
+     driver who set the app up on the road moves every day boundary and corrupts the recap. The
+     question sits inside the first-run dialog (one interruption, not two) and never returns once
+     answered. It is a question the driver can answer wrongly; the point is that he is asked.
+  4. **The flaky timing test was flaky, not the code.** `U4` asserted `<1000ms` and failed at 1009ms
+     on a busy box with the algorithm unchanged. It now asserts the property it exists to protect —
+     `cost(26 weeks) < 2 × cost(3 weeks) + 150ms`, which does not depend on machine speed — plus a
+     second check against a reference workload measured in the same run. Disabling history pruning
+     makes it fail at **85,563ms vs 1,030ms**, so the guard is real rather than decorative.
+  5. The Recap day editor's **"Start"** field is hours after the day start
+     (`web/src/store.ts`: `dayStart + startHour*60`), not a clock time — the two coincide only when
+     the carrier day begins at midnight. It is now labelled, and shows the resolved time beside it.
