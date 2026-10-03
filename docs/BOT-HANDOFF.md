@@ -190,6 +190,13 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
 7. **Naming/exposure**: marketing copy must not name Lorico's employer (UPS) — pension and a
    possible buyout are in play. "One person who drives for a living" is the approved phrasing.
 
+**Decided — do not silently reverse:**
+
+- **The startup disclaimer shows on every launch** (Lorico, 2026-10-03). It is deliberately not
+  persisted and there is no "don't show again": a compliance notice a driver can dismiss forever is
+  one they will never read again. Do not add persistence to it, and do not move it off the startup
+  path. It states the app is not an ELD, not FMCSA-registered and not a legal record of duty status.
+
 ---
 
 ## 9. Hard rules for this bot
