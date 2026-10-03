@@ -121,9 +121,21 @@ function ViolationList({ items, from }: { items: Violation[]; from?: number }) {
 /** Severity in the driver's words. The internal enum says "nominal", which reads as "acceptable" —
  *  nothing short of zero hours is acceptable; it is simply less (stress-test 2.8). */
 const severityWord: Record<Violation['severity'], string> = { nominal: 'minor', violation: 'over', egregious: 'well over' };
-const bindingLabel: Record<FullEvaluation['binding'], string> = {
-  DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', BREAK_30: '30-min break due', NONE: '—',
+/**
+ * The binding limit in the driver's words. BREAK_30 is state-aware, and this is the whole point of
+ * the reported bug: the 8-hour rule can be the binding limit while NO break is outstanding. A
+ * qualifying break resets the counter, but the 480 min of fresh break headroom can still be less than
+ * the drive time left (a break taken before ~3 h of driving does exactly this), so "limited by" lands
+ * on BREAK_30 with the driver staring at a break they have just taken. Saying "due" there tells them
+ * they owe a break they already took — so only say it when the counter has actually run out.
+ */
+const bindingWord: Record<Exclude<FullEvaluation['binding'], 'BREAK_30'>, string> = {
+  DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', NONE: '—',
 };
+function bindingLabel(ev: FullEvaluation): string {
+  if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : '8-hour driving rule';
+  return bindingWord[ev.binding];
+}
 /** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
 const violationLabel: Record<Violation['kind'], string> = {
   DRIVE_11: '11-hour driving limit',
@@ -163,11 +175,11 @@ function StatusBar({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }
         <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - s.current.since)}` : ''}</span>
         <span class="top-right">
           <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
-          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => setState({ theme: s.theme === 'day' ? 'night' : 'day' })}>{s.theme === 'day' ? '☾' : '☀'}</button>
+          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => setState({ theme: s.theme === 'day' ? 'night' : 'day' })}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
         </span>
       </div>
       <div class="clocks">
-        <Stat label="Drive now" value={dur(ev.driveNow)} sub={`limited by ${bindingLabel[ev.binding]}`} tone={tone} />
+        <Stat label="Drive now" value={dur(ev.driveNow)} sub={`limited by ${bindingLabel(ev)}`} tone={tone} />
         <Stat label={`${ev.shift.limits.drive / 60}-hr left`} value={dur(ev.shift.driveRemaining)} />
         <Stat label={`${ev.shift.limits.window / 60}-hr left`} value={dur(ev.shift.windowRemaining)} />
         <Stat label={`${ev.cycle.limit / 60}-hr left`} value={dur(ev.cycle.remaining)} />
@@ -483,7 +495,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <div class="clocks">
           <Stat label="Drive left" value={dur(after.shift.driveRemaining)} tone={after.shift.driveRemaining < 60 ? 'bad' : ''} />
           <Stat label="14-hr left" value={dur(after.shift.windowRemaining)} tone={after.shift.windowRemaining < 60 ? 'bad' : ''} />
-          <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel[after.binding]} />
+          <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel(after)} />
           <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clock(after.mustStopBy)}`} />
         </div>
         <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
@@ -668,7 +680,7 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'}>
         <div class="clocks">
           <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
-          <Stat label="Hard stop" value={clock(ev.mustStopBy)} sub={bindingLabel[ev.binding]} />
+          <Stat label="Hard stop" value={clock(ev.mustStopBy)} sub={bindingLabel(ev)} />
         </div>
         <table class="cutoffs"><tbody>{sh.cutoffs.map((c) => <tr key={c.bufferMinutes}><td>{c.bufferMinutes} min buffer</td><td>park by <b>{clock(c.by, false)}</b></td><td>≤ {c.miles} mi</td></tr>)}</tbody></table>
         <p class="muted small">Net speed (fuel, traffic, scales) is what matters — set it in Settings. Parking after 17:00 fills fast; plan the 60-min line, not the 0.</p>
@@ -746,7 +758,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
-        <label>Screen<Toggle options={[['day', 'Day (default)'], ['night', 'Night']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
+        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={s.theme} onChange={(v) => setState({ theme: v as Theme })} /></label>
         <p class="muted small">Day is the default — it is the readable one outdoors, which is where most planning happens. Night flips to the dark palette for low light. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
         <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
@@ -772,16 +784,38 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
 
 /* ============================================================ App */
 
+/**
+ * Startup disclaimer. Standing rule: this is never an ELD, never FMCSA-registered and never a legal
+ * record of duty status — and a driver who believes otherwise will treat a scratchpad as evidence.
+ * Shown on every launch: the driver who needs to read it is not the one who read it last week.
+ */
+function Disclaimer({ onClose }: { onClose: () => void }) {
+  return (
+    <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
+      <div class="modal">
+        <h2 id="disclaimer-title">Before you use this</h2>
+        <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
+        <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
+        <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
+        <button onClick={onClose}>I understand</button>
+      </div>
+    </div>
+  );
+}
+
 declare const __BUILD__: string;
 
 export function App() {
   const s = useStore();
   const now = useNow();
+  // Startup disclaimer — dismissed for this session only; a fresh launch shows it again.
+  const [disclaimer, setDisclaimer] = useState(true);
   useEffect(() => { applyTheme(s.theme); }, [s.theme]);
   const ev = useMemo(() => evaluate(allSegments(s, now), { asOf: now, config: s.config }), [s, now]);
   const tabs: [State['tab'], string][] = [['log', 'Log'], ['split', 'Split Lab'], ['recap', 'Recap'], ['trip', 'Trip'], ['settings', 'Settings']];
   return (
     <div class="app">
+      {disclaimer && <Disclaimer onClose={() => setDisclaimer(false)} />}
       <StatusBar ev={ev} now={now} s={s} />
       <main>
         <TabBoundary key={s.tab} tab={s.tab}>

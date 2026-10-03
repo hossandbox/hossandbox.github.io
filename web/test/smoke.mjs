@@ -474,7 +474,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   setState({ tab: 'settings', theme: 'night' });
   hh = out('settings/screen theme');
-  if (!/Day \(default\)/.test(hh) || !/Night/.test(hh)) throw new Error('the settings control must name both themes');
+  // The toggle now reads plain "Day" / "Night" — the driver asked for the words, not a label suffix.
+  // The "(default)" claim had to go somewhere or nowhere, so assert BOTH: the words, and that day is
+  // still declared the default in the explainer beneath. Removing the suffix must not silently drop
+  // the claim that day is the product default.
+  if (!/>Day</.test(hh) || !/>Night</.test(hh)) throw new Error('the settings control must name both themes in words');
+  if (!/Day is the default/.test(hh)) throw new Error('the settings control must still declare day as the default');
   if (!/contrast-checked against WCAG AA/.test(hh)) throw new Error('the setting should say the palettes are contrast-checked');
 
   // applyTheme must not explode when there is no DOM (the node harness has none)
@@ -723,5 +728,38 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('stress-test round 2: OK');
+}
+
+// --- reported by a driver: "Took 34 mins break. 'Limited by 30 mins break due' still display under
+// drive now." A qualifying break DOES reset the 8-hour counter, but BREAK_30 can still be the binding
+// limit afterwards — the 480 min of fresh break headroom can be less than the drive time left. The
+// label must not then claim a break is due, because the driver has just taken one.
+{
+  const t = nowMin();
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: true, current: null, segments: [
+    { status: 'D', start: t - 94, end: t - 34 },   // 1h 00m driving
+    { status: 'OFF', start: t - 34, end: t },      // 34-minute break — qualifies
+  ] });
+  const bx = out('log/after a qualifying break');
+  if (!/limited by 8-hour driving rule/.test(bx)) throw new Error('after a qualifying break the binding label must not claim a break is due');
+  if (/30-min break due/.test(bx)) throw new Error('the label still says a break is due after the driver took one');
+
+  // The other half: once the counter has genuinely run out, it must still say so.
+  setState({ segments: [{ status: 'D', start: t - 500, end: t }] });
+  const ox = out('log/break genuinely due');
+  if (!/limited by 30-min break due/.test(ox)) throw new Error('a break the driver has actually run out of must still read as due');
+
+  // Startup disclaimer — never an ELD, never a legal log.
+  const dx = out('startup disclaimer');
+  if (!/HOS Sandbox is a planning scratchpad/.test(dx)) throw new Error('the startup disclaimer must appear at launch');
+  if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
+  if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
+
+  // The theme toggle reads in words. `>Day<` matches only the Settings toggle: the header switch
+  // renders as "☀ Day", which has the glyph between the bracket and the word.
+  setState({ tab: 'settings' });
+  const sx = out('settings/theme toggle');
+  if (!/>Day</.test(sx) || !/>Night</.test(sx)) throw new Error('the theme toggle must read Day and Night');
+  console.log('reported break label + startup disclaimer + toggle words: OK');
 }
 console.log('OK');

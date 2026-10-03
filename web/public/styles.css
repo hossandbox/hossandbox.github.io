@@ -118,3 +118,10 @@ button.mini { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 .plancard.on { border-color: var(--accent); background: var(--tint-accent); }
 .plancard.bad .stat-value { color: var(--bad); }
 .plancard .stat-value { font-size: 20px; }
+
+/* Startup disclaimer. A driver who believes a planning scratchpad is their legal log is the exact
+   failure this product must not have, so the notice is unavoidable rather than buried in a tab. */
+.backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; max-width: 460px; max-height: 85dvh; overflow: auto; }
+.modal h2 { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 18px; margin-bottom: 6px; }
+.modal button { width: 100%; margin-top: 10px; }
