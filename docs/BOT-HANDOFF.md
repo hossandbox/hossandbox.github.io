@@ -453,6 +453,20 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   null when the status *and its note* are unchanged (a real no-op; PC and yard move still switch), and
   the pill counts the whole continuous run of the current status through `currentRunStart()`, so a log
   already split by the old behaviour reads correctly too. 9 new smoke assertions, all 9 falsified
-  individually (see `reviews/falsify-pill-fix.py`). Lesson: *"no clock changed" is not the same as "the
-  app told him the truth"* — a displayed counter is driver-facing output and has to be defended like a
-  rule. The same pattern is still unfixed on the three absolute wall-clock budgets (T6, chain-search).
+  individually (see `reviews/falsify-pill-fix.py`). Lesson: *"no clock changed" is not the
+  same as "the app told him the truth"* — a displayed counter is driver-facing output and has to be
+  defended like a rule.
+- **The absolute wall-clock budgets are gone (2026-10-04, Lorico's instruction)**: what began as "T6 and
+  the chain-search bound" turned out to be **five** budgets, not two — `T6 <500ms`, chain-search
+  `<2000ms`, and **three** in `U2` (`<2000ms`, one per split pattern) which were the ones actually
+  flaking under parallel load. They are now a **work-count property** (the chain-search coverage count,
+  which is load-proof because it counts rather than times) plus **runaway ceilings** calibrated against a
+  machine reference measured in the same run.
+  The first attempt was a shape property — *"4x the history must not cost 50x more"* — and **the box
+  falsified it**: with the container swapping (13 MB free, load 13 on 4 vCPUs) the 48-day case inflated
+  ~23x while the 12-day case did not, giving a ratio of **360 with the algorithm unchanged**. Comparing a
+  light point to a heavy one is not load-robust when the heavy one is memory-bound. That is the lesson:
+  *a guard must be stable in the condition it will actually run in, not just correct in principle.* The
+  ceilings are deliberately loose (~100x) and are falsified where it counts — the pre-DP engine
+  (`aea7ada`) never finishes 12 days, so they fire on the real regression. `U4c` stays a calibrated
+  budget because its regression is genuinely large (disabling `pruneHistory` = 83x).
