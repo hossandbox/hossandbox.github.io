@@ -204,6 +204,20 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   identical — but the pill is the number the driver watches to know when his 10 hours are up, so it now
   counts the whole continuous run of the current status. Do not "fix" this by making the tap re-anchor
   a rest, and do not let the pill be measured from the last tap again.
+- **The pill is measured on the clocks' own timeline** (round-5 retest, 2026-10-04). The walk above only
+  covered double-taps: a **correction** — a past entry overlapping the *start* of the rest — never
+  reached the pill, so it over-counted rest by exactly the correction. At 16:00 it read `Off Duty · 10h`
+  while the same screen said `drive again at 16:30`. It now uses `normalize(rows, { merge: false })`:
+  the same resolved timeline the clocks use (overlaps settled, a correction beating the row it corrects),
+  but **not merged** — merging keeps the first row's note, which would fold personal conveyance into a
+  later plain off-duty run. The live row's placeholder note `current` counts as no note. **Never measure
+  the pill from raw rows again**, and any view that labels a row by its note must use the unmerged
+  timeline.
+- **Open, deliberately not fixed (round 5, §6 of the cover note):** the **Log tab's resolved-timeline
+  view** still renders the *merged* timeline, so `PC 06:00–06:30` followed by plain off duty displays as
+  one `Personal conveyance 06:00 → now` row. The clocks are right; only that row's label is wrong — but
+  it overstates PC time on the driver's own log. One-line change (`normalize(…, { merge: false })`, then
+  join only when status *and* note match). Left as a display decision for Lorico.
 
 ---
 
