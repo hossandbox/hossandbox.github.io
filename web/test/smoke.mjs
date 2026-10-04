@@ -932,4 +932,35 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, segments: keep.segments, current: keep.current, tab: keep.tab, config: keep.config });
   console.log('driver report (pill must not reset on a duplicate status tap): OK');
 }
+// --- round-5 retest: the pill is measured on the clocks' own timeline, so a correction cannot make it
+// over-count rest (it read "Off Duty · 2h 00m" while the clocks said 1h 30m and "drive again at 16:30").
+{
+  const T = Math.floor(Date.UTC(2026, 9, 4, 13, 0) / 60000); // now = Sun 08:00 CDT
+  const H = (x) => T + Math.round(x * 60);
+  const day = [{ status: 'OFF', start: H(-26), end: H(-16), createdAt: 1 }, { status: 'ON', start: H(-16), end: H(-15), createdAt: 2 },
+    { status: 'D', start: H(-15), end: H(-5), createdAt: 3 }, { status: 'ON', start: H(-5), end: H(-2), createdAt: 4 }];
+  const pillOf = (segments, current) => {
+    setState({ nowOverride: T, tab: 'log', historyAcknowledged: true, segments, current, tentative: [] });
+    const m = render(h(App, {})).match(/class="pill"[^>]*>([^<]*)</);
+    return m ? m[1] : '';
+  };
+  const offAt6 = { status: 'OFF', since: H(-2), createdAt: 5 };
+  let p = pillOf([...day, { status: 'D', start: H(-2.5), end: H(-1.5), createdAt: 9 }], offAt6);
+  if (p !== 'Off Duty · 1h 30m') throw new Error(`a correction "drove until 06:30" must move the pill's start to 06:30 (got "${p}")`);
+  if (!render(h(App, {})).includes(`drive again at ${clock(H(8.5))}`)) throw new Error('the pill and "drive again at" must describe the same rest');
+  p = pillOf(day, offAt6);
+  if (p !== 'Off Duty · 2h 00m') throw new Error(`control without a correction (got "${p}")`);
+  p = pillOf([...day, { status: 'OFF', start: H(-2), end: H(-1), createdAt: 5 }], { status: 'OFF', since: H(-1), createdAt: 6 });
+  if (p !== 'Off Duty · 2h 00m') throw new Error(`an old double-tap split must still read as one run (got "${p}")`);
+  p = pillOf([...day, { status: 'OFF', start: H(-2), end: H(-1.5), note: 'PC', createdAt: 5 }], { status: 'OFF', since: H(-1.5), createdAt: 6 });
+  if (p !== 'Off Duty · 1h 30m') throw new Error(`plain off duty after personal conveyance counts from the switch (got "${p}")`);
+  p = pillOf([...day, { status: 'OFF', start: H(-2), end: H(-1.5), createdAt: 5 }], { status: 'OFF', note: 'PC', since: H(-1.5), createdAt: 6 });
+  if (!/· 1h 30m$/.test(p)) throw new Error(`personal conveyance after plain off duty counts only the PC time (got "${p}")`);
+  p = pillOf([...day, { status: 'D', start: H(-1), end: H(-0.75), createdAt: 9 }], offAt6);
+  if (p !== 'Off Duty · 45m') throw new Error(`a correction inside the rest restarts the run after it (got "${p}")`);
+  p = pillOf([...day, { status: 'D', start: H(-1), end: T, createdAt: 9 }], offAt6);
+  if (p !== 'Off Duty · 0m') throw new Error(`a correction running up to now leaves no time in the live status (got "${p}")`);
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
+  console.log('pill measured on the clocks timeline: OK');
+}
 console.log('OK');

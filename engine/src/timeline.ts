@@ -11,7 +11,13 @@ import { LIMITS } from './types.ts';
  * must leave 5h of driving, not 2. Clocks are computed from the record as logged (§395.3(a)),
  * so a small correction must never inflate the available driving or cycle time.
  */
-export function normalize(segments: Segment[]): Segment[] {
+/**
+ * `merge: false` returns the same resolved timeline (overlaps settled, a correction beating the row it
+ * corrects) WITHOUT joining touching rows of one status. Merging keeps the first row's note, so personal
+ * conveyance followed by plain off duty becomes one "PC" row — right for the clocks (both are off duty),
+ * wrong for anything that labels a row by its note, such as the status pill. Default: merged.
+ */
+export function normalize(segments: Segment[], opts: { merge?: boolean } = {}): Segment[] {
   // Entry order when the rows carry it: a correction must beat the row it corrects. Without it
   // (an imported or legacy record) keep the original start-time ordering, unchanged.
   // Ordering contract when any row carries an entry stamp:
@@ -52,6 +58,7 @@ export function normalize(segments: Segment[]): Segment[] {
     placed.length = 0;
     placed.push(...kept);
   }
+  if (opts.merge === false) return placed;
   const out: Segment[] = [];
   for (const s of placed) {
     const last = out[out.length - 1];

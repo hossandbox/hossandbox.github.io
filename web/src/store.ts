@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Segment, RulesConfig, DutyStatus } from '../../engine/src/index.ts';
-import { DEFAULT_CONFIG } from '../../engine/src/index.ts';
+import { DEFAULT_CONFIG, normalize } from '../../engine/src/index.ts';
 
 /**
  * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
@@ -468,20 +468,28 @@ export function allSegments(s: State, now: number): Segment[] {
 /**
  * How long the driver has been continuously in the status he is in now — the number in the header pill.
  *
- * It must NOT be measured from the last tap. A duplicate tap split one continuous period into two
- * back-to-back rows, so the pill showed 0m for a rest that had actually been running for hours (driver
- * report, 2026-10-04). This walks back over rows that touch the live one and share its status and note,
- * so an already-saved log reads correctly too — the tap is now a no-op going forward, but a driver who
- * re-tapped before the fix still has the split rows.
+ * Measured on the clocks' own timeline, so the pill and the clocks can never disagree. It used to be
+ * measured from the raw tap times: a driver who tapped Off Duty at 06:00 and then added a correction
+ * "drove 05:30-06:30" saw "Off Duty · 10h" at 16:00 while the same screen said "drive again at 16:30" —
+ * the pill over-counted rest by exactly the correction (round-5 retest). Resolving the timeline also
+ * joins the back-to-back rows an old duplicate tap left behind (driver report, 2026-10-04).
+ *
+ * The timeline is resolved but NOT merged: merging keeps the first row's note and would fold personal
+ * conveyance into a later plain off-duty run. A row continues the run only if it has the same status and
+ * the same note; the live row's placeholder note "current" counts as no note.
  */
 export function currentRunStart(s: State, now: number): number {
-  if (!s.current) return now;
-  const want = s.current.note ?? undefined;
-  let start = s.current.since;
-  const rows = [...s.segments].sort((a, b) => a.start - b.start);
-  for (let i = rows.length - 1; i >= 0; i--) {
+  if (!s.current || now <= s.current.since) return now;
+  const noteOf = (r: Segment) => (r.note === 'current' ? undefined : r.note ?? undefined);
+  const status = s.current.status, note = s.current.note ?? undefined;
+  const rows = normalize(allSegments(s, now).filter((r) => !r.tentative), { merge: false });
+  let i = rows.length - 1;
+  // A correction that runs right up to now leaves nothing of the live status: 0m.
+  if (i < 0 || rows[i].end !== now || rows[i].status !== status || noteOf(rows[i]) !== note) return now;
+  let start = rows[i].start;
+  for (i--; i >= 0; i--) {
     const r = rows[i];
-    if (r.end !== start || r.status !== s.current.status || (r.note ?? undefined) !== want) break;
+    if (r.end !== start || r.status !== status || noteOf(r) !== note) break;
     start = r.start;
   }
   return start;
