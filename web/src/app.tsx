@@ -23,7 +23,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -248,7 +248,7 @@ function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: 
   return (
     <header class="top" inert={inert}>
       <div class="top-row">
-        <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - s.current.since)}` : ''}</span>
+        <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
         <span class="top-right">
           <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
           <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => chooseTheme(s.theme === 'day' ? 'night' : 'day')}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
@@ -373,11 +373,9 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
     // could drop the status being closed (bug report C5/L3).
     const now = cur.nowOverride ?? nowMin();
-    const segments = [...cur.segments];
-    // The closed row keeps the stamp from when it was tapped, so a correction typed while it was live
-    // still wins over it after it closes.
-    if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: cur.current.createdAt ?? stamp() });
-    return { segments, current: { status: st, since: now, note, createdAt: stamp() } };
+    // Tapping the status you are already in changes nothing (statusTap returns null): re-stamping the
+    // row reset the header pill to 0m mid-rest, while every clock stayed identical (driver report).
+    return statusTap(cur, st, note, now) ?? {};
   });
   // Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
   // storing it orphaned the flag a minute later (bug report C3). exceptionKey is stable for the shift.
@@ -428,7 +426,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           <button class={s.current?.note === 'PC' ? 'on-outline' : ''} onClick={() => switchTo('OFF', 'PC')}>Personal conveyance</button>
           <button class={s.current?.note === 'YM' ? 'on-outline' : ''} onClick={() => switchTo('ON', 'YM')}>Yard move</button>
         </div>
-        <p class="muted small">Tapping a status closes the current one at {clock(now, false)} and starts the new one. PC counts as off duty and yard moves as on duty for the clocks. This is your scratchpad, not your ELD.</p>
+        <p class="muted small">Tapping a status closes the current one at {clock(now, false)} and starts the new one. Tapping the one you are already in does nothing — it will not restart your timer. PC counts as off duty and yard moves as on duty for the clocks. This is your scratchpad, not your ELD.</p>
       </Card>
       <Card title="Exceptions this shift" tone={ev.shift.notes.some((n) => n.startsWith('⚠')) ? 'bad' : ev.shift.notes.length ? 'warn' : undefined}>
         <label class="check"><input type="checkbox" checked={adverseOn} onChange={() => toggleException('adverseShifts')} /> Adverse driving conditions — +2h driving and window (§395.1(b)(1))</label>

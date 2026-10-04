@@ -164,6 +164,29 @@ export function chooseTheme(t: Theme) { setState({ theme: t, themeChosen: true }
 
 /** The driver confirmed where their home terminal is. Until this is set the zone is the phone's. */
 export function chooseTimeZone(tz: string) { setState({ tzChosen: true, config: { ...state.config, timeZone: tz } }); }
+
+/**
+ * A status tap: close the live row at the tap and open the new one there.
+ *
+ * Tapping the status the driver is ALREADY in returns null (no change). It used to re-stamp the row,
+ * which reset the "time in this status" pill to 0m — a driver 2h into a rest saw "Off Duty · 0m" while
+ * the rest of the app still said when driving comes back. The record was never wrong (the closed row
+ * and the new one are contiguous and the same status, so every clock was identical — verified across
+ * the 11/14/70 clocks, the 30-min break counter and a split-sleeper pair), but the pill is the number
+ * the driver watches to know when his 10 hours are up, so the tap is now a no-op. (Driver report,
+ * 2026-10-04: "the pill gets reset every time off duty is tagged".)
+ *
+ * `note` is part of the identity on purpose: Personal conveyance and Yard move still switch, because
+ * they change the note and therefore the label.
+ */
+export function statusTap(cur: State, status: DutyStatus, note: string | undefined, now: number): Partial<State> | null {
+  if (cur.current && cur.current.status === status && (cur.current.note ?? undefined) === (note ?? undefined)) return null;
+  const segments = [...cur.segments];
+  // The closed row keeps the stamp from when it was tapped, so a correction typed while it was live
+  // still wins over it after it closes.
+  if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: cur.current.createdAt ?? stamp() });
+  return { segments, current: { status, since: now, note, createdAt: stamp() } };
+}
 export function useStore(): State {
   const [, tick] = useState(0);
   useEffect(() => { const f = () => tick((n) => n + 1); subs.add(f); return () => { subs.delete(f); }; }, []);
@@ -440,6 +463,28 @@ export function allSegments(s: State, now: number): Segment[] {
   // A live status saved before entries were stamped has no tap time; treat it as the newest entry.
   if (s.current && now > s.current.since) out.push({ status: s.current.status, start: s.current.since, end: now, note: s.current.note ?? 'current', createdAt: s.current.createdAt ?? Number.MAX_SAFE_INTEGER });
   return [...out, ...s.tentative];
+}
+
+/**
+ * How long the driver has been continuously in the status he is in now — the number in the header pill.
+ *
+ * It must NOT be measured from the last tap. A duplicate tap split one continuous period into two
+ * back-to-back rows, so the pill showed 0m for a rest that had actually been running for hours (driver
+ * report, 2026-10-04). This walks back over rows that touch the live one and share its status and note,
+ * so an already-saved log reads correctly too — the tap is now a no-op going forward, but a driver who
+ * re-tapped before the fix still has the split rows.
+ */
+export function currentRunStart(s: State, now: number): number {
+  if (!s.current) return now;
+  const want = s.current.note ?? undefined;
+  let start = s.current.since;
+  const rows = [...s.segments].sort((a, b) => a.start - b.start);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r.end !== start || r.status !== s.current.status || (r.note ?? undefined) !== want) break;
+    start = r.start;
+  }
+  return start;
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };

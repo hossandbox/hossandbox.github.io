@@ -895,4 +895,41 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   for (const ic of mf.icons) { const f = './' + ic.src.replace(/^\.\//, ''); if (!sw.includes(`'${f}'`)) throw new Error(`sw.js does not precache manifest icon ${ic.src}`); }
   console.log('QA patch review fixes: OK');
 }
+// --- driver report 2026-10-04: "the pill gets reset every time off duty is tagged"
+{
+  const { statusTap, currentRunStart, setState, getState } = await import('../src/store.ts');
+  const T = Math.floor(new Date('2026-10-04T03:00:00Z').getTime() / 60000);
+  const keep = getState();
+  const rest = { ...keep, segments: [], current: { status: 'OFF', since: T - 125, createdAt: 1 } };
+
+  // 1. tapping the status you are already in changes nothing at all
+  if (statusTap(rest, 'OFF', undefined, T) !== null) throw new Error('tapping the status you are already in must not re-stamp the row — it reset the header pill to 0m mid-rest');
+  // 2. a different status still switches, and closes the row being left at the tap
+  const dv = statusTap(rest, 'D', undefined, T);
+  if (!dv || dv.current.status !== 'D' || dv.current.since !== T) throw new Error('changing to a different status must still start a row at the tap');
+  if (dv.segments.length !== 1 || dv.segments[0].status !== 'OFF' || dv.segments[0].end !== T) throw new Error('the status being left must be closed at the tap');
+  // 3. PC and Yard move change the note, so they are not duplicates and must still switch
+  if (!statusTap(rest, 'OFF', 'PC', T)) throw new Error('personal conveyance must still switch — the note is part of the status');
+  if (!statusTap(rest, 'ON', 'YM', T)) throw new Error('yard move must still switch');
+  if (statusTap({ ...rest, current: { status: 'OFF', note: 'PC', since: T - 125 } }, 'OFF', 'PC', T) !== null) throw new Error('re-tapping the same note must also be a no-op');
+  if (!statusTap({ ...rest, current: { status: 'OFF', note: 'PC', since: T - 125 } }, 'OFF', undefined, T)) throw new Error('dropping a PC note is a real change and must switch');
+
+  // 4. the pill counts the whole continuous run, so a log already split by the old behaviour reads right
+  if (currentRunStart(rest, T) !== T - 125) throw new Error('an unsplit rest is its own run start');
+  const split = { ...rest, segments: [{ status: 'OFF', start: T - 605, end: T - 125, createdAt: 1 }], current: { status: 'OFF', since: T - 125, createdAt: 2 } };
+  if (currentRunStart(split, T) !== T - 605) throw new Error('a rest split by a duplicate tap must still count from the original start — this is the reported bug');
+  const gapped = { ...rest, segments: [{ status: 'OFF', start: T - 605, end: T - 200, createdAt: 1 }], current: { status: 'OFF', since: T - 125, createdAt: 2 } };
+  if (currentRunStart(gapped, T) !== T - 125) throw new Error('rest separated by a gap must not be merged');
+  const other = { ...rest, segments: [{ status: 'D', start: T - 605, end: T - 125, createdAt: 1 }], current: { status: 'OFF', since: T - 125, createdAt: 2 } };
+  if (currentRunStart(other, T) !== T - 125) throw new Error('a different status must not be merged into the run');
+  const noted = { ...rest, segments: [{ status: 'OFF', note: 'PC', start: T - 605, end: T - 125, createdAt: 1 }], current: { status: 'OFF', since: T - 125, createdAt: 2 } };
+  if (currentRunStart(noted, T) !== T - 125) throw new Error('a PC row must not be merged into a plain off-duty run — they are different labels');
+
+  // 5. end to end: the rendered pill reads the whole rest, not the time since the last tap
+  setState({ tab: 'log', nowOverride: T, tentative: [], current: { status: 'OFF', since: T - 125, createdAt: 2 }, segments: [{ status: 'OFF', start: T - 605, end: T - 125, createdAt: 1 }], config: { ...keep.config, cycle: '70/8' } });
+  const ph = render(h(App, {}));
+  if (!/Off Duty · 10h 05m/.test(ph)) throw new Error(`the header pill must read the whole continuous rest (10h 05m), not the time since the last tap — got ${(ph.match(/Off Duty · [^<]*/) || ['none'])[0]}`);
+  setState({ nowOverride: null, segments: keep.segments, current: keep.current, tab: keep.tab, config: keep.config });
+  console.log('driver report (pill must not reset on a duplicate status tap): OK');
+}
 console.log('OK');

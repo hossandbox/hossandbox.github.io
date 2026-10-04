@@ -197,6 +197,14 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   one they will never read again. Do not add persistence to it, and do not move it off the startup
   path. It states the app is not an ELD, not FMCSA-registered and not a legal record of duty status.
 
+- **Tapping the status you are already in does nothing** (driver report, 2026-10-04: *"the pill gets
+  reset every time off duty is tagged"*). The tap used to re-stamp the live row, which reset the header
+  pill to `0m` mid-rest. The record was never wrong — the closed row and the new one are contiguous and
+  the same status, so every clock (11/14/70, the 30-min break counter, a split-sleeper pair) was
+  identical — but the pill is the number the driver watches to know when his 10 hours are up, so it now
+  counts the whole continuous run of the current status. Do not "fix" this by making the tap re-anchor
+  a rest, and do not let the pill be measured from the last tap again.
+
 ---
 
 ## 9. Hard rules for this bot
@@ -433,3 +441,18 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   5. The Recap day editor's **"Start"** field is hours after the day start
      (`web/src/store.ts`: `dayStart + startHour*60`), not a clock time — the two coincide only when
      the carrier day begins at midnight. It is now labelled, and shows the resolved time beside it.
+- **The status pill no longer resets on a duplicate tap (2026-10-04, driver report)**: a driver wrote
+  *"If you are on off duty, you tag it again the timer still reset. This is not a bug. This needs to be
+  blocked out."* Reproduced live: `Off Duty · 2h 05m` → tap Off Duty again → `Off Duty · 0m`. Replaying
+  the exact tap sequence through the engine showed the record was never wrong — the closed row and the
+  new one are contiguous and carry the same status, so the 11/14/70 clocks, the 30-min break counter,
+  the binding limit, the "you can drive again at" time and a split-sleeper 7/3 pair were all identical;
+  re-tapping Driving, even at the 10-hour limit, handed back no time and raised no violation. His "this
+  is not a bug" was right about the maths and his "needs to be blocked out" was right about the screen:
+  the pill is the number he watches to know when his 10 hours are up. Two changes — `statusTap()` returns
+  null when the status *and its note* are unchanged (a real no-op; PC and yard move still switch), and
+  the pill counts the whole continuous run of the current status through `currentRunStart()`, so a log
+  already split by the old behaviour reads correctly too. 9 new smoke assertions, all 9 falsified
+  individually (see `reviews/falsify-pill-fix.py`). Lesson: *"no clock changed" is not the same as "the
+  app told him the truth"* — a displayed counter is driver-facing output and has to be defended like a
+  rule. The same pattern is still unfixed on the three absolute wall-clock budgets (T6, chain-search).
