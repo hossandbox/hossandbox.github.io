@@ -213,11 +213,23 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   later plain off-duty run. The live row's placeholder note `current` counts as no note. **Never measure
   the pill from raw rows again**, and any view that labels a row by its note must use the unmerged
   timeline.
-- **Open, deliberately not fixed (round 5, §6 of the cover note):** the **Log tab's resolved-timeline
-  view** still renders the *merged* timeline, so `PC 06:00–06:30` followed by plain off duty displays as
-  one `Personal conveyance 06:00 → now` row. The clocks are right; only that row's label is wrong — but
-  it overstates PC time on the driver's own log. One-line change (`normalize(…, { merge: false })`, then
-  join only when status *and* note match). Left as a display decision for Lorico.
+- **The Log tab's resolved view labels a row by its note** (fixed 2026-10-05, Lorico approved). It used
+  the *merged* timeline, which joins touching rows of one status and keeps the **first** row's note, so
+  `PC 06:00–06:30` followed by plain off duty displayed as one `Personal conveyance 06:00 → now` row.
+  The clocks were right; the label overstated PC time on the driver's own log — and personal conveyance
+  *"cannot be used to extend the duty day"* (§395.8 Q26), so an inflated PC row is exactly what an
+  auditor picks up. It now uses `joinDisplayRows(normalize(rows, { merge: false }))`: joined only when
+  status, note and the what-if flag all match, with the live row's `current` placeholder counting as no
+  note. Per-status totals are unchanged (joining rows of one status never changes a per-status sum).
+  **Do not put this view back on the plain merged timeline** — a label that names a row by its note must
+  never be derived from a merge that discards notes.
+- **Never trust a falsification harness's own "restored" claim** (incident, 2026-10-05). A harness killed
+  by a tool timeout kept running as an **orphan**, mutated a source file, and the next harness took its
+  "pristine" backup from the already-mutated file — reporting `restored byte-identical: True` while
+  leaving a broken tree, and the following gate failed for reasons unrelated to the code. Harnesses must
+  assert the tree is in the **intended** state (the fix's own marker strings present) before *and* after,
+  and abort if not. After any timeout, check for orphans before re-running. `git diff` is the arbiter,
+  never a temp backup.
 
 ---
 
