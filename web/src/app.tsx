@@ -23,7 +23,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -358,8 +358,13 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   /**
    * The timeline the clocks actually use: overlaps already resolved, and the live "current" status
    * materialized. Read-only — the rows in edit mode stay the record the driver typed.
+   *
+   * Resolved but NOT merged, then joined on the LABEL: the engine's merge joins touching rows of one
+   * status and keeps the first row's note, so a personal-conveyance row followed by plain off duty
+   * displayed as a single "PC" row running to now — the clocks were right, the label was not, and it
+   * overstated PC time on the driver's own log (cover-note §6, round 5).
    */
-  const resolved = normalize(allSegments(s, now));
+  const resolved = joinDisplayRows(normalize(allSegments(s, now), { merge: false }));
   const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
   for (const x of resolved) totals[x.status] += x.end - x.start;
 

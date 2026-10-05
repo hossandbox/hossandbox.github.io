@@ -465,6 +465,30 @@ export function allSegments(s: State, now: number): Segment[] {
   return [...out, ...s.tentative];
 }
 
+/** A row's note for comparison: the live row's placeholder `current` counts as no note. */
+const noteKey = (r: Segment) => (r.note === 'current' ? undefined : r.note ?? undefined);
+
+/**
+ * The resolved timeline, joined the way the LOG should show it: touching rows are joined only when
+ * their LABEL matches too — same status, same note, same what-if flag.
+ *
+ * The engine's own merge joins on status alone and keeps the first row's note. That is right for the
+ * clocks (a personal-conveyance row and a plain off-duty row are both off duty) but wrong for a list
+ * that names each row by its note: "personal conveyance 06:00-06:30" followed by plain off duty showed
+ * as one "Personal conveyance 06:00 → now" row, overstating PC time on the driver's own log. Personal
+ * conveyance cannot be used to extend the duty day (§395.8 Q26), so an inflated PC row is exactly what
+ * an auditor picks up. Rows are copied, never mutated: this is a display, not the record.
+ */
+export function joinDisplayRows(rows: Segment[]): Segment[] {
+  const out: Segment[] = [];
+  for (const s of rows) {
+    const last = out[out.length - 1];
+    if (last && last.status === s.status && last.end === s.start && !!last.tentative === !!s.tentative && noteKey(last) === noteKey(s)) last.end = s.end;
+    else out.push({ ...s });
+  }
+  return out;
+}
+
 /**
  * How long the driver has been continuously in the status he is in now — the number in the header pill.
  *
@@ -480,16 +504,15 @@ export function allSegments(s: State, now: number): Segment[] {
  */
 export function currentRunStart(s: State, now: number): number {
   if (!s.current || now <= s.current.since) return now;
-  const noteOf = (r: Segment) => (r.note === 'current' ? undefined : r.note ?? undefined);
   const status = s.current.status, note = s.current.note ?? undefined;
   const rows = normalize(allSegments(s, now).filter((r) => !r.tentative), { merge: false });
   let i = rows.length - 1;
   // A correction that runs right up to now leaves nothing of the live status: 0m.
-  if (i < 0 || rows[i].end !== now || rows[i].status !== status || noteOf(rows[i]) !== note) return now;
+  if (i < 0 || rows[i].end !== now || rows[i].status !== status || noteKey(rows[i]) !== note) return now;
   let start = rows[i].start;
   for (i--; i >= 0; i--) {
     const r = rows[i];
-    if (r.end !== start || r.status !== status || noteOf(r) !== note) break;
+    if (r.end !== start || r.status !== status || noteKey(r) !== note) break;
     start = r.start;
   }
   return start;

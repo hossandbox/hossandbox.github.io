@@ -963,4 +963,24 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('pill measured on the clocks timeline: OK');
 }
+// --- round-6: the Log tab's resolved timeline must LABEL each row by its note, not fold a
+// personal-conveyance row into the plain off-duty run that follows it (cover-note section 6). The clocks
+// were always right; that row's label overstated PC time on the driver's own log.
+{
+  const T = Math.floor(Date.UTC(2026, 9, 4, 13, 0) / 60000);
+  const H = (x) => T + Math.round(x * 60);
+  setState({ nowOverride: T, tab: 'log', logResolved: true, historyAcknowledged: true, current: null, tentative: [],
+    segments: [
+      { status: 'OFF', start: H(-3), end: H(-2.5), note: 'PC', createdAt: 1 },
+      { status: 'OFF', start: H(-2.5), end: H(-0.5), createdAt: 2 },
+      { status: 'D', start: H(-0.5), end: T, createdAt: 3 }
+    ] });
+  const html = render(h(App, {}));
+  const pc = html.match(/Personal conveyance \(OFF\)<\/span><span class="muted">([^<]*)</);
+  if (!pc) throw new Error('the resolved timeline must still label the personal-conveyance row');
+  if (!/· 30m$/.test(pc[1])) throw new Error(`personal conveyance must show only its own 30m — folding the plain off duty that followed into it overstates PC time on the driver's own log (got "${pc[1]}")`);
+  if (!/<span>Off Duty<\/span><span class="muted">[^<]*· 2h 00m/.test(html)) throw new Error('the plain off-duty row that followed personal conveyance must be its own row (2h 00m)');
+  setState({ nowOverride: null, tab: 'log', logResolved: false, historyAcknowledged: false, segments: [], current: null });
+  console.log('Log tab resolved timeline labels rows by their note: OK');
+}
 console.log('OK');
