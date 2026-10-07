@@ -125,3 +125,6 @@ button.mini { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; max-width: 460px; max-height: 85dvh; overflow: auto; }
 .modal h2 { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 18px; margin-bottom: 6px; }
 .modal button { width: 100%; margin-top: 10px; }
+/* Driving alert banner (alerts.ts): the warnbox and violation-row colors, which the contrast test covers, made larger. */
+.alertbox { padding: 10px 12px; border-radius: 10px; font-size: 16px; margin: 6px 0; background: var(--tint-warn); border-left: 4px solid var(--warn); }
+.alertbox.bad { background: var(--tint-bad); border-left-color: var(--bad); }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
+import { nextAlert, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -241,6 +242,58 @@ function RestLine({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   );
 }
 
+/** Which limit is running out, in words for an alert. */
+function alertReason(ev: FullEvaluation): string {
+  switch (ev.binding) {
+    case 'BREAK_30': return '8-hour driving limit before a 30-minute break';
+    case 'DRIVE_11': return `${ev.shift.limits.drive / 60}-hour driving limit`;
+    case 'WINDOW_14': return `${ev.shift.limits.window / 60}-hour duty window`;
+    case 'CYCLE': return `${ev.cycle.limit / 60}-hour cycle limit`;
+    default: return 'driving limit';
+  }
+}
+
+/** Sound + vibration + background notification when driving time crosses an alert mark (alerts.ts). */
+function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
+  const mem = useRef<AlertMemory>(NO_ALERTS);
+  // No evaluation (the error card) counts as not driving: nothing to measure against.
+  const driving = s.current?.status === 'D' && ev !== null;
+  const driveNow = ev?.driveNow ?? Infinity;
+  useEffect(() => {
+    const r = nextAlert(mem.current, driving, driveNow, now);
+    mem.current = r.mem;
+    // A simulated clock is for planning: show the banner, but never sound off.
+    if (r.fire === null || !ev || !s.alertsOn || s.nowOverride !== null) return;
+    const m = alertMessage(r.fire, alertReason(ev));
+    chime(r.fire <= 15); buzz(r.fire <= 15); void notify(m.title, m.body);
+  }, [now, driveNow, driving, s.alertsOn, s.nowOverride]);
+}
+
+/** Hold a screen wake lock while `active`. The browser drops it whenever the app is hidden, so re-take it on return. */
+function useWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active || !canKeepAwake()) return;
+    let lock: { release: () => Promise<void> } | null = null, gone = false;
+    const take = async () => {
+      if (gone || document.visibilityState !== 'visible') return;
+      try {
+        const l = await (navigator as unknown as { wakeLock: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }).wakeLock.request('screen');
+        if (gone) void l.release().catch(() => {}); else lock = l;
+      } catch { /* refused (battery saver, not visible): nothing to do */ }
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') void take(); };
+    void take();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { gone = true; document.removeEventListener('visibilitychange', onVis); void lock?.release().catch(() => {}); };
+  }, [active]);
+}
+
+function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
+  const b = alertBanner(s.current?.status === 'D', ev.driveNow, dur(ev.driveNow), alertReason(ev));
+  if (!b) return null;
+  return <div class={`alertbox ${b.level}`} role="alert"><b>{b.title}.</b> {b.text}</div>;
+}
+
 function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: State; inert?: boolean }) {
   const hist = historyBasis(s, now);
   const status = s.current?.status ?? 'OFF';
@@ -254,6 +307,7 @@ function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: 
           <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => chooseTheme(s.theme === 'day' ? 'night' : 'day')}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
         </span>
       </div>
+      <AlertBanner s={s} ev={ev} />
       <div class="clocks">
         <Stat label="Drive now" value={dur(ev.driveNow)} sub={`limited by ${bindingLabel(ev)}`} tone={tone} />
         <Stat label={`${ev.shift.limits.drive / 60}-hr left`} value={dur(ev.shift.driveRemaining)} />
@@ -374,7 +428,9 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
-  const switchTo = (st: DutyStatus, note?: string) => setState((cur) => {
+  // A tap is the browser's permission to play sound later, so a driving alert can be heard (alerts.ts).
+  const switchTo = (st: DutyStatus, note?: string) => { unlockAudio(); tapStatus(st, note); };
+  const tapStatus = (st: DutyStatus, note?: string) => setState((cur) => {
     // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
     // could drop the status being closed (bug report C5/L3).
     const now = cur.nowOverride ?? nowMin();
@@ -836,6 +892,30 @@ function downloadExport(s: State): string {
   return name;
 }
 
+function DrivingAlertsCard({ s }: { s: State }) {
+  // Browser features are only known at run time; the pre-rendered page assumes none.
+  const [notif, setNotif] = useState<NotifyState>('unsupported');
+  const [awakeOk, setAwakeOk] = useState(true);
+  useEffect(() => { setNotif(notifyState()); setAwakeOk(canKeepAwake()); }, []);
+  const test = () => { unlockAudio(); chime(true); buzz(true); };
+  return (
+    <Card title="Driving alerts">
+      <label class="check"><input type="checkbox" checked={s.alertsOn} onChange={(e) => setState({ alertsOn: (e.target as HTMLInputElement).checked })} /> Sound and vibration at 60, 30 and 15 minutes of driving left, and every 15 minutes once you are out of time</label>
+      <label class="check"><input type="checkbox" checked={s.keepAwake} onChange={(e) => setState({ keepAwake: (e.target as HTMLInputElement).checked })} /> Keep the screen on while your status is Driving</label>
+      {!awakeOk && <p class="small">This browser cannot keep the screen on. Set your phone's auto-lock to "Never" while you drive, or the alerts will stop when it locks.</p>}
+      <div class="row">
+        <button onClick={test}>Test alert</button>
+        {notif === 'default' && <button onClick={() => { void askNotify().then(setNotif); }}>Also notify when in background</button>}
+      </div>
+      <p class="muted small">
+        {notif === 'granted' ? 'Notifications are on: if the app is open behind another app, alerts also show as notifications. ' : ''}
+        {notif === 'denied' ? 'Notifications are blocked for this site in your browser settings. ' : ''}
+        Alerts only work while HOS Sandbox is open — when the phone locks or the app is closed, the phone stops it. Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive. <b>Your ELD is your official warning.</b>
+      </p>
+    </Card>
+  );
+}
+
 function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
@@ -883,6 +963,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
       </Card>
+      <DrivingAlertsCard s={s} />
       <Card title="Bug reports">
         <BugButton s={s} ev={ev} />
         <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
@@ -949,6 +1030,8 @@ export function App() {
     catch (e) { return { ev: null, err: e instanceof Error ? e.message : String(e) }; }
   }, [s, now]);
   const ev = result.ev;
+  useDrivingAlerts(s, now, ev);
+  useWakeLock(wantsWakeLock(s.keepAwake, s.current?.status));
   if (!ev) {
     return (
       <div class="app"><main>

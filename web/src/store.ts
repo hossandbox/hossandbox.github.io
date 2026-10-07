@@ -67,6 +67,10 @@ export interface State {
   tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
   /** where "Report a bug" sends mail */
   bugEmail: string;
+  /** Sound, vibration and notification alerts while driving (driver report 2026-10-06). Device setting: not exported. */
+  alertsOn: boolean;
+  /** Keep the screen on while the status is Driving, so a mounted phone keeps running its alerts. Device setting. */
+  keepAwake: boolean;
 }
 
 const KEY = 'hos-sandbox-v1';
@@ -96,7 +100,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
-  tzChosen: false, nowOverride: null, tab: 'log', bugEmail: '',
+  tzChosen: false, nowOverride: null, tab: 'log', bugEmail: '', alertsOn: true, keepAwake: true,
 };
 
 /**

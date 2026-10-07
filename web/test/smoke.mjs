@@ -983,4 +983,57 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'log', logResolved: false, historyAcknowledged: false, segments: [], current: null });
   console.log('Log tab resolved timeline labels rows by their note: OK');
 }
+// --- driving alerts (driver report 2026-10-06: "Drive passed 16 hours should get a warning. It just keep
+// let me drive.") Advance alerts at 60/30/15 min and at zero, a repeat while driving out of time, a banner
+// that needs no tap, and keep-screen-on while driving.
+{
+  const A = await import('../src/alerts.ts');
+  const { parseSaved: parse2 } = await import('../src/store.ts');
+  // 1. the alert sequence, minute by minute, while driving from 75 min left to 40 min over
+  let mem = A.NO_ALERTS, fired = [];
+  for (let m = 0, left = 75; left >= -40; m++, left--) { const r = A.nextAlert(mem, true, left, 1000 + m); mem = r.mem; if (r.fire !== null) fired.push(`${r.fire}@${left}`); }
+  if (fired.join() !== '60@60,30@30,15@15,0@0,0@-15,0@-30') throw new Error(`alert sequence wrong: ${fired.join()}`);
+  // 2. opening the app mid-countdown does not replay passed marks; the next one still fires
+  mem = A.NO_ALERTS; fired = [];
+  for (const [i, left] of [20, 19, 16, 15, 14].entries()) { const r = A.nextAlert(mem, true, left, 2000 + i); mem = r.mem; if (r.fire !== null) fired.push(r.fire); }
+  if (fired.join() !== '15') throw new Error(`opened at 20 min: expected only the 15-min alert, got ${fired.join() || 'none'}`);
+  // 3. tapping Driving (or opening the app) with no time left fires at once — the driver report's moment
+  if (A.nextAlert(A.NO_ALERTS, true, 0, 3000).fire !== 0) throw new Error('driving with no time left must alert immediately');
+  // 4. the phone slept from 50 to 10 min left: one alert, the most urgent
+  let r = A.nextAlert({ prev: 50, lastAt: null }, true, 10, 4000);
+  if (r.fire !== 15) throw new Error(`a jump past several marks must fire the most urgent one once (got ${r.fire})`);
+  // 5. not driving: never, even as the window runs out; and leaving Driving resets
+  mem = A.NO_ALERTS;
+  for (let left = 70; left >= -5; left--) { const x = A.nextAlert(mem, false, left, 5000 - left); mem = x.mem; if (x.fire !== null) throw new Error('alerts must only fire while driving'); }
+  r = A.nextAlert({ prev: 31, lastAt: 1 }, false, 31, 6000);
+  if (r.mem.prev !== null || A.nextAlert(r.mem, true, 45, 6001).fire !== null) throw new Error('back to Driving with time left must not alert at once');
+  // 6. keep the screen on only while driving, and only if wanted
+  if (!A.wantsWakeLock(true, 'D') || A.wantsWakeLock(true, 'ON') || A.wantsWakeLock(true, 'OFF') || A.wantsWakeLock(false, 'D')) throw new Error('wake lock: only while Driving, only when keepAwake');
+  // 7. existing saves get the new settings switched on
+  const old = parse2(JSON.stringify({ segments: [], config: { timeZone: 'America/Chicago' }, tzChosen: true, themeChosen: true }));
+  if (old.alertsOn !== true || old.keepAwake !== true) throw new Error('an existing install must get alerts and keep-screen-on by default');
+  // 8. the banner, rendered: driving since 06:00 after 10h off, so the 8-hour break limit binds first
+  const T0 = Math.floor(Date.UTC(2026, 9, 6, 11, 0) / 60000);
+  const segs = [{ status: 'OFF', start: T0 - 600, end: T0, createdAt: 1 }];
+  const banner = (after, status = 'D') => {
+    setState({ nowOverride: T0 + after, tab: 'log', historyAcknowledged: true, tentative: [], segments: segs, current: { status, since: T0, createdAt: 2 } });
+    const m = render(h(App, {})).match(/<div class="alertbox (warn|bad)" role="alert">([\s\S]*?)<\/div>/);
+    return m ? `${m[1]}: ${m[2].replace(/<[^>]+>/g, '')}` : null;
+  };
+  if (banner(419) !== null) throw new Error('61 min left: no banner yet');
+  let b = banner(435);
+  if (!b?.startsWith('warn: 45m of driving left.') || !/8-hour driving limit before a 30-minute break/.test(b)) throw new Error(`45 min left: amber banner naming the limit (got ${b})`);
+  b = banner(470);
+  if (!b?.startsWith('bad: 10m of driving left.')) throw new Error(`10 min left: red banner (got ${b})`);
+  b = banner(600);
+  if (!b?.startsWith('bad: Out of driving time.') || !/Park as soon as it is safe/.test(b)) throw new Error(`out of time while driving: red "park as soon as it is safe" (got ${b})`);
+  if (banner(600, 'ON') !== null) throw new Error('on duty, not driving: no driving alert banner');
+  // 9. the Settings card
+  setState({ nowOverride: null, tab: 'settings', current: null, segments: [] });
+  const st = render(h(App, {}));
+  if (!/Driving alerts/.test(st) || !/Test alert/.test(st) || !/Keep the screen on while your status is Driving/.test(st)) throw new Error('Settings must offer the alert switches and a test');
+  if (!/Your ELD is your official warning/.test(st)) throw new Error('Settings must say alerts are not the official warning');
+  setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
+  console.log('driving alerts: OK');
+}
 console.log('OK');
