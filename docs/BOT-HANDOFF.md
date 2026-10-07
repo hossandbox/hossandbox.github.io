@@ -223,6 +223,28 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   note. Per-status totals are unchanged (joining rows of one status never changes a per-status sum).
   **Do not put this view back on the plain merged timeline** — a label that names a row by its note must
   never be derived from a merge that discards notes.
+- **Driving alerts exist, and they are not the official warning** (driver report, 2026-10-06: *"Drive
+  passed 16 hours should get a warning. It just keep let me drive. You need to put in a warning system."*).
+  Before this, the app said "No driving time left — stop driving" **on screen only**, starting at 8 hours
+  of driving, with no sound, no vibration, no notification and nothing *before* zero. Now: a banner in the
+  status bar from 60 minutes left (amber) and at 15/0 (red, *"Park as soon as it is safe"*), a chime, an
+  Android vibration, a background notification if the driver allows it, and a screen wake lock while
+  Driving. `web/src/alerts.ts` holds the pure decision logic (`nextAlert`, `alertBanner`) so it is
+  testable; the side effects are all guarded. Rules that must not drift:
+  - Alerts fire **only while the status is Driving**. The 14-hour window runs down at the dock too, and a
+    driver at the dock or at home does not need an alarm; the status bar already says when driving returns.
+  - The **banner is derived from the clocks and always shows** while driving with ≤60 minutes left. The
+    Settings switch `alertsOn` controls **sound, vibration and notifications** — *not* the banner. Do not
+    gate the banner on `alertsOn`.
+  - **Never claim this replaces the ELD.** It only works while the app is open: a locked or closed phone
+    suspends the page and the alerts stop, which is why the wake lock matters. Settings says so plainly and
+    so must any copy (hard rule 7).
+  - The repeat every 15 minutes past zero is deliberate — a driver out of time keeps being told.
+  - Nothing here ever needs a tap while driving. Do not add one.
+- **New device settings default ON, including for existing installs.** `alertsOn` and `keepAwake` live in
+  `INITIAL_STATE`, and `parseSaved()` merges `{ ...INITIAL_STATE, ...saved }`, so a driver who already has
+  a log gets them without touching Settings. They are **device preferences and stay out of the export**,
+  like `theme` and `logResolved` — a restored backup must not silently turn a driver's alerts on or off.
 - **Never trust a falsification harness's own "restored" claim** (incident, 2026-10-05). A harness killed
   by a tool timeout kept running as an **orphan**, mutated a source file, and the next harness took its
   "pristine" backup from the already-mutated file — reporting `restored byte-identical: True` while
@@ -366,10 +388,12 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   RULES-GROUNDING). Verified byte-identical to the author's: **all three post-image blob hashes match
   the patch's own `index` lines** (`bd096ce`, `f7ab134`, `e854d5c`).
   - *The sheet's SHA-256 is truncated.* It prints 62 hex characters, not 64; the value is a prefix of
-    the real file's hash. Don't "fail" a patch on it — but do get the raw file, because the two copies
-    differed: the clipboard paste had downgraded four comment dashes (U+2013/2212 → ASCII `-`) plus a
-    missing trailing newline. **Comments only — no code byte differed**, which the `index` blob hashes
-    prove end to end. Taildrop is the reliable channel.
+    the real file's hash. **This has now recurred in five consecutive rounds** — always the last two
+    characters missing — so treat it as a defect in whatever generates the sheet, not a one-off. Don't
+    "fail" a patch on it; the `index` blob hashes are the real integrity check. But do get the raw file:
+    in the round-3 case the two copies differed (the clipboard paste had downgraded four comment dashes
+    (U+2013/2212 → ASCII `-`) plus a missing trailing newline). **Comments only — no code byte differed**,
+    which the blob hashes prove end to end. Taildrop is the reliable channel.
   - *Perf tests are unusable as a gate on this box (2 GB RAM / 4 vCPU).* Full suite, same machine:
     pre-patch **71/76 pass, 5 fail** (U4 4005ms, chain-search 5989ms, all three U2 2332–2640ms);
     post-patch **78/79 pass, 1 fail** (U4 2966ms). Every failure is a `performance.now()` wall-clock
