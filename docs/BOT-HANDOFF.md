@@ -116,6 +116,15 @@ Things the web gets wrong and this engine gets right (do NOT "fix" toward blogs)
   implemented in `availability.ts` (opening reset offered as a candidate first leg when
   `qualifiesLongSB`) and covered by `engine/test/faq22.test.ts`. It superseded earlier engine
   behavior — expect old blog/ELD material to still teach the 2020 answer.
+- **The driving view exists because of §392.80 and §392.82** (both verified on eCFR, 49 CFR 392
+  subpart H, *Limiting the Use of Electronic Devices*): §392.80(a) *"No driver shall engage in texting
+  while driving."* and §392.82(a)(1) *"No driver shall use a hand-held mobile telephone while driving a
+  CMV."* Neither section mandates a screen of any kind — what they establish is that while the wheels
+  are turning the driver must not be reading or tapping the phone. So the driving view answers the only
+  question he has while moving — how much driving is left, and when he must stop — as **one number with
+  nothing to press**. Its **night mode draws a coloured frame instead of flooding the screen**: a
+  full-brightness panel in a dark cab wrecks night vision and is itself a distraction, which is the
+  opposite of what the glance screen is for. Day mode floods; night mode does not.
 
 Known gaps (documented, not bugs): property-carrying US interstate only (no passenger/bus, Canada,
 Alaska, oilfield); the planner's split option pairs with an existing or planned ≥2h rest and won't
@@ -520,3 +529,43 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   ceilings are deliberately loose (~100x) and are falsified where it counts — the pre-DP engine
   (`aea7ada`) never finishes 12 days, so they fire on the real regression. `U4c` stays a calibrated
   budget because its regression is genuinely large (disabling `pruneHistory` = 83x).
+- **The redesign landed (2026-10-10, 5 commits from Opus 5.5, base `887fe1e`)** — Now, the driving view,
+  the Log one day at a time, the load question as three steps, and a self-hosted Atkinson Hyperlegible
+  Next. Applied after verifying the base had not moved, the safety scan, and **12/12 final blob hashes**
+  against the patch's own index lines; the engine is untouched (0 files under `engine/`).
+  1. **Why the app always opens on Now** (not the tab last used): a driver who glances at the phone while
+     walking out to the truck should see *can I drive* first. The tab he was last on is navigation, not
+     data — reopening into a half-finished planning screen hides the clocks. `parseSaved` replaces every
+     saved tab with `now`, so **a legacy save cannot reopen on a dead tab** either.
+  2. **The driving view's rule basis and its night mode** are recorded in §5 above.
+  3. **This patch's SHA-256, and the result of comparing it**: the note published
+     `e130543d3d7c28c80f9a0cce1bfacd22c6c0c8d1d5d31402dfe169dcb17d3a18` and it **matches the patch file
+     exactly, all 64 characters**. Correction to my own earlier reports: I twice reported this as the
+     *sixth consecutive round* of a truncated hash. **That was wrong.** The value in the PDF is
+     **line-wrapped** — the extractor sees 62 contiguous hex characters with the final two (`18`) on the
+     next line. The published value is complete. A wrapped hash is still annoying to compare by hand, but
+     "truncated" was my misreading, and repeating it five rounds running is exactly how a false pattern
+     gets established.
+  4. **Two defects Lorico found on the live preview, both mine to own.** The status-panel opener did not
+     look clickable: it carries both the `link` and `dock-more` classes and at equal specificity
+     `dock-more` wins only the properties it sets, so `border: 0` / `background: transparent` from `link`
+     survived and a real button rendered as bare text. And **Details was a one-way door** — it pins the
+     peek and the driving view returns only when the status next changes, so one tap cost the driver the
+     glance screen for the rest of the drive. Fixing the first one *introduced* the second report (the
+     active status button's ring reaches 5px past its box with no gap below the status row, and it drew
+     across the new border). Lesson: before adding chrome to a control, check what sits adjacent to it.
+  5. **A vacuous assertion, caught by falsification.** The way-back test called the internal function
+     instead of going through the button, so **a way-back button wired to a no-op passed it**. The suite
+     renders to a string (`preact-render-to-string`) and cannot dispatch a click, so the wiring is now
+     asserted at source level and the view-switching mechanism behaviourally. A test that cannot see the
+     wiring is not testing the wiring.
+  6. **The suite was timezone-locked.** The redesign's new Log assertion hard-coded `10:30`; clock times
+     render in the **device's** zone, so it passed only where the device zone is America/Chicago (the
+     author's machine). Now computed from `clock()`. Verified: UTC and America/Chicago pass;
+     America/Los_Angeles fails on a **pre-existing** assertion (3 instances, present before the redesign,
+     and the pre-redesign tree fails identically in a worktree) — flagged, not this patch's doing.
+  7. **Falsified**: `reviews/falsify-report-fixes.py` (control + 5 breakages) and
+     `reviews/falsify-redesign.py` (**a risk-weighted sample of 7 of the 100 assertions the series adds** —
+     day default, opens on Now, panels inert, modal dialog, started-earlier offsets, sticky-header
+     opacity, PC still offered). Both harnesses assert the tree is in the **intended** state before and
+     after, and refuse to run otherwise.
