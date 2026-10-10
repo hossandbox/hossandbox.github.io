@@ -130,12 +130,15 @@ const severityWord: Record<Violation['severity'], string> = { nominal: 'minor', 
  * on BREAK_30 with the driver staring at a break they have just taken. Saying "due" there tells them
  * they owe a break they already took — so only say it when the counter has actually run out.
  */
-const bindingWord: Record<Exclude<FullEvaluation['binding'], 'BREAK_30'>, string> = {
-  DRIVE_11: 'driving limit', WINDOW_14: 'duty window', CYCLE: 'cycle (60/70)', NONE: '—',
-};
 function bindingLabel(ev: FullEvaluation): string {
   if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : `8-hour rule (30-min break in ${dur(ev.shift.breakRemaining)})`;
-  return bindingWord[ev.binding];
+  // Name the limit in full, with its number: "driving limit" did not say which one (redesign).
+  switch (ev.binding) {
+    case 'DRIVE_11': return `${ev.shift.limits.drive / 60}-hour driving limit`;
+    case 'WINDOW_14': return `${ev.shift.limits.window / 60}-hour window`;
+    case 'CYCLE': return `${ev.cycle.limit / 60}-hour week`;
+    default: return 'no limit';
+  }
 }
 /** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
 const violationLabel: Record<Violation['kind'], string> = {
@@ -166,7 +169,123 @@ function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
   return <button class="ghost" onClick={() => reportBug(s, ev)}>🐞 Report a bug{s.bugEmail ? ' (email)' : ' (GitHub)'}</button>;
 }
 
-/* ============================================================ status bar */
+/* ============================================================ icons */
+
+/** Stroke icons, drawn in the current text colour. Decorative: every one sits next to a word. */
+const I = {
+  now: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
+  log: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  plan: 'M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14',
+  recap: 'M4 5h16v15H4zM4 10h16M9 3v4M15 3v4',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5',
+  x: 'M6 6l12 12M18 6 6 18',
+  back: 'M15 5l-7 7 7 7',
+  next: 'M9 5l7 7-7 7',
+  truck: 'M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM17 19.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z',
+  bunk: 'M3 18V8M3 14h18v4M21 14v-3a3 3 0 0 0-3-3h-7v6M7 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  route: 'M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 15V9a4 4 0 0 1 4-4h6M18 9v6a4 4 0 0 1-4 4H8',
+  cup: 'M17 8h1a4 4 0 0 1 0 8h-1M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4zM6 2v3M10 2v3M14 2v3',
+  case: 'M4 7h16v13H4zM9 7V5a3 3 0 0 1 6 0v2',
+  wheel: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 14v7M10.2 11.2 3.5 9.5M13.8 11.2l6.7-1.7',
+  check: 'M5 12l5 5 9-10',
+  plus: 'M12 5v14M5 12h14',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+};
+function Icon({ d, size = 22 }: { d: string; size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
+}
+const STATUS_ICON: Record<DutyStatus, string> = { OFF: I.cup, SB: I.bunk, D: I.wheel, ON: I.case };
+
+/* ============================================================ sheets */
+
+/**
+ * Slide-up panels for occasional jobs (redesign, 2026-10-10): change status, why this stop time, the
+ * shift's exceptions, edit or add a log entry. The clocks are never put behind one: a panel is opened
+ * by a tap and closed by a tap, the backdrop, or Escape, and everything behind it is inert while open.
+ * Kept outside the persisted store on purpose: an open panel is not something to restore on launch.
+ */
+export type SheetKind =
+  | { kind: 'status' }
+  | { kind: 'why' }
+  | { kind: 'exceptions' }
+  | { kind: 'edit'; seg: Segment }
+  | { kind: 'add' };
+let sheetNow: SheetKind | null = null;
+const sheetSubs = new Set<() => void>();
+export function openSheet(k: SheetKind | null) { sheetNow = k; sheetSubs.forEach((f) => f()); }
+export function currentSheet(): SheetKind | null { return sheetNow; }
+function useSheet(): SheetKind | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); sheetSubs.add(f); return () => { sheetSubs.delete(f); }; }, []);
+  return sheetNow;
+}
+
+function Sheet({ title, children }: { title: string; children: ComponentChildren }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Focus the panel's own first action (marked data-first), else its first control.
+    const el = box.current?.querySelector<HTMLElement>('[data-first]') ?? box.current?.querySelector<HTMLElement>('button, input, select');
+    el?.focus();
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') openSheet(null); };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+  return (
+    <div class="sheet-wrap">
+      <button class="sheet-backdrop" tabIndex={-1} aria-label="Close" onClick={() => openSheet(null)} />
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={box}>
+        <div class="sheet-handle" aria-hidden="true" />
+        <div class="sheet-head">
+          <h2 id="sheet-title">{title}</h2>
+          <button class="icon-btn" aria-label="Close" onClick={() => openSheet(null)}><Icon d={I.x} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ status taps */
+
+/**
+ * A status tap from anywhere (the Now dock, the status panel). `minutesAgo` is "it started a few
+ * minutes ago" — the commonest correction there is (the driver forgot to tap). It can never reach back
+ * past the start of the status being left: that would erase it, which is an edit, not a tap.
+ */
+export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
+  // A tap is the browser's permission to play sound later, so a driving alert can be heard (alerts.ts).
+  unlockAudio();
+  setState((cur) => {
+    // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
+    // could drop the status being closed (bug report C5/L3).
+    const now = cur.nowOverride ?? nowMin();
+    const at = now - Math.max(0, minutesAgo);
+    if (minutesAgo > 0 && cur.current && at <= cur.current.since) return {};
+    // Tapping the status you are already in changes nothing (statusTap returns null): re-stamping the
+    // row reset the header pill to 0m mid-rest, while every clock stayed identical (driver report).
+    return statusTap(cur, st, note, at) ?? {};
+  });
+}
+/** How far back "started earlier" may reach: only while the status being left is still running. */
+export function startOffsets(cur: State, now: number): { minutes: number; ok: boolean }[] {
+  return [0, 5, 15, 30].map((m) => ({ minutes: m, ok: m === 0 || !cur.current || now - m > cur.current.since }));
+}
+
+// Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
+// storing it orphaned the flag a minute later (bug report C3). exceptionKey is stable for the shift.
+function toggleException(ev: FullEvaluation, key: 'adverseShifts' | 'sixteenHourShifts') {
+  setState((cur) => {
+    const list = new Set(cur.config[key] ?? []);
+    const matched = key === 'adverseShifts' ? ev.shift.exceptionKeys.adverse : ev.shift.exceptionKeys.sixteen;
+    if (matched !== null) list.delete(matched); else list.add(ev.shift.exceptionKey);
+    return { config: { ...cur.config, [key]: [...list] } };
+  });
+}
+
+/* ============================================================ out of hours */
 
 /** Minutes of unbroken rest (OFF/SB) that ended exactly when the current status began. */
 function restBefore(s: State, now: number): number {
@@ -182,19 +301,19 @@ function restBefore(s: State, now: number): number {
   return total;
 }
 
+type DriveAgain = { off: number | null; sb: number | null; before: number };
 /**
- * Out of driving hours: say WHEN driving comes back and WHAT is still allowed. Round 4, reported by
- * a driver: after a 14-hour day nothing on screen said when he could drive again, and tapping On duty
- * after 6 hours off reset the only rest number on screen (the status timer) without saying the rest
- * had ended — or that on-duty work was allowed all along.
- *
- * The time comes from the engine (driveAgainAt), so a 30-min break, a sleeper split and the 60/70
- * cycle are all answered by the same rules that drive the clocks — never a hard-coded "10 hours".
+ * When driving comes back, computed once per screen (Now's hero and the header line share it). Round 4:
+ * the time comes from the engine (driveAgainAt), so a 30-min break, a sleeper split and the 60/70 cycle
+ * are answered by the same rules that drive the clocks — never a hard-coded "10 hours". Null while the
+ * driver still has driving time.
  */
-function RestLine({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+function useDriveAgain(s: State, now: number, ev: FullEvaluation | null): DriveAgain | null {
   const status = s.current?.status ?? 'OFF';
   const resting = status === 'OFF' || status === 'SB';
-  const { off, sb, before } = useMemo(() => {
+  const out = ev !== null && ev.driveNow <= 0;
+  return useMemo(() => {
+    if (!out) return null;
     // Right after tapping On duty or Driving the new row is 0 minutes long, so the engine still sees the
     // rest as unbroken and would promise the old time. The tap is the driver's intent: count it as begun.
     const t = !resting && s.current ? Math.max(now, s.current.since + 1) : now;
@@ -208,39 +327,81 @@ function RestLine({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     };
     // While resting, the answer is a fixed clock time that only a new entry can move, so it is not
     // recomputed every minute; on duty or driving it moves with the clock.
-  }, [s.segments, s.current, s.config, resting ? 0 : now]);
+  }, [out, s.segments, s.current, s.config, resting ? 0 : now]);
+}
+
+/**
+ * Out of driving hours: the Now screen's main card says WHEN driving comes back and WHAT is still
+ * allowed. Round 4, reported by a driver: after a 14-hour day nothing on screen said when he could drive
+ * again, and tapping On duty after 6 hours off reset the only rest number on screen without saying the
+ * rest had ended — or that on-duty work was allowed all along.
+ */
+function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain }) {
+  const status = s.current?.status ?? 'OFF';
+  const resting = status === 'OFF' || status === 'SB';
+  const { off, sb, before } = again;
   const cycleWord = `${ev.cycle.limit / 60}-hour`;
-  const when = (t: number) => <><b>{clock(t)}</b> ({dur(t - now)} from now)</>;
-  const lead = status === 'D' ? <b>No driving time left — stop driving. </b> : null;
+  const lead = status === 'D' ? <p class="hero-lead">No driving time left — stop driving.</p> : null;
+  const why = <button class="link" onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>;
   if (off === null) {
-    return <div class="warnbox small">{lead}<b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</div>;
+    return (
+      <section class="hero bad">
+        {lead}
+        <div class="hero-label">Out of driving time</div>
+        <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</p>
+        <div class="hero-foot">{why}</div>
+      </section>
+    );
   }
+  const time = (label: string) => (
+    <>
+      <div class="hero-label">{label}</div>
+      <div class="hero-value">{clock(off)}</div>
+      <div class="hero-stop">{dur(off - now)} from now{resting && ev.binding !== 'BREAK_30' ? `, if you stay ${status === 'SB' ? 'in the sleeper' : 'off duty'}.` : ''}</div>
+    </>
+  );
   if (ev.binding === 'BREAK_30') {
     return (
-      <div class="warnbox small">{lead}<b>30-min break needed.</b> You can drive again at {when(off)}. Any 30 minutes in a row
-        without driving counts — off duty, sleeper, or on-duty work like fueling.</div>
+      <section class="hero warn">
+        {lead}
+        {time('30-min break needed — you can drive again at')}
+        <p class="hero-text">Any 30 minutes in a row without driving counts — off duty, sleeper, or on-duty work like fueling.</p>
+        <div class="hero-foot">{why}</div>
+      </section>
     );
   }
   if (ev.binding === 'CYCLE') {
     return (
-      <div class="warnbox small">{lead}<b>Out of {cycleWord} hours.</b> {resting ? 'If you stay off duty, you' : 'Go off duty now and you'} can
-        drive again at {when(off)}. On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</div>
+      <section class="hero warn">
+        {lead}
+        {time(`Out of ${cycleWord} hours — ${resting ? 'if you stay off duty, you' : 'go off duty now and you'} can drive again at`)}
+        <p class="hero-text">On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</p>
+        <div class="hero-foot">{why}</div>
+      </section>
     );
   }
   if (resting) {
     return (
-      <div class="warnbox small"><b>You can drive again at {clock(off)}</b> — {dur(off - now)} from now, if you stay {status === 'SB' ? 'in the sleeper' : 'off duty'}.{' '}
-        Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</div>
+      <section class="hero">
+        {time('You can drive again at')}
+        <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
+        <div class="hero-foot">{why}</div>
+      </section>
     );
   }
   return (
-    <div class="warnbox small">{lead ?? <b>Out of driving hours. </b>}On-duty work is allowed; driving is not.{' '}
-      Go off duty now and you can drive again at {when(off)}.
-      {sb !== null && sb < off && <> In the sleeper berth instead: {when(sb)} — that completes a split.</>}
-      {before >= 30 && before < 600 && <> Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</>}
-    </div>
+    <section class="hero warn">
+      {lead ?? <div class="hero-label">Out of driving hours</div>}
+      <p class="hero-text"><b>On-duty work is allowed; driving is not.</b></p>
+      {time('Go off duty now and you can drive again at')}
+      {sb !== null && sb < off && <p class="hero-text">In the sleeper berth instead: <b>{clock(sb)}</b> ({dur(sb - now)} from now) — that completes a split.</p>}
+      {before >= 30 && before < 600 && <p class="hero-text">Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</p>}
+      <div class="hero-foot">{why}</div>
+    </section>
   );
 }
+
+/* ============================================================ driving alerts */
 
 /** Which limit is running out, in words for an alert. */
 function alertReason(ev: FullEvaluation): string {
@@ -294,28 +455,45 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
   return <div class={`alertbox ${b.level}`} role="alert"><b>{b.title}.</b> {b.text}</div>;
 }
 
-function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: State; inert?: boolean }) {
-  const hist = historyBasis(s, now);
+/* ============================================================ header and notices */
+
+/**
+ * The header: slim and opaque (redesign, 2026-10-10). It used to hold the four clocks and every
+ * notice, which took 29% of the phone — 47% out of hours — and stayed pinned while scrolling; its
+ * see-through bottom edge put the "drive again at" line on top of the status buttons. Now it carries
+ * only what every screen needs: the status, the time, the theme switch, one line of driving time on the
+ * screens that are not Now, and the driving alert.
+ */
+function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; again: DriveAgain | null; onNow: boolean }) {
   const status = s.current?.status ?? 'OFF';
-  const tone = ev.driveNow <= 0 ? 'bad' : ev.driveNow < 60 ? 'warn' : 'good';
+  const next = s.theme === 'day' ? 'night' : 'day';
   return (
     <header class="top" inert={inert}>
       <div class="top-row">
         <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
         <span class="top-right">
           <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
-          <button class="mini theme-btn" aria-label={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} title={`Switch to ${s.theme === 'day' ? 'night' : 'day'} theme`} onClick={() => chooseTheme(s.theme === 'day' ? 'night' : 'day')}>{s.theme === 'day' ? '☾ Night' : '☀ Day'}</button>
+          <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /> {next === 'night' ? 'Night' : 'Day'}</button>
         </span>
       </div>
-      <AlertBanner s={s} ev={ev} />
-      <div class="clocks">
-        <Stat label="Drive now" value={dur(ev.driveNow)} sub={`limited by ${bindingLabel(ev)}`} tone={tone} />
-        <Stat label={`${ev.shift.limits.drive / 60}-hr left`} value={dur(ev.shift.driveRemaining)} />
-        <Stat label={`${ev.shift.limits.window / 60}-hr left`} value={dur(ev.shift.windowRemaining)} />
-        <Stat label={`${ev.cycle.limit / 60}-hr left`} value={dur(ev.cycle.remaining)} />
-      </div>
-      {ev.driveNow <= 0 && <RestLine s={s} now={now} ev={ev} />}
-      {ev.driveNow > 0 && <div class="muted small">Must stop driving by <b>{clock(ev.mustStopBy)}</b>{ev.shift.pendingSplitLeg ? ' · split leg pending' : ''}{ev.shift.notes.length ? ' · exception active' : ''}</div>}
+      {!onNow && (ev.driveNow > 0
+        ? <div class="compact"><b>{dur(ev.driveNow)}</b> of driving · Stop by <b>{clock(ev.mustStopBy)}</b></div>
+        : again && again.off !== null && status !== 'D' && <div class="compact">{ev.binding === 'BREAK_30' ? '30-min break due' : ev.binding === 'CYCLE' ? `Out of ${ev.cycle.limit / 60}-hour hours` : 'Out of hours'} · <b>drive again at {clock(again.off)}</b></div>)}
+      {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
+      {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
+    </header>
+  );
+}
+
+/**
+ * Notices about the RECORD, shown at the top of every screen: they scroll with the page instead of
+ * pinning it, and they follow the driver to the planning screens, because every answer there rests on
+ * the same record.
+ */
+function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) {
+  const hist = historyBasis(s, now);
+  return (
+    <>
       {hist !== 'known' && (
         <div class="warnbox small">
           {hist === 'fresh' ? (
@@ -361,7 +539,160 @@ function StatusBar({ ev, now, s, inert }: { ev: FullEvaluation; now: number; s: 
           <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
         </div>
       )}
-    </header>
+    </>
+  );
+}
+
+/* ============================================================ Now */
+
+/** The one number a driver needs, in the size he needs it: driving left, the stop time, and why. */
+function HeroDrive({ ev }: { ev: FullEvaluation }) {
+  const tone = ev.driveNow < 60 ? 'warn' : 'good';
+  return (
+    <section class="hero">
+      <div class="hero-label">You can drive</div>
+      <div class={`hero-value ${tone}`}>{dur(ev.driveNow)}</div>
+      <div class="hero-stop">Stop by {clock(ev.mustStopBy)}</div>
+      <div class="hero-foot">
+        <span class="muted">limited by {bindingLabel(ev)}</span>
+        <button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>
+      </div>
+      {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
+        <div class="muted small">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
+      )}
+    </section>
+  );
+}
+
+/** Every limit as a bar: what is left of it, with the one that sets the stop time marked. */
+function Meters({ ev }: { ev: FullEvaluation }) {
+  const sh = ev.shift;
+  const rows: { key: FullEvaluation['binding']; label: string; left: number; of: number; value?: string }[] = [
+    { key: 'DRIVE_11', label: `${sh.limits.drive / 60}-hr driving`, left: sh.driveRemaining, of: sh.limits.drive },
+    { key: 'WINDOW_14', label: `${sh.limits.window / 60}-hr window`, left: sh.windowRemaining, of: sh.limits.window },
+    ...(Number.isFinite(sh.breakRemaining)
+      ? [{ key: 'BREAK_30' as const, label: '30-min break', left: sh.breakRemaining, of: 480, value: sh.breakRemaining <= 0 ? 'due now' : `in ${dur(sh.breakRemaining)}` }]
+      : []),
+    { key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr week`, left: ev.cycle.remaining, of: ev.cycle.limit },
+  ];
+  return (
+    <section class="meters" aria-label="Your limits">
+      {rows.map((r) => (
+        <div key={r.key} class={`meter ${ev.binding === r.key ? 'on' : ''}`}>
+          <span class="meter-label">{r.label}</span>
+          <span class="meter-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(100, (r.left / r.of) * 100)).toFixed(0)}%` }} /></span>
+          <span class="meter-value">{r.value ?? `${dur(r.left)} left`}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** The four statuses, always at the bottom of Now, within thumb reach. */
+function StatusDock({ s }: { s: State }) {
+  return (
+    <div class="dock">
+      <div class="status-buttons">{(['OFF', 'SB', 'D', 'ON'] as DutyStatus[]).map((st) => {
+        const on = s.current?.status === st && !s.current?.note;
+        return <button key={st} style={{ background: STATUS_COLOR[st] }} class={on ? 'on' : ''} aria-pressed={on} onClick={() => tapStatus(st)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
+      })}</div>
+      <button class="link dock-more" onClick={() => openSheet({ kind: 'status' })}>PC, yard move, or started earlier…</button>
+    </div>
+  );
+}
+
+function NowTab({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null }) {
+  const warn = ev.shift.notes.filter((n) => n.startsWith('⚠'));
+  const active = [ev.shift.exceptionKeys.adverse !== null ? 'Adverse conditions' : '', ev.shift.exceptionKeys.sixteen !== null ? '16-hour day' : ''].filter(Boolean);
+  return (
+    <>
+      {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
+      <Meters ev={ev} />
+      <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
+      <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
+        <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
+        <Icon d={I.next} />
+      </button>
+      {warn.map((n, i) => <p key={i} class="warnbox small">{n}</p>)}
+      <div class="quick">
+        <button onClick={() => setState({ tab: 'recap' })}><Icon d={I.truck} /> Take a load?</button>
+        <button onClick={() => setState({ tab: 'split' })}><Icon d={I.bunk} /> Plan a split</button>
+      </div>
+      <StatusDock s={s} />
+    </>
+  );
+}
+
+/* ============================================================ panels */
+
+function StatusSheet({ s, now }: { s: State; now: number }) {
+  const [ago, setAgo] = useState(0);
+  const offsets = startOffsets(s, now);
+  const pick = (st: DutyStatus, note?: string) => { tapStatus(st, note, ago); openSheet(null); };
+  const cur = s.current;
+  const isOn = (st: DutyStatus, note?: string) => cur?.status === st && (cur?.note ?? undefined) === note;
+  return (
+    <Sheet title="What are you doing now?">
+      <div class="big-status">{(['OFF', 'SB', 'ON', 'D'] as DutyStatus[]).map((st, i) => (
+        <button key={st} data-first={i === 0 ? true : undefined} style={{ background: STATUS_COLOR[st] }} class={isOn(st) ? 'on' : ''} aria-pressed={isOn(st)} onClick={() => pick(st)}>
+          <Icon d={STATUS_ICON[st]} size={26} /><span>{STATUS_LABEL[st]}</span>
+        </button>
+      ))}</div>
+      <div class="row">
+        <button class={isOn('OFF', 'PC') ? 'on-outline' : ''} aria-pressed={isOn('OFF', 'PC')} onClick={() => pick('OFF', 'PC')}>Personal conveyance</button>
+        <button class={isOn('ON', 'YM') ? 'on-outline' : ''} aria-pressed={isOn('ON', 'YM')} onClick={() => pick('ON', 'YM')}>Yard move</button>
+      </div>
+      <h3>When did it start?</h3>
+      <div class="toggle" role="group" aria-label="When did it start?">
+        {offsets.map((o) => <button key={o.minutes} class={ago === o.minutes ? 'on' : ''} aria-pressed={ago === o.minutes} disabled={!o.ok} onClick={() => setAgo(o.minutes)}>{o.minutes ? `${o.minutes} min ago` : 'Now'}</button>)}
+      </div>
+      <p class="muted small">{ago ? `Starts at ${clock(now - ago)}. Use this when you forgot to tap.` : `Starts at ${clock(now)} — right now.`} Earlier than that? Add it on the <b>Log</b> tab.</p>
+    </Sheet>
+  );
+}
+
+/** Each rule's own stop time, if he drove from now without stopping; the earliest one is the answer. */
+function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
+  const sh = ev.shift;
+  const split = sh.chain.length >= 2;
+  const rows = [
+    { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining,
+      text: `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
+    ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining,
+      text: `After 8 hours of driving you need 30 minutes in a row without driving. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
+    { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining,
+      text: `No driving once ${sh.limits.window / 60} hours have passed since your shift started — breaks don't stop it${split ? ', except a qualifying sleeper split' : ''}.` },
+    { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour week`, left: ev.cycle.remaining,
+      text: `${dur(ev.cycle.remaining)} left in this ${ev.cycle.windowDays}-day period.` },
+  ];
+  const when = (left: number) => (left <= 0 ? 'Now' : left > 1440 ? 'Not today' : clock(now + left));
+  return (
+    <Sheet title={ev.driveNow > 0 ? `Why stop by ${clock(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
+      <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
+      <ul class="why">{rows.map((r) => (
+        <li key={r.key} class={ev.binding === r.key ? 'on' : ''}>
+          <div class="why-head"><b>{r.name}</b><span class="why-time">{when(r.left)}</span></div>
+          <div class="small">{r.text}</div>
+          {ev.binding === r.key && <div class="why-tag">Earliest — this sets your stop time</div>}
+        </li>
+      ))}</ul>
+      <p class="muted small">Rules: 49 CFR 395.3. Your ELD is your official record.</p>
+      <button class="primary wide" data-first onClick={() => openSheet(null)}>Got it</button>
+    </Sheet>
+  );
+}
+
+function ExceptionsSheet({ ev }: { ev: FullEvaluation }) {
+  const adverseOn = ev.shift.exceptionKeys.adverse !== null;
+  const sixteenOn = ev.shift.exceptionKeys.sixteen !== null;
+  return (
+    <Sheet title="Exceptions this shift">
+      <label class="check"><input type="checkbox" data-first checked={adverseOn} onChange={() => toggleException(ev, 'adverseShifts')} /> Adverse driving conditions — +2h driving and window (§395.1(b)(1))</label>
+      <label class="check"><input type="checkbox" checked={sixteenOn} onChange={() => toggleException(ev, 'sixteenHourShifts')} /> 16-hour short-haul day — window to 16h, driving stays 11 (§395.1(o))</label>
+      {ev.shift.notes.map((n, i) => <p key={i} class={`small ${n.startsWith('⚠') ? 'warnbox' : 'muted'}`}>{n}</p>)}
+      <p class="muted small">Adverse conditions must have been unknown when you were dispatched — snow that was forecast doesn't count. The 16-hour day requires returning to and being released at your normal work reporting location.</p>
+      <button class="primary wide" onClick={() => openSheet(null)}>Done</button>
+    </Sheet>
   );
 }
 
@@ -390,8 +721,6 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const [status, setStatus] = useState<DutyStatus>('OFF');
   const [start, setStart] = useState(toInput(now - 60));
   const [end, setEnd] = useState(toInput(now));
-  const segs = allSegments(s, now);
-
   /**
    * Overlapping raw entries. The engine resolves them (a later entry wins over the range it
    * covers, and the earlier one is split), so the clocks above can disagree with the rows below.
@@ -428,31 +757,11 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
-  // A tap is the browser's permission to play sound later, so a driving alert can be heard (alerts.ts).
-  const switchTo = (st: DutyStatus, note?: string) => { unlockAudio(); tapStatus(st, note); };
-  const tapStatus = (st: DutyStatus, note?: string) => setState((cur) => {
-    // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
-    // could drop the status being closed (bug report C5/L3).
-    const now = cur.nowOverride ?? nowMin();
-    // Tapping the status you are already in changes nothing (statusTap returns null): re-stamping the
-    // row reset the header pill to 0m mid-rest, while every clock stayed identical (driver report).
-    return statusTap(cur, st, note, now) ?? {};
-  });
-  // Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
-  // storing it orphaned the flag a minute later (bug report C3). exceptionKey is stable for the shift.
-  const toggleException = (key: 'adverseShifts' | 'sixteenHourShifts') => setState((cur) => {
-    const list = new Set(cur.config[key] ?? []);
-    const matched = key === 'adverseShifts' ? ev.shift.exceptionKeys.adverse : ev.shift.exceptionKeys.sixteen;
-    if (matched !== null) list.delete(matched); else list.add(ev.shift.exceptionKey);
-    return { config: { ...cur.config, [key]: [...list] } };
-  });
-  const adverseOn = ev.shift.exceptionKeys.adverse !== null;
-  const sixteenOn = ev.shift.exceptionKeys.sixteen !== null;
   const add = () => {
     const a = fromInput(start), b = fromInput(end);
     if (a === null || b === null) { setFormError('Enter a valid start and end.'); return; }
     if (b <= a) { setFormError('End must be after start.'); return; }
-    if (b > now) { setFormError(`End is after now (${clock(now)}). This log is for time that has happened — use Split Lab or Trip to plan ahead, or tap your status above when it changes.`); return; }
+    if (b > now) { setFormError(`End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`); return; }
     setFormError(null);
     setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b, createdAt: stamp() }] }));
   };
@@ -480,21 +789,6 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 
   return (
     <>
-      <Card title="Last 24 hours"><Grid segments={segs} from={now - 1440} to={now} /></Card>
-      <Card title="I am now…">
-        <div class="status-buttons">{(['OFF', 'SB', 'D', 'ON'] as DutyStatus[]).map((st) => <button key={st} style={{ background: STATUS_COLOR[st] }} class={s.current?.status === st && !s.current?.note ? 'on' : ''} onClick={() => switchTo(st)}>{STATUS_LABEL[st]}</button>)}</div>
-        <div class="row">
-          <button class={s.current?.note === 'PC' ? 'on-outline' : ''} onClick={() => switchTo('OFF', 'PC')}>Personal conveyance</button>
-          <button class={s.current?.note === 'YM' ? 'on-outline' : ''} onClick={() => switchTo('ON', 'YM')}>Yard move</button>
-        </div>
-        <p class="muted small">Tapping a status closes the current one at {clock(now, false)} and starts the new one. Tapping the one you are already in does nothing — it will not restart your timer. PC counts as off duty and yard moves as on duty for the clocks. This is your scratchpad, not your ELD.</p>
-      </Card>
-      <Card title="Exceptions this shift" tone={ev.shift.notes.some((n) => n.startsWith('⚠')) ? 'bad' : ev.shift.notes.length ? 'warn' : undefined}>
-        <label class="check"><input type="checkbox" checked={adverseOn} onChange={() => toggleException('adverseShifts')} /> Adverse driving conditions — +2h driving and window (§395.1(b)(1))</label>
-        <label class="check"><input type="checkbox" checked={sixteenOn} onChange={() => toggleException('sixteenHourShifts')} /> 16-hour short-haul day — window to 16h, driving stays 11 (§395.1(o))</label>
-        {ev.shift.notes.map((n, i) => <p key={i} class={`small ${n.startsWith('⚠') ? 'warnbox' : 'muted'}`}>{n}</p>)}
-        <p class="muted small">Adverse conditions must have been unknown when you were dispatched — snow that was forecast doesn't count. The 16-hour day requires returning to and being released at your normal work reporting location.</p>
-      </Card>
       <Card title="Add a past segment">
         <Toggle options={[['OFF', 'Off'], ['SB', 'SB'], ['D', 'Drive'], ['ON', 'On']]} value={status} onChange={setStatus} />
         <div class="row"><label>Start<input type="datetime-local" value={start} onInput={(e) => setStart((e.target as HTMLInputElement).value)} /></label><label>End<input type="datetime-local" value={end} onInput={(e) => setEnd((e.target as HTMLInputElement).value)} /></label></div>
@@ -530,7 +824,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
               <li><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span>{segLabel(s.current.status, s.current.note)}</span><span class="muted">since {clock(s.current.since)} · just started</span></li>
             )}</ul>
             <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
-            <p class="muted small">Set your current status with the buttons above to keep this timeline moving.</p>
+            <p class="muted small">Set your current status on the Now screen to keep this timeline moving.</p>
           </>
         ) : (
           <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
@@ -569,6 +863,32 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   );
 }
 
+/* ============================================================ Plan */
+
+/** "Back to Plan" for the planning screens, which are reached from Plan rather than the tab bar. */
+function BackToPlan() {
+  return <button class="back" onClick={() => setState({ tab: 'plan' })}><Icon d={I.back} /> Plan</button>;
+}
+
+/** The planning tools, one big button each: a question a driver asks, not a tool name. */
+function PlanTab() {
+  const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
+    <button class="plan-item" onClick={() => setState({ tab })}>
+      <span class="plan-icon"><Icon d={icon} size={26} /></span>
+      <span class="plan-text"><b>{title}</b><span class="muted small">{sub}</span></span>
+      <Icon d={I.next} />
+    </button>
+  );
+  return (
+    <>
+      <h1 class="screen-title">Plan</h1>
+      {item('recap', I.truck, 'Can I take this load?', 'Miles and time at the receiver. Get a yes or no.')}
+      {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
+      {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
+    </>
+  );
+}
+
 /* ============================================================ Split Lab */
 
 function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
@@ -601,6 +921,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
   return (
     <>
+      <BackToPlan />
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg ? 'warn' : undefined}>
         {ev.shift.pendingSplitLeg && ev.shift.pendingSplitLeg.isReset
           ? <p><b>Your {dur(ev.shift.pendingSplitLeg.duration)} reset included 7+ hours in the sleeper.</b> Under FMCSA FAQ 22 (July 2026) a later break of 2h+ can pair with it and be <b>excluded from your 14</b> — it won't give back driving time, but it buys window. Clocks below assume the plain reset until you take that break.</p>
@@ -834,6 +1155,7 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
   return (
     <>
+      <BackToPlan />
       <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'}>
         <div class="clocks">
           <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
@@ -954,7 +1276,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <label>Carrier day starts at<select value={c.dayStartHour} onChange={(e) => setC({ dayStartHour: Number((e.target as HTMLSelectElement).value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
         <TimeZoneField value={c.timeZone} onChange={(v) => setC({ timeZone: v })} />
         <label class="check"><input type="checkbox" checked={c.shortHaul} onChange={(e) => setC({ shortHaul: (e.target as HTMLInputElement).checked })} /> Short-haul (§395.1(e)) — no 30-min break rule</label>
-        <p class="muted small">Adverse-conditions and 16-hour-day exceptions are per shift — toggle them on the Log tab.</p>
+        <p class="muted small">Adverse-conditions and 16-hour-day exceptions are per shift — set them on the Now screen, under "Exceptions this shift".</p>
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
@@ -1017,11 +1339,21 @@ function Disclaimer({ onClose, tz, needsTz }: { onClose: (tz?: string) => void; 
 
 declare const __BUILD__: string;
 
+/**
+ * The launch notice is open until dismissed, once per launch (a page load): module state rather than
+ * component state, so it survives a remount within the launch and comes back on the next one. Exported
+ * so a test can look behind it.
+ */
+let launchNotice = true;
+export function setLaunchNotice(open: boolean) { launchNotice = open; }
+
 export function App() {
   const s = useStore();
   const now = useNow();
-  // Startup disclaimer — dismissed for this session only; a fresh launch shows it again.
-  const [disclaimer, setDisclaimer] = useState(true);
+  // Startup disclaimer — dismissed for this launch only; a fresh launch shows it again.
+  const [, redraw] = useState(0);
+  const disclaimer = launchNotice;
+  const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
   useEffect(() => { applyTheme(s.theme); }, [s.theme]);
   // evaluate() runs outside every tab's error boundary, so a throw here used to blank the whole app on
   // every launch (bug report C2). Catch it and offer a way out instead.
@@ -1032,6 +1364,8 @@ export function App() {
   const ev = result.ev;
   useDrivingAlerts(s, now, ev);
   useWakeLock(wantsWakeLock(s.keepAwake, s.current?.status));
+  const again = useDriveAgain(s, now, ev);
+  const sheet = useSheet();
   if (!ev) {
     return (
       <div class="app"><main>
@@ -1050,12 +1384,16 @@ export function App() {
       </main></div>
     );
   }
-  const tabs: [State['tab'], string][] = [['log', 'Log'], ['split', 'Split Lab'], ['recap', 'Recap'], ['trip', 'Trip'], ['settings', 'Settings']];
+  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['recap', 'Recap', I.recap], ['settings', 'More', I.more]];
+  // The planning screens sit under Plan: the tab bar shows where you are, not a sixth tab.
+  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t);
+  // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
+  const blocked = disclaimer || sheet !== null;
   return (
     <div class="app">
       {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
-      <StatusBar ev={ev} now={now} s={s} inert={disclaimer} />
-      <main inert={disclaimer}>
+      <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
+      <main inert={blocked}>
         {s.themeNotice && (
           <div class="card warn">
             <div class="row">
@@ -1064,15 +1402,24 @@ export function App() {
             </div>
           </div>
         )}
+        <Notices ev={ev} now={now} s={s} />
         <TabBoundary key={s.tab} tab={s.tab}>
+          {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} />}
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
+          {s.tab === 'plan' && <PlanTab />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
           {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
           {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
           {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
         </TabBoundary>
       </main>
-      <nav class="tabs" inert={disclaimer}>{tabs.map(([k, l]) => <button key={k} class={s.tab === k ? 'on' : ''} onClick={() => setState({ tab: k })}>{l}</button>)}</nav>
+      <nav class="tabs" inert={blocked}>{tabs.map(([k, l, icon]) => {
+        const on = navOf(s.tab) === k;
+        return <button key={k} class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setState({ tab: k })}><Icon d={icon} /> {l}</button>;
+      })}</nav>
+      {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+      {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
+      {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
     </div>
   );
 }

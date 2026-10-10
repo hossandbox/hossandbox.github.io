@@ -64,7 +64,12 @@ export interface State {
   tzChosen: boolean;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
-  tab: 'log' | 'split' | 'recap' | 'trip' | 'settings';
+  /**
+   * Which screen is showing. 'now' is home (redesign, 2026-10-10); 'split', 'trip' and 'load' are the
+   * planning screens reached from 'plan'; 'settings' is labelled "More". Navigation, not data: every
+   * launch opens on 'now' (see parseSaved).
+   */
+  tab: 'now' | 'log' | 'plan' | 'split' | 'recap' | 'trip' | 'load' | 'settings';
   /** where "Report a bug" sends mail */
   bugEmail: string;
   /** Sound, vibration and notification alerts while driving (driver report 2026-10-06). Device setting: not exported. */
@@ -100,7 +105,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
-  tzChosen: false, nowOverride: null, tab: 'log', bugEmail: '', alertsOn: true, keepAwake: true,
+  tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true,
 };
 
 /**
@@ -137,6 +142,9 @@ export function parseSaved(raw: string | null): State {
     // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
     // every day boundary without a word, so ask again through the first-run zone prompt instead.
     if (typeof s.config?.timeZone === 'string' && s.config.timeZone !== merged.config.timeZone) merged.tzChosen = false;
+    // Every launch opens on Now: the screen a driver opens the app for. The last tab is navigation, not
+    // data, and reopening into a half-finished planning screen hides the clocks (redesign, 2026-10-10).
+    merged.tab = 'now';
     // Legacy save: night was the DEFAULT when it was written, so a stored 'night' far more often means
     // "never touched it" than "chose night" — and `themeChosen` did not exist yet to tell them apart
     // (round-3 item 2). Move it to the new day default once, and raise a notice rather than rewriting

@@ -124,9 +124,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
       { status: 'OFF', start: M('2026-09-22T13:00:00Z'), end: M('2026-09-22T14:00:00Z') }, // 08:00→09:00 CDT
     ],
   });
-  hh = out('log/overlapping entries');
+  // Redesign: the clocks live on Now; the overlap warning stays on the Log, where the rows are fixed.
+  setState({ tab: 'now' });
+  hh = out('now/overlapping entries');
   if (/9h 00m|68h 00m/.test(hh)) throw new Error('overlapping entry inflated driving/cycle time (3h of driving vanished)');
   if (!/65h 00m/.test(hh)) throw new Error('cycle left should be 65h — 5h driven of 70');
+  setState({ tab: 'log' });
+  hh = out('log/overlapping entries');
   if (!/These entries overlap/.test(hh)) throw new Error('overlapping entries must be flagged to the driver');
   setState({ nowOverride: null });
   console.log('overlap repro: OK');
@@ -740,25 +744,31 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 // label must not then claim a break is due, because the driver has just taken one.
 {
   const t = nowMin();
-  setState({ nowOverride: null, tab: 'log', historyAcknowledged: true, current: null, segments: [
+  // Redesign: the "limited by" line is on Now, under the driving time it explains.
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: true, current: null, segments: [
     { status: 'D', start: t - 94, end: t - 34 },   // 1h 00m driving
     { status: 'OFF', start: t - 34, end: t },      // 34-minute break — qualifies
   ] });
-  const bx = out('log/after a qualifying break');
+  const bx = out('now/after a qualifying break');
   if (!/limited by 8-hour rule \(30-min break in 8h 00m\)/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break, not claim one is due');
   if (/30-min break due/.test(bx)) throw new Error('the label still says a break is due after the driver took one');
 
   // Approaching 8 hours with no break: the label must still say "break" (round-3 finding — the first
   // fix dropped the word until the counter hit zero, the moment the driver most needs it).
   setState({ segments: [{ status: 'D', start: t - 465, end: t }] });
-  const ax = out('log/break 15 min away');
+  const ax = out('now/break 15 min away');
   if (!/limited by 8-hour rule \(30-min break in 15m\)/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
   if (/30-min break due/.test(ax)) throw new Error('a break 15 min away is not yet due');
 
   // The other half: once the counter has genuinely run out, it must still say so.
   setState({ segments: [{ status: 'D', start: t - 500, end: t }] });
-  const ox = out('log/break genuinely due');
-  if (!/limited by 30-min break due/.test(ox)) throw new Error('a break the driver has actually run out of must still read as due');
+  // Redesign: with no driving time left, Now leads with the out-of-hours card instead of a "limited by"
+  // line, and the other screens carry it in the header. Both must still say the break is due.
+  const ox = out('now/break genuinely due');
+  if (!/30-min break needed/.test(ox)) throw new Error('a break the driver has actually run out of must still read as due');
+  setState({ tab: 'log' });
+  if (!/30-min break due · <b>drive again at/.test(out('log/break genuinely due'))) throw new Error('away from Now, the header must still say the break is due');
+  setState({ tab: 'now' });
 
   // Startup disclaimer — never an ELD, never a legal log.
   const dx = out('startup disclaimer');
@@ -817,14 +827,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ];
   const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   // 6h into the rest after a 14-hour day
-  setState({ nowOverride: T, tab: 'log', historyAcknowledged: true, segments: day, current: { status: 'OFF', since: T - 360 } });
-  let r = txt(out('log/resting 6h after a 14h day'));
+  // Redesign: this card is the main card on Now (it was a box in the header on every tab).
+  setState({ nowOverride: T, tab: 'now', historyAcknowledged: true, segments: day, current: { status: 'OFF', since: T - 360 } });
+  let r = txt(out('now/resting 6h after a 14h day'));
   if (!r.includes(`You can drive again at ${clock(T + 240)}`)) throw new Error('resting out of hours: the status bar must say when driving comes back');
   if (!/4h 00m from now/.test(r)) throw new Error('resting out of hours: the countdown must show the time left (4h 00m)');
   if (!/Going on duty before then is allowed/.test(r)) throw new Error('the driver must be told on-duty work is allowed while resting');
   // the moment he taps On duty after 6 hours off
   setState({ segments: [...day, { status: 'OFF', start: T - 360, end: T }], current: { status: 'ON', since: T } });
-  r = txt(out('log/tapped on duty after 6h off'));
+  r = txt(out('now/tapped on duty after 6h off'));
   if (!/On-duty work is allowed; driving is not/.test(r)) throw new Error('on duty out of hours: say on-duty work is allowed and driving is not');
   if (r.includes(`drive again at ${clock(T + 240)}`)) throw new Error('going on duty ended the rest: the old drive-again time must not survive the tap');
   if (!/6h 00m off before this does not count toward the 10 hours/.test(r)) throw new Error('going on duty mid-rest must say the rest no longer counts');
@@ -832,16 +843,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/In the sleeper berth instead/.test(r)) throw new Error('when the sleeper is faster (a split), offer it');
   // a full 10 hours: no rest line at all
   setState({ nowOverride: T + 240, segments: day, current: { status: 'OFF', since: T - 360 } });
-  r = txt(out('log/rested 10h'));
+  r = txt(out('now/rested 10h'));
   if (/drive again at/.test(r)) throw new Error('with driving time available there is nothing to wait for');
   // 8h straight driving, then 10 min fueling: the break is 20 min away, and on-duty counts toward it
   setState({ nowOverride: T + 10, segments: [{ status: 'OFF', start: T - 1080, end: T - 480 }, { status: 'D', start: T - 480, end: T }], current: { status: 'ON', since: T } });
-  r = txt(out('log/break needed, fueling'));
+  r = txt(out('now/break needed, fueling'));
   if (!/30-min break needed/.test(r) || !r.includes(`drive again at ${clock(T + 30)}`)) throw new Error('break case: say a break is needed and when it clears (fueling counts)');
   if (!/on-duty work like fueling/.test(r)) throw new Error('break case: on-duty time counts toward the 30 minutes and the driver must be told');
   // driving with no time left
   setState({ nowOverride: T + 90, segments: [...day, { status: 'OFF', start: T - 360, end: T }, { status: 'ON', start: T, end: T + 60 }], current: { status: 'D', since: T + 60 } });
-  r = txt(out('log/driving out of hours'));
+  r = txt(out('now/driving out of hours'));
   if (!/No driving time left — stop driving/.test(r)) throw new Error('driving out of hours must say stop driving');
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('round 4 (when can I drive again): OK');
@@ -1035,5 +1046,108 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/Your ELD is your official warning/.test(st)) throw new Error('Settings must say alerts are not the official warning');
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('driving alerts: OK');
+}
+// --- redesign 1 (2026-10-10): Now screen, slim header, slide-up panels, Plan
+{
+  const { openSheet, tapStatus, startOffsets, setLaunchNotice } = await import('../src/app.tsx');
+  setLaunchNotice(false); // look behind the launch notice: panels open only once it is dismissed
+  const { parseSaved: parse3, getState: gs } = await import('../src/store.ts');
+  const { readFileSync: rf } = await import('node:fs');
+  const T = Math.floor(Date.UTC(2026, 9, 12, 15, 45) / 60000); // Mon 10:45 CDT
+  const L = (h, m = 0) => Math.floor(Date.UTC(2026, 9, 12, h + 5, m) / 60000);
+  const day = [
+    { status: 'OFF', start: L(-4), end: L(6), createdAt: 1 },
+    { status: 'ON', start: L(6), end: L(6, 30), createdAt: 2 },
+    { status: 'D', start: L(6, 30), end: L(10), createdAt: 3 },
+    { status: 'OFF', start: L(10), end: L(10, 30), createdAt: 4 },
+  ];
+  const base = { nowOverride: T, historyAcknowledged: true, tentative: [], segments: day, current: { status: 'ON', since: L(10, 30), createdAt: 5 } };
+  const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const header = (h) => (h.match(/<header[\s\S]*?<\/header>/) || [''])[0];
+
+  // 1. every launch opens on Now
+  if (parse3(JSON.stringify({ segments: [], tab: 'trip', tzChosen: true, themeChosen: true })).tab !== 'now') throw new Error('a launch must open on Now, not the last tab');
+
+  // 2. Now: one big number, the stop time, the limit that sets it, every limit as a bar, status at the bottom
+  setState({ ...base, tab: 'now' });
+  let h = out('now/fuel stop');
+  let t = txt(h);
+  if (!/You can drive 7h 30m Stop by /.test(t)) throw new Error(`Now must lead with driving time and stop time (got ${t.slice(0, 200)})`);
+  if (!t.includes(`Stop by ${clock(L(18, 15))}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
+  if (!/limited by 11-hour driving limit/.test(t)) throw new Error('the hero must name the limit in full');
+  for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break in 8h 00m/, /70-hr week 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
+  if (!/class="meter on"[^>]*><span class="meter-label">11-hr driving/.test(h)) throw new Error('the limit that sets the stop time must be marked');
+  if ((h.match(/class="dock"/g) || []).length !== 1 || !/aria-pressed="true"[^>]*>[\s\S]{0,400}On Duty/.test(h)) throw new Error('Now must end with the status buttons, the current one pressed');
+  if (/class="stat-value"/.test(header(h))) throw new Error('the header must no longer carry the clock tiles');
+  if (/drive again at|of driving · Stop by/.test(header(h))) throw new Error('on Now the header must not repeat what the main card says');
+
+  // 3. the header is opaque — its see-through edge drew text over the content scrolling under it
+  const css = rf('public/styles.css', 'utf8');
+  const top = css.match(/\n\.top \{[^}]*\}/)[0];
+  if (/transparent|gradient/.test(top) || !/background: var\(--bg\)/.test(top)) throw new Error(`the sticky header must be opaque: ${top}`);
+
+  // 4. away from Now, one line of driving time in the header
+  setState({ tab: 'log' });
+  h = out('log/header line');
+  if (!txt(header(h)).includes(`7h 30m of driving · Stop by ${clock(L(18, 15))}`)) throw new Error('other screens must keep one line of driving time in the header');
+
+  // 5. Why: every rule's own end time, the earliest marked
+  setState({ tab: 'now' });
+  openSheet({ kind: 'why' });
+  h = out('now/why panel');
+  t = txt(h);
+  if (!t.includes(`Why stop by ${clock(L(18, 15))}?`)) throw new Error('the Why panel must restate the stop time it explains');
+  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', clock(L(18, 45))], ['14-hour window', clock(L(20))], ['70-hour week', 'Not today']]) {
+    if (!t.includes(`${rule} ${at}`)) throw new Error(`Why panel: ${rule} should end at ${at}`);
+  }
+  if ((h.match(/Earliest — this sets your stop time/g) || []).length !== 1) throw new Error('exactly one rule is the earliest');
+  if (!/<li class="on"><div class="why-head"><b>11-hour driving/.test(h)) throw new Error('the earliest rule must be the 11-hour one here');
+  for (const tag of ['header', 'main', 'nav']) if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(h)) throw new Error(`<${tag}> must be inert while a panel is open`);
+  if (!/role="dialog" aria-modal="true" aria-labelledby="sheet-title"/.test(h)) throw new Error('a panel must be a labelled modal dialog');
+  openSheet(null);
+  h = out('now/panel closed');
+  if (/<main[^>]*\binert\b/.test(h)) throw new Error('closing the panel must make the screen usable again');
+
+  // 6. status panel: "started earlier" — never reaching back past the status being left
+  const offs = startOffsets(gs(), T).map((o) => `${o.minutes}:${o.ok}`).join(' ');
+  if (offs !== '0:true 5:true 15:false 30:false') throw new Error(`on duty since 10:30, at 10:45 only "5 min ago" can be offered (got ${offs})`);
+  openSheet({ kind: 'status' });
+  h = out('now/status panel');
+  if (!/What are you doing now\?/.test(h) || !/Personal conveyance/.test(h) || !/Yard move/.test(h)) throw new Error('the status panel must offer every status, PC and yard move');
+  if (!/disabled=""[^>]*>15 min ago|>15 min ago<\/button>/.test(h)) throw new Error('the status panel must render the start options');
+  openSheet(null);
+  tapStatus('D', undefined, 5);
+  if (gs().current.status !== 'D' || gs().current.since !== T - 5) throw new Error('"5 min ago" must start the new status 5 minutes back');
+  if (gs().segments.at(-1).status !== 'ON' || gs().segments.at(-1).end !== T - 5) throw new Error('the status left must be closed at the earlier time');
+  setState({ ...base });
+  tapStatus('D', undefined, 30);
+  if (gs().current.status !== 'ON') throw new Error('an offset reaching past the start of the status being left must change nothing');
+  tapStatus('ON');
+  if (gs().current.since !== L(10, 30)) throw new Error('tapping the status you are already in must still change nothing');
+
+  // 7. exceptions: one line on Now, the switches in a panel
+  setState({ ...base, tab: 'now' });
+  if (!/Exceptions this shift[\s\S]{0,80}None/.test(out('now/no exceptions'))) throw new Error('Now must say there are no exceptions');
+  openSheet({ kind: 'exceptions' });
+  h = out('now/exceptions panel');
+  if (!/Adverse driving conditions/.test(h) || !/16-hour short-haul day/.test(h) || !/type="checkbox"/.test(h)) throw new Error('the exceptions panel must hold both switches');
+  openSheet(null);
+
+  // 8. Plan: three questions; the planning screens lead back to it and keep Plan lit in the tab bar
+  setState({ ...base, tab: 'plan' });
+  h = out('plan/hub');
+  for (const q of ['Can I take this load?', 'Plan a sleeper split', 'Plan a run']) if (!h.includes(q)) throw new Error(`Plan must offer "${q}"`);
+  for (const tab of ['split', 'trip']) {
+    setState({ tab });
+    h = out(`${tab}/under plan`);
+    if (!/class="back"/.test(h)) throw new Error(`${tab} must lead back to Plan`);
+    if (!/aria-current="page"[^>]*>[\s\S]{0,400}Plan<\/button>/.test(h)) throw new Error(`${tab} must keep Plan lit in the tab bar`);
+  }
+  // 9. tap targets: nothing on Now smaller than 44px by its own CSS
+  if (!/\nbutton \{[^}]*min-height: 44px/.test(css)) throw new Error('buttons must be at least 44px tall');
+  setLaunchNotice(true);
+  if (!/HOS Sandbox is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('redesign 1 (Now, header, panels, Plan): OK');
 }
 console.log('OK');

@@ -69,6 +69,10 @@ function audit(name, V) {
     ['amber as graphic', V['--warn'], V['--panel'], GRAPHIC],
     ['red as graphic', V['--bad'], V['--panel'], GRAPHIC],
     ['muted as graphic', V['--muted'], V['--panel'], GRAPHIC],
+    // redesign: links and the Why-panel tag; the driving view floods the screen with --bad at zero
+    ['link text on card', V['--link'], V['--panel'], AA],
+    ['link text on page', V['--link'], V['--bg'], AA],
+    ['ink on red', V['--chip-ink'], V['--bad'], AA],
   ];
   // tints appear both inside cards and in the sticky header (which sits on --bg)
   for (const [label, t] of [['warnbox', warnbox], ['violation row', violbox], ['selected card', selcard]]) {
