@@ -1508,4 +1508,24 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now' });
   console.log('re-check (zone field: listed names only): OK');
 }
+// --- re-check N5: a what-if row can be edited
+{
+  const { saveEntry, currentUndo, undoLast, setLaunchNotice } = await import('../src/app.tsx');
+  const { getState: gs } = await import('../src/store.ts');
+  const T = Math.floor(Date.UTC(2026, 9, 10, 16, 0) / 60000);
+  const plan = { status: 'SB', start: T + 60, end: T + 540, tentative: true, note: 'Break 1' };
+  setState({ nowOverride: T, tab: 'log', historyAcknowledged: true, segments: [{ status: 'OFF', start: T - 700, end: T }], current: null, tentative: [plan] });
+  if (saveEntry(plan, { status: 'SB', start: T + 60, end: T + 525 }, T) !== null) throw new Error('editing a what-if into the future must be allowed');
+  const edited = gs().tentative[0];
+  if (gs().tentative.length !== 1 || edited.end !== T + 525 || !edited.tentative || edited.note !== 'Break 1') throw new Error('the edit must change the what-if and keep it a what-if');
+  if (!/^Edited Sleeper/.test(currentUndo()?.label ?? '') || !undoLast() || gs().tentative[0].end !== T + 540) throw new Error('a what-if edit is undo-able');
+  // logged rows keep the rule
+  if (!/End is after now/.test(saveEntry(gs().segments[0], { status: 'OFF', start: T - 700, end: T + 5 }, T) ?? '')) throw new Error('logged rows still stop at now');
+  // the row says what it is to a screen reader
+  setLaunchNotice(false);
+  if (!/aria-label="Edit what-if Sleeper/.test(out('log/what-if row'))) throw new Error('a what-if row must say so in its label');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
+  console.log('re-check N5 (what-if rows can be edited): OK');
+}
 console.log('OK');

@@ -845,7 +845,9 @@ function undoable(label: string, change: () => void) {
 /** Save an edited entry; returns a reason it was refused, or null. Undo-able from the Log. */
 export function saveEntry(seg: Segment, next: { status: DutyStatus; start: number; end: number }, now: number): string | null {
   if (next.end <= next.start) return 'End must be after start.';
-  if (next.end > now) return `End is after now (${clock(now)}). Logged time can only run up to now.`;
+  // "Only up to now" is a rule for logged time. A what-if row is a plan, and a plan is in the future;
+  // applying the rule to it meant a what-if could only ever be deleted (re-check N5).
+  if (!seg.tentative && next.end > now) return `End is after now (${clock(now)}). Logged time can only run up to now.`;
   undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, next)));
   return null;
 }
@@ -973,7 +975,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
               <div class="entry live"><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — change it on Now</span></span></div>
             )}
             {dayRows.map((seg, i) => (
-              <button key={i} class="entry" aria-label={`Edit ${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
+              <button key={i} class="entry" aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
                 <span class="dot" style={{ background: STATUS_COLOR[seg.status] }} />
                 <span><b>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</b><span class="muted small">{clock(seg.start)} → {clock(seg.end)}</span></span>
                 <span class="entry-len">{dur(seg.end - seg.start)}</span>
