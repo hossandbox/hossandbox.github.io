@@ -624,6 +624,23 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   3. **Independently falsified: 6 mutations** (`reviews/falsify-breakword.py`) — the author's five (label
      emptied, old wording, padding rule removed, class removed, gap removed) plus the meter wording.
      **6/6**, each with its own assertion; tree restored. Engine untouched (99/99); contrast 31/31.
-  4. **Still no cover note** — only the patch arrived, and the Taildrop queue was again blocked on the
-     re-sent recheck patch (byte-identical to the applied one). Base established from the patch's own
-     pre-image blobs: **3/3 match `21074cb` exactly**, 3/3 final blobs match the author's.
+  4. **The cover note arrived late** (`CLAUDIA-apply-break-wording-dock.pdf`) — after the patch had been
+     applied *and* deployed, together with a byte-identical re-send of the patch itself (`sha256sum`
+     equal), so nothing in the code changed. The note names the base as `21074cb`, which the patch's own
+     pre-image blobs had already established independently: **3/3 match `21074cb` exactly**, 3/3 final
+     blobs match the author's.
+  5. **Patch SHA-256, and the comparison the note asks for.** The note states the hash in two places and
+     says to compare **all 64 characters**. Full value:
+     `17eeeabd7e5b43f9c9c70c713f4deaa2aa3e302c6710ffb34515089683e40e47` — **exact 64/64 match** to the
+     file that was applied and shipped. Its two renderings disagree, which is the trap: the header on
+     page 1 is a single visual line of only **62** characters (the true hash minus its last two, `47`);
+     page 2 gives it in two tokens that join to the full 64 and match exactly. Same class as the redesign
+     note — **join every rendering and count the characters before comparing; a prefix match is not a
+     match.** Verified with a layout-aware extraction (`pymupdf` word boxes), not by eye.
+  6. **Its phone checks.** (1) On Now, scroll to the very bottom then back up: measured on the deployed
+     site at three scroll positions, the gap above the tab bar is **12 / 12 / 12.5px** (before: 23px at
+     the end, 0px anywhere else); `<main>` carries `has-dock` with padding-bottom `61px`, exactly the
+     dock's sticky `bottom` `61px`. (2) Tap **Why?** — verified live: the break row renders
+     `<small>latest start</small>` above its time, with the new wording. (3) An **iPhone** overscroll
+     (rubber-band bounce) at the top of Now — the author could not emulate it and neither can this box;
+     **still needs Lorico's phone.** If the dock nudges toward the tab bar there, it is a separate fix.
