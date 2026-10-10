@@ -569,3 +569,37 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      day default, opens on Now, panels inert, modal dialog, started-earlier offsets, sticky-header
      opacity, PC still offered). Both harnesses assert the tree is in the **intended** state before and
      after, and refuse to run otherwise.
+- **The re-check fixes landed (2026-10-10, 12 commits, base `61fa3c7`)** — answers Daniel Tam's re-check
+  findings N1–N6, M8, M9 and M11, plus two "unconfirmed (code reading)" items he confirmed in the code.
+  Verified before applying: safety scan clean; the base **matched `61fa3c7` exactly** (every file carrying
+  a base pre-image); **7/7 final blobs match** the author's; engine **99/99** (was 98); contrast 31/31;
+  smoke green; and the series **deletes zero assertions**.
+  1. **The one rule change: counting uses under §395.1(o)(3).** A 16-hour claim the rule *refused* no
+     longer counts as a use. Quoted from eCFR: *"The driver has not taken this exemption within the
+     previous 6 consecutive days, except when the driver has begun a new 7- or 8-consecutive day period
+     with the beginning of any off-duty period of 34 or more consecutive hours as allowed by
+     §395.3(c)."* A refused claim never extended the window, so the exemption was never **taken** —
+     counting it blocked the next legitimate claim. The old bug always erred the safe way (14h shown where
+     16h was allowed), so **no driver was ever told he had time he did not**. Claims are now decided in
+     time order, each against the eligible uses before it, so the exemption still cannot be used twice in
+     six days. This is the one change in the series that alters displayed hours.
+  2. **The other eleven are UI and plumbing**, each with its own finding: the Log's undo no longer
+     restores a snapshot over changes made after it (a status tap retires it; adds and start-over are
+     undo-able too); alerts are heard after reopening mid-drive (sound unlocks on every tap, and an alert
+     that came due before the first tap waits and plays once); the first-run zone question names and keeps
+     the **saved** zone instead of replacing it with the phone's; the Log's day date is read in the
+     **terminal** zone; the zone field saves only listed city zones (a bare "EST" never follows daylight
+     saving — an hour off all summer, silently — and half-typed offsets were saved too); what-if rows can
+     be edited again (the "only up to now" rule belongs to logged time); the wake lock re-takes itself
+     after a drop; a simulated clock leaves no alert memory; Android Back closes a panel and steps back
+     before leaving (`backnav.ts`, DOM-free, tested against a fake history); a backup carries the Split
+     Lab plan and the load question; and the Log grid's hour marks stay on real hours on 23- and 25-hour
+     days — the one day a driver checks his grid against his ELD most carefully.
+  3. **Independently falsified: 12 mutations, one per commit** (`reviews/falsify-recheck.py`), each
+     failing with its own assertion. Two of my first attempts **passed** because I mutated the component
+     wiring while the tests exercise `listedZone()` and `createBackNav()` directly. Re-targeted at the
+     layer under test, both falsified. Same lesson as `6c1ba18`: mutate the layer the assertion reads.
+  4. **The cover note never arrived** — only the patch did (the Taildrop queue was also blocked on a
+     re-sent copy of the redesign patch, which is byte-identical to the one already applied). The base was
+     established from the patch's own pre-image blobs instead, so every claim above was verified from the
+     artefact rather than the note. If the note lists phone checks, they are still to do.
