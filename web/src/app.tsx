@@ -601,11 +601,12 @@ function StatusDock({ s }: { s: State }) {
   );
 }
 
-function NowTab({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null }) {
+function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onExitPeek: () => void }) {
   const warn = ev.shift.notes.filter((n) => n.startsWith('⚠'));
   const active = [ev.shift.exceptionKeys.adverse !== null ? 'Adverse conditions' : '', ev.shift.exceptionKeys.sixteen !== null ? '16-hour day' : ''].filter(Boolean);
   return (
     <>
+      {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
       <Meters ev={ev} />
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
@@ -638,6 +639,16 @@ let peekSince: number | null = null;
 export function setDrivingPeek(since: number | null) { peekSince = since; }
 export function showsDrivingView(s: State): boolean {
   return s.tab === 'now' && s.drivingView && s.current?.status === 'D' && peekSince !== s.current.since;
+}
+
+/**
+ * Driving, big view on, but the driver has tapped Details. The driving view comes back on its own only
+ * when the status next changes — so while the peek is up, Now must offer the way back explicitly.
+ * Without this the driver taps Details once and loses the glance screen for the rest of the drive
+ * (Lorico, 2026-10-10, on the live preview).
+ */
+export function drivingPeeked(s: State): boolean {
+  return s.tab === 'now' && s.drivingView && s.current?.status === 'D' && peekSince === s.current.since;
 }
 
 /** How much of the binding limit is left, 0–1, for the driving view's bar. */
@@ -1653,7 +1664,7 @@ export function App() {
         )}
         <Notices ev={ev} now={now} s={s} />
         <TabBoundary key={s.tab} tab={s.tab}>
-          {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} />}
+          {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />}
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
           {s.tab === 'plan' && <PlanTab />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}

@@ -173,7 +173,13 @@ button.rowbtn { width: 100%; min-height: 60px; display: flex; align-items: cente
 
 /* The status buttons stay at the bottom of Now, within thumb reach, whatever the page scroll. */
 .dock { position: sticky; bottom: calc(61px + env(safe-area-inset-bottom)); z-index: 4; background: var(--bg); margin: 0 -12px; padding: 8px 12px 0; border-top: 1px solid var(--line); }
-button.dock-more { width: 100%; justify-content: center; min-height: 44px; color: var(--muted); font-weight: 600; font-size: 14px; }
+/* Must look tappable: this element also carries `link`, which zeroes the border and background, so this
+   rule has to re-state them explicitly (same specificity, so only the properties it sets win). A driver
+   could not tell it was a button (Lorico, 2026-10-10, on the live preview).
+   Height stays 44px (border-box, so the border is inside) — making it taller only crowded the dock.
+   margin-top clears the active status button's ring: outline-offset 2px + 3px outline reaches 5px past
+   its box, and the dock has no bottom padding, so a smaller gap draws that ring across this border. */
+button.dock-more { width: 100%; justify-content: center; min-height: 44px; color: var(--text); font-weight: 700; font-size: 15px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; margin-top: 10px; }
 
 .plan-item { width: 100%; min-height: 84px; display: grid; grid-template-columns: 52px 1fr 24px; align-items: center; gap: 12px; text-align: left; background: var(--panel); border-radius: 18px; padding: 12px 14px; }
 .plan-icon { width: 52px; height: 52px; border-radius: 14px; background: var(--panel2); display: flex; align-items: center; justify-content: center; }

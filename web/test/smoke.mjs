@@ -1239,7 +1239,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if ((h.match(/class="entry" aria-label="Edit /g) || []).length !== 4) throw new Error('today must list its four entries as tap-to-edit rows (yesterday’s drive excluded)');
   if (/class="x"|>Edit</.test(h)) throw new Error('the small Edit and × buttons must be gone');
   if (!/aria-label="Previous day"(?![^>]*disabled)/.test(h) || !/aria-label="Next day" disabled/.test(h)) throw new Error('from today: back allowed (older entries exist), forward not');
-  if (!/since [^<]*10:30 · now — change it on Now/.test(h)) throw new Error('the live status must show on today, pointing to Now');
+  // Compute the expected clock text with clock() itself. The app renders times in the DEVICE's timezone
+  // (clock() uses Date#getHours), so a hard-coded "10:30" only passes on a machine whose local zone is
+  // America/Chicago — it fails on a UTC box. Everything else in this suite derives its expectations, which
+  // is why this was the only assertion that broke.
+  if (!h.includes(`since ${clock(L(12, 10, 30))} · now — change it on Now`)) throw new Error(`the live status must show on today, pointing to Now (got ${(h.match(/since [^<]*/) || ['?'])[0]})`);
   // 3. edit panel: big steppers, delete inside, all behind an inert screen
   setLaunchNotice(false);
   openSheet({ kind: 'edit', seg: day[2] });
@@ -1335,5 +1339,47 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/font:[^;]*"Atkinson Hyperlegible Next",[^;]*sans-serif/.test(css)) throw new Error('the body must use the font, with a system fallback');
   if (/fonts\.googleapis|fonts\.gstatic/.test(css + readFileSync('public/index.html', 'utf8'))) throw new Error('no outside font service: nothing leaves the phone');
   console.log('redesign 5 (typeface): OK');
+}
+// --- report fixes: Lorico, 2026-10-10, looking at the redesign live on the preview ---
+{
+  // 1. "PC, yard move, or started earlier…" must LOOK tappable. It also carries `link`, which zeroes the
+  // border and background; same specificity means only the properties dock-more sets survive, so that rule
+  // has to re-state them or the opener renders as bare text a driver will never think to tap.
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const rule = (css.match(/button\.dock-more \{[^}]*\}/) || [''])[0];
+  if (!/border:\s*1px solid/.test(rule)) throw new Error(`the "PC, yard move, or started earlier" opener must draw a border — without one a driver cannot tell it is a button (rule: ${rule || 'MISSING'})`);
+  if (!/background:\s*var\(--panel2\)/.test(rule)) throw new Error('the status-panel opener must draw a background — it reads as plain text without one');
+  // The active status button reaches 5px past its own box (outline-offset 2px + 3px outline) and the dock
+  // has no bottom padding, so the opener needs at least that gap or the ring is drawn across its border.
+  const gap = Number((rule.match(/margin-top:\s*(\d+)px/) || [0, 0])[1]);
+  if (!(gap >= 5)) throw new Error(`the opener must sit clear of the active status button's ring — 2px outline-offset + 3px outline reaches 5px past its box, and a smaller gap draws the ring over this border (gap: ${gap}px)`);
+  if (!/min-height:\s*44px/.test(rule)) throw new Error('the opener must keep its original 44px height — growing it crowds the dock it sits in');
+
+  // 2. Details must not be a one-way door: after the peek, Now has to offer the way back, and it must work.
+  // This harness renders to a string (preact-render-to-string), so it cannot dispatch a click. Both halves
+  // are therefore checked: the button's WIRING at source level, and the view-switching MECHANISM behaviourally.
+  // A behavioural-only version was vacuum: a way-back button wired to a no-op passed it.
+  const appSrc = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  const wiring = (appSrc.match(/onExitPeek=\{[^\n]*\}/) || [''])[0];
+  if (!/setDrivingPeek\(null\)/.test(wiring)) throw new Error(`the way-back button must actually clear the peek — a button wired to nothing is not a way back (wiring: ${wiring || 'MISSING'})`);
+
+  const { setDrivingPeek, setLaunchNotice } = await import('../src/app.tsx');
+  const T = Math.floor(Date.UTC(2026, 9, 12, 15, 45) / 60000);
+  const DRIVE_VIEW = /class="drive (calm|warn|bad)"/; // unique to DrivingView (HeroDrive uses .hero)
+  setLaunchNotice(false);
+  setState({ tab: 'now', drivingView: true, nowOverride: T, historyAcknowledged: true, tentative: [],
+    segments: [{ status: 'OFF', start: T - 720, end: T - 120, createdAt: 1 }], current: { status: 'D', since: T - 120, createdAt: 2 } });
+  setDrivingPeek(null);
+  if (!DRIVE_VIEW.test(render(h(App, {})))) throw new Error('driving, big view on: the driving view must show');
+  setDrivingPeek(T - 120); // the driver tapped Details
+  const peeked = render(h(App, {}));
+  if (DRIVE_VIEW.test(peeked)) throw new Error('after Details the peek must show the normal Now screen');
+  if (!/Back to the driving view/.test(peeked)) throw new Error('after tapping Details, Now must offer a way back to the driving view — otherwise the glance screen is lost for the rest of the drive');
+  setDrivingPeek(null); // the driver tapped the way back
+  if (!DRIVE_VIEW.test(render(h(App, {})))) throw new Error('the way back must actually restore the driving view');
+
+  setDrivingPeek(null); setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('report fixes (opener affordance, way back from Details): OK');
 }
 console.log('OK');
