@@ -1414,4 +1414,42 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('re-check N2 (undo never eats later changes): OK');
 }
+// --- re-check N3: alerts must not go silent when the app is reopened while driving
+{
+  const { sound, unlockAudio, audioReady, clearPendingSound, audioForTest } = await import('../src/alerts.ts');
+  const { soundNote, setLaunchNotice, setDrivingPeek } = await import('../src/app.tsx');
+  let tones = 0;
+  class FakeAC { constructor() { this.state = 'suspended'; this.currentTime = 0; this.destination = {}; }
+    resume() { this.state = 'running'; return Promise.resolve(); }
+    createOscillator() { tones++; return { type: '', frequency: {}, connect: (g) => g, start() {}, stop() {} }; }
+    createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: (d) => d }; } }
+  audioForTest.reset();
+  // before any tap: nothing can play, so the alert waits instead of being lost
+  sound(false); sound(true);
+  if (tones !== 0 || audioForTest.pending() !== true) throw new Error('an alert before the first tap must wait, the urgent one winning');
+  globalThis.window = { AudioContext: FakeAC };
+  unlockAudio();
+  if (tones !== 3 || audioForTest.pending() !== null) throw new Error(`the waiting alert must play once on the first tap (tones ${tones})`);
+  if (!audioReady()) throw new Error('after a tap, sound is ready');
+  unlockAudio();
+  if (tones !== 3) throw new Error('a second tap must not replay the alert');
+  sound(false);
+  if (tones !== 5) throw new Error('once unlocked, an alert plays straight away');
+  // a waiting alert is dropped when the driver stops driving before tapping
+  audioForTest.reset(); sound(true); clearPendingSound(); unlockAudio();
+  if (tones !== 5) throw new Error('a stale alert must not play after the driver stopped driving');
+  delete globalThis.window; audioForTest.reset();
+  // the screen must not claim sound is on before it is
+  if (soundNote(true, false) === soundNote(true, true) || !/tap the screen/.test(soundNote(true, false))) throw new Error('before a tap the driving view must say sound is off');
+  if (soundNote(false, true) !== 'alerts off') throw new Error('alerts off stays alerts off');
+  setLaunchNotice(false); setDrivingPeek(null);
+  const T = Math.floor(Date.UTC(2026, 9, 10, 16, 0) / 60000);
+  setState({ nowOverride: T, tab: 'now', drivingView: true, alertsOn: true, historyAcknowledged: true, tentative: [],
+    segments: [{ status: 'OFF', start: T - 1400, end: T - 670 }], current: { status: 'D', since: T - 670 } });
+  const h = out('driving view before any tap');
+  if (!/sound is off until you tap the screen once/.test(h) || /sound and vibration on/.test(h)) throw new Error('the driving view must not say "sound and vibration on" before sound can play');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('re-check N3 (alerts after reopening): OK');
+}
 console.log('OK');

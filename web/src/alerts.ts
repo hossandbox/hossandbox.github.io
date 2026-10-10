@@ -84,10 +84,13 @@ export function wantsWakeLock(keepAwake: boolean, status: string | undefined): b
 // Side effects. All guarded: they do nothing in tests or in a browser that lacks the feature.
 
 let ctx: AudioContext | null = null;
+/** An alert that came due while sound was still locked: played on the next tap (re-check N3). */
+let pending: boolean | null = null;
 
 /**
- * Browsers only allow sound after a tap. Call this from a tap (a status button, "Test alert") so a
- * later alert can play. Safe to call repeatedly.
+ * Browsers only allow sound after a tap. Call this from any tap (the launch notice, a status button,
+ * "Test alert", or any touch on the screen) so a later alert can play. Safe to call repeatedly. An
+ * alert that came due while sound was locked plays now, once.
  */
 export function unlockAudio(): void {
   try {
@@ -96,8 +99,25 @@ export function unlockAudio(): void {
       ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!ctx && AC) ctx = new AC();
     void ctx?.resume();
+    if (ctx && pending !== null) { const u = pending; pending = null; chime(u); buzz(u); }
   } catch { /* no sound on this browser */ }
 }
+
+/** True once the browser lets this page make sound (after a tap). */
+export function audioReady(): boolean { return ctx !== null && ctx.state === 'running'; }
+
+/**
+ * Sound and vibrate for an alert. Before the first tap the browser blocks both, so the alert is kept
+ * and played on the next tap rather than lost; the more urgent of two waiting alerts wins.
+ */
+export function sound(urgent: boolean): void {
+  if (!ctx) { pending = pending === null ? urgent : pending || urgent; return; }
+  chime(urgent); buzz(urgent);
+}
+/** Drop a waiting alert (the driver stopped driving before any tap): it would be stale. */
+export function clearPendingSound(): void { pending = null; }
+/** Test hooks: the module's audio state. */
+export const audioForTest = { reset() { ctx = null; pending = null; }, pending: () => pending };
 
 /** Two short tones, or three higher ones when urgent. */
 export function chime(urgent: boolean): void {

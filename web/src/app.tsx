@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
-import { nextAlert, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
+import { nextAlert, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -423,10 +423,11 @@ function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
   useEffect(() => {
     const r = nextAlert(mem.current, driving, driveNow, now);
     mem.current = r.mem;
+    if (!driving) clearPendingSound();
     // A simulated clock is for planning: show the banner, but never sound off.
     if (r.fire === null || !ev || !s.alertsOn || s.nowOverride !== null) return;
     const m = alertMessage(r.fire, alertReason(ev));
-    chime(r.fire <= 15); buzz(r.fire <= 15); void notify(m.title, m.body);
+    sound(r.fire <= 15); void notify(m.title, m.body);
   }, [now, driveNow, driving, s.alertsOn, s.nowOverride]);
 }
 
@@ -637,6 +638,15 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
  */
 let peekSince: number | null = null;
 export function setDrivingPeek(since: number | null) { peekSince = since; }
+/**
+ * What the driving view says about sound. Browsers block sound until the page is tapped, so before
+ * that it must not claim sound is on (re-check N3: it did, and the alerts were silent).
+ */
+export function soundNote(alertsOn: boolean, ready: boolean): string {
+  if (!alertsOn) return 'alerts off';
+  return ready ? 'sound and vibration on' : 'sound is off until you tap the screen once';
+}
+
 export function showsDrivingView(s: State): boolean {
   return s.tab === 'now' && s.drivingView && s.current?.status === 'D' && peekSince !== s.current.since;
 }
@@ -683,7 +693,7 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
         {level === 'bad' && again?.off != null && <div class="drive-why">Off duty from now: drive again at <b>{clock(again.off)}</b></div>}
       </div>
       <div class="drive-foot">
-        <div class="drive-note">{s.keepAwake ? 'Screen stays on' : 'Screen may lock'} · {s.alertsOn ? 'sound and vibration on' : 'alerts off'}</div>
+        <div class="drive-note">{s.keepAwake ? 'Screen stays on' : 'Screen may lock'} · {soundNote(s.alertsOn, audioReady())}</div>
         <button class="drive-stop" onClick={() => openSheet({ kind: 'status' })}>I've stopped</button>
       </div>
     </main>
@@ -1641,6 +1651,14 @@ export function App() {
   const ev = result.ev;
   useDrivingAlerts(s, now, ev);
   useWakeLock(wantsWakeLock(s.keepAwake, s.current?.status));
+  // Any touch is permission to make sound: unlock it on every tap (cheap, and it also wakes audio that
+  // a phone call or the system suspended), so a driver who reopens the app mid-drive hears the next
+  // alert, and any alert that came due before the tap plays then (re-check N3).
+  useEffect(() => {
+    const f = () => { const was = audioReady(); unlockAudio(); if (!was) setTimeout(() => redraw((x) => x + 1), 50); };
+    document.addEventListener('pointerdown', f, true);
+    return () => document.removeEventListener('pointerdown', f, true);
+  }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
   if (!ev) {
@@ -1669,7 +1687,7 @@ export function App() {
   if (showsDrivingView(s)) {
     return (
       <div class="app">
-        {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+        {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
         <div inert={blocked}>
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
@@ -1679,7 +1697,7 @@ export function App() {
   }
   return (
     <div class="app">
-      {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+      {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked}>
         {s.themeNotice && (
