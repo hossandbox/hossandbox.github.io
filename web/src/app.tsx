@@ -24,7 +24,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -100,17 +100,24 @@ function TimeZoneField({ value, onChange }: { value: string; onChange: (v: strin
   const [text, setText] = useState(value);
   const [bad, setBad] = useState(false);
   useEffect(() => { setText(value); setBad(false); }, [value]);
+  // Only a listed city name is saved. That also stops a half-typed entry being saved on the way to the
+  // real one, and keeps out short names like "EST" that never switch to daylight time.
   const typed = (raw: string) => {
     setText(raw);
-    if (isValidTimeZone(raw.trim())) { setBad(false); onChange(raw.trim()); } else setBad(true);
+    const z = listedZone(raw);
+    if (z) { setBad(false); onChange(z); } else setBad(true);
   };
+  const shortName = (t: string) => isValidTimeZone(t.trim()) && !listedZone(t);
   return (
     <>
       <label>Home terminal time zone
         <input list="tz-list" aria-label="Home terminal time zone" value={text} onInput={(e) => typed((e.target as HTMLInputElement).value)} />
         <datalist id="tz-list">{TIME_ZONES.map((z) => <option key={z} value={z} />)}</datalist>
       </label>
-      {bad && <div class="warnbox small">"{text}" isn't a time-zone name, so the setting is unchanged. Start typing a city and pick from the list — for example <b>America/Chicago</b>.</div>}
+      {bad && (shortName(text)
+        ? <div class="warnbox small">"{text.trim()}" is an old short name, so the setting is unchanged: some of these never switch to daylight saving time. Pick your terminal's city from the list — for example <b>America/New_York</b>.</div>
+        : <div class="warnbox small">"{text}" isn't a time-zone name, so the setting is unchanged. Start typing a city and pick from the list — for example <b>America/Chicago</b>.</div>)}
+      {!bad && shortName(value) && <div class="warnbox small">Your zone is saved as the short name "<b>{value}</b>". Some short names never switch to daylight saving time, which puts every clock an hour off for half the year. Pick your terminal's city from the list.</div>}
     </>
   );
 }

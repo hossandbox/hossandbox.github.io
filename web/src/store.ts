@@ -292,6 +292,23 @@ export const TIME_ZONES: string[] = (() => {
  * An invalid zone makes `Intl.DateTimeFormat` throw inside the engine, which would blank every tab.
  * Nothing may reach `config.timeZone` unless it passes this.
  */
+/**
+ * A zone the driver may pick: one of the listed Area/City names (any letter case), or UTC. Old short
+ * names are valid to the browser but not accepted here: "EST" and "MST" never switch to daylight saving
+ * time while "CST" and "PST" do, so a driver who typed "EST" for an Eastern terminal would be an hour off
+ * all summer with nothing on screen to say so (re-check). Returns the canonical spelling, or null.
+ */
+export function listedZone(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  if (/^(etc\/)?utc$/i.test(t)) return 'UTC';
+  const listed = TIME_ZONES.find((z) => z.toLowerCase() === t.toLowerCase());
+  if (listed) return listed;
+  // Older browsers list only a dozen zones, so also accept any Area/City name the browser knows (it
+  // follows daylight time where that city does). Never the Etc/ offsets or a bare short name.
+  if (!/^[a-z]+\/[a-z0-9_+\-/]+$/i.test(t) || /^etc\//i.test(t) || !isValidTimeZone(t)) return null;
+  try { return new Intl.DateTimeFormat('en-US', { timeZone: t }).resolvedOptions().timeZone; } catch { return null; }
+}
 export function isValidTimeZone(tz: string): boolean {
   try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
 }

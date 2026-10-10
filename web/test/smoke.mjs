@@ -1489,4 +1489,23 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('re-check N6 (Log date in the terminal zone): OK');
 }
+// --- re-check: the zone field saves only listed city names
+{
+  const { listedZone } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  for (const z of ['EST', 'MST', 'CST', 'Etc/GMT+1', 'America/New', 'America/Chicag', '']) if (listedZone(z) !== null) throw new Error(`"${z}" must not be accepted as a terminal zone`);
+  if (listedZone(' america/chicago ') !== 'America/Chicago') throw new Error('a listed zone in any letter case is accepted, spelled properly');
+  if (listedZone('utc') !== 'UTC') throw new Error('UTC is accepted');
+  if (listedZone('US/Eastern') === null) throw new Error('an Area/City alias the browser knows (it follows daylight time) is accepted, for older browsers with a short list');
+  // a zone saved before this check is kept, but the driver is told
+  setLaunchNotice(false);
+  setState({ tab: 'settings', tzChosen: true, config: { ...getState().config, timeZone: 'EST' } });
+  const h = out('settings/short zone name saved');
+  if (!/Your zone is saved as the short name &quot;<b>EST<\/b>&quot;/.test(h)) throw new Error('a saved short zone name must be flagged');
+  setState({ config: { ...getState().config, timeZone: 'America/Chicago' } });
+  if (/saved as the short name/.test(out('settings/listed zone'))) throw new Error('a listed zone is not flagged');
+  setLaunchNotice(true);
+  setState({ tab: 'now' });
+  console.log('re-check (zone field: listed names only): OK');
+}
 console.log('OK');
