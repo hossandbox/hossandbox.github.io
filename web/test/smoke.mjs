@@ -421,13 +421,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     config: { ...getState().config, cycle: '60/7', timeZone: 'America/Los_Angeles' },
     mph: 40,
     trip: { ...DEFAULT_TRIP, miles: 1234, pre: 45, stopMile: 600, stopMin: 90, until: 'OFF', view: 'restart34' },
+    split: { ...getState().split, drive: 222 },
+    loadCheck: { ...getState().loadCheck, miles: 777, leaveIn: 60, waitOff: true, answered: true },
     bugEmail: 'roundtrip@example.com',
   };
   setState(original);
   const payload = JSON.parse(exportState(getState()));
 
   // import into a DIFFERENT state, as a restore would
-  setState({ segments: [], tentative: [], config: { ...getState().config, cycle: '70/8', timeZone: tz }, mph: 55, trip: { ...DEFAULT_TRIP }, bugEmail: '' });
+  setState({ segments: [], tentative: [], config: { ...getState().config, cycle: '70/8', timeZone: tz }, mph: 55, trip: { ...DEFAULT_TRIP }, bugEmail: '',
+    split: { ...getState().split, drive: 1 }, loadCheck: { ...getState().loadCheck, miles: 1, leaveIn: 0, waitOff: false, answered: false } });
   setState((cur) => applyImportedState(cur, payload));
   const restored = getState();
 
@@ -441,6 +444,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     ['trip stop', restored.trip.stopMile === 600 && restored.trip.stopMin === 90],
     ['trip view', restored.trip.view === 'restart34'],
     ['report email', restored.bugEmail === 'roundtrip@example.com'],
+    // re-check M8: the Split Lab plan and the load question are part of a backup too
+    ['split plan', restored.split.drive === 222],
+    ['load question', restored.loadCheck.miles === 777 && restored.loadCheck.leaveIn === 60 && restored.loadCheck.waitOff === true && restored.loadCheck.answered === true],
   ];
   const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);
   if (failed.length) throw new Error(`export/import round trip lost: ${failed.join(', ')}`);
@@ -451,6 +457,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState((cur) => applyImportedState(cur, payload));
   if (getState().nowOverride !== MY_CLOCK) throw new Error('import must not silently restore a simulated clock');
   if (payload.nowOverride !== original.nowOverride) throw new Error('the payload should have carried a simulated clock for this check to mean anything');
+
+  // a backup from before M8 has no split or load question: what is on screen stays
+  const { split: _s, loadCheck: _l, ...oldPayload } = payload;
+  setState({ split: { ...getState().split, drive: 111 }, loadCheck: { ...getState().loadCheck, miles: 333 } });
+  setState((cur) => applyImportedState(cur, oldPayload));
+  if (getState().split.drive !== 111 || getState().loadCheck.miles !== 333) throw new Error('an older backup without plans must not reset the plans on screen');
 
   setState({ nowOverride: null, segments: [], tentative: [], trip: { ...DEFAULT_TRIP }, config: { ...getState().config, timeZone: tz, cycle: '70/8' }, mph: 55, bugEmail: '' });
   console.log('export/import round trip: OK');

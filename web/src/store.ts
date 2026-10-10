@@ -448,6 +448,8 @@ export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>
  * import dropped, so a backup/restore silently lost it. `nowOverride` is deliberately NOT restored:
  * a simulated clock must never come back on its own and quietly make the app lie about the time.
  */
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+
 export function applyImportedState(cur: State, d: Partial<State>): Partial<State> {
   return {
     segments: d.segments ?? [],
@@ -456,6 +458,10 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
     config: sanitizeConfig(d.config, cur.config),
     mph: d.mph ?? cur.mph,
     trip: { ...DEFAULT_TRIP, ...(d.trip ?? {}) },
+    // The Split Lab plan and the load question came back from a backup too (re-check M8). A backup made
+    // before they were exported has neither, and then what is on screen stays rather than being reset.
+    split: isObj(d.split) ? { ...DEFAULT_SPLIT, ...d.split } : cur.split,
+    loadCheck: isObj(d.loadCheck) ? { ...DEFAULT_LOADCHECK, ...d.loadCheck } : cur.loadCheck,
     bugEmail: typeof d.bugEmail === 'string' ? d.bugEmail : cur.bugEmail,
   };
 }
@@ -584,5 +590,5 @@ export function segLabel(status: DutyStatus, note?: string): string {
 /** Everything a bug report needs. Kept small enough to paste into an email. */
 export function exportState(s: State): string {
   return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, bugEmail: s.bugEmail, nowOverride: s.nowOverride });
+    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, bugEmail: s.bugEmail, nowOverride: s.nowOverride });
 }
