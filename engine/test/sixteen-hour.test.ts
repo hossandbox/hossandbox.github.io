@@ -105,3 +105,14 @@ test('M5: an ineligible claim does not extend the window — driving in hour 15 
   assert.equal(ineligible.length, 1, 'not eligible: the 14-hour window applies');
   assert.equal(ineligible[0].minutes, 60);
 });
+
+test('re-check N4: a refused claim is not a use, so it does not block the next legitimate one', () => {
+  // Mon 28th used; Thu 1st claimed and correctly refused (Monday is 3 days back); Mon 5th claimed.
+  // Monday 28th has left Monday 5th's look-back, and Thursday was never taken, so Monday 5th is eligible.
+  const { segs, lastStart } = week([...monToSun, [2026, 10, 5, 6]]);
+  const mon = L(2026, 9, 28, 6), thu = L(2026, 10, 1, 6), next = L(2026, 10, 5, 6);
+  assert.equal(eligibleAt(segs, thu + 180, [mon, thu]), false, 'Thursday is refused');
+  assert.equal(eligibleAt(segs, lastStart + 180, [mon, thu, next]), true, 'the refused Thursday must not block Monday 5th');
+  // …but an ELIGIBLE use in between still blocks: drop Monday 28th and Thursday becomes a real use
+  assert.equal(eligibleAt(segs, lastStart + 180, [thu, next]), false, 'an eligible Thursday use blocks Monday 5th');
+});

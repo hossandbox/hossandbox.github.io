@@ -81,20 +81,27 @@ export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvalua
    *
    * A use is the START of a shift the exception was claimed for. The stored key can sit inside the rest
    * before that shift (possibly the previous calendar day); dating the use by the key would push it out
-   * of the look-back and make the check permissive again. Every claimed shift counts as taken.
+   * of the look-back and make the check permissive again.
+   *
+   * Only an ELIGIBLE claim is a use. The rule says "has not TAKEN this exemption": a refused claim never
+   * extended the window, so the exemption was not taken, and counting it blocked the next legitimate
+   * claim (re-check N4). Claims are therefore decided in order, each against the uses before it.
    */
   const openFromOf = (span: { start: number }) => rests.find((r) => r.end === span.start && r.isReset)?.start;
-  const sixteenUses = (config.sixteenHourShifts ?? []).length
-    ? spans.filter((sp) => exceptionKeyFor(config.sixteenHourShifts, sp, openFromOf(sp)) !== null).map((sp) => sp.start)
-    : [];
-  const sixteenEligible = (span: { start: number }) => {
-    let from = carrierDayStart(span.start, config);
+  const sixteenUses: number[] = [];
+  const eligibleAgainstUses = (start: number) => {
+    let from = carrierDayStart(start, config);
     for (let i = 0; i < 6; i++) from = carrierDayStart(from - 1, config); // DST-safe: step by carrier days
-    const prior = sixteenUses.filter((u) => u < span.start && u >= from);
+    const prior = sixteenUses.filter((u) => u < start && u >= from);
     if (!prior.length) return true;
     const last = Math.max(...prior);
-    return rests.some((r) => r.isRestart && r.start >= last && r.end <= span.start);
+    return rests.some((r) => r.isRestart && r.start >= last && r.end <= start);
   };
+  if ((config.sixteenHourShifts ?? []).length) {
+    const claimed = spans.filter((sp) => exceptionKeyFor(config.sixteenHourShifts, sp, openFromOf(sp)) !== null).map((sp) => sp.start).sort((a, b) => a - b);
+    for (const start of claimed) if (eligibleAgainstUses(start)) sixteenUses.push(start);
+  }
+  const sixteenEligible = (span: { start: number }) => eligibleAgainstUses(span.start);
   const evalSpan = (span: (typeof spans)[number]) => {
     const inShift = rests.filter((r) => r.start >= span.start && (span.end === null || r.start <= span.end));
     // FMCSA FAQ 22 (2026-07-01): a ≥10h rest that includes ≥7h consecutive SB may EITHER reset the 11/14 OR
