@@ -58,6 +58,46 @@ export function nextAlert(mem: AlertMemory, driving: boolean, driveNow: number, 
   return { mem: { prev: driveNow, lastAt: fire !== null ? now : mem.lastAt }, fire };
 }
 
+/**
+ * One alert check. A simulated clock is for planning: it never sounds, and it leaves nothing behind in
+ * the alert memory. Returning to the real clock is then like opening the app (only "already out of
+ * time" alerts), instead of measuring a jump from a simulated time as a crossing (re-check).
+ */
+export function alertTick(mem: AlertMemory, driving: boolean, driveNow: number, now: number, simulated: boolean): { mem: AlertMemory; fire: number | null } {
+  if (simulated) return { mem: NO_ALERTS, fire: null };
+  return nextAlert(mem, driving, driveNow, now);
+}
+
+/**
+ * Hold a screen wake lock until the returned stop() is called. The browser drops the lock whenever the
+ * page is hidden, and may drop it while on screen too (battery saver, system policy); take it again on
+ * return, and, if it is dropped while on screen, try again after `retryMs` (re-check).
+ */
+export interface WakeEnv {
+  request: () => Promise<{ release: () => Promise<void>; addEventListener?: (t: 'release', f: () => void) => void }>;
+  visible: () => boolean;
+  onVisible: (f: () => void) => () => void;
+  later: (f: () => void, ms: number) => void;
+}
+export function holdWakeLock(env: WakeEnv, retryMs = 5000): () => void {
+  let lock: { release: () => Promise<void> } | null = null, gone = false;
+  const take = async () => {
+    if (gone || lock || !env.visible()) return;
+    try {
+      const l = await env.request();
+      if (gone) { void l.release().catch(() => {}); return; }
+      lock = l;
+      l.addEventListener?.('release', () => {
+        lock = null;
+        if (!gone && env.visible()) env.later(() => { void take(); }, retryMs);
+      });
+    } catch { /* refused (battery saver, not visible): the next return to the screen tries again */ }
+  };
+  const off = env.onVisible(() => { void take(); });
+  void take();
+  return () => { gone = true; off(); const l = lock; lock = null; void l?.release().catch(() => {}); };
+}
+
 export interface Banner { level: 'warn' | 'bad'; title: string; text: string }
 
 /** The banner shown in the status bar while driving with an hour or less left. `left` is preformatted. */

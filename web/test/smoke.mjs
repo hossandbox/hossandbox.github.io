@@ -1528,4 +1528,46 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('re-check N5 (what-if rows can be edited): OK');
 }
+// --- re-check: the screen lock is taken again after a drop; a simulated clock leaves no alert memory
+{
+  const { holdWakeLock, alertTick, nextAlert, NO_ALERTS } = await import('../src/alerts.ts');
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  let visible = true, requests = 0, onVis = null, timers = [];
+  const locks = [];
+  const env = {
+    request: async () => { requests++; const l = { fns: [], released: false, release: async () => { l.released = true; }, addEventListener: (t, f) => l.fns.push(f) }; locks.push(l); return l; },
+    visible: () => visible,
+    onVisible: (f) => { onVis = f; return () => { onVis = null; }; },
+    later: (f, ms) => timers.push([f, ms]),
+  };
+  const stop = holdWakeLock(env, 5000);
+  await tick();
+  if (requests !== 1) throw new Error('the lock is taken at once');
+  // the system drops it while the app is on screen: try again later, not never
+  locks[0].fns.forEach((f) => f());
+  if (timers.length !== 1 || timers[0][1] !== 5000) throw new Error('a lock dropped while on screen must be retried');
+  timers.shift()[0](); await tick();
+  if (requests !== 2) throw new Error('the retry must take the lock again');
+  // hidden: the browser drops it, no retry until the app is back on screen
+  visible = false; locks[1].fns.forEach((f) => f());
+  if (timers.length !== 0) throw new Error('no retry while the app is hidden');
+  visible = true; onVis(); await tick();
+  if (requests !== 3) throw new Error('coming back on screen takes the lock again');
+  onVis(); await tick();
+  if (requests !== 3) throw new Error('a lock already held is not requested twice');
+  stop();
+  if (!locks[2].released || onVis !== null) throw new Error('stop releases the lock and stops listening');
+  locks[2].fns.forEach((f) => f());
+  if (timers.length !== 0) throw new Error('a lock released by stop() is not retried');
+
+  // a simulated clock never sounds and leaves nothing in the alert memory
+  const driving = nextAlert(NO_ALERTS, true, 200, 1000).mem;
+  const sim = alertTick(driving, true, 10, 1001, true);
+  if (sim.fire !== null || sim.mem.prev !== null) throw new Error('a simulated tick must not sound or be remembered');
+  // back on the real clock with 10 min left: like opening the app — no replay of 60/30/15 crossed in the jump
+  const back = alertTick(sim.mem, true, 10, 1002, false);
+  if (back.fire !== null) throw new Error('returning from a simulated clock must not fire marks crossed by the jump');
+  if (alertTick(sim.mem, true, 0, 1002, false).fire !== 0) throw new Error('but out of time still alerts at once');
+  console.log('re-check (screen lock retry, simulated clock): OK');
+}
 console.log('OK');

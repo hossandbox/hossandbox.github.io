@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
-import { nextAlert, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
+import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -428,7 +428,7 @@ function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
   const driving = s.current?.status === 'D' && ev !== null;
   const driveNow = ev?.driveNow ?? Infinity;
   useEffect(() => {
-    const r = nextAlert(mem.current, driving, driveNow, now);
+    const r = alertTick(mem.current, driving, driveNow, now, s.nowOverride !== null);
     mem.current = r.mem;
     if (!driving) clearPendingSound();
     // A simulated clock is for planning: show the banner, but never sound off.
@@ -438,22 +438,21 @@ function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
   }, [now, driveNow, driving, s.alertsOn, s.nowOverride]);
 }
 
-/** Hold a screen wake lock while `active`. The browser drops it whenever the app is hidden, so re-take it on return. */
+/** Hold a screen wake lock while `active` (alerts.ts holdWakeLock: re-taken on return and after a drop). */
 function useWakeLock(active: boolean) {
   useEffect(() => {
     if (!active || !canKeepAwake()) return;
-    let lock: { release: () => Promise<void> } | null = null, gone = false;
-    const take = async () => {
-      if (gone || document.visibilityState !== 'visible') return;
-      try {
-        const l = await (navigator as unknown as { wakeLock: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }).wakeLock.request('screen');
-        if (gone) void l.release().catch(() => {}); else lock = l;
-      } catch { /* refused (battery saver, not visible): nothing to do */ }
-    };
-    const onVis = () => { if (document.visibilityState === 'visible') void take(); };
-    void take();
-    document.addEventListener('visibilitychange', onVis);
-    return () => { gone = true; document.removeEventListener('visibilitychange', onVis); void lock?.release().catch(() => {}); };
+    type Lock = Awaited<ReturnType<WakeEnv['request']>>;
+    return holdWakeLock({
+      request: () => (navigator as unknown as { wakeLock: { request: (t: 'screen') => Promise<Lock> } }).wakeLock.request('screen'),
+      visible: () => document.visibilityState === 'visible',
+      onVisible: (f) => {
+        const h = () => { if (document.visibilityState === 'visible') f(); };
+        document.addEventListener('visibilitychange', h);
+        return () => document.removeEventListener('visibilitychange', h);
+      },
+      later: (f, ms) => { setTimeout(f, ms); },
+    });
   }, [active]);
 }
 
