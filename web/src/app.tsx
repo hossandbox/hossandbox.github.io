@@ -21,7 +21,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, driveAgainAt, pruneHistory, planTripAll, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
+  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
   useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
@@ -773,13 +773,67 @@ function Grid({ segments, from, to }: { segments: Segment[]; from: number; to: n
 
 /* ============================================================ Log tab */
 
+/**
+ * One level of undo for the Log: the state before the last edit or delete. Module state, because the
+ * edit panel lives outside the Log screen (behind a panel, the screen is inert).
+ */
+type Undo = { label: string; segments: Segment[]; tentative: Segment[] };
+let undoNow: Undo | null = null;
+const undoSubs = new Set<() => void>();
+function setUndo(u: Undo | null) { undoNow = u; undoSubs.forEach((f) => f()); }
+function useUndo(): Undo | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); undoSubs.add(f); return () => { undoSubs.delete(f); }; }, []);
+  return undoNow;
+}
+const describe = (seg: Segment) => `${segLabel(seg.status, seg.note)} ${clock(seg.start)} → ${clock(seg.end)}`;
+function snapshot(label: string) { const s = getState(); setUndo({ label, segments: s.segments, tentative: s.tentative }); }
+export function currentUndo(): Undo | null { return undoNow; }
+/** Save an edited entry; returns a reason it was refused, or null. Undo-able from the Log. */
+export function saveEntry(seg: Segment, next: { status: DutyStatus; start: number; end: number }, now: number): string | null {
+  if (next.end <= next.start) return 'End must be after start.';
+  if (next.end > now) return `End is after now (${clock(now)}). Logged time can only run up to now.`;
+  snapshot(`Edited ${describe(seg)}`);
+  setState((cur) => applySegmentEdit(cur, seg, next));
+  return null;
+}
+/** Delete an entry. Undo-able from the Log. */
+export function deleteEntry(seg: Segment) {
+  snapshot(`Deleted ${describe(seg)}`);
+  setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) }));
+}
+/** Add a forgotten entry; returns a reason it was refused, or null. */
+export function addEntry(status: DutyStatus, start: number, end: number, now: number): string | null {
+  if (end <= start) return 'End must be after start.';
+  if (end > now) return `End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`;
+  setState((cur) => ({ segments: [...cur.segments, { status, start, end, createdAt: stamp() }] }));
+  return null;
+}
+
+/** The carrier day `back` days before the one holding `now`: [start, end) in epoch minutes. */
+function carrierDay(now: number, back: number, s: State): { start: number; end: number } {
+  let start = carrierDayStart(now, s.config);
+  for (let i = 0; i < back; i++) start = carrierDayStart(start - 1, s.config);
+  return { start, end: nextCarrierDayStart(start, s.config) };
+}
+
+/**
+ * The Log (redesign 3/5): one carrier day at a time, on the four-line grid drivers know from paper
+ * logs and ELDs, with that day's totals and its entries as full-width rows. A row is one tap to an
+ * edit panel — the small Edit and × buttons (25×28px) are gone, and delete lives inside the panel,
+ * with undo. The resolved timeline and the overlap and violation reports are unchanged.
+ */
 function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  const [status, setStatus] = useState<DutyStatus>('OFF');
-  const [start, setStart] = useState(toInput(now - 60));
-  const [end, setEnd] = useState(toInput(now));
+  const [back, setBack] = useState(0);
+  const undo = useUndo();
+  const day = carrierDay(now, back, s);
+  const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
+  const canBack = day.start > earliest;
+  const dayName = new Date(day.start * 60000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
   /**
    * Overlapping raw entries. The engine resolves them (a later entry wins over the range it
-   * covers, and the earlier one is split), so the clocks above can disagree with the rows below.
+   * covers, and the earlier one is split), so the clocks can disagree with the rows below.
    * Say so, rather than letting a 6h row sit next to a 5h calculation.
    */
   const overlaps: Segment[] = [];
@@ -806,73 +860,45 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const resolved = joinDisplayRows(normalize(allSegments(s, now), { merge: false }));
   const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
   for (const x of resolved) totals[x.status] += x.end - x.start;
-
-  const [editing, setEditing] = useState<{ orig: Segment; status: DutyStatus; start: string; end: string } | null>(null);
-  const [undo, setUndo] = useState<{ label: string; segments: Segment[]; tentative: Segment[] } | null>(null);
-  // Validation is shown inline, not through alert(): the driver sees why, and a test can assert it.
-  const [formError, setFormError] = useState<string | null>(null);
-  const [editError, setEditError] = useState<string | null>(null);
-
-  const add = () => {
-    const a = fromInput(start), b = fromInput(end);
-    if (a === null || b === null) { setFormError('Enter a valid start and end.'); return; }
-    if (b <= a) { setFormError('End must be after start.'); return; }
-    if (b > now) { setFormError(`End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`); return; }
-    setFormError(null);
-    setState((cur) => ({ segments: [...cur.segments, { status, start: a, end: b, createdAt: stamp() }] }));
-  };
-  const desc = (seg: Segment) => `${segLabel(seg.status, seg.note)} ${clock(seg.start)} → ${clock(seg.end)}`;
-  /** One level of undo: the state before the last edit or delete. Replaced by the next action. */
-  const snapshot = (label: string) => setUndo({ label, segments: s.segments, tentative: s.tentative });
-  const del = (seg: Segment) => {
-    snapshot(`Deleted ${desc(seg)}`);
-    setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) }));
-  };
-  const beginEdit = (seg: Segment) => { setEditError(null); setEditing({ orig: seg, status: seg.status, start: toInput(seg.start), end: toInput(seg.end) }); };
-  const saveEdit = () => {
-    if (!editing) return;
-    const a = fromInput(editing.start), b = fromInput(editing.end);
-    if (a === null || b === null) { setEditError('Enter a valid start and end.'); return; }
-    if (b <= a) { setEditError('End must be after start.'); return; }
-    if (b > now) { setEditError(`End is after now (${clock(now)}). Logged time can only run up to now.`); return; }
-    setEditError(null);
-    snapshot(`Edited ${desc(editing.orig)}`);
-    const next = { status: editing.status, start: a, end: b };
-    setState((cur) => applySegmentEdit(cur, editing.orig, next));
-    setEditing(null);
-  };
-  const fresh = () => { if (confirm('Replace the log with a fresh start (10h off ending now)?')) setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true }); };
+  // The shown day's totals, from the same resolved timeline, clipped to the day and to now.
+  const dayTotals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+  for (const x of resolved) if (!x.tentative) dayTotals[x.status] += Math.max(0, Math.min(x.end, day.end, now) - Math.max(x.start, day.start));
+  const dayRows = [...s.segments, ...s.tentative].filter((x) => x.end > day.start && x.start < day.end).sort((a, b) => b.start - a.start);
 
   return (
     <>
-      <Card title="Add a past segment">
-        <Toggle options={[['OFF', 'Off'], ['SB', 'SB'], ['D', 'Drive'], ['ON', 'On']]} value={status} onChange={setStatus} />
-        <div class="row"><label>Start<input type="datetime-local" value={start} onInput={(e) => setStart((e.target as HTMLInputElement).value)} /></label><label>End<input type="datetime-local" value={end} onInput={(e) => setEnd((e.target as HTMLInputElement).value)} /></label></div>
-        {formError && <div class="warnbox small">{formError}</div>}
-        <div class="row"><button class="primary" onClick={add}>Add segment</button><button onClick={fresh}>Fresh start</button></div>
-      </Card>
-      <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
-      {ev.violations.some((v) => v.tentative) && (
-        <Card title="This plan would violate" tone="warn">
-          <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
-          <ViolationList items={ev.violations.filter((v) => v.tentative)} />
-        </Card>
+      <div class="daynav">
+        <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
+        <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00</span></div>
+        <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
+      </div>
+      <section class="card">
+        <Grid segments={allSegments(s, now)} from={day.start} to={day.end} />
+        <div class="daytotals">
+          {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
+        </div>
+      </section>
+      {overlaps.length > 0 && (
+        <div class="warnbox">
+          <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks count the resolved timeline, which can be less than the rows below appear to add up to.
+          <ul class="seglist">{overlaps.map((seg, i) => (
+            <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
+          ))}</ul>
+        </div>
       )}
-      <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Segments (${s.segments.length + s.tentative.length})`}>
-        {overlaps.length > 0 && (
-          <div class="warnbox">
-            <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks above count the resolved timeline, which can be less than the rows below appear to add up to.
-            <ul class="seglist">{overlaps.map((seg, i) => (
-              <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
-            ))}</ul>
-          </div>
-        )}
+      {undo && (
+        <div class="row undo">
+          <span class="muted small">{undo.label}.</span>
+          <button class="mini" onClick={() => { setState({ segments: undo.segments, tentative: undo.tentative }); setUndo(null); }}>Undo</button>
+        </div>
+      )}
+      <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Entries on this day (${dayRows.length})`}>
         <div class="row">
-          <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Edit entries as entered' : 'Show resolved timeline'}</button>
+          <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Back to entries' : 'Show resolved timeline'}</button>
         </div>
         {showResolved ? (
           <>
-            <p class="muted small">Oldest first — this is the timeline the clocks use: overlaps already resolved, and your current status included. Read-only; switch back to edit what you typed.</p>
+            <p class="muted small">Oldest first — this is the timeline the clocks use, across your whole record: overlaps already resolved, and your current status included. Read-only; go back to entries to change anything.</p>
             <ul class="seglist">{resolved.map((seg, i) => (
               <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
             ))}
@@ -883,39 +909,95 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
             <p class="muted small">Set your current status on the Now screen to keep this timeline moving.</p>
           </>
         ) : (
-          <ul class="seglist">{[...s.segments, ...s.tentative].sort((a, b) => b.start - a.start).map((seg, i) => (
-            editing && editing.orig === seg ? (
-              <li key={i} class="editing">
-                <div class="segedit">
-                  <Toggle options={[['OFF', 'Off'], ['SB', 'SB'], ['D', 'Drive'], ['ON', 'On']]} value={editing.status} onChange={(v) => setEditing({ ...editing, status: v as DutyStatus })} />
-                  <div class="row">
-                    <label>Start<input type="datetime-local" value={editing.start} onInput={(e) => setEditing({ ...editing, start: (e.target as HTMLInputElement).value })} /></label>
-                    <label>End<input type="datetime-local" value={editing.end} onInput={(e) => setEditing({ ...editing, end: (e.target as HTMLInputElement).value })} /></label>
-                  </div>
-                  {editError && <div class="warnbox small">{editError}</div>}
-                  <div class="row"><button class="mini primary" onClick={saveEdit}>Save</button><button class="mini" onClick={() => setEditing(null)}>Cancel</button></div>
-                </div>
-              </li>
-            ) : (
-              <li key={i}>
+          <>
+            {s.current && s.current.since < day.end && (back === 0) && (
+              <div class="entry live"><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — change it on Now</span></span></div>
+            )}
+            {dayRows.map((seg, i) => (
+              <button key={i} class="entry" aria-label={`Edit ${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
                 <span class="dot" style={{ background: STATUS_COLOR[seg.status] }} />
-                <span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span>
-                <span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span>
-                <button class="mini" aria-label={`Edit ${desc(seg)}`} onClick={() => beginEdit(seg)}>Edit</button>
-                <button class="x" aria-label={`Delete ${desc(seg)}`} onClick={() => del(seg)}>×</button>
-              </li>
-            )
-          ))}</ul>
-        )}
-        {undo && (
-          <div class="row undo">
-            <span class="muted small">{undo.label}.</span>
-            <button class="mini" onClick={() => { setState({ segments: undo.segments, tentative: undo.tentative }); setUndo(null); }}>Undo</button>
-          </div>
+                <span><b>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</b><span class="muted small">{clock(seg.start)} → {clock(seg.end)}</span></span>
+                <span class="entry-len">{dur(seg.end - seg.start)}</span>
+                <Icon d={I.next} size={18} />
+              </button>
+            ))}
+            {!dayRows.length && !(s.current && back === 0) && <p class="muted">Nothing logged on this day.</p>}
+          </>
         )}
       </Card>
+      <button class="addbtn" onClick={() => openSheet({ kind: 'add' })}><Icon d={I.plus} /> Add something I forgot</button>
+      <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
+      {ev.violations.some((v) => v.tentative) && (
+        <Card title="This plan would violate" tone="warn">
+          <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
+          <ViolationList items={ev.violations.filter((v) => v.tentative)} />
+        </Card>
+      )}
       <BugButton s={s} ev={ev} />
     </>
+  );
+}
+
+/** Minutes ↔ the datetime-local text, with ±5/±15 steppers: no typing needed for the usual fix. */
+function TimeStepper({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div class="tstep">
+      <div class="tstep-label">{label}</div>
+      <div class="tstep-row">
+        {[-15, -5].map((d) => <button key={d} aria-label={`${label} ${-d} minutes earlier`} onClick={() => onChange(value + d)}>{`−${-d}`}</button>)}
+        <output class="tstep-value" aria-live="polite">{clock(value)}</output>
+        {[5, 15].map((d) => <button key={d} aria-label={`${label} ${d} minutes later`} onClick={() => onChange(value + d)}>{`+${d}`}</button>)}
+      </div>
+      <input type="datetime-local" class="tstep-pick" aria-label={`${label}: pick a date and time`} value={toInput(value)} onInput={(e) => { const v = fromInput((e.target as HTMLInputElement).value); if (v !== null) onChange(v); }} />
+    </div>
+  );
+}
+
+const STATUS_PICK: [DutyStatus, string][] = [['OFF', 'Off'], ['SB', 'Sleeper'], ['D', 'Driving'], ['ON', 'On duty']];
+
+function EditSheet({ seg, now }: { seg: Segment; now: number }) {
+  const [st, setSt] = useState<DutyStatus>(seg.status);
+  const [a, setA] = useState(seg.start);
+  const [b, setB] = useState(seg.end);
+  const [err, setErr] = useState<string | null>(null);
+  const save = () => { const e = saveEntry(seg, { status: st, start: a, end: b }, now); setErr(e); if (!e) openSheet(null); };
+  const del = () => { deleteEntry(seg); openSheet(null); };
+  return (
+    <Sheet title={seg.tentative ? 'Edit this what-if' : 'Edit this entry'}>
+      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
+      <TimeStepper label="Started" value={a} onChange={setA} />
+      <TimeStepper label="Ended" value={b} onChange={setB} />
+      <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
+      {err && <div class="warnbox small">{err}</div>}
+      <button class="primary wide" onClick={save}>Save</button>
+      <button class="danger wide" onClick={del}><Icon d={I.trash} size={18} /> Delete this entry</button>
+      <p class="muted small">You can undo a save or a delete from the Log.</p>
+    </Sheet>
+  );
+}
+
+function AddSheet({ now }: { now: number }) {
+  const [st, setSt] = useState<DutyStatus>('OFF');
+  const [a, setA] = useState(now - 60);
+  const [b, setB] = useState(now);
+  const [err, setErr] = useState<string | null>(null);
+  const add = () => { const e = addEntry(st, a, b, now); setErr(e); if (!e) openSheet(null); };
+  const fresh = () => {
+    if (confirm('Replace the log with a fresh start (10h off ending now)?')) {
+      setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true });
+      openSheet(null);
+    }
+  };
+  return (
+    <Sheet title="Add something I forgot">
+      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
+      <TimeStepper label="Started" value={a} onChange={setA} />
+      <TimeStepper label="Ended" value={b} onChange={setB} />
+      <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
+      {err && <div class="warnbox small">{err}</div>}
+      <button class="primary wide" onClick={add}>Add to my log</button>
+      <button class="ghost" onClick={fresh}>Start over: fresh 10-hour rest ending now</button>
+    </Sheet>
   );
 }
 
@@ -1488,6 +1570,8 @@ export function App() {
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
+      {!disclaimer && sheet?.kind === 'edit' && <EditSheet key={`${sheet.seg.start}-${sheet.seg.end}`} seg={sheet.seg} now={now} />}
+      {!disclaimer && sheet?.kind === 'add' && <AddSheet now={now} />}
     </div>
   );
 }

@@ -1205,4 +1205,55 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('redesign 2 (driving view): OK');
 }
+// --- redesign 3: the Log, one day at a time; edit and add in panels
+{
+  const { openSheet, setLaunchNotice, saveEntry, deleteEntry, addEntry, currentUndo } = await import('../src/app.tsx');
+  const { getState: gs } = await import('../src/store.ts');
+  const L = (d, h, m = 0) => Math.floor(Date.UTC(2026, 9, d, h + 5, m) / 60000); // Oct d, CDT
+  const T = L(12, 10, 45);
+  const yday = { status: 'D', start: L(11, 14), end: L(11, 18), createdAt: 1 };
+  const day = [
+    { status: 'OFF', start: L(11, 18), end: L(12, 6), createdAt: 2 }, { status: 'ON', start: L(12, 6), end: L(12, 6, 30), createdAt: 3 },
+    { status: 'D', start: L(12, 6, 30), end: L(12, 10), createdAt: 4 }, { status: 'OFF', start: L(12, 10), end: L(12, 10, 30), createdAt: 5 },
+  ];
+  setState({ tab: 'log', logResolved: false, nowOverride: T, historyAcknowledged: true, tentative: [], segments: [yday, ...day], current: { status: 'ON', since: L(12, 10, 30), createdAt: 6 }, config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 } });
+  let h = out('log/day view');
+  const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const t = txt(h);
+  // 1. today's carrier day: label, grid, totals clipped to the day and to now
+  if (!/Today, Mon, Oct 12/.test(t)) throw new Error(`the Log must open on today (got ${t.slice(0, 160)})`);
+  if (!/class="grid"/.test(h)) throw new Error('the day needs its four-line grid');
+  if (!/Driving 3h 30m On Duty 45m Off Duty 6h 30m Sleeper 0m/.test(t)) throw new Error(`day totals wrong (want D 3h30, ON 45m incl. the live 15m, OFF 6h30 from midnight): ${(t.match(/Driving \S+ \S+ On Duty.{0,60}/) || ['?'])[0]}`);
+  // 2. rows are whole-width buttons; no small Edit and × targets; yesterday's row is not today's
+  if ((h.match(/class="entry" aria-label="Edit /g) || []).length !== 4) throw new Error('today must list its four entries as tap-to-edit rows (yesterday’s drive excluded)');
+  if (/class="x"|>Edit</.test(h)) throw new Error('the small Edit and × buttons must be gone');
+  if (!/aria-label="Previous day"(?![^>]*disabled)/.test(h) || !/aria-label="Next day" disabled/.test(h)) throw new Error('from today: back allowed (older entries exist), forward not');
+  if (!/since [^<]*10:30 · now — change it on Now/.test(h)) throw new Error('the live status must show on today, pointing to Now');
+  // 3. edit panel: big steppers, delete inside, all behind an inert screen
+  setLaunchNotice(false);
+  openSheet({ kind: 'edit', seg: day[2] });
+  h = out('log/edit panel');
+  if (!/Edit this entry/.test(h) || !/aria-label="Started 15 minutes earlier"/.test(h) || !/aria-label="Ended 5 minutes later"/.test(h)) throw new Error('the edit panel needs labelled ±5/±15 steppers');
+  if (!/Delete this entry/.test(h)) throw new Error('delete lives in the edit panel');
+  if (!/<main[^>]*\binert\b/.test(h)) throw new Error('the Log must be inert behind the panel');
+  openSheet({ kind: 'add' });
+  if (!/Add something I forgot/.test(out('log/add panel'))) throw new Error('the add panel must open');
+  openSheet(null);
+  setLaunchNotice(true);
+  // 4. the panel's actions: refuse the impossible, save, delete, undo
+  if (saveEntry(day[2], { status: 'D', start: L(12, 10), end: L(12, 9) }, T) !== 'End must be after start.') throw new Error('an end before the start must be refused');
+  if (!/End is after now/.test(saveEntry(day[2], { status: 'D', start: L(12, 6, 30), end: L(12, 11) }, T) ?? '')) throw new Error('an end after now must be refused');
+  if (saveEntry(day[2], { status: 'D', start: L(12, 6, 30), end: L(12, 9, 45) }, T) !== null) throw new Error('a valid edit must save');
+  if (!gs().segments.some((x) => x.status === 'D' && x.end === L(12, 9, 45))) throw new Error('the edit must change the entry');
+  if (!/^Edited Driving/.test(currentUndo()?.label ?? '')) throw new Error('an edit must be undo-able');
+  const before = gs().segments.length;
+  deleteEntry(gs().segments.find((x) => x.status === 'D' && x.end === L(12, 9, 45)));
+  if (gs().segments.length !== before - 1 || !/^Deleted Driving/.test(currentUndo()?.label ?? '')) throw new Error('delete must remove the entry and offer undo');
+  setState({ segments: currentUndo().segments, tentative: currentUndo().tentative });
+  if (gs().segments.length !== before) throw new Error('undo must put it back');
+  if (addEntry('SB', L(12, 1), L(12, 3), T) !== null || !gs().segments.some((x) => x.status === 'SB' && x.start === L(12, 1))) throw new Error('add must append the entry');
+  if (!/End is after now/.test(addEntry('OFF', T - 10, T + 10, T) ?? '')) throw new Error('add must refuse time that has not happened');
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('redesign 3 (Log day view, edit and add panels): OK');
+}
 console.log('OK');

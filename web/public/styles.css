@@ -219,3 +219,22 @@ main.drive.warn .drive-bar span { background: var(--warn); } main.drive.bad .dri
 :root[data-theme="day"] main.drive.warn .drive-bar span, :root[data-theme="day"] main.drive.bad .drive-bar span { background: var(--chip-ink); }
 :root[data-theme="day"] main.drive.warn button.drive-stop, :root[data-theme="day"] main.drive.bad button.drive-stop { background: var(--chip-ink); color: var(--text); }
 
+/* Log, one day at a time (redesign 3/5). Rows are whole-width buttons: no small Edit and × targets. */
+.daynav { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; }
+.daynav-title { display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 18px; }
+.daytotals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); text-align: center; }
+.daytotals div { display: flex; flex-direction: column; } .daytotals b { font-variant-numeric: tabular-nums; }
+button.entry, .entry { width: 100%; min-height: 60px; display: grid; grid-template-columns: 12px 1fr auto 18px; align-items: center; gap: 10px; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 8px 2px; font-size: 16px; }
+.entry > span:nth-child(2) { display: flex; flex-direction: column; }
+.entry.live { grid-template-columns: 12px 1fr; }
+.entry-len { font-weight: 800; font-variant-numeric: tabular-nums; }
+button.addbtn { width: 100%; min-height: 56px; border: 2px dashed var(--tick); background: transparent; border-radius: 16px; font-size: 17px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.toggle.big button { min-height: 52px; font-size: 15px; font-weight: 700; }
+.tstep-label { font-size: 15px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
+.tstep-row { display: grid; grid-template-columns: 52px 52px 1fr 52px 52px; gap: 6px; align-items: center; }
+.tstep-row button { min-height: 52px; padding: 0; font-size: 16px; font-weight: 800; }
+.tstep-value { min-height: 52px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--line); border-radius: 12px; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+input.tstep-pick { margin-top: 6px; width: 100%; min-height: 44px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 14px; padding: 0 10px; }
+.lenrow { display: flex; justify-content: space-between; background: var(--bg); border-radius: 12px; padding: 12px 14px; font-size: 16px; }
+button.danger.wide { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 0; }
+
