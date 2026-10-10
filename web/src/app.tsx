@@ -579,7 +579,7 @@ function Meters({ ev }: { ev: FullEvaluation }) {
     { key: 'DRIVE_11', label: `${sh.limits.drive / 60}-hr driving`, left: sh.driveRemaining, of: sh.limits.drive },
     { key: 'WINDOW_14', label: `${sh.limits.window / 60}-hr window`, left: sh.windowRemaining, of: sh.limits.window },
     ...(Number.isFinite(sh.breakRemaining)
-      ? [{ key: 'BREAK_30' as const, label: '30-min break', left: sh.breakRemaining, of: 480, value: sh.breakRemaining <= 0 ? 'due now' : `in ${dur(sh.breakRemaining)}` }]
+      ? [{ key: 'BREAK_30' as const, label: '30-min break', left: sh.breakRemaining, of: 480, value: sh.breakRemaining <= 0 ? 'due now' : `due in ${dur(sh.breakRemaining)}` }]
       : []),
     { key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr week`, left: ev.cycle.remaining, of: ev.cycle.limit },
   ];
@@ -742,8 +742,11 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   const rows = [
     { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining,
       text: `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
-    ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining,
-      text: `After 8 hours of driving you need 30 minutes in a row without driving. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
+    // The time on this row is the LATEST the break can start, not a time it must be finished by, and
+    // the break can come any time before it. "After 8 hours of driving you need 30 minutes" next to a
+    // bare clock time left a driver asking which (Lorico, 2026-10-10).
+    ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining, timeLabel: 'latest start',
+      text: `Stop for 30 minutes in a row before your driving adds up to 8 hours. Take it any time before then: off duty, sleeper, or on duty without driving (fueling, an inspection) all count. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
     { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining,
       text: `No driving once ${sh.limits.window / 60} hours have passed since your shift started — breaks don't stop it${split ? ', except a qualifying sleeper split' : ''}.` },
     { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour week`, left: ev.cycle.remaining,
@@ -755,7 +758,7 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
       <ul class="why">{rows.map((r) => (
         <li key={r.key} class={ev.binding === r.key ? 'on' : ''}>
-          <div class="why-head"><b>{r.name}</b><span class="why-time">{when(r.left)}</span></div>
+          <div class="why-head"><b>{r.name}</b><span class="why-time">{'timeLabel' in r && r.left > 0 && r.left <= 1440 && <small>{r.timeLabel}</small>}{when(r.left)}</span></div>
           <div class="small">{r.text}</div>
           {ev.binding === r.key && <div class="why-tag">Earliest — this sets your stop time</div>}
         </li>
@@ -1743,7 +1746,7 @@ export function App() {
     <div class="app">
       {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
-      <main inert={blocked}>
+      <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>
         {s.themeNotice && (
           <div class="card warn">
             <div class="row">

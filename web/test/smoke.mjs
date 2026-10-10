@@ -1106,7 +1106,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/You can drive 7h 30m Stop by /.test(t)) throw new Error(`Now must lead with driving time and stop time (got ${t.slice(0, 200)})`);
   if (!t.includes(`Stop by ${clock(L(18, 15))}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
   if (!/limited by 11-hour driving limit/.test(t)) throw new Error('the hero must name the limit in full');
-  for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break in 8h 00m/, /70-hr week 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
+  for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break due in 8h 00m/, /70-hr week 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
   if (!/class="meter on"[^>]*><span class="meter-label">11-hr driving/.test(h)) throw new Error('the limit that sets the stop time must be marked');
   if ((h.match(/class="dock"/g) || []).length !== 1 || !/aria-pressed="true"[^>]*>[\s\S]{0,400}On Duty/.test(h)) throw new Error('Now must end with the status buttons, the current one pressed');
   if (/class="stat-value"/.test(header(h))) throw new Error('the header must no longer carry the clock tiles');
@@ -1128,7 +1128,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   h = out('now/why panel');
   t = txt(h);
   if (!t.includes(`Why stop by ${clock(L(18, 15))}?`)) throw new Error('the Why panel must restate the stop time it explains');
-  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', clock(L(18, 45))], ['14-hour window', clock(L(20))], ['70-hour week', 'Not today']]) {
+  // the break's time is labelled as the latest start (driver question, 2026-10-10)
+  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', `latest start ${clock(L(18, 45))}`], ['14-hour window', clock(L(20))], ['70-hour week', 'Not today']]) {
     if (!t.includes(`${rule} ${at}`)) throw new Error(`Why panel: ${rule} should end at ${at}`);
   }
   if ((h.match(/Earliest — this sets your stop time/g) || []).length !== 1) throw new Error('exactly one rule is the earliest');
@@ -1665,5 +1666,32 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     if (majors.some((h) => h % 6 !== 0) || !majors.includes(6) || !majors.includes(12) || !majors.includes(18)) throw new Error(`${label}: heavy marks on 06/12/18 local (saw ${majors})`);
   }
   console.log('re-check (grid hours on clock-change days): OK');
+}
+// --- driver question (2026-10-10): is the break time a start or a finish? And the dock must rest in one place
+{
+  const { openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const { readFileSync } = await import('node:fs');
+  const T = Math.floor(Date.UTC(2026, 9, 10, 19, 42) / 60000);
+  setLaunchNotice(false);
+  setState({ nowOverride: T, tab: 'now', drivingView: false, historyAcknowledged: true, tentative: [],
+    segments: [{ status: 'OFF', start: T - 900, end: T - 300 }, { status: 'D', start: T - 300, end: T - 100 }, { status: 'OFF', start: T - 100, end: T - 5 }],
+    current: { status: 'D', since: T - 5 } });
+  openSheet({ kind: 'why' });
+  let h = out('why/break row');
+  const row = (h.match(/<li[^>]*>(?:(?!<\/li>)[\s\S])*30-minute break(?:(?!<\/li>)[\s\S])*<\/li>/) || [''])[0];
+  if (!/<small>latest start<\/small>/.test(row)) throw new Error('the break time must say it is the latest START, not a finish');
+  if (!/before your driving adds up to 8 hours/.test(row) || !/any time before then/.test(row)) throw new Error('the break text must say it can come any time before 8 hours of driving');
+  if (!/on duty without driving/.test(row)) throw new Error('the break text must say on-duty time that is not driving counts');
+  openSheet(null);
+  h = out('now/meters');
+  if (!/30-min break<\/span>[\s\S]{0,400}?due in 7h 55m/.test(h)) throw new Error('the meter says the break is DUE in a time, not that it happens then');
+  // the dock rests where it sticks: Now's <main> bottom padding equals the dock's sticky offset
+  if (!/<main[^>]*class="has-dock"/.test(h)) throw new Error('Now must mark its main as holding the dock');
+  const css = readFileSync('public/styles.css', 'utf8');
+  const stick = (css.match(/\.dock \{[^}]*bottom: ([^;]+);/) || [])[1], pad = (css.match(/main\.has-dock \{ padding-bottom: ([^;]+);/) || [])[1];
+  if (!stick || stick !== pad) throw new Error(`the dock's sticky offset (${stick}) and Now's bottom padding (${pad}) must match, or the dock jumps at the end of the page`);
+  if (!/\.dock \{[^}]*padding: 8px 12px 12px/.test(css)) throw new Error('the dock keeps its own gap above the tab bar');
+  setLaunchNotice(true); setState({ nowOverride: null, drivingView: true, historyAcknowledged: false, segments: [], current: null });
+  console.log('driver question (break wording, dock rests in one place): OK');
 }
 console.log('OK');
