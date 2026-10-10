@@ -1318,4 +1318,22 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null, loadCheck: { ...DL } });
   console.log('redesign 4 (load question as steps): OK');
 }
+// --- redesign 5: the typeface is self-hosted, licensed, and precached for offline use
+{
+  const { readFileSync, existsSync, statSync } = await import('node:fs');
+  const css = readFileSync('public/styles.css', 'utf8'), sw = readFileSync('public/sw.js', 'utf8');
+  const faces = css.match(/@font-face\s*\{[^}]*\}/g) || [];
+  if (faces.length < 4) throw new Error(`expected 4 @font-face rules, saw ${faces.length}`);
+  for (const f of faces) {
+    const src = (f.match(/url\(['"]?([^'")]+)/) || [])[1];
+    if (!src || /^(https?:)?\/\//.test(src)) throw new Error(`a font must be served from the app itself, not ${src}`);
+    if (!existsSync('public/' + src) || statSync('public/' + src).size < 5000) throw new Error(`font file missing or empty: ${src}`);
+    if (!sw.includes(`'./${src}'`)) throw new Error(`sw.js does not precache ${src}, so it would be missing offline`);
+    if (!/font-display:\s*swap/.test(f)) throw new Error('fonts must not hide text while they load');
+  }
+  if (!/Open Font License/.test(readFileSync('public/fonts/OFL.txt', 'utf8'))) throw new Error('the font licence must ship with the font');
+  if (!/font:[^;]*"Atkinson Hyperlegible Next",[^;]*sans-serif/.test(css)) throw new Error('the body must use the font, with a system fallback');
+  if (/fonts\.googleapis|fonts\.gstatic/.test(css + readFileSync('public/index.html', 'utf8'))) throw new Error('no outside font service: nothing leaves the phone');
+  console.log('redesign 5 (typeface): OK');
+}
 console.log('OK');

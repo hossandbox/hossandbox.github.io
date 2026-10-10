@@ -1,3 +1,10 @@
+/* Atkinson Hyperlegible Next (SIL OFL 1.1, fonts/OFL.txt): made by the Braille Institute for low-vision
+   readers; 0/O, 1/l/I and 5/S are drawn to be told apart at a glance. Self-hosted, so the app still
+   makes no outside requests and the font works offline. Glyphs it lacks (→ ≤ ⚠) fall back to the system font. */
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/atkinson-next-400.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/atkinson-next-600.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/atkinson-next-700.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 800; font-display: swap; src: url('fonts/atkinson-next-800.woff2') format('woff2'); }
 :root {
   /* Night is the opt-in palette; DAY is the product default (set on <html> so a fresh install never
      flashes the dark palette). Every pair below is verified by web/test/contrast.mjs against
@@ -18,7 +25,7 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
 button, input, select { font: inherit; color: inherit; }
 .app { min-height: 100dvh; display: flex; flex-direction: column; }
 main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }

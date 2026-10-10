@@ -8,7 +8,8 @@ const ROOT = new URL('./dist/', import.meta.url).pathname;
 const PORT = Number(process.env.PORT || 8776);
 const HOST = process.env.HOST || '0.0.0.0';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
-  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.map': 'application/json' };
+  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.map': 'application/json',
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 
 createServer(async (req, res) => {
   try {
