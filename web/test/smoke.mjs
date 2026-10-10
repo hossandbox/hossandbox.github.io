@@ -190,9 +190,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ logResolved: false, segments: [], tentative: [], current: null });
   hh = out('log/fresh (nothing logged)');
   if (!/Assumed fresh clock/.test(hh)) throw new Error('a fresh clock must be labelled as an assumption');
-  setState({ tab: 'recap' });
-  hh = out('recap/fresh verdict');
+  // the load verdict moved from Recap to its own Load screen (redesign 4/5); same check, on the answer
+  setState({ tab: 'load', loadCheck: { ...getState().loadCheck, answered: true } });
+  hh = out('load/fresh verdict');
   if (!/This verdict rests on an incomplete basis/.test(hh)) throw new Error('the LEGAL verdict must be qualified when nothing is logged');
+  // and the recap itself says the same about its own numbers
+  setState({ tab: 'recap' });
+  hh = out('recap/fresh');
+  if (!/This recap rests on an incomplete basis/.test(hh)) throw new Error('the recap must be qualified when nothing is logged');
 
   // no current status + a future departure: the wait must not be credited as rest
   setState({ tab: 'trip', current: null, segments: [], trip: { ...DEFAULT_TRIP, dep: toInput(T + 180) } });
@@ -535,16 +540,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   hh = out('split/returned from Log');
   if (!/3h 30m/.test(hh)) throw new Error('Split Lab discarded the plan when the tab changed');
 
-  // (2) Recap load checker — 200 miles, no dwell
-  setState({ ...reset, tab: 'recap', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 0 } });
-  hh = out('recap/200 mi, no dwell');
-  if (!/200 mi/.test(hh)) throw new Error('Recap should show the 200-mile load');
-  setState({ tab: 'trip' }); out('trip/from recap');
-  setState({ tab: 'recap' });
-  hh = out('recap/returned');
+  // (2) load checker — 200 miles, no dwell (moved from Recap to the Load screen, redesign 4/5)
+  setState({ ...reset, tab: 'load', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 0, answered: true } });
+  hh = out('load/200 mi, no dwell');
+  if (!/200 mi/.test(hh)) throw new Error('the Load answer should show the 200-mile load');
+  setState({ tab: 'trip' }); out('trip/from load');
+  setState({ tab: 'load' });
+  hh = out('load/returned');
   // pin the slider HEAD specifically: "200 mi" also appears in the itinerary, so a loose match
   // would pass even if the field had been reset
-  if (!/Load distance[\s\S]{0,60}?<b>200 mi<\/b>/.test(hh)) throw new Error('Recap discarded the load when the tab changed');
+  if (!/Load distance[\s\S]{0,60}?<b>200 mi<\/b>/.test(hh)) throw new Error('the Load screen discarded the load when the tab changed');
 
   // (3) the disclosure must outlive a status tap, and survive navigation
   setState({ ...reset, tab: 'log' });
@@ -565,8 +570,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...reset, current: { status: 'ON', since: T }, segments: [
       { status: 'OFF', start: M('2026-09-23T03:30:00Z'), end: M('2026-09-23T13:30:00Z') },
       { status: 'D', start: M('2026-09-23T13:30:00Z'), end: T },
-    ], historyAcknowledged: true, tab: 'recap', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 120 } });
-  hh = out('recap/arrive vs unload');
+    ], historyAcknowledged: true, tab: 'load', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 120, answered: true } });
+  hh = out('load/arrive vs unload');
   if (!/Arrive — wheels stop/.test(hh)) throw new Error('the card must distinguish wheels-stop from unloading');
   if (!/Unloaded by/.test(hh)) throw new Error('unloading completion needs its own label');
   if (!/Cycle left after unloading/.test(hh)) throw new Error('the cycle figure must say which event it belongs to');
@@ -620,14 +625,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: now2130, tab: 'recap', segments: [D5, { status: 'OFF', start: M('2026-09-15T13:00:00Z'), end: now2130 }], tentative: [], current: null, historyAcknowledged: true });
   hh = out('recap/2h hole');
   if (!/Unlogged time is being counted as off duty/.test(hh)) throw new Error('a 2h hole must be disclosed on screen');
+  // the load verdict lives on its own screen since redesign 4/5
+  setState({ tab: 'load', loadCheck: { ...getState().loadCheck, answered: true } });
+  hh = out('load/2h hole');
   if (!/Verdict \(provisional\)/.test(hh)) throw new Error('a verdict resting on an unlogged hole must be marked provisional');
   // a 30-minute hole cannot, and nagging about it teaches the driver to ignore the warning that matters
-  setState({ segments: [D5, { status: 'OFF', start: M('2026-09-15T11:30:00Z'), end: now2130 }] });
+  setState({ tab: 'recap', segments: [D5, { status: 'OFF', start: M('2026-09-15T11:30:00Z'), end: now2130 }] });
   hh = out('recap/30min hole');
   if (/Unlogged time is being counted/.test(hh)) throw new Error('a 30-minute hole must not raise the gap warning');
+  setState({ tab: 'load' });
+  hh = out('load/30min hole');
   if (/Verdict \(provisional\)/.test(hh)) throw new Error('a 30-minute hole must not make the verdict provisional');
+  if (!/>Verdict</.test(hh)) throw new Error('the plain verdict label should be shown instead');
   // and it clears once the record covers the hole
-  setState({ segments: [D5, { status: 'OFF', start: M('2026-09-15T11:00:00Z'), end: now2130 }] });
+  setState({ tab: 'recap', segments: [D5, { status: 'OFF', start: M('2026-09-15T11:00:00Z'), end: now2130 }] });
   hh = out('recap/hole filled');
   if (/Unlogged time is being counted/.test(hh)) throw new Error('the gap warning should clear once the hole is filled');
 
@@ -1255,5 +1266,56 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/End is after now/.test(addEntry('OFF', T - 10, T + 10, T) ?? '')) throw new Error('add must refuse time that has not happened');
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('redesign 3 (Log day view, edit and add panels): OK');
+}
+// --- redesign 4: "Can I take this load?" as three questions and an answer
+{
+  const { getState: gs, DEFAULT_LOADCHECK: DL, parseSaved: ps } = await import('../src/store.ts');
+  const L = (d, h, m = 0) => Math.floor(Date.UTC(2026, 9, d, h + 5, m) / 60000); // Oct d, CDT
+  const T = L(12, 10);
+  setState({ nowOverride: T, historyAcknowledged: true, tentative: [], current: { status: 'ON', since: L(12, 9), createdAt: 2 },
+    segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 9), createdAt: 1 }],
+    config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 }, loadCheck: { ...DL } });
+  // 1. a new question starts at question 1, one thing on screen
+  setState({ tab: 'load' });
+  let h = out('load/question 1');
+  if (!/How far is the load\?/.test(h) || !/1 of 3/.test(h)) throw new Error('an unanswered load check must open on question 1');
+  if (/Verdict|How it goes/.test(h)) throw new Error('question 1 must not show the answer yet');
+  if (!/aria-label="Add 50 miles"/.test(h) || !/aria-label="Take off 10 miles"/.test(h)) throw new Error('the miles steppers need spoken labels');
+  if (!/<b>1200<\/b> mi/.test(h)) throw new Error('the big number must show the current miles');
+  // 2. once answered it opens on the answer, with each answer changeable
+  setState({ loadCheck: { ...DL, miles: 300, dwell: 60, answered: true } });
+  h = out('load/answer');
+  if (!/Yes, it’s legal/.test(h)) throw new Error('300 mi on a fresh 10-hour rest is legal');
+  if (!/Load distance<\/span><b>300 mi<\/b>/.test(h) || !/At the receiver<\/span><b>1h 00m on duty<\/b>/.test(h) || !/Leaving<\/span><b>now<\/b>/.test(h)) throw new Error('the answer must list what it was asked');
+  if ((h.match(/>Change</g) || []).length !== 3) throw new Error('each of the three answers needs its own Change');
+  if (!/Unloaded by/.test(h) || !/How it goes/.test(h)) throw new Error('the answer must keep the unload time and the plan');
+  // 3. waiting to leave is planned as what he said, and said back to him
+  setState({ loadCheck: { ...gs().loadCheck, leaveIn: 60, waitOff: false } });
+  h = out('load/leave in an hour, on duty');
+  if (!/Leaving<\/span><b>in 1h 00m, on duty till then<\/b>/.test(h)) throw new Error('a later departure must be stated with its duty status');
+  if (!/On duty until departure/.test(h)) throw new Error('the wait must show in the plan as an assumed on-duty row');
+  // the row's colour dot is its duty status; the label alone could say "off" while planning "on"
+  const waitDot = (x) => (x.match(/background:\s*([^;"]+)[^>]*><\/span><span><b>[^<]*<\/b> (?:On|Off) duty until departure/) || [])[1];
+  const onDot = waitDot(h);
+  setState({ loadCheck: { ...gs().loadCheck, waitOff: true } });
+  h = out('load/leave in an hour, off duty');
+  if (!/Off duty until departure/.test(h)) throw new Error('an off-duty wait must be labelled off duty');
+  if (!onDot || !waitDot(h) || onDot === waitDot(h)) throw new Error(`an off-duty wait must be planned as off duty, not just labelled (dots ${onDot} / ${waitDot(h)})`);
+  // 4. the answer survives a reload, but the app still opens on Now
+  const saved = ps(JSON.stringify({ ...gs(), tab: 'load', loadCheck: { ...DL, miles: 450, answered: true } }));
+  if (saved.tab !== 'now' || saved.loadCheck.miles !== 450 || saved.loadCheck.answered !== true) throw new Error('the load answer must persist; the app must open on Now');
+  const old = ps(JSON.stringify({ segments: [], loadCheck: { miles: 333, dwell: 30, dwellOff: true } }));
+  if (old.loadCheck.miles !== 333 || old.loadCheck.leaveIn !== 0 || old.loadCheck.answered !== false) throw new Error('a load check saved before the redesign must load with the new fields defaulted');
+  // 5. reachable from Plan, Now and Recap; Recap no longer carries its own copy
+  setState({ tab: 'plan' });
+  if (!/Can I take this load\?/.test(out('plan/load link'))) throw new Error('Plan must offer the load question');
+  setState({ tab: 'now', current: { status: 'ON', since: L(12, 9), createdAt: 2 } });
+  if (!/Take a load\?/.test(out('now/load link'))) throw new Error('Now must offer the load question');
+  setState({ tab: 'recap' });
+  h = out('recap/load link');
+  if (!/Can I take this load\?/.test(h)) throw new Error('Recap must link to the load question');
+  if (/Load distance|Verdict/.test(h)) throw new Error('Recap must not carry a second copy of the load checker');
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null, loadCheck: { ...DL } });
+  console.log('redesign 4 (load question as steps): OK');
 }
 console.log('OK');

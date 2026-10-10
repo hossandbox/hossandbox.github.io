@@ -615,7 +615,7 @@ function NowTab({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluati
       </button>
       {warn.map((n, i) => <p key={i} class="warnbox small">{n}</p>)}
       <div class="quick">
-        <button onClick={() => setState({ tab: 'recap' })}><Icon d={I.truck} /> Take a load?</button>
+        <button onClick={() => setState({ tab: 'load' })}><Icon d={I.truck} /> Take a load?</button>
         <button onClick={() => setState({ tab: 'split' })}><Icon d={I.bunk} /> Plan a split</button>
       </div>
       <StatusDock s={s} />
@@ -1020,7 +1020,7 @@ function PlanTab() {
   return (
     <>
       <h1 class="screen-title">Plan</h1>
-      {item('recap', I.truck, 'Can I take this load?', 'Miles and time at the receiver. Get a yes or no.')}
+      {item('load', I.truck, 'Can I take this load?', 'Miles and time at the receiver. Get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
       {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
     </>
@@ -1200,10 +1200,6 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
 }
 
 function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  // The scenario lives in the store: navigating away used to silently reset the load being checked.
-  const lc = s.loadCheck;
-  const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
-  const { miles, dwell, dwellOff } = lc;
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const firstLogged = s.segments.length ? Math.min(...s.segments.map((x) => x.start)) : null;
   const days = ev.cycle.days;
@@ -1211,12 +1207,6 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const applyDay = (dayStart: number, dayEnd: number) => (drive: number, on: number, startHour: number) => {
     setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp()) }));
   };
-  const both = useMemo(() => planTripAll(allSegments(s, now), { departure: now, distanceMiles: miles, mph: s.mph, stops: dwell ? [{ atMile: miles, minutes: dwell, status: dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [], config: s.config }), [s, now, miles, dwell, dwellOff]);
-  const best = both[earliestStrategy(both)];
-  // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
-  // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
-  const openGaps = meaningfulGaps(ev.gaps);
-  const provisional = openGaps.length > 0;
 
   return (
     <>
@@ -1236,25 +1226,134 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Available" value={`${hrs(ev.cycle.remaining)} h`} tone={ev.cycle.remaining < 120 ? 'bad' : ''} />
           {ev.cycle.restartEnd !== null && <Stat label="Last 34h restart" value={clock(ev.cycle.restartEnd)} />}
         </div>
+        {hist !== 'known' && <p class="warnbox small">This recap rests on an incomplete basis: your record does not cover the whole {ev.cycle.windowDays}-day period, so the days before it count as zero. Use <b>set</b> on those days, or confirm that your record really starts here.</p>}
         <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)}</b> — the times in this table use your device zone.</>}</p>
       </Card>
       <Card title="Hours coming back">
         <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
       </Card>
-      <Card title="Can I take this load?" tone={best.feasible ? 'good' : 'bad'}>
-        <Slider label="Load distance" value={miles} min={1} max={3000} step={50} onChange={(v) => setLoad({ miles: v })} fmt={(v) => `${v} mi`} unit="mi" />
-        <Slider label="Receiver dwell" value={dwell} min={0} max={480} step={30} onChange={(v) => setLoad({ dwell: v })} fmt={dur} unit="min" />
-        <Toggle options={[[false, 'Dwell on duty'], [true, 'Dwell off duty (relieved)']]} value={dwellOff} onChange={(v) => setLoad({ dwellOff: v })} />
-        <div class="clocks">
-          <Stat label={provisional ? 'Verdict (provisional)' : 'Verdict'} value={best.feasible ? 'LEGAL' : 'NO'} tone={best.feasible ? 'good' : 'bad'} />
-          <Stat label="Arrive — wheels stop" value={clock(best.driveEnd)} />
-          {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clock(best.arrival)} />}
-          <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={`${hrs(best.cycleRemainingAtArrival)} h`} />
-        </div>
-        {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
-        {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm on the Log tab that the record starts here.</p>}
-        <PlanCompare both={both} from={now} />
-      </Card>
+      <button class="plan-item" onClick={() => setState({ tab: 'load' })}>
+        <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
+        <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
+        <Icon d={I.next} />
+      </button>
+    </>
+  );
+}
+
+/* ============================================================ Can I take this load? */
+
+/**
+ * Redesign 4/5: the load check as three questions, one per screen, then a plain answer. It lived as a
+ * card at the bottom of Recap, with two sliders; at the dock, with a dispatcher waiting, the driver
+ * wants the question asked and the answer given. Every answer is kept (the store), so leaving and
+ * coming back changes nothing.
+ */
+function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+  const lc = s.loadCheck;
+  const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
+  const [step, setStep] = useState(lc.answered ? 4 : 1);
+  // each question is its own screen: start it at the top, not wherever the last Next button was
+  useEffect(() => { window.scrollTo(0, 0); }, [step]);
+  const hist = cycleBasis(s, now, ev.cycle.windowDays);
+  const departure = now + lc.leaveIn;
+  const both = useMemo(() => planTripAll(allSegments(s, now).filter((x) => !x.tentative), {
+    departure, distanceMiles: lc.miles, mph: s.mph,
+    stops: lc.dwell ? [{ atMile: lc.miles, minutes: lc.dwell, status: lc.dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [],
+    config: s.config,
+    // Waiting to leave is not rest unless he says so: shown as an assumed row, never an unlogged gap.
+    ...(lc.leaveIn > 0 ? { untilDeparture: { from: now, status: lc.waitOff ? 'OFF' as DutyStatus : 'ON' as DutyStatus, label: `${lc.waitOff ? 'Off duty' : 'On duty'} until departure` } } : {}),
+  }), [s, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
+  const best = both[earliestStrategy(both)];
+  // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
+  // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
+  const openGaps = meaningfulGaps(ev.gaps);
+  const provisional = openGaps.length > 0;
+  const leaveWord = lc.leaveIn ? `in ${dur(lc.leaveIn)}` : 'now';
+  const head = (n: number) => (
+    <>
+      <div class="flow-head">
+        <button class="icon-btn" aria-label={n === 1 ? 'Back to Plan' : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: 'plan' }) : setStep(n - 1))}><Icon d={I.back} /></button>
+        <b>Can I take this load?</b>
+        <span class="muted">{n} of 3</span>
+      </div>
+      <div class="flow-dots" aria-hidden="true">{[1, 2, 3].map((k) => <span key={k} class={k <= n ? 'on' : ''} />)}</div>
+    </>
+  );
+  const next = (n: number, label: string) => <button class="primary wide flow-next" onClick={() => { if (n === 3) setLoad({ answered: true }); setStep(n + 1); }}>{label} <Icon d={I.next} /></button>;
+  const chips = <T,>(opts: [T, string][], value: T, set: (v: T) => void) => (
+    <div class="chips">{opts.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => set(v)}>{l}</button>)}</div>
+  );
+
+  if (step === 1) {
+    return (
+      <>
+        {head(1)}
+        <h1 class="flow-q">How far is the load?</h1>
+        <p class="muted">Miles from here to the receiver.</p>
+        <div class="bignum"><b>{lc.miles}</b> mi</div>
+        <div class="steps4">{[-50, -10, 10, 50].map((d) => <button key={d} aria-label={`${d > 0 ? 'Add' : 'Take off'} ${Math.abs(d)} miles`} onClick={() => setLoad({ miles: Math.min(3000, Math.max(1, lc.miles + d)) })}>{d > 0 ? `+${d}` : `−${-d}`}</button>)}</div>
+        <label>Or type the miles<input type="number" inputMode="numeric" min={1} max={3000} value={lc.miles} onInput={(e) => { const n = Math.round(Number((e.target as HTMLInputElement).value)); if (n >= 1 && n <= 3000) setLoad({ miles: n }); }} /></label>
+        {chips([[250, '250'], [400, '400'], [550, '550'], [700, '700'], [900, '900']] as [number, string][], lc.miles, (v) => setLoad({ miles: v }))}
+        {next(1, 'Next: when you leave')}
+      </>
+    );
+  }
+  if (step === 2) {
+    return (
+      <>
+        {head(2)}
+        <h1 class="flow-q">When will you leave?</h1>
+        {chips([[0, 'Now'], [30, 'In 30 min'], [60, 'In 1 hour'], [120, 'In 2 hours']] as [number, string][], lc.leaveIn, (v) => setLoad({ leaveIn: v }))}
+        {lc.leaveIn > 0 && (
+          <>
+            <h3>Until then, you will be</h3>
+            {chips([[false, 'On duty'], [true, 'Off duty']] as [boolean, string][], lc.waitOff, (v) => setLoad({ waitOff: v }))}
+            <p class="muted small">{lc.waitOff ? 'Only choose off duty if you really will be: it can count as rest.' : 'On duty earns no rest credit, so the answer can only come out on the careful side.'}</p>
+          </>
+        )}
+        {next(2, 'Next: time at the receiver')}
+      </>
+    );
+  }
+  if (step === 3) {
+    return (
+      <>
+        {head(3)}
+        <h1 class="flow-q">How long at the receiver?</h1>
+        {chips([[0, 'None'], [30, '30 min'], [60, '1 hour'], [120, '2 hours'], [180, '3 hours'], [240, '4 hours']] as [number, string][], lc.dwell, (v) => setLoad({ dwell: v }))}
+        <h3>While you are there, you are</h3>
+        {chips([[false, 'On duty (unloading)'], [true, 'Off duty (relieved)']] as [boolean, string][], lc.dwellOff, (v) => setLoad({ dwellOff: v }))}
+        {next(3, 'Show me the answer')}
+      </>
+    );
+  }
+  return (
+    <>
+      <div class="flow-head">
+        <button class="icon-btn" aria-label="Back to Plan" onClick={() => setState({ tab: 'plan' })}><Icon d={I.back} /></button>
+        <b>Can I take this load?</b><span />
+      </div>
+      <section class={`verdict ${best.feasible ? 'yes' : 'no'}`}>
+        <div class="verdict-label">{provisional ? 'Verdict (provisional)' : 'Verdict'}</div>
+        <div class="verdict-big">{best.feasible ? 'Yes, it’s legal' : 'No — not legal as planned'}</div>
+        <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clock(best.arrival)}` : `There by ${clock(best.driveEnd)}`}</div>
+      </section>
+      {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
+      {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm that the record starts here.</p>}
+      <div class="clocks">
+        <Stat label="Arrive — wheels stop" value={clock(best.driveEnd)} />
+        {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clock(best.arrival)} />}
+        <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={`${hrs(best.cycleRemainingAtArrival)} h`} />
+      </div>
+      <ul class="answers">
+        <li><span>Load distance</span><b>{lc.miles} mi</b><button class="link" onClick={() => setStep(1)}>Change</button></li>
+        <li><span>Leaving</span><b>{leaveWord}{lc.leaveIn ? (lc.waitOff ? ', off duty till then' : ', on duty till then') : ''}</b><button class="link" onClick={() => setStep(2)}>Change</button></li>
+        <li><span>At the receiver</span><b>{lc.dwell ? `${dur(lc.dwell)} ${lc.dwellOff ? 'off duty' : 'on duty'}` : 'none'}</b><button class="link" onClick={() => setStep(3)}>Change</button></li>
+      </ul>
+      <Card title="How it goes"><PlanCompare both={both} from={now} /></Card>
+      <p class="muted small">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
+      <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
     </>
   );
 }
@@ -1560,6 +1659,7 @@ export function App() {
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
           {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
           {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
+          {s.tab === 'load' && <LoadTab s={s} now={now} ev={ev} />}
           {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
         </TabBoundary>
       </main>

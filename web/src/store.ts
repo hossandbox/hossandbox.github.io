@@ -98,8 +98,14 @@ export interface SplitDraft {
 export const DEFAULT_SPLIT: SplitDraft = { b1: 180, b1s: 'OFF', dwell: 30, drive: 300, b2: 420, b2s: 'SB' };
 
 /** Recap "can I take this load?" scenario. */
-export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean }
-export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false };
+/**
+ * "Can I take this load?" (redesign 4/5: its own step-by-step screen under Plan). `leaveIn` is minutes
+ * from now; until then the driver is on duty unless `waitOff` — unlogged waiting is never assumed to be
+ * rest (consumer-review-2). `answered` = the steps were completed once, so the screen reopens on the
+ * answer rather than the first question.
+ */
+export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean; leaveIn: number; waitOff: boolean; answered: boolean }
+export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false, leaveIn: 0, waitOff: false, answered: false };
 
 /** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
 export const INITIAL_STATE: State = {

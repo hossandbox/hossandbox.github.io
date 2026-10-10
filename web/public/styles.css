@@ -238,3 +238,25 @@ input.tstep-pick { margin-top: 6px; width: 100%; min-height: 44px; background: v
 .lenrow { display: flex; justify-content: space-between; background: var(--bg); border-radius: 12px; padding: 12px 14px; font-size: 16px; }
 button.danger.wide { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 0; }
 
+/* Can I take this load? (redesign 4/5): one question per screen, then the answer. */
+.flow-head { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 4px; font-size: 18px; }
+.flow-dots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.flow-dots span { height: 5px; border-radius: 3px; background: var(--panel2); } .flow-dots span.on { background: var(--accent); }
+.flow-q { margin: 18px 0 0; font-size: 30px; line-height: 1.15; }
+.bignum { border: 2px solid var(--line); border-radius: 20px; padding: 14px; text-align: center; font-size: 26px; font-weight: 800; color: var(--muted); background: var(--panel); }
+.bignum b { font-size: 60px; color: var(--text); font-variant-numeric: tabular-nums; }
+.steps4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.steps4 button { min-height: 60px; font-size: 19px; font-weight: 800; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button { min-height: 48px; border-radius: 999px; padding: 0 18px; font-size: 17px; font-weight: 800; background: var(--panel); }
+.chips button.on { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+button.flow-next { margin-top: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.verdict { border-radius: 22px; padding: 18px 20px; color: var(--chip-ink); }
+.verdict.yes { background: var(--good); } .verdict.no { background: var(--bad); }
+.verdict-label { font-size: 15px; font-weight: 600; }
+.verdict-big { font-size: 32px; font-weight: 800; line-height: 1.1; margin-top: 4px; }
+.verdict-sub { font-size: 20px; font-weight: 800; margin-top: 8px; }
+.answers { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+.answers li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 4px 12px; min-height: 52px; border-top: 1px solid var(--line); font-size: 15px; }
+.answers li:first-child { border-top: 0; } .answers li span { color: var(--muted); }
+
