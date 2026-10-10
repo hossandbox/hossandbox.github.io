@@ -852,7 +852,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/on-duty work like fueling/.test(r)) throw new Error('break case: on-duty time counts toward the 30 minutes and the driver must be told');
   // driving with no time left
   setState({ nowOverride: T + 90, segments: [...day, { status: 'OFF', start: T - 360, end: T }, { status: 'ON', start: T, end: T + 60 }], current: { status: 'D', since: T + 60 } });
+  // Redesign 2: while Driving, Now is the full-screen driving view — it must say stop, plainly.
   r = txt(out('now/driving out of hours'));
+  if (!/Out of driving time/.test(r) || !/Park as soon as it is safe/.test(r)) throw new Error('driving out of hours must say stop driving');
+  if (!r.includes(`Off duty from now: drive again at ${clock(T + 690)}`)) throw new Error('driving out of hours: say when driving comes back if he parks now');
+  // …and "Details" (the normal Now screen) still leads with the same instruction
+  const { setDrivingPeek } = await import('../src/app.tsx');
+  setDrivingPeek(T + 60);
+  r = txt(out('now/driving out of hours, details'));
+  setDrivingPeek(null);
   if (!/No driving time left — stop driving/.test(r)) throw new Error('driving out of hours must say stop driving');
   setState({ nowOverride: null, tab: 'log', historyAcknowledged: false, segments: [], current: null });
   console.log('round 4 (when can I drive again): OK');
@@ -1149,5 +1157,52 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/HOS Sandbox is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('redesign 1 (Now, header, panels, Plan): OK');
+}
+// --- redesign 2: the driving view
+{
+  const { setDrivingPeek, showsDrivingView } = await import('../src/app.tsx');
+  const { getState: gs } = await import('../src/store.ts');
+  const { readFileSync: rf } = await import('node:fs');
+  const L = (h, m = 0) => Math.floor(Date.UTC(2026, 9, 12, h + 5, m) / 60000);
+  const day = [
+    { status: 'OFF', start: L(-4), end: L(6), createdAt: 1 }, { status: 'ON', start: L(6), end: L(6, 30), createdAt: 2 },
+    { status: 'D', start: L(6, 30), end: L(10), createdAt: 3 }, { status: 'OFF', start: L(10), end: L(10, 30), createdAt: 4 },
+    { status: 'ON', start: L(10, 30), end: L(11), createdAt: 5 },
+  ];
+  const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const at = (h, m) => { setState({ tab: 'now', nowOverride: L(h, m), historyAcknowledged: true, tentative: [], segments: day, current: { status: 'D', since: L(11), createdAt: 6 }, drivingView: true }); return out(`drive/${h}:${m}`); };
+  // 1. cruising: one number, the stop time, the limit, one button — no header, no tab bar
+  let h = at(12, 30), t = txt(h);
+  if (!/<main class="drive calm"/.test(h)) throw new Error('driving with time left must show the calm driving view');
+  if (!t.includes(`Driving left 6h 00m Stop by ${clock(L(18, 30))} limited by 11-hour driving limit`)) throw new Error(`driving view content wrong: ${t.slice(0, 220)}`);
+  if (/<header|<nav/.test(h)) throw new Error('the driving view hides the header and tab bar');
+  if ((h.match(/<button/g) || []).length > 3) throw new Error('while driving there must be almost nothing to tap: Details and I’ve stopped (plus the launch notice)');
+  if (!/I've stopped/.test(h)) throw new Error('the driving view needs its one big button');
+  // 2. an hour or less: amber, "plan where you'll park"
+  h = at(17, 45); t = txt(h);
+  if (!/<main class="drive warn"/.test(h) || !/Plan where you’ll park/.test(t) || !/45m/.test(t)) throw new Error('45 min left must be the amber "plan where you’ll park" view');
+  // 3. none: red, "park as soon as it is safe"
+  h = at(18, 30);
+  if (!/<main class="drive bad"/.test(h) || !/Park as soon as it is safe/.test(h)) throw new Error('out of time must be the red view');
+  // 4. day floods, night frames (no flood of light in a dark cab)
+  const css = rf('public/styles.css', 'utf8');
+  if (/\nmain\.drive\.warn \{[^}]*background/.test(css) || /\nmain\.drive\.bad \{[^}]*background/.test(css)) throw new Error('at night the driving view must not flood the screen with colour');
+  if (!/:root\[data-theme="day"\] main\.drive\.bad \{[^}]*background: var\(--bad\)/.test(css)) throw new Error('in day the out-of-time view floods red');
+  // 5. Details shows the normal Now until the status changes
+  at(12, 30);
+  setDrivingPeek(gs().current.since);
+  if (showsDrivingView(gs()) || !/<header/.test(out('drive/details'))) throw new Error('Details must show the normal Now screen');
+  setState({ current: { status: 'D', since: L(12, 31), createdAt: 7 } });
+  if (!showsDrivingView(gs())) throw new Error('a new Driving status must bring the driving view back');
+  setDrivingPeek(null);
+  // 6. switched off in Settings, or on another tab: the normal app
+  setState({ drivingView: false });
+  if (showsDrivingView(gs())) throw new Error('the setting must turn the driving view off');
+  setState({ drivingView: true, tab: 'log' });
+  if (showsDrivingView(gs()) || !/<header/.test(out('drive/on log'))) throw new Error('only Now becomes the driving view');
+  setState({ tab: 'settings', current: null });
+  if (!/Big driving screen while your status is Driving/.test(out('settings/driving view switch'))) throw new Error('Settings must offer the driving view switch');
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('redesign 2 (driving view): OK');
 }
 console.log('OK');

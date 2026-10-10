@@ -623,6 +623,62 @@ function NowTab({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluati
   );
 }
 
+/* ============================================================ driving view */
+
+/**
+ * While the status is Driving, Now becomes a glance view: one number, the stop time, one button. A
+ * mounted phone is looked at, not read — and federal rules bar a CMV driver from reading text on, or
+ * typing into, a device while driving (49 CFR 392.80) — so nothing here needs reading past a word or
+ * two, and the only control is the one big button. It turns amber at an hour left and red at zero; at
+ * night it uses a coloured frame instead of flooding the cab with light.
+ *
+ * "Details" shows the normal Now screen until the status next changes.
+ */
+let peekSince: number | null = null;
+export function setDrivingPeek(since: number | null) { peekSince = since; }
+export function showsDrivingView(s: State): boolean {
+  return s.tab === 'now' && s.drivingView && s.current?.status === 'D' && peekSince !== s.current.since;
+}
+
+/** How much of the binding limit is left, 0–1, for the driving view's bar. */
+function bindingShare(ev: FullEvaluation): number {
+  const sh = ev.shift;
+  const [left, of] = ev.binding === 'WINDOW_14' ? [sh.windowRemaining, sh.limits.window]
+    : ev.binding === 'BREAK_30' ? [sh.breakRemaining, 480]
+    : ev.binding === 'CYCLE' ? [ev.cycle.remaining, ev.cycle.limit]
+    : [sh.driveRemaining, sh.limits.drive];
+  return Math.max(0, Math.min(1, left / of));
+}
+
+function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onDetails: () => void }) {
+  // 'calm', not 'ok': .ok is the app-wide green-text class and turned the whole screen green.
+  const level = ev.driveNow <= 0 ? 'bad' : ev.driveNow <= 60 ? 'warn' : 'calm';
+  const left = dur(ev.driveNow);
+  return (
+    <main class={`drive ${level}`} aria-live="polite">
+      <div class="top-row">
+        <span class="pill" style={{ background: STATUS_COLOR.D }}>{segLabel('D', s.current?.note)} · {dur(now - currentRunStart(s, now))}</span>
+        <span class="top-right">
+          <span class="drive-clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+          <button class="drive-details" onClick={onDetails}>Details</button>
+        </span>
+      </div>
+      <div class="drive-body">
+        <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
+        <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
+        <div class="drive-head">{level === 'bad' ? 'Park as soon as it is safe' : level === 'warn' ? 'Plan where you\u2019ll park' : `Stop by ${clock(ev.mustStopBy)}`}</div>
+        <div class="drive-why">{level === 'bad' ? `Over the ${alertReason(ev)}` : level === 'warn' ? `Stop by ${clock(ev.mustStopBy)} · ${bindingLabel(ev)}` : `limited by ${bindingLabel(ev)}`}</div>
+        <div class="drive-bar" aria-hidden="true"><span style={{ width: `${(bindingShare(ev) * 100).toFixed(0)}%` }} /></div>
+        {level === 'bad' && again?.off != null && <div class="drive-why">Off duty from now: drive again at <b>{clock(again.off)}</b></div>}
+      </div>
+      <div class="drive-foot">
+        <div class="drive-note">{s.keepAwake ? 'Screen stays on' : 'Screen may lock'} · {s.alertsOn ? 'sound and vibration on' : 'alerts off'}</div>
+        <button class="drive-stop" onClick={() => openSheet({ kind: 'status' })}>I've stopped</button>
+      </div>
+    </main>
+  );
+}
+
 /* ============================================================ panels */
 
 function StatusSheet({ s, now }: { s: State; now: number }) {
@@ -1224,6 +1280,7 @@ function DrivingAlertsCard({ s }: { s: State }) {
     <Card title="Driving alerts">
       <label class="check"><input type="checkbox" checked={s.alertsOn} onChange={(e) => setState({ alertsOn: (e.target as HTMLInputElement).checked })} /> Sound and vibration at 60, 30 and 15 minutes of driving left, and every 15 minutes once you are out of time</label>
       <label class="check"><input type="checkbox" checked={s.keepAwake} onChange={(e) => setState({ keepAwake: (e.target as HTMLInputElement).checked })} /> Keep the screen on while your status is Driving</label>
+      <label class="check"><input type="checkbox" checked={s.drivingView} onChange={(e) => setState({ drivingView: (e.target as HTMLInputElement).checked })} /> Big driving screen while your status is Driving</label>
       {!awakeOk && <p class="small">This browser cannot keep the screen on. Set your phone's auto-lock to "Never" while you drive, or the alerts will stop when it locks.</p>}
       <div class="row">
         <button onClick={test}>Test alert</button>
@@ -1389,6 +1446,17 @@ export function App() {
   const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t);
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
   const blocked = disclaimer || sheet !== null;
+  if (showsDrivingView(s)) {
+    return (
+      <div class="app">
+        {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+        <div inert={blocked}>
+          <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
+        </div>
+        {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+      </div>
+    );
+  }
   return (
     <div class="app">
       {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}

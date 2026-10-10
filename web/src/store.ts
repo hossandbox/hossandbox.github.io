@@ -76,6 +76,8 @@ export interface State {
   alertsOn: boolean;
   /** Keep the screen on while the status is Driving, so a mounted phone keeps running its alerts. Device setting. */
   keepAwake: boolean;
+  /** Show the full-screen driving view on Now while the status is Driving (redesign). Device setting. */
+  drivingView: boolean;
 }
 
 const KEY = 'hos-sandbox-v1';
@@ -105,7 +107,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
-  tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true,
+  tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
 };
 
 /**
