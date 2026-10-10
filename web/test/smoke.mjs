@@ -1452,4 +1452,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('re-check N3 (alerts after reopening): OK');
 }
+// --- re-check N1: the terminal-zone question must start from the zone already saved
+{
+  const { deviceTz: dz, parseSaved: ps } = await import('../src/store.ts');
+  const other = dz === 'America/New_York' ? 'America/Denver' : 'America/New_York';
+  // a save from before the question existed: no tzChosen, terminal zone not the phone's
+  const legacy = ps(JSON.stringify({ segments: [], config: { cycle: '70/8', dayStartHour: 0, timeZone: other, shortHaul: false }, themeChosen: true }));
+  if (legacy.tzChosen !== false || legacy.config.timeZone !== other) throw new Error('setup: a legacy save keeps its zone and is asked to confirm it');
+  setState({ ...legacy, tab: 'now' });
+  const h = out('legacy save, terminal zone not the phone zone');
+  if (!new RegExp(`It is set to <b>${other}</b>`).test(h)) throw new Error('the question must name the zone actually saved');
+  if (!new RegExp(`Your phone's zone right now is <b>${dz}</b>`).test(h)) throw new Error('and name the phone zone separately when they differ');
+  const field = (h.match(/<input[^>]*aria-label="Home terminal time zone"[^>]*>/) || [''])[0];
+  if (!field.includes(`value="${other}"`)) throw new Error(`the field must be pre-filled with the saved zone, so "I understand" keeps it (saw ${field})`);
+  setState({ tzChosen: true, config: { ...getState().config, timeZone: dz } });
+  console.log('re-check N1 (terminal-zone question keeps the saved zone): OK');
+}
 console.log('OK');

@@ -1614,7 +1614,9 @@ function Disclaimer({ onClose, tz, needsTz }: { onClose: (tz?: string) => void; 
         {needsTz && (
           <>
             <h3>Where is your home terminal?</h3>
-            <p class="small">Every clock here is worked out in your <b>terminal's</b> time zone. It is set to your phone's zone right now (<b>{tz}</b>), which is wrong if you set the app up somewhere else — it would move every day boundary and the whole recap.</p>
+            {/* Name the zone actually saved. Naming the phone's zone and pre-filling it replaced an existing
+                driver's terminal zone with the phone's on one tap of "I understand" (re-check N1). */}
+            <p class="small">Every clock here is worked out in your <b>terminal's</b> time zone. It is set to <b>{tz}</b>{tz === deviceTz ? <>, your phone's zone right now</> : <>. Your phone's zone right now is <b>{deviceTz}</b></>}. If your terminal is somewhere else, change it here — the zone moves every day boundary and the whole recap.</p>
             <TimeZoneField value={choice} onChange={setChoice} />
           </>
         )}
@@ -1687,7 +1689,7 @@ export function App() {
   if (showsDrivingView(s)) {
     return (
       <div class="app">
-        {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+        {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
         <div inert={blocked}>
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
@@ -1697,7 +1699,7 @@ export function App() {
   }
   return (
     <div class="app">
-      {disclaimer && <Disclaimer tz={deviceTz} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+      {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked}>
         {s.themeNotice && (
