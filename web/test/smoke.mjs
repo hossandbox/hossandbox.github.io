@@ -1650,4 +1650,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('re-check M9 (Split Lab hint in time order): OK');
 }
+// --- re-check: grid hour marks stay on real hours on the days the clocks change
+{
+  const { gridTicks } = await import('../src/app.tsx');
+  const { carrierDayStart, nextCarrierDayStart } = await import('../../engine/src/index.ts');
+  const cfg = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const at = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  for (const [label, noon, hours] of [['fall back, Nov 1', '2026-11-01T18:00:00Z', 25], ['spring forward, Mar 8', '2026-03-08T18:00:00Z', 23], ['ordinary day', '2026-10-10T17:00:00Z', 24]]) {
+    const from = carrierDayStart(at(noon), cfg), to = nextCarrierDayStart(from, cfg);
+    if (to - from !== hours * 60) throw new Error(`setup: ${label} is ${hours}h`);
+    const t = gridTicks(from, to, cfg.timeZone);
+    if (t.length !== hours + 1 || t.some((k, i) => k.m !== from + i * 60)) throw new Error(`${label}: one mark per real hour`);
+    const majors = t.filter((k) => k.major).map((k) => new Intl.DateTimeFormat('en-US', { timeZone: cfg.timeZone, hour: 'numeric', hourCycle: 'h23' }).format(new Date(k.m * 60000))).map(Number);
+    if (majors.some((h) => h % 6 !== 0) || !majors.includes(6) || !majors.includes(12) || !majors.includes(18)) throw new Error(`${label}: heavy marks on 06/12/18 local (saw ${majors})`);
+  }
+  console.log('re-check (grid hours on clock-change days): OK');
+}
 console.log('OK');

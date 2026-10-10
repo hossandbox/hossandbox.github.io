@@ -782,15 +782,30 @@ function ExceptionsSheet({ ev }: { ev: FullEvaluation }) {
 
 /* ============================================================ RODS grid */
 
-function Grid({ segments, from, to }: { segments: Segment[]; from: number; to: number }) {
+/**
+ * The hour marks for a grid: one per real hour from `from`. A carrier day is 23 or 25 hours long on the
+ * days the clocks change; dividing it into 24 equal parts put the marks up to half an hour off the real
+ * hours (re-check). With `tz`, the heavy marks fall on 00/06/12/18 of that zone's clock, so they stay
+ * on the right hours after the change; without it, every sixth mark from the start.
+ */
+export function gridTicks(from: number, to: number, tz?: string): { m: number; major: boolean }[] {
+  const fmt = tz ? new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }) : null;
+  const out: { m: number; major: boolean }[] = [];
+  for (let m = from, i = 0; m <= to; m += 60, i++) {
+    const major = fmt ? Number(fmt.format(new Date(m * 60000))) % 6 === 0 : i % 6 === 0;
+    out.push({ m, major });
+  }
+  return out;
+}
+
+function Grid({ segments, from, to, tz }: { segments: Segment[]; from: number; to: number; tz?: string }) {
   const rows: DutyStatus[] = ['OFF', 'SB', 'D', 'ON'];
   const W = 360, H = 88, left = 34, rowH = 18;
   const x = (m: number) => left + ((Math.min(Math.max(m, from), to) - from) / (to - from)) * (W - left - 4);
-  const hours = 24;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} class="grid">
       {rows.map((r, i) => <g key={r}><text x={2} y={12 + i * rowH + 8} class="grid-label">{r}</text><line x1={left} x2={W - 4} y1={12 + i * rowH + 9} y2={12 + i * rowH + 9} class="grid-line" /></g>)}
-      {Array.from({ length: hours + 1 }, (_, i) => { const m = from + (i * (to - from)) / hours; return <line key={i} x1={x(m)} x2={x(m)} y1={10} y2={H - 6} class={i % 6 === 0 ? 'grid-tick major' : 'grid-tick'} />; })}
+      {gridTicks(from, to, tz).map((t, i) => <line key={i} x1={x(t.m)} x2={x(t.m)} y1={10} y2={H - 6} class={t.major ? 'grid-tick major' : 'grid-tick'} />)}
       {segments.filter((s) => s.end > from && s.start < to).map((s, i) => {
         const y = 12 + rows.indexOf(s.status) * rowH + 9;
         return <line key={i} class={`s-${s.status}`} x1={x(s.start)} x2={x(s.end)} y1={y} y2={y} stroke-width={6} stroke-dasharray={s.tentative ? '4 3' : undefined} />;
@@ -934,7 +949,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
         <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
       </div>
       <section class="card">
-        <Grid segments={allSegments(s, now)} from={day.start} to={day.end} />
+        <Grid segments={allSegments(s, now)} from={day.start} to={day.end} tz={s.config.timeZone} />
         <div class="daytotals">
           {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
         </div>
