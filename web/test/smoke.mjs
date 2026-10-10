@@ -1570,4 +1570,49 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (alertTick(sim.mem, true, 0, 1002, false).fire !== 0) throw new Error('but out of time still alerts at once');
   console.log('re-check (screen lock retry, simulated clock): OK');
 }
+// --- re-check M11: the phone's Back button steps back through the app before leaving it
+{
+  const { createBackNav } = await import('../src/backnav.ts');
+  // a fake browser history: go() lands later (as in a browser) and fires popstate
+  const mk = () => {
+    const h = { entries: [{ state: null }], i: 0, queued: [], left: false,
+      get state() { return this.entries[this.i].state; },
+      pushState(d) { this.entries.length = this.i + 1; this.entries.push({ state: d }); this.i++; },
+      replaceState(d) { this.entries[this.i] = { state: d }; },
+      go(n) { this.queued.push(n); },
+      land(onPop) { while (this.queued.length) { const n = this.queued.shift(); const j = this.i + n; if (j < 0) { this.left = true; return; } this.i = j; onPop(); } },
+      back(onPop) { this.go(-1); this.land(onPop); } };
+    return h;
+  };
+  const h = mk();
+  let tab = 'now', sheet = false;
+  const nav = createBackNav(h, () => ({ tab, sheet }), { closeSheet: () => { sheet = false; }, goTo: (t) => { tab = t; } });
+  const pop = () => nav.onPop();
+  const ui = (t, sh) => { if (t !== undefined) tab = t; if (sh !== undefined) sheet = sh; nav.sync(); h.land(pop); };
+  nav.sync();
+  if (h.entries.length !== 1) throw new Error('on Now with nothing open, nothing is added to history');
+  // Now -> Plan -> Load, open a panel; then press Back four times
+  ui('plan'); ui('load'); ui(undefined, true);
+  if (h.i !== 3) throw new Error(`expected 3 app entries above the page, saw ${h.i}`);
+  h.back(pop); if (sheet !== false || tab !== 'load') throw new Error('Back must first close the panel');
+  h.back(pop); if (tab !== 'plan') throw new Error('then step back from the load question to Plan');
+  h.back(pop); if (tab !== 'now') throw new Error('then return to Now');
+  h.back(pop); if (!h.left) throw new Error('and only then leave the app');
+  // closing things inside the app removes their entries, so Back never lands on a ghost
+  const h2 = mk(); tab = 'now'; sheet = false;
+  const nav2 = createBackNav(h2, () => ({ tab, sheet }), { closeSheet: () => { sheet = false; }, goTo: (t) => { tab = t; } });
+  const pop2 = () => nav2.onPop();
+  const ui2 = (t, sh) => { if (t !== undefined) tab = t; if (sh !== undefined) sheet = sh; nav2.sync(); h2.land(pop2); };
+  ui2('log'); ui2(undefined, true); ui2(undefined, false); // panel opened and closed with its own button
+  if (h2.i !== 1) throw new Error('a panel closed in the app must take its history entry with it');
+  ui2('recap'); if (h2.i !== 1) throw new Error('moving between tabs must not pile up entries');
+  ui2('now'); if (h2.i !== 0) throw new Error('tapping Now in the tab bar must remove the tab entry');
+  ui2(undefined, true); h2.back(pop2);
+  if (sheet !== false || tab !== 'now' || h2.left) throw new Error('on Now, Back closes the panel without leaving');
+  // a reload on top of old entries starts clean
+  const h3 = mk(); h3.pushState({ app: 'hos-sandbox', layer: 'tab' }, '');
+  createBackNav(h3, () => ({ tab: 'now', sheet: false }), { closeSheet() {}, goTo() {} });
+  if (h3.state !== null) throw new Error('an entry left by an earlier load must not be counted as ours');
+  console.log('re-check M11 (Back button): OK');
+}
 console.log('OK');

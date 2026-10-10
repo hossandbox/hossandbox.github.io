@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
+import { createBackNav, type BackNav } from './backnav.ts';
 import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
@@ -1645,6 +1646,7 @@ declare const __BUILD__: string;
  * so a test can look behind it.
  */
 let launchNotice = true;
+let backNav: BackNav | null = null;
 export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
 export function App() {
@@ -1674,6 +1676,17 @@ export function App() {
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
+  // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
+  useEffect(() => {
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: () => openSheet(null), goTo: (tab) => setState({ tab }) });
+    backNav = nav;
+    const f = () => nav.onPop();
+    window.addEventListener('popstate', f);
+    nav.sync();
+    return () => { window.removeEventListener('popstate', f); backNav = null; };
+  }, []);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet]);
   if (!ev) {
     return (
       <div class="app"><main>
