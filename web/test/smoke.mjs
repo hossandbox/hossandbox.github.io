@@ -1627,4 +1627,27 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (h3.state !== null) throw new Error('an entry left by an earlier load must not be counted as ours');
   console.log('re-check M11 (Back button): OK');
 }
+// --- re-check M9: the Split Lab hint reads the record in time order, not entry order
+{
+  const { DEFAULT_SPLIT: DS } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  setLaunchNotice(false);
+  const T = Math.floor(Date.UTC(2026, 9, 10, 16, 0) / 60000);
+  const rows = [
+    { status: 'OFF', start: T - 2000, end: T - 1000, createdAt: 1 },
+    { status: 'OFF', start: T - 700, end: T, createdAt: 2 },
+    // a forgotten drive added afterwards: last in the list, but not the latest in time
+    { status: 'D', start: T - 1000, end: T - 700, createdAt: 3 },
+  ];
+  setState({ nowOverride: T, tab: 'split', historyAcknowledged: true, tentative: [], current: null, segments: rows, split: { ...DS } });
+  let h = out('split/forgotten entry added last');
+  if (!/Break 1 runs straight into the rest/.test(h)) throw new Error('the driver is resting now, so Break 1 merges with that rest, whatever order the rows were entered in');
+  // same record, entered in time order: same answer
+  setState({ segments: [rows[0], rows[2], rows[1]] });
+  h = out('split/rows in time order');
+  if (!/Break 1 runs straight into the rest/.test(h)) throw new Error('setup: in time order the hint shows');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('re-check M9 (Split Lab hint in time order): OK');
+}
 console.log('OK');
