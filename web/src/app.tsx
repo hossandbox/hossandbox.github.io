@@ -785,40 +785,68 @@ function Grid({ segments, from, to }: { segments: Segment[]; from: number; to: n
 /* ============================================================ Log tab */
 
 /**
- * One level of undo for the Log: the state before the last edit or delete. Module state, because the
- * edit panel lives outside the Log screen (behind a panel, the screen is inert).
+ * One level of undo for the Log: the state before the last edit, delete, add or start-over. Module
+ * state, because the edit panel lives outside the Log screen (behind a panel, the screen is inert).
+ *
+ * An undo is only offered while the log is exactly as that action left it. Restoring a whole snapshot
+ * after anything else has changed the record (a status tap on Now closing a row, another add) would
+ * throw that later change away without a word (re-check N2), so any other change retires the undo.
  */
-type Undo = { label: string; segments: Segment[]; tentative: Segment[] };
+type Saved = Pick<State, 'segments' | 'tentative' | 'current' | 'historyAcknowledged'>;
+type Undo = { label: string; before: Saved; after: Saved };
 let undoNow: Undo | null = null;
 const undoSubs = new Set<() => void>();
 function setUndo(u: Undo | null) { undoNow = u; undoSubs.forEach((f) => f()); }
+const pick = (s: State): Saved => ({ segments: s.segments, tentative: s.tentative, current: s.current, historyAcknowledged: s.historyAcknowledged });
+/** The pending undo, or null once the record has changed since (compared by identity: every change makes new arrays). */
+export function currentUndo(): Undo | null {
+  if (!undoNow) return null;
+  const s = getState(), a = undoNow.after;
+  if (s.segments !== a.segments || s.tentative !== a.tentative || s.current !== a.current) undoNow = null;
+  return undoNow;
+}
 function useUndo(): Undo | null {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); undoSubs.add(f); return () => { undoSubs.delete(f); }; }, []);
-  return undoNow;
+  return currentUndo();
+}
+/** Put the record back as it was before the action. Refused (returns false) if anything changed since. */
+export function undoLast(): boolean {
+  const u = currentUndo();
+  if (!u) { setUndo(null); return false; }
+  setState({ ...u.before });
+  setUndo(null);
+  return true;
 }
 const describe = (seg: Segment) => `${segLabel(seg.status, seg.note)} ${clock(seg.start)} → ${clock(seg.end)}`;
-function snapshot(label: string) { const s = getState(); setUndo({ label, segments: s.segments, tentative: s.tentative }); }
-export function currentUndo(): Undo | null { return undoNow; }
+/** Run a change to the record and make it undo-able. */
+function undoable(label: string, change: () => void) {
+  const before = pick(getState());
+  change();
+  setUndo({ label, before, after: pick(getState()) });
+}
 /** Save an edited entry; returns a reason it was refused, or null. Undo-able from the Log. */
 export function saveEntry(seg: Segment, next: { status: DutyStatus; start: number; end: number }, now: number): string | null {
   if (next.end <= next.start) return 'End must be after start.';
   if (next.end > now) return `End is after now (${clock(now)}). Logged time can only run up to now.`;
-  snapshot(`Edited ${describe(seg)}`);
-  setState((cur) => applySegmentEdit(cur, seg, next));
+  undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, next)));
   return null;
 }
 /** Delete an entry. Undo-able from the Log. */
 export function deleteEntry(seg: Segment) {
-  snapshot(`Deleted ${describe(seg)}`);
-  setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) }));
+  undoable(`Deleted ${describe(seg)}`, () => setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) })));
 }
-/** Add a forgotten entry; returns a reason it was refused, or null. */
+/** Add a forgotten entry; returns a reason it was refused, or null. Undo-able from the Log. */
 export function addEntry(status: DutyStatus, start: number, end: number, now: number): string | null {
   if (end <= start) return 'End must be after start.';
   if (end > now) return `End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`;
-  setState((cur) => ({ segments: [...cur.segments, { status, start, end, createdAt: stamp() }] }));
+  const row: Segment = { status, start, end, createdAt: stamp() };
+  undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
   return null;
+}
+/** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
+export function startOver(now: number) {
+  undoable('Started over with a fresh 10-hour rest', () => setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true }));
 }
 
 /** The carrier day `back` days before the one holding `now`: [start, end) in epoch minutes. */
@@ -900,7 +928,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
       {undo && (
         <div class="row undo">
           <span class="muted small">{undo.label}.</span>
-          <button class="mini" onClick={() => { setState({ segments: undo.segments, tentative: undo.tentative }); setUndo(null); }}>Undo</button>
+          <button class="mini" onClick={() => { undoLast(); }}>Undo</button>
         </div>
       )}
       <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Entries on this day (${dayRows.length})`}>
@@ -995,7 +1023,7 @@ function AddSheet({ now }: { now: number }) {
   const add = () => { const e = addEntry(st, a, b, now); setErr(e); if (!e) openSheet(null); };
   const fresh = () => {
     if (confirm('Replace the log with a fresh start (10h off ending now)?')) {
-      setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true });
+      startOver(now);
       openSheet(null);
     }
   };

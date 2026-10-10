@@ -1218,7 +1218,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 }
 // --- redesign 3: the Log, one day at a time; edit and add in panels
 {
-  const { openSheet, setLaunchNotice, saveEntry, deleteEntry, addEntry, currentUndo } = await import('../src/app.tsx');
+  const { openSheet, setLaunchNotice, saveEntry, deleteEntry, addEntry, currentUndo, undoLast } = await import('../src/app.tsx');
   const { getState: gs } = await import('../src/store.ts');
   const L = (d, h, m = 0) => Math.floor(Date.UTC(2026, 9, d, h + 5, m) / 60000); // Oct d, CDT
   const T = L(12, 10, 45);
@@ -1264,7 +1264,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const before = gs().segments.length;
   deleteEntry(gs().segments.find((x) => x.status === 'D' && x.end === L(12, 9, 45)));
   if (gs().segments.length !== before - 1 || !/^Deleted Driving/.test(currentUndo()?.label ?? '')) throw new Error('delete must remove the entry and offer undo');
-  setState({ segments: currentUndo().segments, tentative: currentUndo().tentative });
+  if (!undoLast()) throw new Error('the undo for the delete must still be valid');
   if (gs().segments.length !== before) throw new Error('undo must put it back');
   if (addEntry('SB', L(12, 1), L(12, 3), T) !== null || !gs().segments.some((x) => x.status === 'SB' && x.start === L(12, 1))) throw new Error('add must append the entry');
   if (!/End is after now/.test(addEntry('OFF', T - 10, T + 10, T) ?? '')) throw new Error('add must refuse time that has not happened');
@@ -1381,5 +1381,37 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setDrivingPeek(null); setLaunchNotice(true);
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('report fixes (opener affordance, way back from Details): OK');
+}
+// --- re-check N2: an undo must never throw away changes made after it
+{
+  const { saveEntry, addEntry, deleteEntry, tapStatus, currentUndo, undoLast, startOver } = await import('../src/app.tsx');
+  const { getState: gs } = await import('../src/store.ts');
+  const T = Math.floor(Date.UTC(2026, 9, 10, 16, 0) / 60000);
+  const rows = () => gs().segments.map((x) => `${x.status}@${x.start}-${x.end}`).sort().join(',');
+  setState({ nowOverride: T, historyAcknowledged: true, tentative: [], current: { status: 'ON', since: T - 120, createdAt: 3 },
+    segments: [{ status: 'OFF', start: T - 1200, end: T - 480, createdAt: 1 }, { status: 'D', start: T - 480, end: T - 120, createdAt: 2 }] });
+  // Daniel's repro: edit, add, then a status tap on Now; the edit's undo must be gone, and nothing lost
+  if (saveEntry(gs().segments[1], { status: 'D', start: T - 475, end: T - 120 }, T) !== null) throw new Error('the edit should save');
+  if (!currentUndo()) throw new Error('an edit must be undo-able');
+  if (addEntry('SB', T - 1100, T - 1000, T) !== null) throw new Error('the add should save');
+  if (!/^Added Sleeper/.test(currentUndo()?.label ?? '')) throw new Error('an add must be undo-able, and replace the edit\'s undo');
+  tapStatus('OFF');
+  const kept = rows();
+  if (currentUndo() !== null) throw new Error('a status tap changes the record, so the pending undo must be retired');
+  if (undoLast() !== false || rows() !== kept) throw new Error('a stale undo must change nothing');
+  if (!gs().segments.some((x) => x.status === 'SB') || !gs().segments.some((x) => x.status === 'ON' && x.end === T)) throw new Error('the added entry and the closed On Duty row must survive');
+  // an undo that is still current works, including for an add
+  if (addEntry('OFF', T - 30, T - 20, T) !== null || !undoLast() || rows() !== kept) throw new Error('undoing an add must remove exactly that add');
+  // a delete then another delete: only the last can be undone, and the undo restores only that one
+  deleteEntry(gs().segments.find((x) => x.status === 'SB'));
+  const afterFirst = rows();
+  deleteEntry(gs().segments.find((x) => x.status === 'D'));
+  if (!undoLast() || rows() !== afterFirst) throw new Error('undo must restore only the last delete');
+  // start over is undo-able too, current status included
+  const curBefore = gs().current;
+  startOver(T);
+  if (gs().segments.length !== 1 || !undoLast() || rows() !== afterFirst || gs().current !== curBefore) throw new Error('start over must be undo-able, current status included');
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('re-check N2 (undo never eats later changes): OK');
 }
 console.log('OK');
