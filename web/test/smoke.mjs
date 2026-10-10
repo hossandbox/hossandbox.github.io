@@ -1468,4 +1468,25 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tzChosen: true, config: { ...getState().config, timeZone: dz } });
   console.log('re-check N1 (terminal-zone question keeps the saved zone): OK');
 }
+// --- re-check N6: the Log's day is the terminal's day, and its date is read in the terminal zone
+{
+  const { deviceTz: dz } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  setLaunchNotice(false);
+  // a terminal zone well east of any test runner's zone: its midnight is the day before on the phone
+  const east = 'Pacific/Kiritimati'; // UTC+14
+  const T = Math.floor(Date.UTC(2026, 9, 10, 15, 0) / 60000); // Sat Oct 10 15:00 UTC = Sun Oct 11 05:00 in Kiritimati
+  setState({ nowOverride: T, tab: 'log', tzChosen: true, historyAcknowledged: true, segments: [], tentative: [], current: { status: 'ON', since: T - 60 },
+    config: { ...getState().config, timeZone: east, dayStartHour: 0 } });
+  let h = out('log/terminal far east');
+  if (!/Today, Sun, Oct 11/.test(h)) throw new Error(`the carrier day must carry the terminal's date (${(h.match(/Today, [^<]*/) || [''])[0]})`);
+  if (dz !== east && !/Carrier day from 00:00 Pacific\/Kiritimati · [A-Z][a-z]{2} \d\d:\d\d on this phone/.test(h)) throw new Error('with two zones, say when the day rolls on the phone clock');
+  // one zone: no extra words
+  setState({ config: { ...getState().config, timeZone: dz } });
+  h = out('log/one zone');
+  if (/on this phone/.test(h)) throw new Error('with one zone the subtitle stays short');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('re-check N6 (Log date in the terminal zone): OK');
+}
 console.log('OK');

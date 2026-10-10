@@ -878,7 +878,10 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const day = carrierDay(now, back, s);
   const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
   const canBack = day.start > earliest;
-  const dayName = new Date(day.start * 60000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  // The carrier day is the TERMINAL's day, so its date is read in the terminal zone. Read in the phone's
+  // zone, a terminal east of the phone showed Saturday as "Fri, Oct 9" (re-check N6).
+  const dayName = new Date(day.start * 60000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: s.config.timeZone });
+  const twoZones = s.config.timeZone !== deviceTz;
 
   /**
    * Overlapping raw entries. The engine resolves them (a later entry wins over the range it
@@ -918,7 +921,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
     <>
       <div class="daynav">
         <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
-        <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00</span></div>
+        <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
         <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
       </div>
       <section class="card">
