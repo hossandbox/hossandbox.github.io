@@ -603,3 +603,27 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      re-sent copy of the redesign patch, which is byte-identical to the one already applied). The base was
      established from the patch's own pre-image blobs instead, so every claim above was verified from the
      artefact rather than the note. If the note lists phone checks, they are still to do.
+- **Driver-driven wording fix (2026-10-10, 1 commit, base `21074cb`)** — from Lorico's own question on his
+  phone: the Why panel's break row read *"After 8 hours of driving you need 30 minutes in a row without
+  driving"* next to a bare time, and never said whether that time was when the break **starts** or when it
+  must be **finished**.
+  1. **The rule** — §395.3(a)(3)(ii), quoted from eCFR: *"driving is not permitted if more than 8 hours of
+     driving time have passed without at least a consecutive 30-minute interruption in driving status. A
+     consecutive 30-minute interruption of driving status may be satisfied either by off-duty, sleeper
+     berth or on-duty not driving time or by a combination of off-duty, sleeper berth and on-duty not
+     driving time."* So the time on that row is the **latest the break may start**, and the row now says
+     it: *"Stop for 30 minutes in a row before your driving adds up to 8 hours. Take it any time before
+     then: off duty, sleeper, or on duty without driving (fueling, an inspection) all count."* The time
+     carries a small **latest start** label, and the Now meter reads **"due in …"** rather than "in …".
+  2. **The dock now rests in one place.** It is sticky inside `<main>`; at the end of the page it sat at
+     its own spot in the page, which `<main>`'s 84px bottom padding put **23px above** its sticky offset
+     (61px) — so scrolling up from the end dropped the dock 23px until the opener sat flush against the
+     tab bar (measured: 23px gap at the end, 0px anywhere else). Now `<main class="has-dock">` on Now
+     carries bottom padding exactly equal to the sticky offset, and the dock has its own 12px gap.
+     Measured after: **12px at every scroll position**.
+  3. **Independently falsified: 6 mutations** (`reviews/falsify-breakword.py`) — the author's five (label
+     emptied, old wording, padding rule removed, class removed, gap removed) plus the meter wording.
+     **6/6**, each with its own assertion; tree restored. Engine untouched (99/99); contrast 31/31.
+  4. **Still no cover note** — only the patch arrived, and the Taildrop queue was again blocked on the
+     re-sent recheck patch (byte-identical to the applied one). Base established from the patch's own
+     pre-image blobs: **3/3 match `21074cb` exactly**, 3/3 final blobs match the author's.
