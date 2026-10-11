@@ -1541,6 +1541,136 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('re-check N5 (what-if rows can be edited): OK');
 }
+// --- re-check 2 (Daniel Tam) R1: a what-if plan may not be pushed back into logged time
+{
+  const { saveEntry, setLaunchNotice } = await import('../src/app.tsx');
+  const { getState: gs, allSegments } = await import('../src/store.ts');
+  const { evaluate: ev, normalize: nrm } = await import('../../engine/src/index.ts');
+  const T = Math.floor(Date.UTC(2026, 9, 11, 18, 0) / 60000);
+  const logged = [
+    { status: 'OFF', start: T - 18 * 60, end: T - 7 * 60, createdAt: T - 5000 },
+    { status: 'D', start: T - 7 * 60, end: T - 1 * 60, createdAt: T - 4000 },
+  ];
+  const live = { status: 'ON', since: T - 60, createdAt: T - 3000 };
+  const plan = { status: 'OFF', start: T + 30, end: T + 90, tentative: true, createdAt: T - 2000 };
+  setState({ nowOverride: T, tab: 'log', historyAcknowledged: true, segments: logged, current: live, tentative: [plan] });
+  const cfg = gs().config;
+  const before = ev(allSegments(gs(), T), { asOf: T, config: cfg });
+  if (before.driveNow !== 300 || before.cycle.remaining !== 63 * 60) throw new Error(`the fixture must start at 5h / 63h left (got ${before.driveNow} / ${before.cycle.remaining})`);
+  // the re-check's edit: "Started -15" x30, "Ended -15" x10 -- lands the what-if exactly on the drive
+  const refused = saveEntry(plan, { status: 'OFF', start: plan.start - 450, end: plan.end - 150 }, T);
+  if (!/what-if plan can only cover time from now on/.test(refused ?? '')) throw new Error(`a what-if must not be pushed into logged time (got ${JSON.stringify(refused)})`);
+  if (gs().tentative[0].start !== plan.start || gs().tentative[0].end !== plan.end) throw new Error('a refused edit must leave the plan untouched');
+  // and nothing may come of it: the 6h drive survives and every clock is where it was
+  const after = ev(allSegments(gs(), T), { asOf: T, config: cfg });
+  if (after.driveNow !== before.driveNow || after.cycle.remaining !== before.cycle.remaining || after.shift.windowRemaining !== before.shift.windowRemaining) {
+    throw new Error('a refused what-if edit must not move a clock');
+  }
+  if (!nrm(allSegments(gs(), T)).some((r) => r.status === 'D' && r.end - r.start === 360)) throw new Error('the logged 6h drive must survive');
+  // N5 still holds: a what-if inside the future is editable
+  if (saveEntry(gs().tentative[0], { status: 'OFF', start: T + 45, end: T + 105 }, T) !== null) throw new Error('a future what-if must still be editable');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
+  console.log('re-check 2 R1 (a what-if cannot be pushed into logged time): OK');
+}
+// --- re-check 2 (Daniel Tam) R2: an imported draft the app cannot use is not merged in unchecked
+{
+  const { importProblem, applyImportedState, draftResets, getState: gs, DEFAULT_SPLIT, DEFAULT_LOADCHECK } = await import('../src/store.ts');
+  const bad = { segments: [], split: { b1: 'abc', b1s: 'XX', dwell: -500, drive: 1e9, b2: null, b2s: 7 }, loadCheck: { miles: 10000000, leaveIn: -99999, dwell: 'x' } };
+  if (importProblem(bad) !== null) throw new Error('this fixture\'s segment list is fine, so the file itself must stay importable');
+  const cur = gs();
+  const names = draftResets(bad, cur);
+  if (!names.includes('the Split Lab plan') || !names.includes('the load question')) throw new Error(`the replaced drafts must be named so the message can say so (got ${JSON.stringify(names)})`);
+  const applied = applyImportedState(cur, bad);
+  // a value of the wrong type -> the default; a finite value outside the control's range -> clamped
+  if (applied.split.b1 !== DEFAULT_SPLIT.b1 || applied.split.b2 !== DEFAULT_SPLIT.b2) throw new Error(`a Split Lab length that is not a number must fall back (got ${JSON.stringify(applied.split)})`);
+  if (applied.split.dwell !== 0 || applied.split.drive !== 660) throw new Error(`out-of-range Split Lab lengths must be clamped to the control's range (got ${JSON.stringify(applied.split)})`);
+  if (applied.split.b1s !== 'OFF' || applied.split.b2s !== 'SB') throw new Error('a Split Lab draft with an unknown break status must fall back to a legal one');
+  if (applied.loadCheck.miles !== 3000 || applied.loadCheck.leaveIn !== 0) throw new Error(`out-of-range load numbers must be clamped to the control's range (got ${JSON.stringify(applied.loadCheck)})`);
+  if (applied.loadCheck.dwell !== cur.loadCheck.dwell) throw new Error('a load duration that is not a number must fall back to what is on screen');
+  if (applied.loadCheck.waitOff !== cur.loadCheck.waitOff || applied.loadCheck.dwellOff !== cur.loadCheck.dwellOff) throw new Error('a non-boolean flag must fall back to what is on screen');
+  // merely out of range -> clamped to what the controls allow, not dropped
+  const clamped = applyImportedState(cur, { segments: [], split: { ...DEFAULT_SPLIT, drive: 9999 }, loadCheck: { ...DEFAULT_LOADCHECK, miles: 9999 } });
+  if (clamped.split.drive !== 660 || clamped.loadCheck.miles !== 3000) throw new Error(`out-of-range numbers must be clamped to the control's range (got ${clamped.split.drive}/${clamped.loadCheck.miles})`);
+  // a bad trip draft, mph and live status have the same gap and get the same treatment
+  const other = applyImportedState(cur, { segments: [], mph: 1e6, current: { status: 'XX', since: 'nope' }, trip: { miles: 1e9, until: 'NOPE', dep: 'not-a-date' } });
+  if (other.mph !== 100) throw new Error(`an out-of-range mph must be clamped (got ${other.mph})`);
+  if (other.current !== null) throw new Error('a live status with an unknown status and an unusable time must be dropped, not kept');
+  if (other.trip.miles !== 5000 || other.trip.until !== cur.trip.until || other.trip.dep !== cur.trip.dep) throw new Error(`a bad trip draft must fall back field by field (got ${JSON.stringify(other.trip)})`);
+  // the Split Lab plan built from the sanitized draft is a real plan, not a 1,900,000-year one
+  const plan = [];
+  let t = 0;
+  const push = (status, m, note) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
+  const sd = applied.split;
+  push(sd.b1s, sd.b1, 'Break 1'); push('ON', sd.dwell, 'On duty'); push('D', sd.drive, 'Drive'); push(sd.b2s, sd.b2, 'Break 2');
+  if (!plan.length || !plan.every((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start)) throw new Error('the Split Lab plan must be made of real times');
+  if (t > 3000) throw new Error(`the Split Lab plan spans ${t} minutes — a draft like that is what froze the screen`);
+  // and M8 still holds: a file whose drafts are good comes back exactly as it went in
+  const good = { segments: [], split: { b1: 210, b1s: 'SB', dwell: 45, drive: 300, b2: 420, b2s: 'OFF' }, loadCheck: { miles: 900, dwell: 60, dwellOff: true, leaveIn: 30, waitOff: false, answered: true } };
+  const back = applyImportedState(cur, good);
+  if (JSON.stringify(back.split) !== JSON.stringify(good.split)) throw new Error('a valid Split Lab draft must come back unchanged (M8)');
+  if (JSON.stringify(back.loadCheck) !== JSON.stringify(good.loadCheck)) throw new Error('a valid load draft must come back unchanged (M8)');
+  if (draftResets(good, cur).length !== 0) throw new Error('a clean file must not be reported as having replaced anything');
+  console.log('re-check 2 R2 (imported drafts are checked before use): OK');
+}
+// --- re-check 2 (Daniel Tam) R3: a reload must not leave Back presses doing nothing
+{
+  const { createBackNav } = await import('../src/backnav.ts');
+  // The suite's own fake history: go() lands later, as in a browser, and fires popstate once.
+  const mk = () => {
+    const h = { entries: [{ state: null }], i: 0, queued: [], left: false,
+      get state() { return this.entries[this.i].state; },
+      pushState(d) { this.entries.length = this.i + 1; this.entries.push({ state: d }); this.i++; },
+      replaceState(d) { this.entries[this.i] = { state: d }; },
+      go(n) { this.queued.push(n); },
+      land(onPop) { while (this.queued.length) { const n = this.queued.shift(); const j = this.i + n; if (j < 0) { this.left = true; return; } this.i = j; onPop(); } },
+      back(onPop) { this.go(-1); this.land(onPop); } };
+    return h;
+  };
+  const h = mk();
+  let tab = 'now', sheet = false;
+  const nav = createBackNav(h, () => ({ tab, sheet }), { closeSheet: () => { sheet = false; }, goTo: (t) => { tab = t; } });
+  // session 1: the driver goes Now -> Log -> Plan -> the load question, then the page reloads (or updates)
+  nav.sync();
+  tab = 'log'; nav.sync(); h.land(() => nav.onPop());
+  tab = 'plan'; nav.sync(); h.land(() => nav.onPop());
+  tab = 'load'; nav.sync(); h.land(() => nav.onPop());
+  if (h.i !== 2) throw new Error(`session 1 should leave 2 app entries above the page, saw ${h.i}`);
+
+  // the reload: same history, a fresh nav, the app opens on Now with nothing open
+  let tab2 = 'now', sheet2 = false;
+  const nav2 = createBackNav(h, () => ({ tab: tab2, sheet: sheet2 }), { closeSheet: () => { sheet2 = false; }, goTo: (t) => { tab2 = t; } });
+  nav2.sync();
+  if (h.queued.length === 0) throw new Error('a fresh load on one of our own entries must step back over the run');
+  h.land(() => nav2.onPop());
+  if (h.i !== 0) throw new Error(`the fresh load must end on the page entry below everything it left behind (index ${h.i})`);
+
+  // the cleanup must not leave the nav believing a move of its own is still in flight, or every later
+  // push is swallowed and Back stops working for the rest of the session
+  tab2 = 'log'; nav2.sync();
+  if (h.i !== 1) throw new Error('after the cleanup the nav must be able to push again');
+  h.land(() => nav2.onPop());
+  tab2 = 'now'; nav2.sync(); h.land(() => nav2.onPop());
+  if (h.i !== 0) throw new Error('and it must still come back to the page entry');
+
+  // so the FIRST Back press does what Back should: nothing is open, so the app is left
+  h.back(() => nav2.onPop());
+  if (!h.left) throw new Error('after a reload the first Back press must leave the app, not do nothing');
+
+  // and an in-app move is not mistaken for a leftover: closing a panel still lands on our own entry
+  const h3 = mk();
+  let t3 = 'now', s3 = false;
+  const nav3 = createBackNav(h3, () => ({ tab: t3, sheet: s3 }), { closeSheet: () => { s3 = false; }, goTo: (t) => { t3 = t; } });
+  nav3.sync();
+  t3 = 'log'; nav3.sync(); h3.land(() => nav3.onPop());
+  s3 = true; nav3.sync(); h3.land(() => nav3.onPop());
+  if (h3.i !== 2) throw new Error(`Log + a panel should sit 2 entries above the page, saw ${h3.i}`);
+  s3 = false; nav3.sync(); h3.land(() => nav3.onPop());
+  if (h3.i !== 1 || h3.left) throw new Error(`closing the panel must land on the Log entry, not leave (index ${h3.i})`);
+  h3.back(() => nav3.onPop());
+  if (t3 !== 'now') throw new Error('the next Back press must still return to Now');
+  console.log('re-check 2 R3 (a reload does not swallow Back presses): OK');
+}
 // --- re-check: the screen lock is taken again after a drop; a simulated clock leaves no alert memory
 {
   const { holdWakeLock, alertTick, nextAlert, NO_ALERTS } = await import('../src/alerts.ts');
@@ -1622,10 +1752,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ui2('now'); if (h2.i !== 0) throw new Error('tapping Now in the tab bar must remove the tab entry');
   ui2(undefined, true); h2.back(pop2);
   if (sheet !== false || tab !== 'now' || h2.left) throw new Error('on Now, Back closes the panel without leaving');
-  // a reload on top of old entries starts clean
+  // a reload on top of old entries steps back OVER them, rather than just forgetting the mark: an entry
+  // left behind is one the driver would otherwise press Back through for nothing (re-check 2, R3).
   const h3 = mk(); h3.pushState({ app: 'hos-sandbox', layer: 'tab' }, '');
   createBackNav(h3, () => ({ tab: 'now', sheet: false }), { closeSheet() {}, goTo() {} });
-  if (h3.state !== null) throw new Error('an entry left by an earlier load must not be counted as ours');
+  if (h3.queued.length !== 1 || h3.queued[0] !== -1) throw new Error(`a fresh load on an old entry must step back over it (got ${JSON.stringify(h3.queued)})`);
+  h3.land(() => {});
+  if (h3.state !== null || h3.i !== 0) throw new Error('the leftover entry must be left behind, not counted as ours');
   console.log('re-check M11 (Back button): OK');
 }
 // --- re-check M9: the Split Lab hint reads the record in time order, not entry order

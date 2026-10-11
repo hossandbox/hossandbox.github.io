@@ -450,20 +450,108 @@ export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>
  */
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
+/*
+ * An imported file's DRAFTS used to be merged with no checks at all: a Split Lab draft of
+ * {drive: 1e9} made the screen unresponsive for minutes and a 10,000,000-mile load produced nonsense
+ * (Daniel Tam, re-check 2, R2). They are UI state, but they are consumed by real math, so each field is
+ * checked the way an imported config already was: a value the controls could not have produced falls
+ * back to the default (or to what is on screen), and finite numbers are clamped to the allowed range.
+ * `mph`, `current` and the trip draft had the same gap.
+ */
+const numIn = (v: unknown, lo: number, hi: number, fallback: number): number =>
+  (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+const boolAt = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+  (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
+
+export const SPLIT_MS = ['OFF', 'SB'] as const;
+export const TRIP_UNTILS = ['OFF', 'SB', 'D', 'ON', 'CURRENT'] as const;
+export const TRIP_VIEWS = ['reset10', 'split', 'restart34'] as const;
+
+export function sanitizeSplit(d: unknown, fallback: SplitDraft): SplitDraft {
+  if (!isObj(d)) return fallback;
+  return {
+    b1: numIn(d.b1, 0, 600, fallback.b1),
+    b1s: oneOf(d.b1s, SPLIT_MS, fallback.b1s),
+    dwell: numIn(d.dwell, 0, 240, fallback.dwell),
+    drive: numIn(d.drive, 0, 660, fallback.drive),
+    b2: numIn(d.b2, 0, 600, fallback.b2),
+    b2s: oneOf(d.b2s, SPLIT_MS, fallback.b2s),
+  };
+}
+
+export function sanitizeLoadCheck(d: unknown, fallback: LoadCheckDraft): LoadCheckDraft {
+  if (!isObj(d)) return fallback;
+  return {
+    miles: numIn(d.miles, 1, 3000, fallback.miles),
+    dwell: numIn(d.dwell, 0, 1440, fallback.dwell),
+    dwellOff: boolAt(d.dwellOff, fallback.dwellOff),
+    leaveIn: numIn(d.leaveIn, 0, 1440, fallback.leaveIn),
+    waitOff: boolAt(d.waitOff, fallback.waitOff),
+    answered: boolAt(d.answered, fallback.answered),
+  };
+}
+
+export function sanitizeTrip(d: unknown, fallback: TripDraft): TripDraft {
+  if (!isObj(d)) return fallback;
+  // A departure string that does not parse is the same class of defect as a non-finite number.
+  const dep = d.dep === null ? null : typeof d.dep === 'string' && Number.isFinite(Date.parse(d.dep)) ? d.dep : fallback.dep;
+  return {
+    miles: numIn(d.miles, 1, 5000, fallback.miles),
+    pre: numIn(d.pre, 0, 240, fallback.pre),
+    stopMile: numIn(d.stopMile, 0, 5000, fallback.stopMile),
+    stopMin: numIn(d.stopMin, 0, 1440, fallback.stopMin),
+    stopOff: boolAt(d.stopOff, fallback.stopOff),
+    dep,
+    until: oneOf(d.until, TRIP_UNTILS, fallback.until),
+    view: d.view === null ? null : oneOf(d.view, TRIP_VIEWS, fallback.view ?? 'reset10'),
+  };
+}
+
+const DUTY = ['OFF', 'SB', 'D', 'ON'] as const;
+/** The live status, checked: a bad one is the same class as a bad segment row. */
+export function sanitizeCurrent(d: unknown): State['current'] {
+  if (!isObj(d)) return null;
+  const status = oneOf(d.status, DUTY, 'OFF' as const);
+  if (!Number.isFinite(d.since)) return null;
+  const out: NonNullable<State['current']> = { status, since: d.since as number };
+  if (typeof d.note === 'string') out.note = d.note;
+  if (Number.isFinite(d.createdAt)) out.createdAt = d.createdAt as number;
+  return out;
+}
+
 export function applyImportedState(cur: State, d: Partial<State>): Partial<State> {
   return {
     segments: d.segments ?? [],
     tentative: d.tentative ?? [],
-    current: d.current ?? null,
+    current: 'current' in d ? sanitizeCurrent(d.current) : cur.current,
     config: sanitizeConfig(d.config, cur.config),
-    mph: d.mph ?? cur.mph,
-    trip: { ...DEFAULT_TRIP, ...(d.trip ?? {}) },
+    mph: numIn(d.mph, 5, 100, cur.mph),
+    trip: sanitizeTrip(d.trip, cur.trip),
     // The Split Lab plan and the load question came back from a backup too (re-check M8). A backup made
     // before they were exported has neither, and then what is on screen stays rather than being reset.
-    split: isObj(d.split) ? { ...DEFAULT_SPLIT, ...d.split } : cur.split,
-    loadCheck: isObj(d.loadCheck) ? { ...DEFAULT_LOADCHECK, ...d.loadCheck } : cur.loadCheck,
+    split: 'split' in d ? sanitizeSplit(d.split, cur.split) : cur.split,
+    loadCheck: 'loadCheck' in d ? sanitizeLoadCheck(d.loadCheck, cur.loadCheck) : cur.loadCheck,
     bugEmail: typeof d.bugEmail === 'string' ? d.bugEmail : cur.bugEmail,
   };
+}
+
+/** Names of the imported drafts whose values were unusable and got replaced, for the import message. */
+export function draftResets(d: unknown, cur: State): string[] {
+  if (!isObj(d)) return [];
+  const out: string[] = [];
+  const sameSplit = (a: SplitDraft, b: SplitDraft) =>
+    a.b1 === b.b1 && a.b1s === b.b1s && a.dwell === b.dwell && a.drive === b.drive && a.b2 === b.b2 && a.b2s === b.b2s;
+  const sameLoad = (a: LoadCheckDraft, b: LoadCheckDraft) =>
+    a.miles === b.miles && a.dwell === b.dwell && a.dwellOff === b.dwellOff && a.leaveIn === b.leaveIn && a.waitOff === b.waitOff && a.answered === b.answered;
+  if (isObj(d.split) && !sameSplit(sanitizeSplit(d.split, cur.split), { ...DEFAULT_SPLIT, ...d.split } as SplitDraft)) out.push('the Split Lab plan');
+  if (isObj(d.loadCheck) && !sameLoad(sanitizeLoadCheck(d.loadCheck, cur.loadCheck), { ...DEFAULT_LOADCHECK, ...d.loadCheck } as LoadCheckDraft)) out.push('the load question');
+  if (isObj(d.trip)) {
+    const raw = { ...DEFAULT_TRIP, ...d.trip } as TripDraft;
+    const got = sanitizeTrip(d.trip, cur.trip);
+    if (raw.miles !== got.miles || raw.pre !== got.pre || raw.stopMile !== got.stopMile || raw.stopMin !== got.stopMin || raw.dep !== got.dep || raw.until !== got.until || raw.view !== got.view) out.push('the trip plan');
+  }
+  return out;
 }
 
 const STATUSES = new Set(['OFF', 'SB', 'D', 'ON']);

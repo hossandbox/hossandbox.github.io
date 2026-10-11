@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -866,6 +866,13 @@ export function saveEntry(seg: Segment, next: { status: DutyStatus; start: numbe
   // "Only up to now" is a rule for logged time. A what-if row is a plan, and a plan is in the future;
   // applying the rule to it meant a what-if could only ever be deleted (re-check N5).
   if (!seg.tentative && next.end > now) return `End is after now (${clock(now)}). Logged time can only run up to now.`;
+  // ...but a plan must not reach BACK into logged time either. A what-if row is drawn last in the
+  // resolved timeline on purpose (a plan must never be silently overwritten by the history it overlaps),
+  // so a what-if moved into the past masks the logged driving underneath it and every clock is then read
+  // off the plan instead of the record: 6h of logged driving disappeared, "You can drive" went 5h -> 8h
+  // and the week 63h -> 69h left (Daniel Tam, re-check 2, R1). N5 still holds: a what-if inside the
+  // future is editable.
+  if (seg.tentative && next.start < now) return `A what-if plan can only cover time from now on (${clock(now)}). Pushing it back would hide logged time — edit the logged entry instead.`;
   undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, next)));
   return null;
 }
@@ -1585,8 +1592,11 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         return;
       }
       const badZone = typeof d.config?.timeZone === 'string' && !isValidTimeZone(d.config.timeZone) ? d.config.timeZone : null;
+      // Say what was replaced, exactly as the bad-zone case does: an imported draft that the app could
+      // not use must not be silently swapped for a default.
+      const resets = draftResets(d, cur);
       setState((cur) => applyImportedState(cur, d));
-      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.${badZone ? ` The file's time zone "${badZone}" is not valid, so your home terminal zone stayed ${getState().config.timeZone}.` : ''}`);
+      setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.${badZone ? ` The file's time zone "${badZone}" is not valid, so your home terminal zone stayed ${getState().config.timeZone}.` : ''}${resets.length ? ` Values the app could not use were replaced in ${resets.join(' and ')}.` : ''}`);
     }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
   };
   return (

@@ -36,11 +36,24 @@ export function createBackNav(
   view: () => { tab: string; sheet: boolean },
   act: { closeSheet: () => void; goTo: (tab: 'now' | 'plan') => void },
 ): BackNav {
-  // Entries left by an earlier page load are not ours to count: start clean on top of them.
-  if ((h.state as { app?: string } | null)?.app === MARK) h.replaceState(null, '');
   const layers: Layer[] = [];
   /** History moves we started ourselves; their popstate events are not the driver pressing Back. */
   let ours = 0;
+  /** True while stepping back over entries an earlier page load left behind. */
+  let cleaning = false;
+
+  // Entries left by an earlier page load are not ours to count — and they are not the driver's to press
+  // Back through either. A reload (or an app update) leaves this app's own entries in the stack with
+  // nothing open behind them, and each one swallowed a Back press before the app did anything: go
+  // Now -> Log -> Plan, reload, and the first two presses did nothing at all (Daniel Tam, re-check 2,
+  // R3). Every entry records how deep it sits, so a fresh load steps back over the whole run at once.
+  const st = h.state as { app?: string; depth?: number } | null;
+  if (st?.app === MARK) {
+    cleaning = true;
+    const depth = Number.isInteger(st.depth) && (st.depth as number) > 0 ? (st.depth as number) : 1;
+    ours += 1; // a traversal fires ONE popstate, however many entries it crosses
+    h.go(-depth);
+  }
 
   const wanted = (): Layer[] => {
     const v = view();
@@ -64,11 +77,21 @@ export function createBackNav(
       h.go(-n);
       return; // pushes (if any) happen after the move lands, never racing it
     }
-    for (let i = same; i < w.length; i++) { h.pushState({ app: MARK, layer: w[i] }, ''); layers.push(w[i]); }
+    for (let i = same; i < w.length; i++) { h.pushState({ app: MARK, layer: w[i], depth: layers.length + 1 }, ''); layers.push(w[i]); }
   };
 
   const onPop = () => {
-    if (ours > 0) { ours--; sync(); return; }
+    if (ours > 0) {
+      ours--;
+      if (ours > 0) return; // more of our own moves still to land
+      if (cleaning) {
+        // Landed, but an older load may have left another of ours below: keep stepping until we are not.
+        if ((h.state as { app?: string } | null)?.app === MARK) { ours++; h.go(-1); return; }
+        cleaning = false;
+      }
+      sync();
+      return;
+    }
     // The driver pressed Back: one of our entries is gone. Close whatever it stood for.
     layers.pop();
     const v = view();
