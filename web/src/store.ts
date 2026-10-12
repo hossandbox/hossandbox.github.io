@@ -650,7 +650,8 @@ export function currentRunStart(s: State, now: number): number {
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };
-export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', SB: 'var(--accent)', D: 'var(--good)', ON: 'var(--warn)' };
+// Sleeper has its own colour: the accent is the ice blue of the dials and links in the cab look.
+export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', SB: 'var(--sb)', D: 'var(--good)', ON: 'var(--warn)' };
 
 /**
  * 'night' is the product default and needs no attribute — `:root` carries the night palette.
@@ -667,7 +668,8 @@ export function applyTheme(t: Theme) {
   // Keep the browser chrome (address bar, status bar, PWA title bar) on the ACTIVE palette. Hardcoded
   // in index.html it would show a dark strip above the light app on a fresh install.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', t === 'day' ? '#f2f5fa' : '#0f1420');
+  // The page colour of each palette (--bg in styles.css; the smoke test holds the two together).
+  if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : '#090c10');
 }
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };

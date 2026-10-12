@@ -519,13 +519,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
       },
       querySelector: (sel) => (sel === 'meta[name="theme-color"]' ? { setAttribute: (k, v) => { if (k === 'content') attrs.meta = v; } } : null),
     };
+    // the chrome colour must be each palette's own page colour, read from the stylesheet (cab look, 2026-10-12)
+    const { readFileSync: rf } = await import('node:fs');
+    const css = rf('public/styles.css', 'utf8');
+    const bgOf = (sel) => (css.slice(css.indexOf(sel)).match(/--bg:\s*(#[0-9a-f]{6})/i) || [])[1];
+    const nightBg = bgOf(':root {'), dayBg = bgOf(':root[data-theme="day"] {');
     try {
       applyTheme('night');
       if (attrs.theme !== null) throw new Error(`night must clear data-theme, got ${attrs.theme}`);
-      if (attrs.meta !== '#0f1420') throw new Error(`night must set the dark chrome colour, got ${attrs.meta}`);
+      if (attrs.meta !== nightBg) throw new Error(`night must set the dark chrome colour ${nightBg}, got ${attrs.meta}`);
       applyTheme('day');
       if (attrs.theme !== 'day') throw new Error(`day must set data-theme=day, got ${attrs.theme}`);
-      if (attrs.meta !== '#f2f5fa') throw new Error(`day must set the light chrome colour, got ${attrs.meta}`);
+      if (attrs.meta !== dayBg) throw new Error(`day must set the light chrome colour ${dayBg}, got ${attrs.meta}`);
+      const html = rf('public/index.html', 'utf8'), mf = rf('public/manifest.webmanifest', 'utf8');
+      if (!html.includes(`content="${dayBg}"`) || !mf.includes(`"theme_color": "${dayBg}"`)) throw new Error('index.html and the manifest must start on the day page colour');
     } finally {
       delete globalThis.document;
     }
@@ -1349,6 +1356,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     if (!/font-display:\s*swap/.test(f)) throw new Error('fonts must not hide text while they load');
   }
   if (!/Open Font License/.test(readFileSync('public/fonts/OFL.txt', 'utf8'))) throw new Error('the font licence must ship with the font');
+  // the cab look adds the Mono readout face: its own licence ships too, and both families are declared
+  if (!/Open Font License/.test(readFileSync('public/fonts/OFL-mono.txt', 'utf8'))) throw new Error('the Mono licence must ship with the Mono font');
+  if (!faces.some((f) => /Atkinson Hyperlegible Mono/.test(f)) || !faces.some((f) => /Atkinson Hyperlegible Next/.test(f))) throw new Error('both typefaces must be declared');
   if (!/font:[^;]*"Atkinson Hyperlegible Next",[^;]*sans-serif/.test(css)) throw new Error('the body must use the font, with a system fallback');
   if (/fonts\.googleapis|fonts\.gstatic/.test(css + readFileSync('public/index.html', 'utf8'))) throw new Error('no outside font service: nothing leaves the phone');
   console.log('redesign 5 (typeface): OK');
@@ -1826,5 +1836,64 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/\.dock \{[^}]*padding: 8px 12px 12px/.test(css)) throw new Error('the dock keeps its own gap above the tab bar');
   setLaunchNotice(true); setState({ nowOverride: null, drivingView: true, historyAcknowledged: false, segments: [], current: null });
   console.log('driver question (break wording, dock rests in one place): OK');
+}
+// --- the cab look (2026-10-12): dials, backlit keys, the status capsule, the sleeper colour
+{
+  const { dialGeometry, setLaunchNotice, setDrivingPeek, openSheet } = await import('../src/app.tsx');
+  const { STATUS_COLOR, getState: gs } = await import('../src/store.ts');
+  const { readFileSync } = await import('node:fs');
+  // 1. dial geometry: a fuel gauge over 270°, the scale outside the arc
+  const S = 300, c = S / 2, r = S * 0.4, sw = S * 0.05;
+  const full = dialGeometry(1, 11, S), empty = dialGeometry(0, 11, S), half = dialGeometry(0.5, 11, S);
+  if (full.fill !== full.track) throw new Error('a full limit must fill the whole arc');
+  if (empty.fill !== null) throw new Error('an empty limit draws no fill (and no cap)');
+  if (Math.abs(half.end.x - c) > 0.01 || Math.abs(half.end.y - (c - r)) > 0.01) throw new Error(`half left must end at the top of the dial (got ${half.end.x},${half.end.y})`);
+  if (dialGeometry(1.7, 11, S).fill !== full.track || dialGeometry(-1, 11, S).fill !== null) throw new Error('the share is clamped to 0–1');
+  if (full.ticks.length !== 12 || dialGeometry(1, 14, S).ticks.length !== 15 || dialGeometry(1, 70, S).ticks.length !== 8) throw new Error('one mark per hour (11h: 12, 14h: 15), one per 10h for the week (70h: 8)');
+  for (const t of dialGeometry(0.3, 14, S).ticks) {
+    const d = Math.hypot(t.x1 - c, t.y1 - c);
+    if (d < r + sw * 0.65) throw new Error('scale marks must sit outside the arc, never across the number');
+  }
+  if (full.scale.max !== '11h' || dialGeometry(1, 70, S).scale.max !== '70h') throw new Error('the scale is labelled with the limit');
+
+  // 2. Now: the hero is a dial of the binding limit, the limit on a plate under it
+  const T = Math.floor(Date.UTC(2026, 9, 12, 19, 0) / 60000);
+  setLaunchNotice(false); setDrivingPeek(null);
+  setState({ nowOverride: T, tab: 'now', drivingView: true, historyAcknowledged: true, tentative: [],
+    segments: [{ status: 'OFF', start: T - 900, end: T - 210 }, { status: 'D', start: T - 210, end: T }], current: { status: 'ON', since: T } });
+  let h = out('now/cab dial');
+  if (!/<section class="hero"><div class="dial calm">/.test(h)) throw new Error('Now leads with the dial');
+  if (!/<path class="dial-fill"/.test(h) || !/<circle class="dial-cap"/.test(h)) throw new Error('the dial shows what is left');
+  // 3h30 driven: the 30-minute break binds first (4h30 left of 8h), so the dial is the break's
+  if (!/class="dial-center"><div class="hero-label">You can drive<\/div><div class="hero-value good">4h 30m<\/div>/.test(h)) throw new Error('the number sits in the middle of the dial');
+  if (!/<span class="limit-plate">limited by 8-hour rule \(30-min break in 4h 30m\)<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
+  if (!/<text class="dial-scale"[^>]*>8h<\/text>/.test(h)) throw new Error('the dial is scaled to the limit that binds (the break: 8h)');
+  // 3. keys and capsule: LED colour through --led, not a coloured slab; the lit key also carries a check
+  if (!/class="pill" style="--led: var\(--warn\)"/.test(h)) throw new Error('the status capsule takes its LED colour from the status');
+  if (!/style="--led: var\(--sb\)"[^>]*aria-pressed="false"/.test(h)) throw new Error('the Sleeper key is lit in the sleeper colour');
+  if (!/style="--led: var\(--warn\)" class="on" aria-pressed="true"><svg/.test(h)) throw new Error('the current status key is marked on, pressed, with a check — not by colour alone');
+  if (/class="status-buttons"[\s\S]{0,400}background: var\(--/.test(h)) throw new Error('the status keys are no longer solid colour slabs');
+  if (!/class="muted clock"/.test(h)) throw new Error('the header clock uses the readout face');
+  // 4. the driving view: the same dial, amber at 45 min, red at zero, no bar
+  // 10h15 driven with a 30-min break after 5h: the 11-hour limit binds, 45 min left
+  setState({ current: { status: 'D', since: T }, segments: [{ status: 'OFF', start: T - 1400, end: T - 645 }, { status: 'D', start: T - 645, end: T - 345 }, { status: 'OFF', start: T - 345, end: T - 315 }, { status: 'D', start: T - 315, end: T }] });
+  h = out('drive/cab dial 45m');
+  if (!/<main class="drive warn"[\s\S]*<div class="dial warn">/.test(h)) throw new Error('45 min left: the driving dial turns amber');
+  if (!/class="dial-center"><div class="drive-label">Driving left<\/div><div class="drive-num short">45m<\/div>/.test(h)) throw new Error('the driving number sits in the dial');
+  if (/drive-bar/.test(h)) throw new Error('the dial replaces the old bar');
+  setState({ segments: [{ status: 'OFF', start: T - 1400, end: T - 690 }, { status: 'D', start: T - 690, end: T - 390 }, { status: 'OFF', start: T - 390, end: T - 360 }, { status: 'D', start: T - 360, end: T }] });
+  h = out('drive/cab dial 0');
+  if (!/<div class="dial bad">/.test(h) || /class="dial-fill"/.test(h)) throw new Error('out of time: a red, empty dial');
+  // 5. Sleeper has its own colour in both palettes; the accent is free for dials and links
+  if (STATUS_COLOR.SB !== 'var(--sb)') throw new Error('Sleeper must not share the accent colour');
+  const css = readFileSync('public/styles.css', 'utf8');
+  for (const sel of [':root {', ':root[data-theme="day"] {']) {
+    const block = css.slice(css.indexOf(sel), css.indexOf('}', css.indexOf(sel)));
+    for (const v of ['--sb', '--key-hi', '--key-lo', '--screen', '--glow', '--dial-track', '--ground']) if (!block.includes(`${v}:`)) throw new Error(`${sel} must define ${v}`);
+  }
+  if (!/\.s-SB \{ stroke: var\(--sb\); \}/.test(css)) throw new Error('the log grid draws sleeper in the sleeper colour');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('cab look (dials, keys, capsule, sleeper colour): OK');
 }
 console.log('OK');

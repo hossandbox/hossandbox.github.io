@@ -478,9 +478,9 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
   return (
     <header class="top" inert={inert}>
       <div class="top-row">
-        <span class="pill" style={{ background: STATUS_COLOR[status] }}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
+        <span class="pill" style={`--led: ${STATUS_COLOR[status]}`}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
         <span class="top-right">
-          <span class="muted">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+          <span class="muted clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
           <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /> {next === 'night' ? 'Night' : 'Day'}</button>
         </span>
       </div>
@@ -553,16 +553,71 @@ function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) 
 
 /* ============================================================ Now */
 
+/* ============================================================ the dial */
+
+/** Hours on the dial's scale: the full length of the limit that binds (11, 14, 8 for the break, 60/70). */
+function bindingHours(ev: FullEvaluation): number {
+  const sh = ev.shift;
+  return (ev.binding === 'WINDOW_14' ? sh.limits.window : ev.binding === 'BREAK_30' ? 480 : ev.binding === 'CYCLE' ? ev.cycle.limit : sh.limits.drive) / 60;
+}
+
+/**
+ * The dial's geometry, in a `size`-square box: a 270° arc from bottom-left, clockwise, filled for the
+ * share of the binding limit that is left — a fuel gauge, emptying as the driver drives. The scale is
+ * printed OUTSIDE the arc, so nothing crosses the number in the middle. Exported for the tests.
+ */
+export function dialGeometry(share: number, hours: number, size: number) {
+  const f = Math.max(0, Math.min(1, share));
+  const c = size / 2, r = size * 0.4, sw = size * 0.05;
+  const at = (rad: number, deg: number) => { const a = (deg * Math.PI) / 180; return [+(c + rad * Math.cos(a)).toFixed(2), +(c + rad * Math.sin(a)).toFixed(2)] as const; };
+  const arc = (to: number) => {
+    const [x0, y0] = at(r, 135), [x1, y1] = at(r, 135 + 270 * to);
+    return `M ${x0} ${y0} A ${r} ${r} 0 ${270 * to > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+  };
+  // one mark per hour up to 16h; a week (60/70h) gets one per 10h
+  const n = hours <= 16 ? Math.max(1, Math.round(hours)) : Math.round(hours / 10);
+  const ticks = Array.from({ length: n + 1 }, (_, i) => {
+    const deg = 135 + (270 * i) / n;
+    const major = n <= 11 || i === 0 || i === n || i === Math.round(n / 2);
+    const [x1, y1] = at(r + sw * 0.95, deg), [x2, y2] = at(r + sw * 0.95 + size * (major ? 0.04 : 0.025), deg);
+    return { x1, y1, x2, y2, major };
+  });
+  const [ex, ey] = at(r, 135 + 270 * f);
+  const [lx, ly] = at(r, 135), [rx] = at(r, 45);
+  return { size, track: arc(1), fill: f > 0.004 ? arc(f) : null, end: { x: ex, y: ey }, ticks, sw, scale: { y: +(ly + sw * 2.2).toFixed(2), left: lx, right: rx, max: `${Math.round(hours)}h` } };
+}
+
+/** A gauge for the limit that binds; children go in the middle. tone: calm (accent), warn, bad. */
+function Dial({ share, hours, tone, size, children }: { share: number; hours: number; tone: 'calm' | 'warn' | 'bad'; size: number; children?: ComponentChildren }) {
+  const g = dialGeometry(share, hours, size);
+  return (
+    <div class={`dial ${tone}`}>
+      <svg viewBox={`0 0 ${size} ${size * 0.9}`} aria-hidden="true">
+        <path class="dial-track" d={g.track} stroke-width={g.sw * 1.3} />
+        <g class="dial-ticks">{g.ticks.map((t, i) => <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke-width={t.major ? 2.5 : 1.5} />)}</g>
+        {g.fill && <path class="dial-fill" d={g.fill} stroke-width={g.sw} />}
+        {g.fill && <circle class="dial-cap" cx={g.end.x} cy={g.end.y} r={g.sw * 0.62} />}
+        <text class="dial-scale" x={g.scale.left} y={g.scale.y} text-anchor="middle">0</text>
+        <text class="dial-scale" x={g.scale.right} y={g.scale.y} text-anchor="middle">{g.scale.max}</text>
+      </svg>
+      <div class="dial-center">{children}</div>
+    </div>
+  );
+}
+
 /** The one number a driver needs, in the size he needs it: driving left, the stop time, and why. */
 function HeroDrive({ ev }: { ev: FullEvaluation }) {
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
+  const left = dur(ev.driveNow);
   return (
     <section class="hero">
-      <div class="hero-label">You can drive</div>
-      <div class={`hero-value ${tone}`}>{dur(ev.driveNow)}</div>
-      <div class="hero-stop">Stop by {clock(ev.mustStopBy)}</div>
+      <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270}>
+        <div class="hero-label">You can drive</div>
+        <div class={`hero-value ${tone}${left.length > 6 ? ' long' : ''}`}>{left}</div>
+        <div class="hero-stop">Stop by {clock(ev.mustStopBy)}</div>
+      </Dial>
       <div class="hero-foot">
-        <span class="muted">limited by {bindingLabel(ev)}</span>
+        <span class="limit-plate">limited by {bindingLabel(ev)}</span>
         <button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>
       </div>
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
@@ -602,7 +657,7 @@ function StatusDock({ s }: { s: State }) {
     <div class="dock">
       <div class="status-buttons">{(['OFF', 'SB', 'D', 'ON'] as DutyStatus[]).map((st) => {
         const on = s.current?.status === st && !s.current?.note;
-        return <button key={st} style={{ background: STATUS_COLOR[st] }} class={on ? 'on' : ''} aria-pressed={on} onClick={() => tapStatus(st)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
+        return <button key={st} style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => tapStatus(st)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
       })}</div>
       <button class="link dock-more" onClick={() => openSheet({ kind: 'status' })}>PC, yard move, or started earlier…</button>
     </div>
@@ -668,7 +723,7 @@ export function drivingPeeked(s: State): boolean {
   return s.tab === 'now' && s.drivingView && s.current?.status === 'D' && peekSince === s.current.since;
 }
 
-/** How much of the binding limit is left, 0–1, for the driving view's bar. */
+/** How much of the binding limit is left, 0–1, for the dials on Now and in the driving view. */
 function bindingShare(ev: FullEvaluation): number {
   const sh = ev.shift;
   const [left, of] = ev.binding === 'WINDOW_14' ? [sh.windowRemaining, sh.limits.window]
@@ -685,18 +740,20 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
   return (
     <main class={`drive ${level}`} aria-live="polite">
       <div class="top-row">
-        <span class="pill" style={{ background: STATUS_COLOR.D }}>{segLabel('D', s.current?.note)} · {dur(now - currentRunStart(s, now))}</span>
+        <span class="pill" style={`--led: ${STATUS_COLOR.D}`}>{segLabel('D', s.current?.note)} · {dur(now - currentRunStart(s, now))}</span>
         <span class="top-right">
-          <span class="drive-clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+          {/* time only: the weekday pushed the row onto two lines next to the capsule and Details */}
+          <span class="drive-clock">{s.nowOverride ? `SIM ${clock(now, false)}` : clock(now, false)}</span>
           <button class="drive-details" onClick={onDetails}>Details</button>
         </span>
       </div>
       <div class="drive-body">
-        <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
-        <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
+        <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={level} size={320}>
+          <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
+          <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
+        </Dial>
         <div class="drive-head">{level === 'bad' ? 'Park as soon as it is safe' : level === 'warn' ? 'Plan where you\u2019ll park' : `Stop by ${clock(ev.mustStopBy)}`}</div>
         <div class="drive-why">{level === 'bad' ? `Over the ${alertReason(ev)}` : level === 'warn' ? `Stop by ${clock(ev.mustStopBy)} · ${bindingLabel(ev)}` : `limited by ${bindingLabel(ev)}`}</div>
-        <div class="drive-bar" aria-hidden="true"><span style={{ width: `${(bindingShare(ev) * 100).toFixed(0)}%` }} /></div>
         {level === 'bad' && again?.off != null && <div class="drive-why">Off duty from now: drive again at <b>{clock(again.off)}</b></div>}
       </div>
       <div class="drive-foot">
@@ -718,7 +775,7 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
   return (
     <Sheet title="What are you doing now?">
       <div class="big-status">{(['OFF', 'SB', 'ON', 'D'] as DutyStatus[]).map((st, i) => (
-        <button key={st} data-first={i === 0 ? true : undefined} style={{ background: STATUS_COLOR[st] }} class={isOn(st) ? 'on' : ''} aria-pressed={isOn(st)} onClick={() => pick(st)}>
+        <button key={st} data-first={i === 0 ? true : undefined} style={`--led: ${STATUS_COLOR[st]}`} class={isOn(st) ? 'on' : ''} aria-pressed={isOn(st)} onClick={() => pick(st)}>
           <Icon d={STATUS_ICON[st]} size={26} /><span>{STATUS_LABEL[st]}</span>
         </button>
       ))}</div>

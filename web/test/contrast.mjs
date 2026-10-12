@@ -61,7 +61,7 @@ function audit(name, V) {
     ['red as text', V['--bad'], V['--panel'], AA],
     ['ink on primary button', V['--on-accent'], V['--accent-solid'], AA],
     ['ink on OFF chip', V['--chip-ink'], V['--muted'], AA],
-    ['ink on SB chip', V['--chip-ink'], V['--accent'], AA],
+    ['ink on SB chip', V['--chip-ink'], V['--sb'], AA],
     ['ink on D chip', V['--chip-ink'], V['--good'], AA],
     ['ink on ON chip', V['--chip-ink'], V['--warn'], AA],
     ['accent as graphic', V['--accent'], V['--panel'], GRAPHIC],
@@ -73,6 +73,16 @@ function audit(name, V) {
     ['link text on card', V['--link'], V['--panel'], AA],
     ['link text on page', V['--link'], V['--bg'], AA],
     ['ink on red', V['--chip-ink'], V['--bad'], AA],
+    // the cab look (2026-10-12): key faces, the recessed log screen and limit plate, the sleeper LED, the dials
+    ['key label on key face (top)', V['--text'], V['--key-hi'], AA],
+    ['key label on key face (bottom)', V['--text'], V['--key-lo'], AA],
+    ['text on log screen / limit plate', V['--text'], V['--screen'], AA],
+    ['muted on log screen', V['--muted'], V['--screen'], AA],
+    ['sleeper as graphic', V['--sb'], V['--panel'], GRAPHIC],
+    ['accent as graphic on log screen', V['--accent'], V['--screen'], GRAPHIC],
+    ['dial arc against its track', V['--accent'], V['--dial-track'], GRAPHIC],
+    ['amber arc against its track', V['--warn'], V['--dial-track'], GRAPHIC],
+    ['red arc against its track', V['--bad'], V['--dial-track'], GRAPHIC],
   ];
   // tints appear both inside cards and in the sticky header (which sits on --bg)
   for (const [label, t] of [['warnbox', warnbox], ['violation row', violbox], ['selected card', selcard]]) {

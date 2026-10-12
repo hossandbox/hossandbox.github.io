@@ -5,29 +5,48 @@
 @font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/atkinson-next-600.woff2') format('woff2'); }
 @font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/atkinson-next-700.woff2') format('woff2'); }
 @font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 800; font-display: swap; src: url('fonts/atkinson-next-800.woff2') format('woff2'); }
+/* Atkinson Hyperlegible Mono (SIL OFL 1.1, fonts/OFL-mono.txt): the instrument-readout face for clocks and
+   figures — every digit the same width, so a clock or a countdown never shifts as it ticks. */
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/atkinson-mono-500.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/atkinson-mono-700.woff2') format('woff2'); }
 :root {
   /* Night is the opt-in palette; DAY is the product default (set on <html> so a fresh install never
      flashes the dark palette). Every pair below is verified by web/test/contrast.mjs against
      WCAG AA — change a colour and the suite fails instead of drifting silently. */
-  --bg: #0f1420; --panel: #161d2c; --panel2: #1d2637; --line: #273247; --tick: #3a4661;
-  --text: #e8edf5; --muted: #9aa4b8; --good: #2ecc71; --warn: #f5a623; --bad: #ff5c5c;
-  --accent: #7c5cff; --accent-solid: #6a49f0; --on-accent: #fff; --chip-ink: #000; --link: #a48bff;
-  --tint-warn: rgba(245,166,35,.16); --tint-bad: rgba(255,92,92,.16); --tint-accent: rgba(124,92,255,.10);
+  /* The cab look (2026-10-12): a carbon instrument cluster at night. Materials on the frame (machined
+     edges, backlit keys, a dial with a printed scale), flat high-contrast type on every number. */
+  --bg: #090c10; --panel: #11161c; --panel2: #19212a; --line: #26303b; --tick: #3a4756;
+  --text: #eaf2f8; --muted: #9aa9b9; --good: #3ee08f; --warn: #ffb547; --bad: #ff6464;
+  --accent: #7cc8ff; --accent-solid: #1d6aa8; --on-accent: #fff; --chip-ink: #000; --link: #9fd6ff;
+  --sb: #a993ff;
+  --tint-warn: rgba(255,181,71,.15); --tint-bad: rgba(255,100,100,.15); --tint-accent: rgba(124,200,255,.10);
+  /* materials: lit top edge, surface gradient, drop shadow, key faces, the recessed log screen, glow */
+  --edge-hi: rgba(255,255,255,.06); --surface-hi: #151b22; --drop: rgba(0,0,0,.5);
+  --key-hi: #1b232b; --key-lo: #10151b; --key-base: #040608; --screen: #070a0d;
+  --glow: rgba(124,200,255,.55); --dial-track: #19212a;
+  --ground: radial-gradient(120% 55% at 50% 0%, #131b23 0%, #0b1015 50%, #090c10 100%);
   color-scheme: dark;
 }
 /* Day theme: for reading in sunlight, where a dark screen is the worst case. Opt-in, never the
    default — the status colours are re-tuned rather than inverted, and the chip ink flips to white. */
 :root[data-theme="day"] {
-  --bg: #f2f5fa; --panel: #ffffff; --panel2: #e9edf4; --line: #ccd4e2; --tick: #b3bdd0;
-  --text: #0f1622; --muted: #4e5972; --good: #12703c; --warn: #8a5200; --bad: #b32020;
-  --accent: #5a3ad0; --accent-solid: #5a3ad0; --on-accent: #fff; --chip-ink: #fff; --link: #5a3ad0;
-  --tint-warn: rgba(138,82,0,.18); --tint-bad: rgba(179,32,32,.14); --tint-accent: rgba(90,58,208,.09);
+  /* Daylight: brushed titanium, dark ink. Built for the sun on the glass, where a dark screen is the worst case. */
+  --bg: #e4e9ee; --panel: #f9fafb; --panel2: #e8ecf0; --line: #c3cbd3; --tick: #9aa6b2;
+  --text: #0b1117; --muted: #45525f; --good: #0f7a40; --warn: #8a5200; --bad: #b32020;
+  --accent: #0b5fa8; --accent-solid: #0b5fa8; --on-accent: #fff; --chip-ink: #fff; --link: #0b4f8c;
+  --sb: #5b3fc4;
+  --tint-warn: rgba(138,82,0,.16); --tint-bad: rgba(179,32,32,.12); --tint-accent: rgba(11,95,168,.09);
+  --edge-hi: rgba(255,255,255,.9); --surface-hi: #ffffff; --drop: rgba(30,45,60,.14);
+  --key-hi: #ffffff; --key-lo: #e5e9ed; --key-base: #b3bcc5; --screen: #f2f4f6;
+  --glow: rgba(11,95,168,0); --dial-track: #dce2e7;
+  --ground: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 1px, rgba(255,255,255,0) 1px 3px), linear-gradient(180deg, #e9edf1 0%, #dce2e7 100%);
   color-scheme: light;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
 button, input, select { font: inherit; color: inherit; }
-.app { min-height: 100dvh; display: flex; flex-direction: column; }
+.app { min-height: 100dvh; display: flex; flex-direction: column; background: var(--ground); }
+.mono, .meter-value, .why-time, .entry-len, .daytotals b, .tstep-value, .drive-clock, .clock { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
 h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 h3 { margin: 12px 0 6px; font-size: 14px; color: var(--muted); }
@@ -35,9 +54,13 @@ p { margin: 8px 0; }
 .small { font-size: 13px; } .muted { color: var(--muted); } .ok { color: var(--good); }
 
 /* Opaque: a see-through bottom edge drew the header's text over the content scrolling under it. */
-.top { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+.top { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 var(--edge-hi); padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
 .top-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.pill { padding: 8px 14px; border-radius: 999px; font-weight: 800; font-size: 15px; color: var(--chip-ink); }
+/* The status capsule: an LED in the status colour (--led, set inline) on a dark key face. Colour is never
+   the only cue: the status is spelled out beside it. */
+.pill { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 16px 0 14px; border-radius: 999px; font-weight: 800; font-size: 15px; letter-spacing: .02em; color: var(--text); background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 2px var(--drop); }
+.pill::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--led, var(--muted)); box-shadow: 0 0 10px 1px var(--led, transparent); flex: none; }
+:root[data-theme="day"] .pill::before { box-shadow: 0 0 4px var(--led, transparent); }
 .clocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .stat-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -45,20 +68,21 @@ p { margin: 8px 0; }
 .stat-sub { font-size: 12px; color: var(--muted); }
 .stat.good .stat-value { color: var(--good); } .stat.warn .stat-value { color: var(--warn); } .stat.bad .stat-value { color: var(--bad); }
 
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+.card { background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: 18px; padding: 14px; box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop); }
 .card.good { border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
 .card.warn { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
 .card.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
 .card .clocks { margin-top: 8px; }
 
-.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-.tabs button { background: none; border: 0; border-radius: 0; padding: 8px 4px 10px; min-height: 60px; color: var(--muted); font-weight: 600; font-size: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
-.tabs button.on { color: var(--text); font-weight: 800; box-shadow: inset 0 3px 0 var(--accent); }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(5, 1fr); background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tabs button { position: relative; background: none; border: 0; border-radius: 0; padding: 8px 4px 10px; min-height: 60px; color: var(--muted); font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-shadow: none; }
+.tabs button.on { color: var(--text); font-weight: 800; }
+.tabs button.on::before { content: ""; position: absolute; top: 0; left: 26%; right: 26%; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent); box-shadow: 0 0 10px var(--glow); }
 
 /* 44px is the smallest target a gloved thumb in a moving cab can hit (Apple's minimum, Google's is 48dp). */
-button { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-weight: 600; min-height: 44px; }
+button { background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-weight: 600; min-height: 44px; box-shadow: inset 0 1px 0 var(--edge-hi); }
 button:disabled { opacity: .4; }
-button.primary { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+button.primary { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 2px 0 var(--key-base), 0 0 16px var(--glow); }
 button.danger { background: transparent; border-color: var(--bad); color: var(--bad); margin-top: 8px; }
 button.x { background: transparent; border: 0; color: var(--muted); font-size: 20px; padding: 0 6px; }
 .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; } .row > * { flex: 1; }
@@ -70,8 +94,14 @@ label.check { display: flex; align-items: center; gap: 12px; color: var(--text);
 
 .status-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 /* Selection is a ring, not opacity: dimming the whole chip dropped these to 2.23:1 (consumer-review). */
-.status-buttons button { color: var(--chip-ink); border: 0; padding: 8px 4px; min-height: 64px; font-size: 15px; font-weight: 800; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
-.status-buttons button.on { outline: 3px solid var(--text); outline-offset: 2px; }
+/* Backlit switch keys: a dark key face, an LED strip in the status colour (--led, set inline). The lit key
+   is the current status: its strip glows, its edge takes the colour and it carries a check mark, so the
+   selection never rests on colour alone. */
+.status-buttons button, .big-status button { position: relative; color: var(--text); background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--key-base), 0 6px 12px var(--drop); font-weight: 800; }
+.status-buttons button::before, .big-status button::before { content: ""; position: absolute; left: 24%; right: 24%; top: 8px; height: 4px; border-radius: 2px; background: var(--led, var(--muted)); opacity: .38; }
+.status-buttons button.on, .big-status button.on { border: 2px solid var(--led, var(--text)); outline: none; box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--key-base), 0 0 18px color-mix(in srgb, var(--led, transparent) 35%, transparent); }
+.status-buttons button.on::before, .big-status button.on::before { opacity: 1; box-shadow: 0 0 10px 1px var(--led, transparent); }
+.status-buttons button { padding: 14px 4px 6px; min-height: 66px; font-size: 15px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 
 .toggle { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin-top: 8px; }
 .toggle button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 10px 6px; font-size: 14px; }
@@ -87,7 +117,7 @@ label.check { display: flex; align-items: center; gap: 12px; color: var(--text);
 .slider-row .mini { padding: 8px 12px; }
 input.num { width: 100%; text-align: right; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; font-variant-numeric: tabular-nums; }
 
-.grid { width: 100%; height: auto; display: block; }
+.grid { width: 100%; height: auto; display: block; background: var(--screen); border-radius: 10px; box-shadow: inset 0 2px 8px var(--drop); }
 .grid-label { fill: var(--muted); font-size: 10px; font-weight: 700; }
 .grid-line { stroke: var(--line); stroke-width: 1; }
 .grid-tick { stroke: var(--line); stroke-width: .5; } .grid-tick.major { stroke: var(--tick); stroke-width: 1; }
@@ -103,7 +133,10 @@ input.num { width: 100%; text-align: right; padding: 8px 10px; background: var(-
 .itin { counter-reset: none; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 /* SVG presentation attributes cannot hold var(), so the grid gets status classes instead of a stroke. */
-.s-OFF { stroke: var(--muted); } .s-SB { stroke: var(--accent); } .s-D { stroke: var(--good); } .s-ON { stroke: var(--warn); }
+.s-OFF { stroke: var(--muted); } .s-SB { stroke: var(--sb); } .s-D { stroke: var(--good); } .s-ON { stroke: var(--warn); }
+/* at night the log lines glow faintly, like an ELD screen; never in daylight */
+:root:not([data-theme="day"]) .s-D { filter: drop-shadow(0 0 3px rgba(62,224,143,.55)); }
+:root:not([data-theme="day"]) .s-ON { filter: drop-shadow(0 0 3px rgba(255,181,71,.5)); }
 .top-right { display: flex; align-items: center; gap: 8px; }
 .theme-btn { padding: 6px 12px; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; gap: 6px; }
 .viol li { padding: 8px 10px; border-radius: 10px; margin-top: 6px; background: var(--tint-bad); border-left: 3px solid var(--bad); font-size: 14px; }
@@ -147,7 +180,7 @@ button.wide { width: 100%; min-height: 56px; font-size: 18px; font-weight: 800; 
 button.back { align-self: flex-start; background: transparent; border: 0; padding: 0 8px 0 0; color: var(--link); font-weight: 800; font-size: 16px; display: inline-flex; align-items: center; gap: 2px; }
 
 /* The main card on Now: one number, big enough to read at arm's length in a mount. */
-.hero { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 16px 18px 10px; }
+.hero { background: radial-gradient(90% 80% at 50% 38%, var(--surface-hi) 0%, var(--panel) 70%); border: 1px solid var(--line); border-radius: 26px; padding: 16px 18px 12px; box-shadow: inset 0 1px 0 var(--edge-hi), inset 0 0 0 5px var(--panel), inset 0 0 0 6px var(--line), 0 16px 32px var(--drop); }
 .hero.warn { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
 .hero.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
 .hero-label { font-size: 16px; font-weight: 600; color: var(--muted); }
@@ -157,14 +190,19 @@ button.back { align-self: flex-start; background: transparent; border: 0; paddin
 .hero-lead { margin: 0 0 6px; font-size: 18px; font-weight: 800; color: var(--bad); }
 .hero-text { font-size: 15px; margin: 8px 0 0; }
 .hero-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; margin-top: 4px; font-size: 15px; }
+/* "limited by …" reads as a recessed plate under the dial */
+.limit-plate { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 10px; background: var(--screen); border: 1px solid var(--line); box-shadow: inset 0 2px 4px var(--drop); color: var(--text); font-weight: 700; font-size: 14px; }
 
 .meters { display: flex; flex-direction: column; gap: 10px; padding: 2px 4px; }
+.meters { background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: 18px; padding: 10px 14px; box-shadow: inset 0 1px 0 var(--edge-hi); }
 .meter { display: grid; grid-template-columns: 118px 1fr auto; align-items: center; gap: 10px; font-size: 15px; }
-.meter-label { color: var(--muted); }
-.meter-bar { height: 10px; border-radius: 6px; background: var(--panel2); overflow: hidden; }
-.meter-bar span { display: block; height: 10px; border-radius: 6px; background: var(--muted); }
-.meter.on .meter-label { color: var(--text); font-weight: 800; }
-.meter.on .meter-bar span { background: var(--good); }
+.meter-label { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+/* a segmented gauge: the gaps are drawn over the fill, so it reads as LED segments */
+.meter-bar { position: relative; height: 10px; border-radius: 3px; background: var(--panel2); overflow: hidden; box-shadow: inset 0 1px 3px var(--drop); }
+.meter-bar span { display: block; height: 10px; background: var(--muted); }
+.meter-bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 10px, var(--panel) 10px 12px); }
+.meter.on .meter-label { color: var(--text); }
+.meter.on .meter-bar span { background: var(--accent); box-shadow: 0 0 10px var(--glow); }
 .meter-value { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 
 button.rowbtn { width: 100%; min-height: 60px; display: flex; align-items: center; justify-content: space-between; text-align: left; background: var(--panel); border-radius: 16px; font-size: 15px; }
@@ -193,22 +231,22 @@ button.dock-more { width: 100%; justify-content: center; min-height: 44px; color
 /* Slide-up panels (Sheet in app.tsx). */
 .sheet-wrap { position: fixed; inset: 0; z-index: 40; }
 button.sheet-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: rgba(0,0,0,.55); padding: 0; min-height: 0; }
-.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 88dvh; overflow: auto; background: var(--panel); border-radius: 22px 22px 0 0; padding: 8px 16px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; max-width: 640px; margin: 0 auto; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 88dvh; overflow: auto; background: linear-gradient(180deg, var(--surface-hi), var(--panel) 30%); border-top: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 -20px 40px var(--drop); border-radius: 24px 24px 0 0; padding: 8px 16px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; max-width: 640px; margin: 0 auto; }
 .sheet-handle { width: 44px; height: 5px; border-radius: 3px; background: var(--line); align-self: center; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sheet-head h2 { margin: 0; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 21px; }
 .sheet h3 { margin: 4px 0 0; color: var(--text); font-size: 16px; }
 .sheet-lead { margin: 0; font-size: 16px; }
 .big-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.big-status button { min-height: 96px; border: 0; border-radius: 18px; color: var(--chip-ink); display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 14px 16px; font-size: 19px; font-weight: 800; }
-.big-status button.on { outline: 3px solid var(--text); outline-offset: 2px; }
+.big-status button { min-height: 96px; border-radius: 18px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 20px 16px 14px; font-size: 19px; }
+.big-status button::before { left: 16px; right: auto; width: 56px; }
 .why { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.why li { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--bg); }
-.why li.on { border: 2px solid var(--good); }
+.why li { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: var(--panel2); box-shadow: inset 0 1px 0 var(--edge-hi); }
+.why li.on { border: 2px solid var(--accent); box-shadow: 0 0 18px color-mix(in srgb, var(--glow) 40%, transparent); }
 .why-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 16px; }
 .why-time { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 .why-time small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
-.why-tag { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--chip-ink); background: var(--good); border-radius: 999px; padding: 3px 10px; }
+.why-tag { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--on-accent); background: var(--accent-solid); border-radius: 8px; padding: 3px 10px; letter-spacing: .04em; }
 
 /* Driving view: a glance, not a read. Night keeps the dark ground and frames the screen instead of
    flooding the cab with light; day floods amber at an hour left and red at zero. */
@@ -219,24 +257,19 @@ main.drive.bad { box-shadow: inset 0 0 0 8px var(--bad); }
 :root[data-theme="day"] main.drive.bad { background: var(--bad); color: var(--chip-ink); box-shadow: none; }
 .drive-clock { font-size: 17px; font-weight: 600; }
 button.drive-details { background: transparent; color: inherit; border: 2px solid currentColor; border-radius: 12px; font-weight: 800; }
-.drive-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 8px; }
-.drive-label { font-size: 20px; font-weight: 600; }
-.drive-num { font-size: clamp(64px, 23vw, 96px); line-height: 1; font-weight: 800; letter-spacing: -2px; white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 8px; color: var(--good); }
-.drive-num.short { font-size: clamp(96px, 34vw, 136px); }
-main.drive.warn .drive-num { color: var(--warn); } main.drive.bad .drive-num { color: var(--bad); }
+.drive-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 8px; }
+.drive-label { font-size: 13px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+.drive-num { font-size: clamp(44px, 15vw, 60px); line-height: 1; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--text); text-shadow: 0 0 22px var(--glow); }
+.drive-num.short { font-size: clamp(64px, 22vw, 88px); }
+main.drive.warn .drive-num { color: var(--warn); text-shadow: none; } main.drive.bad .drive-num { color: var(--bad); text-shadow: none; }
+main.drive.calm { background: radial-gradient(85% 45% at 50% 36%, var(--surface-hi) 0%, var(--bg) 70%); }
 :root[data-theme="day"] main.drive.warn .drive-num, :root[data-theme="day"] main.drive.bad .drive-num { color: var(--chip-ink); }
-.drive-head { font-size: 32px; font-weight: 800; line-height: 1.15; margin-top: 16px; }
-.drive-why { font-size: 19px; margin-top: 8px; }
-.drive-bar { height: 16px; border-radius: 9px; background: var(--panel2); overflow: hidden; margin-top: 24px; }
-.drive-bar span { display: block; height: 16px; border-radius: 9px; background: currentColor; }
-main.drive.calm .drive-bar span { background: var(--good); }
+.drive-head { font-size: 28px; font-weight: 800; line-height: 1.15; margin-top: 8px; text-align: center; }
+.drive-why { font-size: 18px; margin-top: 8px; text-align: center; }
 .drive-foot { display: flex; flex-direction: column; gap: 10px; }
 .drive-note { text-align: center; font-size: 14px; }
-button.drive-stop { min-height: 88px; border-radius: 22px; border: 0; font-size: 24px; font-weight: 800; background: var(--panel2); color: var(--text); }
-:root[data-theme="day"] button.drive-stop { background: var(--text); color: var(--bg); }
-main.drive.warn .drive-bar span { background: var(--warn); } main.drive.bad .drive-bar span { background: var(--bad); }
-:root[data-theme="day"] main.drive.warn .drive-bar span, :root[data-theme="day"] main.drive.bad .drive-bar span { background: var(--chip-ink); }
-:root[data-theme="day"] main.drive.warn button.drive-stop, :root[data-theme="day"] main.drive.bad button.drive-stop { background: var(--chip-ink); color: var(--text); }
+button.drive-stop { min-height: 88px; border-radius: 22px; font-size: 24px; font-weight: 800; color: var(--text); box-shadow: inset 0 1px 0 var(--edge-hi), 0 4px 0 var(--key-base), 0 10px 22px var(--drop); }
+:root[data-theme="day"] main.drive.warn button.drive-stop, :root[data-theme="day"] main.drive.bad button.drive-stop { background: var(--chip-ink); color: var(--text); box-shadow: none; }
 
 /* Log, one day at a time (redesign 3/5). Rows are whole-width buttons: no small Edit and × targets. */
 .daynav { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; }
@@ -279,3 +312,40 @@ button.flow-next { margin-top: 12px; display: inline-flex; align-items: center; 
 .answers li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 4px 12px; min-height: 52px; border-top: 1px solid var(--line); font-size: 15px; }
 .answers li:first-child { border-top: 0; } .answers li span { color: var(--muted); }
 
+
+/* ---------------------------------------------------------------- the cab look, 2026-10-12 */
+/* The dial (Dial in app.tsx): a fuel-gauge arc of what is left of the limit that binds, a printed scale
+   outside the arc, the number in the middle. SVG presentation attributes cannot hold var(), so colour
+   comes from these classes. */
+.dial { position: relative; width: 100%; aspect-ratio: 1 / 0.9; margin: 0 auto; }
+.dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.dial-track { fill: none; stroke: var(--dial-track); stroke-linecap: round; }
+.dial-ticks line { stroke: var(--tick); stroke-linecap: round; }
+.dial-fill { fill: none; stroke: var(--accent); stroke-linecap: round; filter: drop-shadow(0 0 7px var(--glow)); }
+.dial-cap { fill: #f4fbff; filter: drop-shadow(0 0 6px var(--glow)); }
+:root[data-theme="day"] .dial-cap { fill: #fff; stroke: var(--accent); stroke-width: 3px; }
+.dial.warn .dial-fill { stroke: var(--warn); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--warn) 60%, transparent)); }
+.dial.bad .dial-fill { stroke: var(--bad); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--bad) 60%, transparent)); }
+:root[data-theme="day"] .dial-fill { filter: none; }
+.dial-scale { fill: var(--muted); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 12px; }
+.dial-center { position: absolute; left: 50%; top: 55.5%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; width: 76%; }
+.hero .dial { max-width: 270px; }
+.hero .hero-label { font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.hero .hero-value { font-size: 50px; letter-spacing: 0; text-shadow: 0 0 18px var(--glow); }
+.hero .hero-value.long { font-size: 42px; }
+.hero .hero-value.good { color: var(--text); }
+.hero .hero-stop { font-size: 17px; letter-spacing: .03em; text-transform: uppercase; margin-top: 2px; }
+.drive-body .dial { max-width: 320px; }
+/* In daylight the driving view floods amber/red: the dial draws in the ink colour on top of it. */
+:root[data-theme="day"] main.drive.warn .dial-fill, :root[data-theme="day"] main.drive.bad .dial-fill { stroke: var(--chip-ink); }
+:root[data-theme="day"] main.drive.warn .dial-track, :root[data-theme="day"] main.drive.bad .dial-track { stroke: rgba(255,255,255,.28); }
+:root[data-theme="day"] main.drive.warn .dial-ticks line, :root[data-theme="day"] main.drive.bad .dial-ticks line,
+:root[data-theme="day"] main.drive.warn .dial-scale, :root[data-theme="day"] main.drive.bad .dial-scale { stroke: rgba(255,255,255,.6); fill: var(--chip-ink); }
+:root[data-theme="day"] main.drive.warn .drive-label, :root[data-theme="day"] main.drive.bad .drive-label { color: var(--chip-ink); }
+/* See-through controls (links, icon buttons, list rows, toggles) carry no key face: the base button's lit edge
+   drew a ghost box behind "Why?". */
+button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, button.sheet-backdrop, .toggle button, button.drive-details, button.rowbtn.flat { box-shadow: none; }
+.toggle button:not(.on) { background: transparent; }
+.meter-value { font-size: 14px; }
+.pill, .drive-clock, .top-right .clock { white-space: nowrap; }
+:root[data-theme="day"] main.drive.warn .dial-cap, :root[data-theme="day"] main.drive.bad .dial-cap { fill: var(--chip-ink); stroke: none; }
