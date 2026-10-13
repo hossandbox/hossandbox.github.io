@@ -1268,11 +1268,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(false);
   openSheet({ kind: 'edit', seg: day[2] });
   h = out('log/edit panel');
-  if (!/Edit this entry/.test(h) || !/aria-label="Started 15 minutes earlier"/.test(h) || !/aria-label="Ended 5 minutes later"/.test(h)) throw new Error('the edit panel needs labelled ±5/±15 steppers');
+  // (since the editor redesign, 2026-10-13, tapping an entry asks what is wrong with it; the steppers are a step away)
+  if (!/What do you want to fix\?/.test(h) || !/The times are wrong/.test(h)) throw new Error('tapping an entry opens the fix panel');
   if (!/Delete this entry/.test(h)) throw new Error('delete lives in the edit panel');
   if (!/<main[^>]*\binert\b/.test(h)) throw new Error('the Log must be inert behind the panel');
   openSheet({ kind: 'add' });
-  if (!/Add a break or something I forgot/.test(out('log/add panel'))) throw new Error('the add panel must open'); // title names breaks since 2026-10-13
+  if (!/What were you doing\?/.test(out('log/add panel'))) throw new Error('the add panel must open');
   openSheet(null);
   setLaunchNotice(true);
   // 4. the panel's actions: refuse the impossible, save, delete, undo
@@ -1947,16 +1948,19 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (after.breakRemaining !== 330 || after.driveUsed !== 330) throw new Error(`the break must split the drive: the 8 hours restart at 11:30, 2h30 driven since (330m left, got ${after.breakRemaining}); 5h30 driven in all (got ${after.driveUsed})`);
   let h = out('log/break row');
   if (!/30-min break \(OFF\)/.test(h)) throw new Error('the Log shows the break by name');
-  // 7. the add panel leads with the break buttons
+  // 7. the add panel offers every break button, with its length and how it is logged (since the editor
+  //    redesign the four statuses come first, as most entries are not breaks; inside a drive, breaks lead)
   openSheet({ kind: 'add' });
   h = out('log/add panel with breaks');
-  if (!/Add a break or something I forgot/.test(h)) throw new Error('the panel says it adds breaks');
-  if (!/role="group" aria-label="Break buttons"><button data-first="true" aria-pressed="false">30-min break<\/button><button aria-pressed="false">20-min paid<\/button><button aria-pressed="false">40-min lunch<\/button>/.test(h)) throw new Error('every break button is offered, first in the panel');
-  if (!/>Or anything else</.test(h)) throw new Error('the four statuses follow, as the other way in');
+  if (!/What were you doing\?/.test(h)) throw new Error('the panel asks what the driver was doing');
+  if (!/role="group" aria-label="Break buttons"><button><b>30-min break<\/b><span>30m · off duty<\/span><\/button><button><b>20-min paid<\/b><span>20m · on duty<\/span><\/button><button><b>40-min lunch<\/b><span>40m · off duty<\/span><\/button>/.test(h)) throw new Error('every break button is offered, with its length and status');
+  const pan = h.slice(h.indexOf('role="dialog"'));
+  if (pan.indexOf('<b>Driving</b>') < 0 || pan.indexOf('<b>Driving</b>') > pan.indexOf('Break buttons')) throw new Error('on a plain add, the statuses come first');
   setState({ breakPresets: [] });
   h = out('log/add panel, no breaks');
-  if (/Break buttons/.test(h) || !/>What you were doing</.test(h)) throw new Error('with no break buttons the panel shows the statuses only');
+  if (/Break buttons/.test(h) || !/<b>Driving<\/b>/.test(h)) throw new Error('with no break buttons the panel shows the statuses only');
   openSheet(null);
+  setState({ breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }, { name: '20-min paid', minutes: 20, status: 'ON' }, { name: '40-min lunch', minutes: 40, status: 'OFF' }] });
   // 8. Settings: the buttons are the driver's to set
   setState({ tab: 'settings', breakPresets: [{ name: '20-min paid', minutes: 20, status: 'ON' }] });
   h = out('settings/break buttons');
@@ -1999,21 +2003,158 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (gs().segments.find((x) => x.start === M(13)).note !== breakNote('30-min break')) throw new Error('a break logged on duty instead is still that break');
   saveEntry(gs().segments.find((x) => x.start === M(13)), { status: 'D', start: M(13), end: M(13.5) }, M(20));
   if (gs().segments.find((x) => x.start === M(13)).note !== undefined) throw new Error('a break edited to Driving is no longer a break');
-  // 4. the panels offer them
+  // 4. the panels offer them, each saying what it is
   openSheet({ kind: 'add' });
   let h = out('log/add panel pc');
-  if (!/role="group" aria-label="Personal conveyance or yard move"><button aria-pressed="false">Personal conveyance<\/button><button aria-pressed="false">Yard move<\/button>/.test(h)) throw new Error('the add panel offers personal conveyance and yard move');
-  openSheet({ kind: 'edit', seg: gs().segments.find((x) => x.start === M(18)) });
+  if (!/<b>Personal conveyance<\/b><span class="sub">Off duty, using the truck for yourself<\/span>/.test(h) || !/<b>Yard move<\/b><span class="sub">On duty, moving the truck in the yard<\/span>/.test(h)) throw new Error('the add panel offers personal conveyance and yard move');
+  openSheet({ kind: 'edit', seg: gs().segments.find((x) => x.start === M(18)), step: 'what' });
   h = out('log/edit panel ym');
-  if (!/<button class="on" aria-pressed="true">Yard move<\/button>/.test(h)) throw new Error('editing a yard move shows it picked');
-  if (!/A yard move is on duty, not driving/.test(h)) throw new Error('and says what it is');
-  if (/<button[^>]*class="on"[^>]*aria-pressed="true"[^>]*>On duty</.test(h)) throw new Error('plain On duty is not also lit');
-  // the panel's Add must hand its PC/YM choice to addEntry. A string render cannot click, so the wiring is
+  if (!/<button class="opt" aria-pressed="true">(?:(?!<\/button>).)*<b>Yard move<\/b>/.test(h)) throw new Error('editing a yard move shows it picked');
+  if (/<button class="opt" aria-pressed="true">(?:(?!<\/button>).)*<b>On duty<\/b>/.test(h)) throw new Error('plain On duty is not also lit');
+  // and the check step says what a yard move is
+  openSheet({ kind: 'add', step: 'check', draft: { status: 'ON', note: 'YM', start: M(19), len: 15 } });
+  if (!/A yard move is on duty, not driving/.test(out('log/check ym'))) throw new Error('the check says what a yard move is');
+  // the panel's Add must hand its PC/YM label to addEntry. A string render cannot click, so the wiring is
   // pinned at source level (as in 6c1ba18); the click itself is checked in a browser.
   const { readFileSync: rf } = await import('node:fs');
-  if (!/addEntry\(st, a, b, now, brk \? breakNote\(brk\.name\) : sub\)/.test(rf('src/app.tsx', 'utf8'))) throw new Error('the add panel must pass personal conveyance / yard move to the new row');
+  const src = rf('src/app.tsx', 'utf8');
+  if (!/return addEntry\(d\.status, d\.start, end, now, d\.note\);/.test(src)) throw new Error('the add panel must pass the label (break, personal conveyance, yard move) to the new row');
+  if (!/onPick=\{\(\) => choose\(o\.status, o\.note\)\}/.test(src)) throw new Error('the Also rows must pick their label');
   openSheet(null); setLaunchNotice(true);
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('personal conveyance and yard move from the Log: OK');
+}
+// --- the log editor, one question per screen (a tester, 2026-10-13: "the log editor is very confusing")
+{
+  const { getState: gs, allSegments: all, breakNote, clock: ck, segLabel: sl } = await import('../src/store.ts');
+  const app = await import('../src/app.tsx');
+  const { openSheet, currentSheet, sheetBack, stepBack, draftFor, whenProblem, draftProblem, overlapNote, draftNotes, commitDraft, relabel, onDay, dayChips, setLaunchNotice } = app;
+  const { evaluate, normalize } = await import('../../engine/src/index.ts');
+  const M = (h) => Math.floor(Date.UTC(2026, 9, 13, 0, 0) / 60000) + Math.round(h * 60);
+  const NOW = M(16);
+  const txt = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  // 1. days: the buttons and moving a time to another day keep the time of day
+  const back = dayChips(NOW, false), fwd = dayChips(NOW, true);
+  if (back.map((c) => c.label).slice(0, 2).join() !== 'Today,Yesterday' || fwd[1].label !== 'Tomorrow' || back.length !== 4) throw new Error('day buttons: Today, Yesterday and two more (Tomorrow for a plan)');
+  if (onDay(M(14.5), back[1].at) !== M(14.5) - 1440) throw new Error('moving to yesterday keeps the time of day');
+  // 2. sensible first times
+  const plain = draftFor({ status: 'D' }, undefined, NOW + 3);
+  if (plain.start !== NOW - 60 || plain.len !== 60 || plain.fixedLen) throw new Error(`a plain entry starts on the 5 minutes about an hour ago and lasts an hour (got ${JSON.stringify(plain)})`);
+  const brk = draftFor({ status: 'OFF', note: breakNote('30-min break'), minutes: 30 }, undefined, NOW);
+  if (brk.start !== NOW - 30 || brk.len !== 30 || !brk.fixedLen) throw new Error('a break button ends now and keeps its length');
+  const drive = { status: 'D', start: M(12.5), end: M(16), createdAt: 2 };
+  const mid = draftFor({ status: 'OFF', note: breakNote('30-min break'), minutes: 30 }, undefined, NOW, drive);
+  if (mid.start !== M(14) || mid.len !== 30) throw new Error(`a break inside a drive lands in its middle (got ${ck(mid.start)})`);
+  const changed = draftFor({ status: 'ON' }, { ...mid }, NOW);
+  if (changed.start !== M(14) || changed.len !== 30 || changed.fixedLen) throw new Error('a changed answer keeps the times');
+  const yday = draftFor({ status: 'ON' }, undefined, NOW, undefined, NOW - 1440);
+  if (yday.start !== NOW - 1440 - 60) throw new Error('adding while viewing yesterday starts on yesterday');
+  // 3. what cannot be used, said before Next, not after
+  if (!/later than now/.test(whenProblem({ ...plain, start: NOW }, NOW, false) ?? '')) throw new Error('a start at or after now is refused for logged time');
+  if (!/would still be going/.test(whenProblem({ ...brk, start: NOW - 20 }, NOW, false) ?? '')) throw new Error('a break that would still be going is refused');
+  if (whenProblem(brk, NOW, false) !== null) throw new Error('a break that just ended is fine');
+  if (!/what-if plan can only start from now on/.test(whenProblem({ ...plain, start: NOW - 5 }, NOW, true) ?? '')) throw new Error('a what-if cannot start in the past');
+  if (!/runs past now/.test(draftProblem({ ...plain, len: 90 }, NOW, false) ?? '') || draftProblem({ ...plain, len: 90 }, NOW, true) !== null && !/start/.test(draftProblem({ ...plain, len: 90 }, NOW, true))) throw new Error('logged time cannot run past now');
+  // 4. what it does to entries already there, before it is added
+  const { joinDisplayRows } = await import('../src/store.ts');
+  const rows = joinDisplayRows(normalize([{ status: 'OFF', start: M(-12), end: M(8), createdAt: 1 }, { status: 'D', start: M(8), end: M(12.5), createdAt: 1 }, drive], { merge: false }));
+  const inside = overlapNote(rows, mid, NOW);
+  if (inside !== `This goes inside your Driving from ${ck(M(8))} to now. Your log will show that drive split around the break.`) throw new Error(`a break inside a drive says so (got ${inside})`);
+  const across = overlapNote(rows, { status: 'ON', start: M(7.5), len: 60 }, NOW);
+  if (across !== `This takes over part of your Off Duty from ${ck(M(-12))} to ${ck(M(8))}, Driving from ${ck(M(8))} to now. Where they overlap, that time will count as On Duty instead.`) throw new Error(`an entry across two says which, and who wins (got ${across})`);
+  if (overlapNote(rows, { status: 'D', start: M(9), len: 30 }, NOW) !== null) throw new Error('driving inside driving changes nothing worth a warning');
+  if (draftNotes({ status: 'ON', start: 0, len: 30 }, 70)[0] !== 'Long enough for the 30-minute break rule: 30 minutes in a row without driving.' || draftNotes({ status: 'D', start: 0, len: 60 }, 70).length) throw new Error('the 30-minute rule note fits what counts');
+  // 5. Back goes back a step (the panel's Back and the phone's), and only closes at the first question
+  const d = { ...plain };
+  const steps = [[{ kind: 'add' }, null], [{ kind: 'add', step: 'when', draft: d }, 'what'], [{ kind: 'add', step: 'long', draft: d }, 'when'], [{ kind: 'add', step: 'check', draft: d }, 'long'],
+    [{ kind: 'add', step: 'check', draft: brk }, 'when'], [{ kind: 'add', step: 'what', draft: d, resume: 'long' }, 'long'], [{ kind: 'add', step: 'what', draft: d }, 'check'],
+    [{ kind: 'edit', seg: drive }, null], [{ kind: 'edit', seg: drive, step: 'what', draft: d }, 'menu'], [{ kind: 'edit', seg: drive, step: 'check', draft: d }, 'long'], [{ kind: 'status' }, null]];
+  for (const [k, want] of steps) { const b = stepBack(k); if ((b?.step ?? null) !== want) throw new Error(`Back from ${k.kind}/${k.step ?? 'start'} should go to ${want} (got ${b?.step ?? null})`); }
+  openSheet({ kind: 'add', step: 'long', draft: d }); sheetBack();
+  if (currentSheet()?.step !== 'when' || currentSheet()?.draft !== d) throw new Error('Back keeps the entry and goes one step back');
+  sheetBack();
+  if (currentSheet()?.step !== 'what' || currentSheet()?.draft !== undefined) throw new Error('Back to the first question starts the answer again');
+  sheetBack();
+  if (currentSheet() !== null) throw new Error('Back at the first question closes');
+  const { readFileSync: rf } = await import('node:fs');
+  const src = rf('src/app.tsx', 'utf8');
+  if (!/\{ closeSheet: sheetBack, goTo:/.test(src)) throw new Error('the phone’s Back must step back through the editor');
+  // layout a string render cannot see, pinned in the stylesheet (checked on a 390px phone in a browser):
+  // a long panel scrolls rather than squeezing its rows, and the step's main button stays in reach
+  const css = rf('public/styles.css', 'utf8');
+  if (!/\.sheet > \* \{ flex-shrink: 0; \}/.test(css)) throw new Error('rows in a tall panel must not be squeezed (a two-line choice spilled out of its button)');
+  if (!/\.sheet button\.ed-go \{ position: sticky; bottom: 0;/.test(css)) throw new Error('the step’s main button must stay in reach while the panel scrolls');
+  if (!/\.sheet \.ed-q \{/.test(css)) throw new Error('the question must outrank the panel’s small h3 style');
+  // 6. each screen
+  setLaunchNotice(false);
+  setState({ nowOverride: NOW, tab: 'log', historyAcknowledged: true, tentative: [], current: null, config: { ...gs().config, timeZone: 'UTC', dayStartHour: 0 },
+    breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }], segments: [{ status: 'OFF', start: M(-12), end: M(8), createdAt: 1 }, { status: 'D', start: M(8), end: M(16), createdAt: 2 }] });
+  openSheet({ kind: 'add', step: 'when', draft: d });
+  let h = out('editor/when');
+  if (!/When did it start\?/.test(h) || !/Step 2 of 3/.test(h) || !/<button class="on" aria-pressed="true">Today<\/button>/.test(h)) throw new Error('step 2 asks when, on today');
+  if (!h.includes(`aria-label="Started ${ck(d.start)}">${ck(d.start, false)}</output>`)) throw new Error('step 2 shows the start time big');
+  if (!/aria-label="1 hour earlier"/.test(h) || !/aria-label="5 minutes later"/.test(h) || !/<button class="primary wide ed-go">Next: how long<\/button>/.test(h)) throw new Error('hour and minute keys, then Next');
+  if (/It just ended/.test(h)) throw new Error('"It just ended" is for a break, whose length is known');
+  openSheet({ kind: 'add', step: 'when', draft: { ...brk, start: NOW - 10 } });
+  h = out('editor/when break');
+  if (!/Step 2 of 2/.test(h) || !/It just ended: started/.test(h) || !/would still be going/.test(h) || !/<button class="primary wide ed-go" disabled>Next: check it<\/button>/.test(h)) throw new Error('a break skips the length, and a start it cannot use holds Next');
+  openSheet({ kind: 'add', step: 'long', draft: { ...d, start: NOW - 60, len: 60 } });
+  h = out('editor/long');
+  if (!/How long did it last\?/.test(h) || !/<button class="on" aria-pressed="true">1 hour<\/button>/.test(h) || !/<button aria-pressed="false" disabled>2 hours<\/button>/.test(h) || !/<button class="all on" aria-pressed="true">Until now · 1h 00m<\/button>/.test(h)) throw new Error('step 3: lengths, those past now held, and Until now');
+  openSheet({ kind: 'add', step: 'check', draft: { status: 'OFF', note: breakNote('30-min break'), start: M(14), len: 30, fixedLen: true } });
+  h = out('editor/check');
+  const th = txt(h);
+  if (!/Check and add/.test(h) || !/What Off duty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go">Add to my log<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
+  // a drive logged as two touching rows is still one drive to the driver: the warning names all of it
+  const keep = gs().segments;
+  setState({ segments: [keep[0], { status: 'D', start: M(8), end: M(12), createdAt: 2 }, { status: 'D', start: M(12), end: M(16), createdAt: 3 }] });
+  if (!out('editor/check two rows').includes(`This goes inside your Driving from ${ck(M(8))} to now.`)) throw new Error('the check joins touching rows of one drive');
+  setState({ segments: keep });
+  // the picture is the day with the entry in: the drive drawn in two pieces around the break
+  const panel = h.slice(h.indexOf('role="dialog"'));
+  if ((panel.match(/class="s-D"/g) || []).length !== 2 || (panel.match(/class="s-OFF"/g) || []).length !== 2) throw new Error('the check draws the drive split around the break');
+  // 7. tapping an entry: what is wrong with it
+  openSheet({ kind: 'edit', seg: gs().segments[1] });
+  h = out('editor/menu');
+  for (const want of ['What do you want to fix?', 'It wasn’t Driving', 'The times are wrong', 'I took a break in the middle', 'Add a break inside this drive', 'It never happened']) if (!h.includes(want)) throw new Error(`the fix panel offers "${want}"`);
+  openSheet({ kind: 'edit', seg: gs().segments[0] });
+  if (!/I worked or drove in the middle/.test(out('editor/menu off'))) throw new Error('inside a rest, the middle is work or driving');
+  const plan = { status: 'OFF', start: NOW + 30, end: NOW + 90, tentative: true, createdAt: 9 };
+  openSheet({ kind: 'edit', seg: plan });
+  h = out('editor/menu what-if');
+  if (!/Remove this what-if/.test(h) || /in the middle/.test(h)) throw new Error('a what-if is removed, not "never happened", and has no middle');
+  openSheet({ kind: 'edit', seg: plan, step: 'what', draft: { status: 'OFF', start: plan.start, len: 60 } });
+  if (/Personal conveyance/.test(out('editor/what what-if'))) throw new Error('a what-if plan offers the four statuses only');
+  openSheet({ kind: 'add', inside: gs().segments[1] });
+  h = out('editor/inside');
+  const pin = h.slice(h.indexOf('role="dialog"'));
+  if (!/What happened in the middle\?/.test(h) || pin.indexOf('Break buttons') < 0 || pin.indexOf('Break buttons') > pin.indexOf('<b>Driving</b>')) throw new Error('inside a drive, the break buttons come first');
+  // 8. saving: the break goes in, the drive splits, the clocks follow; the Log's grid shows it as the clocks do
+  if (commitDraft({ kind: 'add', inside: gs().segments[1] }, draftFor({ status: 'OFF', note: breakNote('30-min break'), minutes: 30 }, undefined, NOW, gs().segments[1]), NOW) !== null) throw new Error('the break saves');
+  const sh = evaluate(all(gs(), NOW), { asOf: NOW, config: gs().config }).shift;
+  // the 8h drive 08:00-16:00 is split by a break centred in it, 11:45-12:15: 7h30 driven, 3h45 since the break
+  if (!gs().segments.some((x) => x.start === M(11.75) && x.end === M(12.25))) throw new Error('the break is centred in the drive');
+  if (sh.driveUsed !== 450 || sh.breakRemaining !== 255) throw new Error(`the break splits the drive: 7h30 driven, 8 hours counted again from 12:15 (got ${sh.driveUsed}, ${sh.breakRemaining})`);
+  openSheet(null);
+  h = out('editor/log after');
+  const grid = h.slice(h.indexOf('<svg viewBox="0 0 360 88" class="grid">'), h.indexOf('</svg>', h.indexOf('class="grid"')));
+  if ((grid.match(/class="s-D"/g) || []).length !== 2) throw new Error('the Log’s grid draws the drive in two pieces, as the clocks read it, not straight through the break');
+  if (!/Undo/.test(h)) throw new Error('the add is undo-able');
+  const seg = gs().segments.find((x) => x.note === breakNote('30-min break'));
+  if (commitDraft({ kind: 'edit', seg }, { status: 'OFF', note: seg.note, start: M(13), len: 45 }, NOW) !== null) throw new Error('a fixed time saves');
+  const moved = gs().segments.find((x) => x.note === breakNote('30-min break'));
+  if (moved.start !== M(13) || moved.end !== M(13.75)) throw new Error('the times change');
+  // a break moved between off and on duty stays that break; picked to Driving it is not one
+  if (relabel(moved, 'ON') !== moved.note || relabel(moved, 'D') !== undefined || relabel(moved, 'OFF', 'PC') !== 'PC' || relabel({ status: 'OFF', start: 0, end: 1, note: 'PC' }, 'ON') !== undefined) throw new Error('relabel keeps a break, drops what no longer fits');
+  // 9. "Start over" left the add panel for More, and its undo is on the Log
+  openSheet({ kind: 'add' });
+  if (/Start over/.test(out('editor/no start over'))) throw new Error('"Start over" must not sit in the add panel');
+  openSheet(null);
+  setState({ tab: 'settings' });
+  if (!/Start over: fresh 10-hour rest ending now/.test(out('settings/start over'))) throw new Error('"Start over" is under More');
+  if (!/startOver\(now\); setState\(\{ tab: 'log' \}\)/.test(src)) throw new Error('after starting over, the Log (with its Undo) is shown');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null, breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }] });
+  console.log('log editor (one question per screen): OK');
 }
 console.log('OK');

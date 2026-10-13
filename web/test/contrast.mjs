@@ -76,6 +76,11 @@ function audit(name, V) {
     // the cab look (2026-10-12): key faces, the recessed log screen and limit plate, the sleeper LED, the dials
     ['key label on key face (top)', V['--text'], V['--key-hi'], AA],
     ['key label on key face (bottom)', V['--text'], V['--key-lo'], AA],
+    // the Log editor's big choice rows are keys with a second, muted line, and the delete row is red
+    ['muted line on key face (top)', V['--muted'], V['--key-hi'], AA],
+    ['muted line on key face (bottom)', V['--muted'], V['--key-lo'], AA],
+    ['red label on key face (bottom)', V['--bad'], V['--key-lo'], AA],
+    ['link icon on key face', V['--link'], V['--key-lo'], GRAPHIC],
     ['text on log screen / limit plate', V['--text'], V['--screen'], AA],
     ['muted on log screen', V['--muted'], V['--screen'], AA],
     ['sleeper as graphic', V['--sb'], V['--panel'], GRAPHIC],

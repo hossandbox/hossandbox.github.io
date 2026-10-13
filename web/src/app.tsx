@@ -219,8 +219,11 @@ export type SheetKind =
   | { kind: 'status' }
   | { kind: 'why' }
   | { kind: 'exceptions' }
-  | { kind: 'edit'; seg: Segment }
-  | { kind: 'add' };
+  // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
+  | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft }
+  // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
+  // `resume`: the step a "Change" came from, to return to once the new answer is in.
+  | { kind: 'add'; step?: EdStep; draft?: Draft; inside?: Segment; day?: number; resume?: EdStep };
 let sheetNow: SheetKind | null = null;
 const sheetSubs = new Set<() => void>();
 export function openSheet(k: SheetKind | null) { sheetNow = k; sheetSubs.forEach((f) => f()); }
@@ -231,12 +234,15 @@ function useSheet(): SheetKind | null {
   return sheetNow;
 }
 
-function Sheet({ title, children }: { title: string; children: ComponentChildren }) {
+function Sheet({ title, children, onBack, focusKey }: { title: string; children: ComponentChildren; onBack?: () => void; focusKey?: string }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // Focus the panel's own first action (marked data-first), else its first control.
+    // Focus the panel's own first action (marked data-first), else its first control. Again on each new
+    // step of a panel that has steps (the Log's editor), so the new question is what is read out.
     const el = box.current?.querySelector<HTMLElement>('[data-first]') ?? box.current?.querySelector<HTMLElement>('button, input, select');
     el?.focus();
+  }, [focusKey]);
+  useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') openSheet(null); };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
@@ -247,6 +253,7 @@ function Sheet({ title, children }: { title: string; children: ComponentChildren
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={box}>
         <div class="sheet-handle" aria-hidden="true" />
         <div class="sheet-head">
+          {onBack && <button class="icon-btn" aria-label="Back" onClick={onBack}><Icon d={I.back} /></button>}
           <h2 id="sheet-title">{title}</h2>
           <button class="icon-btn" aria-label="Close" onClick={() => openSheet(null)}><Icon d={I.x} /></button>
         </div>
@@ -858,7 +865,7 @@ export function gridTicks(from: number, to: number, tz?: string): { m: number; m
   return out;
 }
 
-function Grid({ segments, from, to, tz }: { segments: Segment[]; from: number; to: number; tz?: string }) {
+function Grid({ segments, from, to, tz, mark }: { segments: Segment[]; from: number; to: number; tz?: string; mark?: { start: number; end: number } }) {
   const rows: DutyStatus[] = ['OFF', 'SB', 'D', 'ON'];
   const W = 360, H = 88, left = 34, rowH = 18;
   const x = (m: number) => left + ((Math.min(Math.max(m, from), to) - from) / (to - from)) * (W - left - 4);
@@ -870,6 +877,7 @@ function Grid({ segments, from, to, tz }: { segments: Segment[]; from: number; t
         const y = 12 + rows.indexOf(s.status) * rowH + 9;
         return <line key={i} class={`s-${s.status}`} x1={x(s.start)} x2={x(s.end)} y1={y} y2={y} stroke-width={6} stroke-dasharray={s.tentative ? '4 3' : undefined} />;
       })}
+      {mark && mark.end > from && mark.start < to && <rect class="grid-mark" x={x(mark.start) - 2} y={6} width={Math.max(4, x(mark.end) - x(mark.start) + 4)} height={H - 14} rx={3} />}
     </svg>
   );
 }
@@ -1019,7 +1027,9 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
         <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
       </div>
       <section class="card">
-        <Grid segments={allSegments(s, now)} from={day.start} to={day.end} tz={s.config.timeZone} />
+        {/* The resolved timeline, as the clocks read it: drawn raw, a break added inside a drive showed the
+            drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
+        <Grid segments={resolved} from={day.start} to={day.end} tz={s.config.timeZone} />
         <div class="daytotals">
           {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
         </div>
@@ -1071,7 +1081,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           </>
         )}
       </Card>
-      <button class="addbtn" onClick={() => openSheet({ kind: 'add' })}><Icon d={I.plus} /> Add a break or something I forgot</button>
+      <button class="addbtn" onClick={() => openSheet(back === 0 ? { kind: 'add' } : { kind: 'add', day: day.start + 720 })}><Icon d={I.plus} /> Add a break or something I forgot</button>
       <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
       {ev.violations.some((v) => v.tentative) && (
         <Card title="This plan would violate" tone="warn">
@@ -1084,76 +1094,175 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   );
 }
 
-/** Minutes ↔ the datetime-local text, with ±5/±15 steppers: no typing needed for the usual fix. */
-function TimeStepper({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  return (
-    <div class="tstep">
-      <div class="tstep-label">{label}</div>
-      <div class="tstep-row">
-        {[-15, -5].map((d) => <button key={d} aria-label={`${label} ${-d} minutes earlier`} onClick={() => onChange(value + d)}>{`−${-d}`}</button>)}
-        <output class="tstep-value" aria-live="polite">{clock(value)}</output>
-        {[5, 15].map((d) => <button key={d} aria-label={`${label} ${d} minutes later`} onClick={() => onChange(value + d)}>{`+${d}`}</button>)}
-      </div>
-      <input type="datetime-local" class="tstep-pick" aria-label={`${label}: pick a date and time`} value={toInput(value)} onInput={(e) => { const v = fromInput((e.target as HTMLInputElement).value); if (v !== null) onChange(v); }} />
-    </div>
-  );
+/* ============================================================ the log editor */
+
+/**
+ * The Log's editor (redesign, 2026-10-13; a tester: "the log editor is very confusing"). The old panel put
+ * every choice on one screen: four statuses, break buttons, two extra labels, then a start AND an end, each
+ * with its own steppers and a date picker, and "Start over" one tap from Add. A driver who is not at ease
+ * with phones had to work out which of those mattered.
+ *
+ * Now it asks one question per screen, in the driver's words:
+ *   1. What were you doing?   one tap moves on
+ *   2. When did it start?     a day, then a big clock with hour and minute keys
+ *   3. How long?              common lengths, then fine adjust (a break button already knows, and skips it)
+ *   4. Check and add          the day with the entry in it, and what it does to entries already there
+ * Tapping an entry asks what is wrong with it instead of showing every field at once.
+ *
+ * The whole flow lives in the open panel's descriptor (SheetKind): each step is openSheet() with the next
+ * step and the draft, so every screen renders from data (the tests open any step directly), and the phone's
+ * Back steps back through it instead of throwing the entry away (sheetBack).
+ */
+export type EdStep = 'menu' | 'what' | 'when' | 'long' | 'check';
+/** An entry being made or fixed: what, when it started, how long. `fixedLen` marks a break button's length. */
+export interface Draft { status: DutyStatus; note?: string; start: number; len: number; fixedLen?: boolean }
+
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const round5 = (m: number) => Math.floor(m / 5) * 5;
+/** `min`'s time of day on the calendar day holding `day` (device-local, as every clock in the app is). */
+export function onDay(min: number, day: number): number {
+  const a = new Date(min * 60000), d = new Date(day * 60000);
+  d.setHours(a.getHours(), a.getMinutes(), 0, 0);
+  return Math.floor(d.getTime() / 60000);
+}
+const sameDay = (a: number, b: number) => new Date(a * 60000).toDateString() === new Date(b * 60000).toDateString();
+/** The day buttons: today and the three days before it (or, for a what-if plan, after it). */
+export function dayChips(now: number, future: boolean): { at: number; label: string }[] {
+  return [0, 1, 2, 3].map((i) => {
+    const d = new Date(now * 60000);
+    d.setDate(d.getDate() + (future ? i : -i));
+    const label = i === 0 ? 'Today' : i === 1 ? (future ? 'Tomorrow' : 'Yesterday') : `${DOW_SHORT[d.getDay()]} ${d.getDate()}`;
+    return { at: Math.floor(d.getTime() / 60000), label };
+  });
+}
+const dateInput = (min: number) => toInput(min).slice(0, 10);
+
+/**
+ * The draft after "what" is answered. A first answer sets sensible times: the hour before now (or before
+ * this time of day on the day being viewed), a break ending now, or something inside the entry the driver
+ * tapped, centred in it. A changed answer keeps the times already chosen.
+ */
+export function draftFor(pick: { status: DutyStatus; note?: string; minutes?: number }, prev: Draft | undefined, now: number, inside?: Segment, day?: number): Draft {
+  const fixedLen = pick.minutes !== undefined;
+  if (prev) return { status: pick.status, note: pick.note, start: prev.start, len: pick.minutes ?? prev.len, fixedLen };
+  if (inside) {
+    const room = inside.end - inside.start;
+    const len = Math.min(pick.minutes ?? 30, room);
+    const start = Math.min(Math.max(round5(inside.start + (room - len) / 2), inside.start), inside.end - len);
+    return { status: pick.status, note: pick.note, start, len, fixedLen };
+  }
+  const end = day === undefined ? now : Math.min(now, onDay(now, day));
+  if (fixedLen) return { status: pick.status, note: pick.note, start: end - pick.minutes!, len: pick.minutes!, fixedLen };
+  const start = round5(end - 60);
+  return { status: pick.status, note: pick.note, start, len: Math.max(5, Math.min(60, now - start)), fixedLen };
+}
+const draftOf = (seg: Segment): Draft => ({ status: seg.status, note: seg.note, start: seg.start, len: seg.end - seg.start });
+
+/** Why the start time cannot be used yet, or null. Logged time is the past; a what-if plan is the future. */
+export function whenProblem(d: Draft, now: number, tentative: boolean): string | null {
+  if (tentative) return d.start < now ? `A what-if plan can only start from now on (${clock(now)}).` : null;
+  if (d.start >= now) return `That is later than now (${clock(now)}). This log is for time that has happened.`;
+  if (d.fixedLen && d.start + d.len > now) return `A ${dur(d.len)} break starting then would still be going. Pick an earlier start, or “It just ended”.`;
+  return null;
+}
+/** Why the draft cannot be saved yet, or null. */
+export function draftProblem(d: Draft, now: number, tentative: boolean): string | null {
+  const w = whenProblem({ ...d, fixedLen: false }, now, tentative);
+  if (w) return w;
+  if (d.len < 1) return 'Pick how long it lasted.';
+  if (!tentative && d.start + d.len > now) return `That runs past now (${clock(now)}). Pick a shorter length, or “Until now”.`;
+  return null;
 }
 
-const STATUS_PICK: [DutyStatus, string][] = [['OFF', 'Off'], ['SB', 'Sleeper'], ['D', 'Driving'], ['ON', 'On duty']];
+/**
+ * What the entry will do to the entries already there, in plain words, or null if it touches none. A later
+ * entry wins over the time it covers (the engine's rule), so the driver is told before, not after.
+ * `rows` is the resolved timeline without the entry itself.
+ */
+export function overlapNote(rows: Segment[], d: Draft, now: number): string | null {
+  const end = d.start + d.len;
+  const key = (r: Segment) => (r.note === 'current' ? undefined : r.note ?? undefined);
+  const hit = rows.filter((r) => !r.tentative && r.end > d.start && r.start < end && !(r.status === d.status && key(r) === (d.note ?? undefined)));
+  if (!hit.length) return null;
+  const name = (r: Segment) => segLabel(r.status, key(r));
+  const to = (r: Segment) => (r.end >= now ? 'now' : clock(r.end));
+  const it = d.note?.startsWith('break:') ? 'the break' : 'it';
+  if (hit.length === 1 && hit[0].start < d.start && hit[0].end > end) {
+    const r = hit[0];
+    return `This goes inside your ${name(r)} from ${clock(r.start)} to ${to(r)}. Your log will show that ${r.status === 'D' ? 'drive' : 'entry'} split around ${it}.`;
+  }
+  const list = hit.slice(0, 3).map((r) => `${name(r)} from ${clock(r.start)} to ${to(r)}`).join(', ') + (hit.length > 3 ? ` and ${hit.length - 3} more` : '');
+  return `This takes over part of your ${list}. Where they overlap, that time will count as ${segLabel(d.status, d.note)} instead.`;
+}
+
+/** What the rules make of the entry, when there is something worth saying. */
+export function draftNotes(d: Draft, cycleHours: number): string[] {
+  if (d.note?.startsWith('break:') && (d.status === 'OFF' || d.status === 'ON')) return breakHint(d.len, d.status, cycleHours);
+  if (d.note === 'PC' || d.note === 'YM') return [SUB_HINT[d.note]];
+  if (d.status !== 'D' && d.len >= 30) return ['Long enough for the 30-minute break rule: 30 minutes in a row without driving.'];
+  return [];
+}
+
+/**
+ * The label a fixed entry keeps when the driver picks another status for it: the one picked (personal
+ * conveyance, yard move), else the entry's break name while it still fits (a break logged off duty can be
+ * moved to on duty, as its button allows), else none.
+ */
+export function relabel(seg: Segment, status: DutyStatus, picked?: string): string | undefined {
+  if (picked) return picked;
+  return seg.note?.startsWith('break:') && noteFits(seg.note, status) ? seg.note : undefined;
+}
+
+/** The step before this one, or null when Back should close the panel. */
+export function stepBack(k: SheetKind): SheetKind | null {
+  if (k.kind !== 'add' && k.kind !== 'edit') return null;
+  const step = k.step ?? (k.kind === 'edit' ? 'menu' : 'what');
+  const d = k.draft;
+  if (k.kind === 'edit') {
+    if (step === 'menu') return null;
+    if (step === 'what' || step === 'when') return { ...k, step: 'menu' };
+    if (step === 'long') return { ...k, step: 'when' };
+    return { ...k, step: d?.fixedLen ? 'when' : 'long' };
+  }
+  if (step === 'what') return d ? { ...k, step: k.resume ?? 'check', resume: undefined } : null; // came from a "Change": go back there
+  // Back to the first question starts the answer again (a "what" holding a draft means a "Change" is open).
+  if (step === 'when') return { ...k, step: 'what', draft: undefined, resume: undefined };
+  if (step === 'long') return { ...k, step: 'when' };
+  return { ...k, step: d?.fixedLen ? 'when' : 'long' };
+}
+/** The phone's Back, and the panel's own Back button: one step back, or close. */
+export function sheetBack() {
+  const k = currentSheet();
+  openSheet(k ? stepBack(k) : null);
+}
+
+/** Save the draft: a new entry, or the fixed one. Returns a reason it was refused, or null. */
+export function commitDraft(k: SheetKind, d: Draft, now: number): string | null {
+  const end = d.start + d.len;
+  if (k.kind === 'edit') return saveEntry(k.seg, { status: d.status, start: d.start, end, note: d.note }, now);
+  return addEntry(d.status, d.start, end, now, d.note);
+}
 
 /** The special categories a driver logs from the Log as well as from Now (driver report 2026-10-13). */
-const SUB_PICK: ['PC' | 'YM', DutyStatus, string][] = [['PC', 'OFF', 'Personal conveyance'], ['YM', 'ON', 'Yard move']];
-/** What each special category is, in a line; shown when it is picked. */
 const SUB_HINT: Record<'PC' | 'YM', string> = {
   PC: 'Personal conveyance is off duty: personal use of the truck, never to move a load forward or for the carrier’s business (FMCSA guidance, 2018). Your carrier can restrict or forbid it.',
   YM: 'A yard move is on duty, not driving: it uses your 14-hour window and your week, but not your 11 hours of driving.',
 };
-/**
- * The status rows for the Log's panels: the four statuses, then personal conveyance and yard move. A plain
- * status drops a PC/YM label; PC sets Off and YM sets On; tapping the lit one again goes back to plain.
- */
-function StatusPicker({ st, note, onPick, first }: { st: DutyStatus; note: string | undefined; onPick: (st: DutyStatus, note: string | undefined) => void; first?: boolean }) {
-  const sub = note === 'PC' || note === 'YM' ? note : undefined;
-  return (
-    <>
-      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={first && i === 0 ? true : undefined} class={st === k && !sub ? 'on' : ''} style={st === k && !sub ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k && !sub} onClick={() => onPick(k, sub ? undefined : note && noteFits(note, k) ? note : undefined)}>{l}</button>)}</div>
-      <div class="chips" role="group" aria-label="Personal conveyance or yard move">{SUB_PICK.map(([n, k, l]) => (
-        <button key={n} class={sub === n ? 'on' : undefined} aria-pressed={sub === n} onClick={() => (sub === n ? onPick(k, undefined) : onPick(k, n))}>{l}</button>
-      ))}</div>
-      {sub && <p class="brk-hint sub-hint">{SUB_HINT[sub]}</p>}
-    </>
-  );
-}
-
-function EditSheet({ seg, now }: { seg: Segment; now: number }) {
-  const [st, setSt] = useState<DutyStatus>(seg.status);
-  const [note, setNote] = useState<string | undefined>(seg.note);
-  const [a, setA] = useState(seg.start);
-  const [b, setB] = useState(seg.end);
-  const [err, setErr] = useState<string | null>(null);
-  const save = () => { const e = saveEntry(seg, { status: st, start: a, end: b, note }, now); setErr(e); if (!e) openSheet(null); };
-  const del = () => { deleteEntry(seg); openSheet(null); };
-  return (
-    <Sheet title={seg.tentative ? 'Edit this what-if' : 'Edit this entry'}>
-      {seg.tentative
-        ? <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
-        : <StatusPicker st={st} note={note} first onPick={(k, n) => { setSt(k); setNote(n); }} />}
-      {note?.startsWith('break:') && noteFits(note, st) && <p class="muted small">Logged as the break “{note.slice(6)}”.</p>}
-      <TimeStepper label="Started" value={a} onChange={setA} />
-      <TimeStepper label="Ended" value={b} onChange={setB} />
-      <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
-      {err && <div class="warnbox small">{err}</div>}
-      <button class="primary wide" onClick={save}>Save</button>
-      <button class="danger wide" onClick={del}><Icon d={I.trash} size={18} /> Delete this entry</button>
-      <p class="muted small">You can undo a save or a delete from the Log.</p>
-    </Sheet>
-  );
-}
+type WhatOpt = { status: DutyStatus; note?: 'PC' | 'YM'; title: string; sub: string };
+const WHAT: WhatOpt[] = [
+  { status: 'D', title: 'Driving', sub: 'Behind the wheel' },
+  { status: 'ON', title: 'On duty', sub: 'Working, not driving: fueling, loading, inspecting' },
+  { status: 'OFF', title: 'Off duty', sub: 'Done with work, free to do as you like' },
+  { status: 'SB', title: 'Sleeper berth', sub: 'Resting in the sleeper' },
+];
+const ALSO: WhatOpt[] = [
+  { status: 'OFF', note: 'PC', title: 'Personal conveyance', sub: 'Off duty, using the truck for yourself' },
+  { status: 'ON', note: 'YM', title: 'Yard move', sub: 'On duty, moving the truck in the yard' },
+];
 
 /**
  * What a break does under the rules, in the driver's words: whether it can satisfy the 30-minute break on
- * its own, what logging it on duty costs, and the off-duty test. Shown under the add panel when a break
- * button is picked. Exported for the tests.
+ * its own, what logging it on duty costs, and the off-duty test. Exported for the tests.
  *
  * §395.3(a)(3)(ii): no driving once 8 hours of driving have passed without a 30-minute consecutive
  * interruption, and since 2020 on-duty time that is not driving counts. Off duty, per FMCSA's 2013
@@ -1170,48 +1279,244 @@ export function breakHint(minutes: number, status: 'OFF' | 'ON', cycleHours: num
   return out;
 }
 
-function AddSheet({ s, now }: { s: State; now: number }) {
-  const [st, setSt] = useState<DutyStatus>('OFF');
-  const [a, setA] = useState(now - 60);
-  const [b, setB] = useState(now);
-  const [brk, setBrk] = useState<BreakPreset | null>(null);
-  const [sub, setSub] = useState<'PC' | 'YM' | undefined>(undefined);
-  const [err, setErr] = useState<string | null>(null);
-  const add = () => { const e = addEntry(st, a, b, now, brk ? breakNote(brk.name) : sub); setErr(e); if (!e) openSheet(null); };
-  // A break button sets the status and the length, keeping the end time: most breaks are added just after.
-  const pickBreak = (p: BreakPreset) => { setBrk(p); setSub(undefined); setSt(p.status); setA(b - p.minutes); };
-  // Another status, or personal conveyance / yard move, by hand: no longer that break unless it still fits.
-  const pick = (k: DutyStatus, n: string | undefined) => {
-    setSt(k);
-    setSub(n === 'PC' || n === 'YM' ? n : undefined);
-    if (brk && (n === 'PC' || n === 'YM' || brk.status !== k)) setBrk(null);
-  };
-  const cycleHours = s.config.cycle === '60/7' ? 60 : 70;
-  const fresh = () => {
-    if (confirm('Replace the log with a fresh start (10h off ending now)?')) {
-      startOver(now);
-      openSheet(null);
-    }
-  };
+function Question({ children }: { children: ComponentChildren }) {
+  // Focused when the step opens, so a screen reader reads the question first.
+  return <h3 class="ed-q" tabIndex={-1} data-first>{children}</h3>;
+}
+function StepCount({ at, of }: { at: number; of: number }) {
   return (
-    <Sheet title="Add a break or something I forgot">
-      {s.breakPresets.length > 0 && (
-        <div>
-          <div class="tstep-label">A break</div>
-          <div class="chips" role="group" aria-label="Break buttons">{s.breakPresets.map((p, i) => (
-            <button key={i} data-first={i === 0 ? true : undefined} class={brk === p ? 'on' : undefined} aria-pressed={brk === p} onClick={() => pickBreak(p)}>{p.name}</button>
-          ))}</div>
-          {brk && b > a && <ul class="brk-hint">{breakHint(b - a, brk.status, cycleHours).map((t, i) => <li key={i}>{t}</li>)}</ul>}
-        </div>
+    <div class="ed-steps">
+      <div class="ed-bar" aria-hidden="true">{Array.from({ length: of }, (_, i) => <span key={i} class={i < at ? 'on' : undefined} />)}</div>
+      <span class="ed-count">Step {at} of {of}</span>
+    </div>
+  );
+}
+function OptRow({ o, on, onPick }: { o: WhatOpt; on?: boolean; onPick: () => void }) {
+  return (
+    <button class="opt" aria-pressed={on ? true : undefined} onClick={onPick}>
+      <span class="led" style={{ background: STATUS_COLOR[o.status] }} />
+      <span><b>{o.title}</b><span class="sub">{o.sub}</span></span>
+      <Icon d={on ? I.check : I.next} size={20} />
+    </button>
+  );
+}
+/** The answer so far, above the next question, with a way back to change it. */
+function Context({ d, onChange }: { d: Draft; onChange?: () => void }) {
+  return (
+    <div class="ed-ctx">
+      <span class="dot" style={{ background: STATUS_COLOR[d.status] }} />
+      <span class="ed-ctx-t">{segLabel(d.status, d.note)}</span>
+      {onChange ? <button class="link" onClick={onChange}>Change</button> : <span />}
+    </div>
+  );
+}
+
+type EdKind = Extract<SheetKind, { kind: 'add' } | { kind: 'edit' }>;
+
+function WhatStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
+  const [err, setErr] = useState<string | null>(null);
+  const edit = k.kind === 'edit' ? k.seg : null;
+  const tentative = !!edit?.tentative;
+  const inside = k.kind === 'add' ? k.inside : undefined;
+  const choose = (status: DutyStatus, note?: string, minutes?: number) => {
+    if (edit) {
+      if (isOn({ status, note: note as WhatOpt['note'], title: '', sub: '' })) { openSheet(null); return; } // already that: nothing to change
+      // A different status is one tap, kept as the times were; undo is on the Log.
+      const e = saveEntry(edit, { status, start: edit.start, end: edit.end, note: relabel(edit, status, note) }, now);
+      setErr(e);
+      if (!e) openSheet(null);
+      return;
+    }
+    const d = draftFor({ status, note, minutes }, k.draft, now, inside, k.kind === 'add' ? k.day : undefined);
+    openSheet({ ...k, draft: d, step: k.draft ? (k.kind === 'add' && k.resume) || 'check' : 'when', ...(k.kind === 'add' ? { resume: undefined } : {}) });
+  };
+  // The row lit in an edit: its status, as personal conveyance or yard move when it is one.
+  function isOn(o: WhatOpt): boolean {
+    if (!edit) return false;
+    const sub = edit.note === 'PC' || edit.note === 'YM' ? edit.note : undefined;
+    return edit.status === o.status && o.note === sub;
+  }
+  const breaks = edit ? [] : s.breakPresets;
+  const breakRow = breaks.length > 0 && (
+    <>
+      <div class="ed-lab">A break</div>
+      <div class="ed-brk" role="group" aria-label="Break buttons">{breaks.map((p, i) => (
+        <button key={i} onClick={() => choose(p.status, breakNote(p.name), p.minutes)}><b>{p.name}</b><span>{dur(p.minutes)} · {p.status === 'ON' ? 'on duty' : 'off duty'}</span></button>
+      ))}</div>
+    </>
+  );
+  // Inside a drive or a work stretch, the likeliest answer is a break: it comes first there.
+  const breaksFirst = !!inside && (inside.status === 'D' || inside.status === 'ON');
+  return (
+    <>
+      {!edit && <StepCount at={1} of={k.draft?.fixedLen ? 2 : 3} />}
+      <Question>{edit ? 'What were you really doing?' : inside ? 'What happened in the middle?' : 'What were you doing?'}</Question>
+      {breaksFirst && breakRow}
+      {breaksFirst && <div class="ed-lab">Or</div>}
+      {WHAT.map((o) => <OptRow key={o.status} o={o} on={isOn(o)} onPick={() => choose(o.status)} />)}
+      {!breaksFirst && breakRow}
+      {!tentative && (
+        <>
+          <div class="ed-lab">Also</div>
+          {ALSO.map((o) => <OptRow key={o.note} o={o} on={isOn(o)} onPick={() => choose(o.status, o.note)} />)}
+        </>
       )}
-      <div class="tstep-label">{s.breakPresets.length > 0 ? 'Or anything else' : 'What you were doing'}</div>
-      <StatusPicker st={st} note={brk ? breakNote(brk.name) : sub} first={s.breakPresets.length === 0} onPick={pick} />
-      <TimeStepper label="Started" value={a} onChange={setA} />
-      <TimeStepper label="Ended" value={b} onChange={setB} />
-      <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
       {err && <div class="warnbox small">{err}</div>}
-      <button class="primary wide" onClick={add}>Add to my log</button>
-      <button class="ghost" onClick={fresh}>Start over: fresh 10-hour rest ending now</button>
+      {edit && <p class="muted small ed-foot">Keeps the times. You can undo it from the Log.</p>}
+    </>
+  );
+}
+
+function WhenStep({ k, now }: { k: EdKind; now: number }) {
+  const d = k.draft!;
+  const tentative = k.kind === 'edit' && !!k.seg.tentative;
+  const set = (start: number) => openSheet({ ...k, draft: { ...d, start } });
+  const problem = whenProblem(d, now, tentative);
+  const key = (delta: number, text: string, label: string) => <button key={delta} aria-label={label} onClick={() => set(d.start + delta)}>{text}</button>;
+  const pickDate = (v: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return;
+    const t = new Date(d.start * 60000);
+    set(Math.floor(new Date(+m[1], +m[2] - 1, +m[3], t.getHours(), t.getMinutes()).getTime() / 60000));
+  };
+  const chips = dayChips(now, tentative);
+  const onChip = chips.some((c) => sameDay(c.at, d.start));
+  return (
+    <>
+      {k.kind === 'add' && <StepCount at={2} of={d.fixedLen ? 2 : 3} />}
+      <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'when' }) : undefined} />
+      <Question>{k.kind === 'edit' ? 'When did it really start?' : 'When did it start?'}</Question>
+      <div class="chips ed-days" role="group" aria-label="Day">
+        {chips.map((c) => <button key={c.label} class={sameDay(c.at, d.start) ? 'on' : undefined} aria-pressed={sameDay(c.at, d.start)} onClick={() => set(onDay(d.start, c.at))}>{c.label}</button>)}
+      </div>
+      <div class="ed-clock">
+        <output class="mono" aria-live="polite" aria-label={`Started ${clock(d.start)}`}>{clock(d.start, false)}</output>
+        <span>{new Date(d.start * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+      </div>
+      {d.fixedLen && !tentative && <button class="wide-btn" onClick={() => set(now - d.len)}>It just ended: started {clock(now - d.len, false)}</button>}
+      <div class="ed-keys two">{key(-60, '− 1 hour', '1 hour earlier')}{key(60, '+ 1 hour', '1 hour later')}</div>
+      <div class="ed-keys four">{key(-15, '−15', '15 minutes earlier')}{key(-5, '−5', '5 minutes earlier')}{key(5, '+5', '5 minutes later')}{key(15, '+15', '15 minutes later')}</div>
+      <label class="ed-day">Another day<input type="date" value={dateInput(d.start)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>
+      {problem && <div class="warnbox small">{problem}</div>}
+      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: d.fixedLen ? 'check' : 'long' })}>{d.fixedLen ? 'Next: check it' : 'Next: how long'}</button>
+    </>
+  );
+}
+
+const LENGTHS: [number, string][] = [[15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [120, '2 hours'], [600, '10 hours']];
+
+function LongStep({ k, now }: { k: EdKind; now: number }) {
+  const d = k.draft!;
+  const tentative = k.kind === 'edit' && !!k.seg.tentative;
+  const set = (len: number) => openSheet({ ...k, draft: { ...d, len: Math.max(5, len), fixedLen: false } });
+  const sinceStart = now - d.start;
+  const problem = draftProblem(d, now, tentative);
+  return (
+    <>
+      {k.kind === 'add' && <StepCount at={3} of={3} />}
+      <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'long' }) : undefined} />
+      <p class="ed-from">From <b class="mono">{clock(d.start)}</b></p>
+      <Question>{k.kind === 'edit' ? 'How long did it really last?' : 'How long did it last?'}</Question>
+      <div class="ed-len" role="group" aria-label="Length">
+        {LENGTHS.map(([m, l]) => <button key={m} class={d.len === m ? 'on' : undefined} aria-pressed={d.len === m} disabled={!tentative && d.start + m > now} onClick={() => set(m)}>{l}</button>)}
+        {!tentative && sinceStart >= 5 && <button class={`all${d.len === sinceStart ? ' on' : ''}`} aria-pressed={d.len === sinceStart} onClick={() => set(sinceStart)}>Until now · {dur(sinceStart)}</button>}
+      </div>
+      <div class="ed-fine">
+        <button aria-label="15 minutes shorter" onClick={() => set(d.len - 15)}>−15</button>
+        <button aria-label="5 minutes shorter" onClick={() => set(d.len - 5)}>−5</button>
+        <output class="mono" aria-live="polite">{dur(d.len)}</output>
+        <button aria-label="5 minutes longer" onClick={() => set(d.len + 5)}>+5</button>
+        <button aria-label="15 minutes longer" onClick={() => set(d.len + 15)}>+15</button>
+      </div>
+      <p class="ed-ends">Ends <b class="mono">{clock(d.start + d.len)}</b></p>
+      {problem && <div class="warnbox small">{problem}</div>}
+      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: 'check' })}>Check it</button>
+    </>
+  );
+}
+
+function CheckStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
+  const [err, setErr] = useState<string | null>(null);
+  const d = k.draft!;
+  const edit = k.kind === 'edit' ? k.seg : null;
+  const tentative = !!edit?.tentative;
+  const end = d.start + d.len;
+  const cycleHours = s.config.cycle === '60/7' ? 60 : 70;
+  // The timeline without this entry (for what it overlaps), and with it (for the picture).
+  const without: State = edit ? { ...s, segments: s.segments.filter((x) => x !== edit), tentative: s.tentative.filter((x) => x !== edit) } : s;
+  const row: Segment = { status: d.status, start: d.start, end, createdAt: Number.MAX_SAFE_INTEGER, ...(d.note ? { note: d.note } : {}), ...(tentative ? { tentative: true } : {}) };
+  const withIt: State = tentative ? { ...without, tentative: [...without.tentative, row] } : { ...without, segments: [...without.segments, row] };
+  // Resolved, then joined on the label as the Log shows it: a drive logged as two touching rows is one drive.
+  const before = joinDisplayRows(normalize(allSegments(without, now), { merge: false }));
+  const after = joinDisplayRows(normalize(allSegments(withIt, now), { merge: false }));
+  const from = carrierDayStart(d.start, s.config), to = nextCarrierDayStart(from, s.config);
+  const overlap = overlapNote(before, d, now);
+  const notes = draftNotes(d, cycleHours);
+  const problem = draftProblem(d, now, tentative);
+  const go = (step: EdStep) => openSheet({ ...k, step });
+  const save = () => { const e = commitDraft(k, d, now); setErr(e); if (!e) openSheet(null); };
+  return (
+    <>
+      <Question>{edit ? 'Check the change' : 'Check and add'}</Question>
+      <div class="ed-sum">
+        <div><span>What</span><b>{segLabel(d.status, d.note)}</b>{edit ? <span /> : <button class="link" onClick={() => go('what')} aria-label="Change what you were doing">Change</button>}</div>
+        <div><span>When</span><b class="mono">{clock(d.start)} → {clock(end, !sameDay(d.start, end))}</b><button class="link" onClick={() => go('when')} aria-label="Change when it started">Change</button></div>
+        <div><span>Length</span><b class="mono">{dur(d.len)}</b><button class="link" onClick={() => go('long')} aria-label="Change how long it lasted">Change</button></div>
+      </div>
+      <div>
+        <div class="ed-lab">Your day with it {edit ? 'changed' : 'added'}</div>
+        <Grid segments={after} from={from} to={to} tz={s.config.timeZone} mark={{ start: d.start, end }} />
+      </div>
+      {overlap && <p class="warnbox">{overlap}</p>}
+      {notes.length > 0 && <ul class="brk-hint">{notes.map((t, i) => <li key={i}>{t}</li>)}</ul>}
+      {(problem || err) && <div class="warnbox small">{problem ?? err}</div>}
+      <button class="primary wide ed-go" disabled={!!problem} onClick={save}>{edit ? 'Save the change' : 'Add to my log'}</button>
+      <p class="muted small ed-foot">You can undo it from the Log.</p>
+    </>
+  );
+}
+
+/** Tapping an entry: what is wrong with it, in the driver's words, rather than every field at once. */
+function MenuStep({ k }: { k: Extract<SheetKind, { kind: 'edit' }> }) {
+  const seg = k.seg;
+  const d = draftOf(seg);
+  const label = segLabel(seg.status, seg.note);
+  const middle = !seg.tentative && seg.end - seg.start >= 10;
+  const worked = seg.status === 'D' || seg.status === 'ON';
+  const act = (icon: string, title: string, sub: string, onClick: () => void, cls?: string) => (
+    <button class={`act${cls ? ` ${cls}` : ''}`} onClick={onClick}>
+      <Icon d={icon} size={24} />
+      <span><b>{title}</b><span class="sub">{sub}</span></span>
+      {cls ? <span /> : <Icon d={I.next} size={20} />}
+    </button>
+  );
+  return (
+    <>
+      <p class="ed-when mono">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</p>
+      <Question>What do you want to fix?</Question>
+      {act(I.log, `It wasn’t ${label}`, 'Change what you were doing', () => openSheet({ ...k, step: 'what', draft: d }))}
+      {act(I.now, 'The times are wrong', 'Change when it started or how long', () => openSheet({ ...k, step: 'when', draft: d }))}
+      {middle && act(I.plus, worked ? 'I took a break in the middle' : 'I worked or drove in the middle', worked ? `Add a break inside this ${seg.status === 'D' ? 'drive' : 'entry'}` : 'Add something inside this entry', () => openSheet({ kind: 'add', inside: seg }))}
+      {act(I.trash, seg.tentative ? 'Remove this what-if' : 'It never happened', seg.tentative ? 'Take it out of the plan' : 'Delete this entry', () => { deleteEntry(seg); openSheet(null); }, 'del')}
+      <p class="muted small ed-foot">Every change can be undone from the Log.</p>
+    </>
+  );
+}
+
+function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
+  const step: EdStep = k.step ?? (k.kind === 'edit' ? 'menu' : 'what');
+  // A step that needs a draft without one (a stale descriptor) starts over at the first question.
+  const ok = step === 'menu' || step === 'what' || !!k.draft;
+  const at: EdStep = ok ? step : k.kind === 'edit' ? 'menu' : 'what';
+  const title = k.kind === 'add' ? 'Add to your log' : `${segLabel(k.seg.status, k.seg.note)}${k.seg.tentative ? ' (what-if)' : ''}`;
+  const first = at === (k.kind === 'edit' ? 'menu' : 'what') && !(k.kind === 'add' && k.draft);
+  return (
+    <Sheet title={title} onBack={first ? undefined : sheetBack} focusKey={at}>
+      {at === 'menu' && k.kind === 'edit' && <MenuStep k={k} />}
+      {at === 'what' && <WhatStep k={k} s={s} now={now} />}
+      {at === 'when' && <WhenStep k={k} now={now} />}
+      {at === 'long' && <LongStep k={k} now={now} />}
+      {at === 'check' && <CheckStep k={k} s={s} now={now} />}
     </Sheet>
   );
 }
@@ -1786,6 +2091,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       <Card title="Data">
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
         {ioNote && <p class="muted small">{ioNote}</p>}
+        <button class="danger" onClick={() => { if (confirm('Start over? Your log is replaced with a fresh 10-hour rest ending now. You can undo this from the Log.')) { startOver(now); setState({ tab: 'log' }); } }}>Start over: fresh 10-hour rest ending now</button>
+        <p class="muted small">Moved here from the Log's add panel, where it sat one tap from Add. It can be undone from the Log.</p>
         <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
@@ -1872,7 +2179,7 @@ export function App() {
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
     const nav = createBackNav(window.history, () => ({ tab: getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: () => openSheet(null), goTo: (tab) => setState({ tab }) });
+      { closeSheet: sheetBack, goTo: (tab) => setState({ tab }) });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
@@ -1946,8 +2253,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
-      {!disclaimer && sheet?.kind === 'edit' && <EditSheet key={`${sheet.seg.start}-${sheet.seg.end}`} seg={sheet.seg} now={now} />}
-      {!disclaimer && sheet?.kind === 'add' && <AddSheet s={s} now={now} />}
+      {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
     </div>
   );
 }

@@ -358,3 +358,61 @@ button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, butto
 button.wide-btn { width: 100%; margin-top: 8px; font-weight: 800; }
 .brk-hint { margin: 10px 0 0; padding: 10px 12px 10px 28px; border-radius: 12px; background: var(--tint-accent); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .sub-hint { list-style: none; padding: 10px 12px; margin: 0; }
+/* The Log's editor, one question per screen (redesign, 2026-10-13). */
+.sheet-head h2 { flex: 1; }
+.ed-steps { display: flex; flex-direction: column; gap: 4px; }
+.ed-bar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.ed-bar span { height: 5px; border-radius: 3px; background: var(--line); }
+.ed-bar span.on { background: var(--accent-solid); }
+.ed-count { font-size: 14px; color: var(--muted); text-align: right; }
+/* A panel taller than the screen scrolls; its rows must not be squeezed to fit instead. */
+.sheet > * { flex-shrink: 0; }
+.sheet .ed-q { margin: 2px 0 0; font-size: 26px; line-height: 1.15; color: var(--text); outline: none; }
+.ed-lab { font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 4px 2px 0; }
+.ed-foot { text-align: center; margin: 0; }
+button.opt, button.act { width: 100%; min-height: 64px; display: grid; grid-template-columns: 8px 1fr 20px; align-items: center; gap: 14px; padding: 10px 14px 10px 12px; text-align: left; border-radius: 16px; }
+button.act { grid-template-columns: 24px 1fr 20px; color: var(--text); }
+button.act > svg:first-child { color: var(--link); }
+button.act.del, button.act.del > svg:first-child { color: var(--bad); border-color: var(--bad); }
+.opt .led { width: 8px; height: 38px; border-radius: 4px; }
+.opt b, .act b { display: block; font-size: 18px; font-weight: 800; }
+.opt .sub, .act .sub { display: block; font-size: 14px; color: var(--muted); font-weight: 400; margin-top: 1px; }
+button.opt[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.ed-brk { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
+.ed-brk button { min-height: 60px; padding: 8px 12px; border-radius: 14px; text-align: left; }
+.ed-brk b { display: block; font-size: 16px; font-weight: 800; }
+.ed-brk span { display: block; font-size: 13px; color: var(--muted); font-weight: 400; }
+.ed-ctx { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 10px; min-height: 48px; padding: 0 6px 0 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.ed-ctx .dot { width: 10px; height: 10px; border-radius: 50%; }
+.ed-ctx-t { font-size: 15px; font-weight: 700; }
+.ed-ctx button.link { min-height: 44px; }
+.ed-day { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--muted); font-weight: 700; }
+.ed-day input { flex: 1; min-height: 44px; }
+.ed-day input.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ed-clock { padding: 12px; border-radius: 18px; background: var(--screen); border: 1px solid var(--line); box-shadow: inset 0 2px 8px var(--drop); text-align: center; }
+.ed-clock output { display: block; font-size: 64px; font-weight: 700; line-height: 1; color: var(--text); }
+.ed-clock span { display: block; font-size: 15px; color: var(--muted); margin-top: 4px; }
+.ed-keys { display: grid; gap: 8px; }
+.ed-keys.two { grid-template-columns: 1fr 1fr; }
+.ed-keys.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ed-keys button { min-height: 56px; padding: 0; font-size: 18px; font-weight: 800; }
+.ed-from, .ed-ends, .ed-when { margin: 0; font-size: 16px; }
+.ed-ends { text-align: center; }
+.ed-len { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ed-len button { min-height: 58px; font-size: 18px; font-weight: 800; }
+.ed-len button.on { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+.ed-len button.all { grid-column: 1 / -1; }
+.ed-fine { display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr 1fr; gap: 6px; align-items: center; }
+.ed-fine button { min-height: 52px; padding: 0; font-size: 16px; font-weight: 800; }
+.ed-fine output { min-height: 52px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--line); border-radius: 12px; font-size: 17px; font-weight: 800; white-space: nowrap; }
+.ed-sum { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.ed-sum > div { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 8px; min-height: 52px; padding: 2px 6px 2px 12px; border-top: 1px solid var(--line); }
+.ed-sum > div:first-child { border-top: 0; }
+.ed-sum > div > span:first-child { color: var(--muted); font-size: 14px; }
+.ed-sum button.link { min-height: 44px; }
+.grid-mark { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
+p.warnbox { margin: 0; font-size: 15px; line-height: 1.35; }
+.ed-days { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.ed-days button { padding: 0 4px; font-size: 16px; }
+/* The step's main button stays in reach at the foot of the panel while the rest scrolls. */
+.sheet button.ed-go { position: sticky; bottom: 0; z-index: 1; box-shadow: 0 -10px 18px var(--panel), 0 2px 0 var(--key-base); }
