@@ -1868,6 +1868,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/class="dial-center"><div class="hero-label">You can drive<\/div><div class="hero-value good">4h 30m<\/div>/.test(h)) throw new Error('the number sits in the middle of the dial');
   if (!/<span class="limit-plate">limited by 8-hour rule \(30-min break in 4h 30m\)<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
   if (!/<text class="dial-scale"[^>]*>8h<\/text>/.test(h)) throw new Error('the dial is scaled to the limit that binds (the break: 8h)');
+  // the RENDERED arc must be the driver's real share (4h30 left of the 8h break rule), not just "a fill":
+  // a dial wired to a constant reads full while the driver runs out. The share is a literal here on
+  // purpose -- recomputing it through bindingShare() would test the wiring against itself.
+  if (!h.includes(`class="dial-fill" d="${dialGeometry(270 / 480, 8, 270).fill}"`)) throw new Error('Now\'s dial must show the share of the binding limit that is left (4h 30m of 8h)');
   // 3. keys and capsule: LED colour through --led, not a coloured slab; the lit key also carries a check
   if (!/class="pill" style="--led: var\(--warn\)"/.test(h)) throw new Error('the status capsule takes its LED colour from the status');
   if (!/style="--led: var\(--sb\)"[^>]*aria-pressed="false"/.test(h)) throw new Error('the Sleeper key is lit in the sleeper colour');
@@ -1880,6 +1884,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   h = out('drive/cab dial 45m');
   if (!/<main class="drive warn"[\s\S]*<div class="dial warn">/.test(h)) throw new Error('45 min left: the driving dial turns amber');
   if (!/class="dial-center"><div class="drive-label">Driving left<\/div><div class="drive-num short">45m<\/div>/.test(h)) throw new Error('the driving number sits in the dial');
+  // and its arc is the real share: 45 min left of the 11-hour limit (a full dial here would lie)
+  if (!h.includes(`class="dial-fill" d="${dialGeometry(45 / 660, 11, 320).fill}"`)) throw new Error('the driving dial must show the share of the binding limit that is left (45m of 11h)');
   if (/drive-bar/.test(h)) throw new Error('the dial replaces the old bar');
   setState({ segments: [{ status: 'OFF', start: T - 1400, end: T - 690 }, { status: 'D', start: T - 690, end: T - 390 }, { status: 'OFF', start: T - 390, end: T - 360 }, { status: 'D', start: T - 360, end: T }] });
   h = out('drive/cab dial 0');

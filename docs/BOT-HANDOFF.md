@@ -644,3 +644,68 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      `<small>latest start</small>` above its time, with the new wording. (3) An **iPhone** overscroll
      (rubber-band bounce) at the top of Now — the author could not emulate it and neither can this box;
      **still needs Lorico's phone.** If the dock nudges toward the tab bar there, it is a separate fix.
+- **Re-check 2 fixes (2026-10-11, `c47935c`, base `3226ff9`)** — from a third-party re-check (Daniel Tam,
+  `HOS-Sandbox-Recheck-2026-10-11.pdf`, kept out of the repo). 9 of the 14 earlier items confirmed fixed,
+  including both High; three new bugs, **each reproduced from the report's own steps before any change**
+  (`reviews/repro-recheck2.mjs`), matching every figure it quoted. *This entry was missed when the fix
+  shipped and was added with the cab look.*
+  1. **R1 (High) — a what-if row dragged into the past masked logged driving.** 6h of driving vanished
+     from every clock: "You can drive" 5h → 8h, the week 63h → 69h — the dangerous direction. Cause:
+     `saveEntry` refused nothing for a what-if row, and `applySegmentEdit` re-stamps the row it edits, so
+     the plan won the overlap in `normalize()` (newest wins). A regression from the N5 fix. Now a what-if
+     plan may only cover time from now on (edit the logged entry for time that has happened); a future
+     what-if is still editable.
+  2. **R2 (Medium) — imported drafts were merged unchecked.** `split {drive: 1e9}` froze the Split Lab
+     (138 s measured). Fixed as a class, wider than reported: `split`, `loadCheck`, `trip`, `mph` and the
+     live status are checked field by field like an imported config — wrong type → default or what is on
+     screen, finite but out of range → clamped. The import message names what was replaced
+     (`draftResets`), never substituting silently.
+  3. **R3 (Low) — after a reload the first Back presses did nothing.** A fresh load cleared only the
+     current entry's mark. Each entry now records its depth and a fresh load steps back over the whole run
+     at once; `history.go(-n)` fires ONE popstate, so the pending count is per event, not per entry. An
+     existing M11 assertion that encoded the old clear-the-mark behaviour (the defect) was updated
+     deliberately in the same commit.
+  4. **Falsified: 5/5** (`reviews/falsify-recheck2.py`), one mutation per mechanism. Engine untouched.
+- **The cab look (2026-10-12, 1 commit `d3150f9` from Opus 5.5, base `c47935c`) + one test of ours.**
+  Lorico asked for a look that fits a modern semi's cab; the tester's mockups were approved with all four
+  suggestions (the dial, the ice-blue accent, the readout typeface, the daylight look).
+  1. **Its reading of "hyper-realistic":** realistic *materials on the frame* — machined edges, backlit
+     keys with a status-coloured LED strip, a dial with a printed scale, a recessed log screen — and
+     **flat, high-contrast type on every number**. No glossy glass or chrome reflections (they cost
+     legibility in sun glare and at night). **No truck maker's name, logo or emblem anywhere.**
+     Palettes: night carbon `#090c10` / ice-blue accent `#7cc8ff`; daylight brushed titanium `#e4e9ee` /
+     deep blue `#0b5fa8`. Day is still the default; all four declarations agree on the new colour
+     (`applyTheme`, `index.html` theme-color, the manifest, and `theme: 'day'` unchanged).
+  2. **Sleeper has its own colour, `--sb`** (violet). It used to share the accent, which is now the ice
+     blue of the dials and links. `STATUS_COLOR.SB = 'var(--sb)'`; the log grid draws sleeper in it.
+  3. **The dial shows the binding limit's share, from `bindingShare`** — the same 0–1 value the driving
+     view's bar used — scaled to that limit (11h, 14h, 8h for the break rule, 60/70h for the week). It is a
+     fuel gauge: it empties as the driver drives; amber under an hour, red and empty at zero. The scale
+     sits outside the arc so nothing crosses the number. Copy is unchanged except two things the note's
+     summary line understated: the driving-view clock now shows the **time only** (no weekday), and the
+     dial prints its scale (`0` / `11h` …, `aria-hidden`).
+  4. **Verified, not trusted:** SHA-256 **`c24d07dbf3b281e59b79296a59a0f258e869675115ce1ba292cca091feee5b20`
+     — exact 64/64 match** to the applied file (this note printed it on one line, all 64). Base: 8/8
+     pre-image blobs exactly `c47935c`; 11/11 final blobs match the author's. Safety scan: the only URLs in
+     the patch are inside the OFL licence; the two WOFF2 files are genuine Atkinson Hyperlegible Mono
+     (500/700, 237 glyphs, the project's copyright; read with fontTools in a throwaway env). Engine
+     untouched (99/99); contrast **40/40 both themes**.
+  5. **Falsified 12/12** (`reviews/falsify-cablook.py`): the author's eight claimed proofs, two checks it
+     did not list (chrome colour drift, the Mono licence), and two of ours. **One gap was real:** with
+     Now's dial wired to `share={1}` — always full — the whole suite stayed green, and the driving dial was
+     only caught at zero. The geometry test proved `dialGeometry(0.5)` is half full, not that the *screen*
+     passes the driver's share. Added: the rendered arc must equal the arc for the literal share
+     (4h30 of 8h = 270/480 on Now; 45m of 11h = 45/660 in the driving view) — literal on purpose, so the
+     wiring is not tested against itself. Both falsify with their own message.
+  6. **Looked at, measured:** screenshots of every tab in both looks at 390×844
+     (`shots/2026-10-13-cab-preview/`). Three defects a vision pass claimed were checked in the DOM and
+     are false (the capsule sits 12px inside the edge; no horizontal overflow; no clipped text; the meter
+     bars are clearly visible). **One trade-off, not a bug:** the taller dial puts the 70-hr week row
+     below the fold at the top of Now (reachable by scrolling, clear of the dock); before, all four limits
+     showed without scrolling.
+  7. **Rollback:** `git revert --no-edit d3150f9` (and our test commit) → push → deploy. No saved data
+     changes; the fonts become unused files. Glow strength is one knob: `--glow` in the night block.
+  8. **Phone checks still owed (headless cannot do them):** night glow at low brightness; daylight
+     legibility in direct sun; scroll smoothness on an older Android (the glows are CSS drop-shadows);
+     the driving view at calm / under an hour / zero in both looks (the night look should frame, never
+     flood); each status key lit, obvious at arm's length.
