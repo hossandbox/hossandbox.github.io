@@ -1967,4 +1967,53 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null, breakPresets: sanitizeBreaks(undefined) });
   console.log('break buttons (add a break from the Log): OK');
 }
+// --- personal conveyance and yard move from the Log (driver report 2026-10-13: "no option to add personal conveyance")
+{
+  const { noteFits, segLabel: sl, getState: gs, allSegments: all, breakNote } = await import('../src/store.ts');
+  const { addEntry, saveEntry, openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  // 1. which labels fit which status
+  const fits = [['PC', 'OFF', true], ['PC', 'D', false], ['PC', 'ON', false], ['YM', 'ON', true], ['YM', 'OFF', false], ['YM', 'D', false],
+    [breakNote('x'), 'OFF', true], [breakNote('x'), 'ON', true], [breakNote('x'), 'D', false], [breakNote('x'), 'SB', false], [undefined, 'D', true], ['Break 1', 'SB', true]];
+  for (const [n, st, want] of fits) if (noteFits(n, st) !== want) throw new Error(`noteFits(${n}, ${st}) should be ${want}`);
+  // 2. adding personal conveyance from the Log: labelled, and off duty to the clocks
+  const M = (h) => Math.floor(Date.UTC(2026, 9, 13, 0, 0) / 60000) + Math.round(h * 60);
+  setLaunchNotice(false);
+  setState({ nowOverride: M(20), tab: 'log', historyAcknowledged: true, tentative: [], current: null, config: { ...gs().config, timeZone: 'UTC', dayStartHour: 0 },
+    segments: [{ status: 'OFF', start: M(-12), end: M(8), createdAt: 1 }, { status: 'D', start: M(8), end: M(12), createdAt: 2 }, { status: 'OFF', start: M(12), end: M(20), createdAt: 3 }] });
+  if (addEntry('OFF', M(18), M(18.5), M(20), 'PC') !== null) throw new Error('personal conveyance must add');
+  const pc = gs().segments.find((x) => x.note === 'PC');
+  if (!pc || sl(pc.status, pc.note) !== 'Personal conveyance (OFF)') throw new Error('the row reads as personal conveyance');
+  if (evaluate(all(gs(), M(20)), { asOf: M(20), config: gs().config }).shift.driveUsed !== 240) throw new Error('personal conveyance is off duty: it uses no driving time');
+  if (!/Personal conveyance \(OFF\)/.test(out('log/pc row'))) throw new Error('the Log shows it by name');
+  // 3. an edit that moves a labelled row out of its status drops the label
+  if (saveEntry(pc, { status: 'D', start: pc.start, end: pc.end }, M(20)) !== null) throw new Error('setup: the edit saves');
+  const moved = gs().segments.find((x) => x.start === M(18) && x.end === M(18.5));
+  if (moved.note !== undefined || sl(moved.status, moved.note) !== 'Driving') throw new Error(`a PC row edited to Driving must not read "Personal conveyance (D)" (got ${sl(moved.status, moved.note)})`);
+  if (saveEntry(moved, { status: 'ON', start: moved.start, end: moved.end, note: 'YM' }, M(20)) !== null) throw new Error('setup: relabel as a yard move');
+  const ym = gs().segments.find((x) => x.start === M(18));
+  if (sl(ym.status, ym.note) !== 'Yard move (ON)') throw new Error('an edit can make a row a yard move');
+  addEntry('OFF', M(13), M(13.5), M(20), breakNote('30-min break'));
+  const br = gs().segments.find((x) => x.note === breakNote('30-min break'));
+  saveEntry(br, { status: 'ON', start: br.start, end: br.end }, M(20));
+  if (gs().segments.find((x) => x.start === M(13)).note !== breakNote('30-min break')) throw new Error('a break logged on duty instead is still that break');
+  saveEntry(gs().segments.find((x) => x.start === M(13)), { status: 'D', start: M(13), end: M(13.5) }, M(20));
+  if (gs().segments.find((x) => x.start === M(13)).note !== undefined) throw new Error('a break edited to Driving is no longer a break');
+  // 4. the panels offer them
+  openSheet({ kind: 'add' });
+  let h = out('log/add panel pc');
+  if (!/role="group" aria-label="Personal conveyance or yard move"><button aria-pressed="false">Personal conveyance<\/button><button aria-pressed="false">Yard move<\/button>/.test(h)) throw new Error('the add panel offers personal conveyance and yard move');
+  openSheet({ kind: 'edit', seg: gs().segments.find((x) => x.start === M(18)) });
+  h = out('log/edit panel ym');
+  if (!/<button class="on" aria-pressed="true">Yard move<\/button>/.test(h)) throw new Error('editing a yard move shows it picked');
+  if (!/A yard move is on duty, not driving/.test(h)) throw new Error('and says what it is');
+  if (/<button[^>]*class="on"[^>]*aria-pressed="true"[^>]*>On duty</.test(h)) throw new Error('plain On duty is not also lit');
+  // the panel's Add must hand its PC/YM choice to addEntry. A string render cannot click, so the wiring is
+  // pinned at source level (as in 6c1ba18); the click itself is checked in a browser.
+  const { readFileSync: rf } = await import('node:fs');
+  if (!/addEntry\(st, a, b, now, brk \? breakNote\(brk\.name\) : sub\)/.test(rf('src/app.tsx', 'utf8'))) throw new Error('the add panel must pass personal conveyance / yard move to the new row');
+  openSheet(null); setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  console.log('personal conveyance and yard move from the Log: OK');
+}
 console.log('OK');

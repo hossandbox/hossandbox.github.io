@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -918,7 +918,7 @@ function undoable(label: string, change: () => void) {
   setUndo({ label, before, after: pick(getState()) });
 }
 /** Save an edited entry; returns a reason it was refused, or null. Undo-able from the Log. */
-export function saveEntry(seg: Segment, next: { status: DutyStatus; start: number; end: number }, now: number): string | null {
+export function saveEntry(seg: Segment, next: { status: DutyStatus; start: number; end: number; note?: string }, now: number): string | null {
   if (next.end <= next.start) return 'End must be after start.';
   // "Only up to now" is a rule for logged time. A what-if row is a plan, and a plan is in the future;
   // applying the rule to it meant a what-if could only ever be deleted (re-check N5).
@@ -930,7 +930,10 @@ export function saveEntry(seg: Segment, next: { status: DutyStatus; start: numbe
   // and the week 63h -> 69h left (Daniel Tam, re-check 2, R1). N5 still holds: a what-if inside the
   // future is editable.
   if (seg.tentative && next.start < now) return `A what-if plan can only cover time from now on (${clock(now)}). Pushing it back would hide logged time — edit the logged entry instead.`;
-  undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, next)));
+  // The label: the one the panel picked, else the row's own, and only while it fits the status.
+  const picked = 'note' in next ? next.note : seg.note;
+  const fixed = { status: next.status, start: next.start, end: next.end, note: noteFits(picked, next.status) ? picked : undefined };
+  undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, fixed)));
   return null;
 }
 /** Delete an entry. Undo-able from the Log. */
@@ -1098,16 +1101,44 @@ function TimeStepper({ label, value, onChange }: { label: string; value: number;
 
 const STATUS_PICK: [DutyStatus, string][] = [['OFF', 'Off'], ['SB', 'Sleeper'], ['D', 'Driving'], ['ON', 'On duty']];
 
+/** The special categories a driver logs from the Log as well as from Now (driver report 2026-10-13). */
+const SUB_PICK: ['PC' | 'YM', DutyStatus, string][] = [['PC', 'OFF', 'Personal conveyance'], ['YM', 'ON', 'Yard move']];
+/** What each special category is, in a line; shown when it is picked. */
+const SUB_HINT: Record<'PC' | 'YM', string> = {
+  PC: 'Personal conveyance is off duty: personal use of the truck, never to move a load forward or for the carrier’s business (FMCSA guidance, 2018). Your carrier can restrict or forbid it.',
+  YM: 'A yard move is on duty, not driving: it uses your 14-hour window and your week, but not your 11 hours of driving.',
+};
+/**
+ * The status rows for the Log's panels: the four statuses, then personal conveyance and yard move. A plain
+ * status drops a PC/YM label; PC sets Off and YM sets On; tapping the lit one again goes back to plain.
+ */
+function StatusPicker({ st, note, onPick, first }: { st: DutyStatus; note: string | undefined; onPick: (st: DutyStatus, note: string | undefined) => void; first?: boolean }) {
+  const sub = note === 'PC' || note === 'YM' ? note : undefined;
+  return (
+    <>
+      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={first && i === 0 ? true : undefined} class={st === k && !sub ? 'on' : ''} style={st === k && !sub ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k && !sub} onClick={() => onPick(k, sub ? undefined : note && noteFits(note, k) ? note : undefined)}>{l}</button>)}</div>
+      <div class="chips" role="group" aria-label="Personal conveyance or yard move">{SUB_PICK.map(([n, k, l]) => (
+        <button key={n} class={sub === n ? 'on' : undefined} aria-pressed={sub === n} onClick={() => (sub === n ? onPick(k, undefined) : onPick(k, n))}>{l}</button>
+      ))}</div>
+      {sub && <p class="brk-hint sub-hint">{SUB_HINT[sub]}</p>}
+    </>
+  );
+}
+
 function EditSheet({ seg, now }: { seg: Segment; now: number }) {
   const [st, setSt] = useState<DutyStatus>(seg.status);
+  const [note, setNote] = useState<string | undefined>(seg.note);
   const [a, setA] = useState(seg.start);
   const [b, setB] = useState(seg.end);
   const [err, setErr] = useState<string | null>(null);
-  const save = () => { const e = saveEntry(seg, { status: st, start: a, end: b }, now); setErr(e); if (!e) openSheet(null); };
+  const save = () => { const e = saveEntry(seg, { status: st, start: a, end: b, note }, now); setErr(e); if (!e) openSheet(null); };
   const del = () => { deleteEntry(seg); openSheet(null); };
   return (
     <Sheet title={seg.tentative ? 'Edit this what-if' : 'Edit this entry'}>
-      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
+      {seg.tentative
+        ? <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
+        : <StatusPicker st={st} note={note} first onPick={(k, n) => { setSt(k); setNote(n); }} />}
+      {note?.startsWith('break:') && noteFits(note, st) && <p class="muted small">Logged as the break “{note.slice(6)}”.</p>}
       <TimeStepper label="Started" value={a} onChange={setA} />
       <TimeStepper label="Ended" value={b} onChange={setB} />
       <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
@@ -1144,12 +1175,17 @@ function AddSheet({ s, now }: { s: State; now: number }) {
   const [a, setA] = useState(now - 60);
   const [b, setB] = useState(now);
   const [brk, setBrk] = useState<BreakPreset | null>(null);
+  const [sub, setSub] = useState<'PC' | 'YM' | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
-  const add = () => { const e = addEntry(st, a, b, now, brk ? breakNote(brk.name) : undefined); setErr(e); if (!e) openSheet(null); };
+  const add = () => { const e = addEntry(st, a, b, now, brk ? breakNote(brk.name) : sub); setErr(e); if (!e) openSheet(null); };
   // A break button sets the status and the length, keeping the end time: most breaks are added just after.
-  const pickBreak = (p: BreakPreset) => { setBrk(p); setSt(p.status); setA(b - p.minutes); };
-  // Picking another status by hand means it is no longer that break.
-  const pickStatus = (k: DutyStatus) => { setSt(k); if (brk && brk.status !== k) setBrk(null); };
+  const pickBreak = (p: BreakPreset) => { setBrk(p); setSub(undefined); setSt(p.status); setA(b - p.minutes); };
+  // Another status, or personal conveyance / yard move, by hand: no longer that break unless it still fits.
+  const pick = (k: DutyStatus, n: string | undefined) => {
+    setSt(k);
+    setSub(n === 'PC' || n === 'YM' ? n : undefined);
+    if (brk && (n === 'PC' || n === 'YM' || brk.status !== k)) setBrk(null);
+  };
   const cycleHours = s.config.cycle === '60/7' ? 60 : 70;
   const fresh = () => {
     if (confirm('Replace the log with a fresh start (10h off ending now)?')) {
@@ -1169,7 +1205,7 @@ function AddSheet({ s, now }: { s: State; now: number }) {
         </div>
       )}
       <div class="tstep-label">{s.breakPresets.length > 0 ? 'Or anything else' : 'What you were doing'}</div>
-      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 && s.breakPresets.length === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => pickStatus(k)}>{l}</button>)}</div>
+      <StatusPicker st={st} note={brk ? breakNote(brk.name) : sub} first={s.breakPresets.length === 0} onPick={pick} />
       <TimeStepper label="Started" value={a} onChange={setA} />
       <TimeStepper label="Ended" value={b} onChange={setB} />
       <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>

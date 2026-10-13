@@ -708,6 +708,19 @@ export function applyTheme(t: Theme) {
 }
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };
+/**
+ * Whether a row's label still fits its status. Personal conveyance is off duty and a yard move is on duty
+ * (49 CFR 395 guidance; the ELD records them as special categories of those two), and a break is logged off
+ * or on duty, never Driving or Sleeper. An edit that moves a row out of its status drops the label, or a
+ * personal-conveyance row edited to Driving would read "Personal conveyance (D)". Other notes always fit.
+ */
+export function noteFits(note: string | undefined, status: DutyStatus): boolean {
+  if (!note) return true;
+  if (note === 'PC') return status === 'OFF';
+  if (note === 'YM') return status === 'ON';
+  if (note.startsWith(BREAK_NOTE)) return status === 'OFF' || status === 'ON';
+  return true;
+}
 export function segLabel(status: DutyStatus, note?: string): string {
   if (note && note.startsWith(BREAK_NOTE) && note.length > BREAK_NOTE.length) return `${note.slice(BREAK_NOTE.length)} (${status})`;
   return note && SUB_STATUS[note] ? `${SUB_STATUS[note]} (${status})` : STATUS_LABEL[status];

@@ -357,3 +357,4 @@ button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, butto
 .brk-len button { min-height: 48px; font-weight: 800; font-size: 16px; }
 button.wide-btn { width: 100%; margin-top: 8px; font-weight: 800; }
 .brk-hint { margin: 10px 0 0; padding: 10px 12px 10px 28px; border-radius: 12px; background: var(--tint-accent); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.sub-hint { list-style: none; padding: 10px 12px; margin: 0; }
