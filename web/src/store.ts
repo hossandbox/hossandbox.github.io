@@ -488,7 +488,7 @@ const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object
 /*
  * An imported file's DRAFTS used to be merged with no checks at all: a Split Lab draft of
  * {drive: 1e9} made the screen unresponsive for minutes and a 10,000,000-mile load produced nonsense
- * (Daniel Tam, re-check 2, R2). They are UI state, but they are consumed by real math, so each field is
+ * (a tester, re-check 2, R2). They are UI state, but they are consumed by real math, so each field is
  * checked the way an imported config already was: a value the controls could not have produced falls
  * back to the default (or to what is on screen), and finite numbers are clamped to the allowed range.
  * `mph`, `current` and the trip draft had the same gap.

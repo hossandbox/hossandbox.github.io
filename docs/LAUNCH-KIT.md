@@ -153,7 +153,7 @@ Found a bug? Use the "Report a bug" link in the app. **Please don't post your pa
 
 **What I changed and why:**
 - **"include your Venmo creds!" → removed.** Never collect payment handles in a public post or issue. Venmo exposes the account holder's real name, anyone can send a payment *request* against a handle, and you'd be publishing a list of drivers' identities tied to your app. The safe flow — now in the README, the issue form, and the app — is: report publicly → I confirm → handle emailed privately to hossandbox.app@gmail.com → paid within 48 h. ("Creds" also means passwords; asking for credentials in a post reads like phishing.)
-- **"driving for UPS" → "driving for a living."** Naming your employer while promoting a personal product is exactly what corporate social-media policies exist to catch, and you have a pension and a possible buyout in play. Same credibility, no exposure. Check the policy if you'd rather name them.
+- **Naming the employer → "driving for a living."** Naming your employer while promoting a personal product is exactly what corporate social-media policies exist to catch. Same credibility, no exposure. Check the policy if you'd rather name them.
 - **Added the paper-log disclaimer.** When an ELD fails, §395.34 puts the driver on paper RODS. This app can't satisfy that, and a driver who thinks it does is in real trouble. One line protects both of you.
 - **"send this github link" → the app link.** Drivers want the app, not a repository. GitHub reads as techy to a Facebook audience; the app URL installs to a home screen in two taps.
 

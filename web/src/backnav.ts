@@ -45,7 +45,7 @@ export function createBackNav(
   // Entries left by an earlier page load are not ours to count — and they are not the driver's to press
   // Back through either. A reload (or an app update) leaves this app's own entries in the stack with
   // nothing open behind them, and each one swallowed a Back press before the app did anything: go
-  // Now -> Log -> Plan, reload, and the first two presses did nothing at all (Daniel Tam, re-check 2,
+  // Now -> Log -> Plan, reload, and the first two presses did nothing at all (a tester, re-check 2,
   // R3). Every entry records how deep it sits, so a fresh load steps back over the whole run at once.
   const st = h.state as { app?: string; depth?: number } | null;
   if (st?.app === MARK) {

@@ -927,7 +927,7 @@ export function saveEntry(seg: Segment, next: { status: DutyStatus; start: numbe
   // resolved timeline on purpose (a plan must never be silently overwritten by the history it overlaps),
   // so a what-if moved into the past masks the logged driving underneath it and every clock is then read
   // off the plan instead of the record: 6h of logged driving disappeared, "You can drive" went 5h -> 8h
-  // and the week 63h -> 69h left (Daniel Tam, re-check 2, R1). N5 still holds: a what-if inside the
+  // and the week 63h -> 69h left (a tester, re-check 2, R1). N5 still holds: a what-if inside the
   // future is editable.
   if (seg.tentative && next.start < now) return `A what-if plan can only cover time from now on (${clock(now)}). Pushing it back would hide logged time — edit the logged entry instead.`;
   // The label: the one the panel picked, else the row's own, and only while it fits the status.

@@ -917,7 +917,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ config: keep });
   console.log('import validation + bad time zone: OK');
 }
-// --- review of the QA patch (Daniel Tam): fixes on top of it
+// --- review of the QA patch (a tester): fixes on top of it
 {
   const { earliestStrategy } = await import('../src/app.tsx');
   const { parseSaved, isValidTimeZone: validTz } = await import('../src/store.ts');
@@ -1413,7 +1413,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const rows = () => gs().segments.map((x) => `${x.status}@${x.start}-${x.end}`).sort().join(',');
   setState({ nowOverride: T, historyAcknowledged: true, tentative: [], current: { status: 'ON', since: T - 120, createdAt: 3 },
     segments: [{ status: 'OFF', start: T - 1200, end: T - 480, createdAt: 1 }, { status: 'D', start: T - 480, end: T - 120, createdAt: 2 }] });
-  // Daniel's repro: edit, add, then a status tap on Now; the edit's undo must be gone, and nothing lost
+  // the tester's repro: edit, add, then a status tap on Now; the edit's undo must be gone, and nothing lost
   if (saveEntry(gs().segments[1], { status: 'D', start: T - 475, end: T - 120 }, T) !== null) throw new Error('the edit should save');
   if (!currentUndo()) throw new Error('an edit must be undo-able');
   if (addEntry('SB', T - 1100, T - 1000, T) !== null) throw new Error('the add should save');
@@ -1551,7 +1551,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('re-check N5 (what-if rows can be edited): OK');
 }
-// --- re-check 2 (Daniel Tam) R1: a what-if plan may not be pushed back into logged time
+// --- re-check 2 (a tester) R1: a what-if plan may not be pushed back into logged time
 {
   const { saveEntry, setLaunchNotice } = await import('../src/app.tsx');
   const { getState: gs, allSegments } = await import('../src/store.ts');
@@ -1583,7 +1583,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('re-check 2 R1 (a what-if cannot be pushed into logged time): OK');
 }
-// --- re-check 2 (Daniel Tam) R2: an imported draft the app cannot use is not merged in unchecked
+// --- re-check 2 (a tester) R2: an imported draft the app cannot use is not merged in unchecked
 {
   const { importProblem, applyImportedState, draftResets, getState: gs, DEFAULT_SPLIT, DEFAULT_LOADCHECK } = await import('../src/store.ts');
   const bad = { segments: [], split: { b1: 'abc', b1s: 'XX', dwell: -500, drive: 1e9, b2: null, b2s: 7 }, loadCheck: { miles: 10000000, leaveIn: -99999, dwell: 'x' } };
@@ -1623,7 +1623,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (draftResets(good, cur).length !== 0) throw new Error('a clean file must not be reported as having replaced anything');
   console.log('re-check 2 R2 (imported drafts are checked before use): OK');
 }
-// --- re-check 2 (Daniel Tam) R3: a reload must not leave Back presses doing nothing
+// --- re-check 2 (a tester) R3: a reload must not leave Back presses doing nothing
 {
   const { createBackNav } = await import('../src/backnav.ts');
   // The suite's own fake history: go() lands later, as in a browser, and fires popstate once.

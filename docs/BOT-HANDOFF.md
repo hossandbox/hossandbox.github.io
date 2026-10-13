@@ -196,8 +196,9 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
    Program (15% instead of 30%).
 6. **Decide what the free web version becomes at launch.** If it keeps every feature it
    cannibalizes the paid app. Recommendation: the web stays as **Lite** (Log + Split Lab).
-7. **Naming/exposure**: marketing copy must not name Lorico's employer (UPS) — pension and a
-   possible buyout are in play. "One person who drives for a living" is the approved phrasing.
+7. **Naming/exposure**: nothing public (marketing copy, commits, docs, the app) names Lorico's
+   employer or any tester or driver. "One person who drives for a living" is the approved phrasing;
+   testers are "a tester", drivers "a driver".
 
 **Decided — do not silently reverse:**
 
@@ -569,7 +570,7 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      day default, opens on Now, panels inert, modal dialog, started-earlier offsets, sticky-header
      opacity, PC still offered). Both harnesses assert the tree is in the **intended** state before and
      after, and refuse to run otherwise.
-- **The re-check fixes landed (2026-10-10, 12 commits, base `61fa3c7`)** — answers Daniel Tam's re-check
+- **The re-check fixes landed (2026-10-10, 12 commits, base `61fa3c7`)** — answers a tester's re-check
   findings N1–N6, M8, M9 and M11, plus two "unconfirmed (code reading)" items he confirmed in the code.
   Verified before applying: safety scan clean; the base **matched `61fa3c7` exactly** (every file carrying
   a base pre-image); **7/7 final blobs match** the author's; engine **99/99** (was 98); contrast 31/31;
@@ -644,7 +645,7 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      `<small>latest start</small>` above its time, with the new wording. (3) An **iPhone** overscroll
      (rubber-band bounce) at the top of Now — the author could not emulate it and neither can this box;
      **still needs Lorico's phone.** If the dock nudges toward the tab bar there, it is a separate fix.
-- **Re-check 2 fixes (2026-10-11, `c47935c`, base `3226ff9`)** — from a third-party re-check (Daniel Tam,
+- **Re-check 2 fixes (2026-10-11, `c47935c`, base `3226ff9`)** — from a third-party re-check (a tester,
   `HOS-Sandbox-Recheck-2026-10-11.pdf`, kept out of the repo). 9 of the 14 earlier items confirmed fixed,
   including both High; three new bugs, **each reproduced from the report's own steps before any change**
   (`reviews/repro-recheck2.mjs`), matching every figure it quoted. *This entry was missed when the fix
