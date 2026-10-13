@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -938,10 +938,10 @@ export function deleteEntry(seg: Segment) {
   undoable(`Deleted ${describe(seg)}`, () => setState((cur) => ({ segments: cur.segments.filter((x) => x !== seg), tentative: cur.tentative.filter((x) => x !== seg) })));
 }
 /** Add a forgotten entry; returns a reason it was refused, or null. Undo-able from the Log. */
-export function addEntry(status: DutyStatus, start: number, end: number, now: number): string | null {
+export function addEntry(status: DutyStatus, start: number, end: number, now: number, note?: string): string | null {
   if (end <= start) return 'End must be after start.';
   if (end > now) return `End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`;
-  const row: Segment = { status, start, end, createdAt: stamp() };
+  const row: Segment = { status, start, end, createdAt: stamp(), ...(note ? { note } : {}) };
   undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
   return null;
 }
@@ -1068,7 +1068,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           </>
         )}
       </Card>
-      <button class="addbtn" onClick={() => openSheet({ kind: 'add' })}><Icon d={I.plus} /> Add something I forgot</button>
+      <button class="addbtn" onClick={() => openSheet({ kind: 'add' })}><Icon d={I.plus} /> Add a break or something I forgot</button>
       <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
       {ev.violations.some((v) => v.tentative) && (
         <Card title="This plan would violate" tone="warn">
@@ -1119,12 +1119,38 @@ function EditSheet({ seg, now }: { seg: Segment; now: number }) {
   );
 }
 
-function AddSheet({ now }: { now: number }) {
+/**
+ * What a break does under the rules, in the driver's words: whether it can satisfy the 30-minute break on
+ * its own, what logging it on duty costs, and the off-duty test. Shown under the add panel when a break
+ * button is picked. Exported for the tests.
+ *
+ * §395.3(a)(3)(ii): no driving once 8 hours of driving have passed without a 30-minute consecutive
+ * interruption, and since 2020 on-duty time that is not driving counts. Off duty, per FMCSA's 2013
+ * guidance, means relieved of all duty and responsibility for the vehicle and free to do as one chooses;
+ * pay is not part of that test.
+ */
+export function breakHint(minutes: number, status: 'OFF' | 'ON', cycleHours: number): string[] {
+  const out = [minutes < 30
+    ? 'On its own this does not satisfy the 30-minute break rule: that needs 30 minutes in a row without driving. Back to back with other time off the wheel (fueling, a meal), it all counts together.'
+    : 'Long enough for the 30-minute break rule: 30 minutes in a row without driving.'];
+  out.push(status === 'ON'
+    ? `Logged on duty: it still counts toward the 30-minute break, but it uses ${dur(minutes)} of your ${cycleHours}-hour week.`
+    : 'Off duty means relieved of all work and free to do as you choose (FMCSA guidance). Whether a break is paid is not part of that test.');
+  return out;
+}
+
+function AddSheet({ s, now }: { s: State; now: number }) {
   const [st, setSt] = useState<DutyStatus>('OFF');
   const [a, setA] = useState(now - 60);
   const [b, setB] = useState(now);
+  const [brk, setBrk] = useState<BreakPreset | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const add = () => { const e = addEntry(st, a, b, now); setErr(e); if (!e) openSheet(null); };
+  const add = () => { const e = addEntry(st, a, b, now, brk ? breakNote(brk.name) : undefined); setErr(e); if (!e) openSheet(null); };
+  // A break button sets the status and the length, keeping the end time: most breaks are added just after.
+  const pickBreak = (p: BreakPreset) => { setBrk(p); setSt(p.status); setA(b - p.minutes); };
+  // Picking another status by hand means it is no longer that break.
+  const pickStatus = (k: DutyStatus) => { setSt(k); if (brk && brk.status !== k) setBrk(null); };
+  const cycleHours = s.config.cycle === '60/7' ? 60 : 70;
   const fresh = () => {
     if (confirm('Replace the log with a fresh start (10h off ending now)?')) {
       startOver(now);
@@ -1132,8 +1158,18 @@ function AddSheet({ now }: { now: number }) {
     }
   };
   return (
-    <Sheet title="Add something I forgot">
-      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => setSt(k)}>{l}</button>)}</div>
+    <Sheet title="Add a break or something I forgot">
+      {s.breakPresets.length > 0 && (
+        <div>
+          <div class="tstep-label">A break</div>
+          <div class="chips" role="group" aria-label="Break buttons">{s.breakPresets.map((p, i) => (
+            <button key={i} data-first={i === 0 ? true : undefined} class={brk === p ? 'on' : undefined} aria-pressed={brk === p} onClick={() => pickBreak(p)}>{p.name}</button>
+          ))}</div>
+          {brk && b > a && <ul class="brk-hint">{breakHint(b - a, brk.status, cycleHours).map((t, i) => <li key={i}>{t}</li>)}</ul>}
+        </div>
+      )}
+      <div class="tstep-label">{s.breakPresets.length > 0 ? 'Or anything else' : 'What you were doing'}</div>
+      <div class="toggle big" role="group" aria-label="Status">{STATUS_PICK.map(([k, l], i) => <button key={k} data-first={i === 0 && s.breakPresets.length === 0 ? true : undefined} class={st === k ? 'on' : ''} style={st === k ? { background: STATUS_COLOR[k], color: 'var(--chip-ink)' } : undefined} aria-pressed={st === k} onClick={() => pickStatus(k)}>{l}</button>)}</div>
       <TimeStepper label="Started" value={a} onChange={setA} />
       <TimeStepper label="Ended" value={b} onChange={setB} />
       <div class="lenrow"><span class="muted">Length</span><b>{b > a ? dur(b - a) : '—'}</b></div>
@@ -1622,6 +1658,38 @@ function DrivingAlertsCard({ s }: { s: State }) {
   );
 }
 
+/**
+ * The driver's break buttons. A break is not a duty status, so each button is just a name, a length and
+ * the status it is logged as; the rules about pay belong to the carrier, not to this app.
+ */
+function BreakButtonsCard({ s }: { s: State }) {
+  const list = s.breakPresets;
+  const save = (next: BreakPreset[]) => setState({ breakPresets: sanitizeBreaks(next) });
+  const set = (i: number, p: Partial<BreakPreset>) => {
+    if (p.name !== undefined && !p.name.trim()) return; // an emptied name keeps the old one rather than deleting the button
+    save(list.map((b, j) => (j === i ? { ...b, ...p } : b)));
+  };
+  return (
+    <Card title="Break buttons">
+      <p class="muted small">Shown when you add an entry on the Log. A break is not a duty status of its own: each button logs the length and status you set here. For example, a 20-minute paid break and a 40-minute lunch, each logged the way your carrier has you log it.</p>
+      {list.map((b, i) => (
+        <div class="brk-row" key={`${i}-${b.name}`}>
+          <label>Name<input type="text" maxLength={24} value={b.name} onChange={(e) => set(i, { name: (e.target as HTMLInputElement).value })} /></label>
+          <div class="brk-len">
+            <button aria-label={`${b.name}: 5 minutes shorter`} disabled={b.minutes <= 5} onClick={() => set(i, { minutes: b.minutes - 5 })}>−5</button>
+            <output class="tstep-value">{dur(b.minutes)}</output>
+            <button aria-label={`${b.name}: 5 minutes longer`} disabled={b.minutes >= 240} onClick={() => set(i, { minutes: b.minutes + 5 })}>+5</button>
+          </div>
+          <Toggle options={[['OFF', 'Logged off duty'], ['ON', 'Logged on duty']]} value={b.status} onChange={(v) => set(i, { status: v })} />
+          <button class="danger" onClick={() => save(list.filter((_, j) => j !== i))}>Remove “{b.name}”</button>
+        </div>
+      ))}
+      {list.length < MAX_BREAKS && <button class="wide-btn" onClick={() => save([...list, { name: `Break ${list.length + 1}`, minutes: 30, status: 'OFF' }])}>Add a break button</button>}
+      {list.length === 0 && <p class="muted small">No break buttons: the Log's add panel shows the four statuses only.</p>}
+    </Card>
+  );
+}
+
 function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
@@ -1673,6 +1741,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
       </Card>
       <DrivingAlertsCard s={s} />
+      <BreakButtonsCard s={s} />
       <Card title="Bug reports">
         <BugButton s={s} ev={ev} />
         <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
@@ -1842,7 +1911,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && sheet?.kind === 'edit' && <EditSheet key={`${sheet.seg.start}-${sheet.seg.end}`} seg={sheet.seg} now={now} />}
-      {!disclaimer && sheet?.kind === 'add' && <AddSheet now={now} />}
+      {!disclaimer && sheet?.kind === 'add' && <AddSheet s={s} now={now} />}
     </div>
   );
 }

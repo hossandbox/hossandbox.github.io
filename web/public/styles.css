@@ -349,3 +349,11 @@ button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, butto
 .meter-value { font-size: 14px; }
 .pill, .drive-clock, .top-right .clock { white-space: nowrap; }
 :root[data-theme="day"] main.drive.warn .dial-cap, :root[data-theme="day"] main.drive.bad .dial-cap { fill: var(--chip-ink); stroke: none; }
+
+/* Break buttons (driver report 2026-10-13): Settings rows and the add panel's rule hint. */
+.brk-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.brk-row:first-of-type { border-top: 0; }
+.brk-len { display: grid; grid-template-columns: 64px 1fr 64px; gap: 8px; align-items: center; }
+.brk-len button { min-height: 48px; font-weight: 800; font-size: 16px; }
+button.wide-btn { width: 100%; margin-top: 8px; font-weight: 800; }
+.brk-hint { margin: 10px 0 0; padding: 10px 12px 10px 28px; border-radius: 12px; background: var(--tint-accent); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }

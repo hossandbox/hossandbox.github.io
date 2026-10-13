@@ -78,6 +78,12 @@ export interface State {
   keepAwake: boolean;
   /** Show the full-screen driving view on Now while the status is Driving (redesign). Device setting. */
   drivingView: boolean;
+  /**
+   * The driver's break buttons for the Log's add panel (driver report 2026-10-13: "I can't find a way to
+   * add break"). A break is not a duty status: each button is a name, a length and the status the driver
+   * actually logs it as. Device setting, like the alerts: not exported.
+   */
+  breakPresets: BreakPreset[];
 }
 
 const KEY = 'hos-sandbox-v1';
@@ -108,12 +114,39 @@ export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolea
 export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false, leaveIn: 0, waitOff: false, answered: false };
 
 /** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
+/** One break button: what the driver calls it, how long it is, and how it is logged (never Driving or Sleeper). */
+export interface BreakPreset { name: string; minutes: number; status: 'OFF' | 'ON' }
+/** The federal one is the only default. A carrier's own breaks (a 20-minute paid break, a lunch) are the driver's to add. */
+export const DEFAULT_BREAKS: BreakPreset[] = [{ name: '30-min break', minutes: 30, status: 'OFF' }];
+export const MAX_BREAKS = 6;
+/**
+ * Break buttons read from storage or typed in Settings, made safe: a name of 1–24 characters, 5–240
+ * minutes in steps of 5, Off or On only, at most six. Anything else is dropped, never guessed at.
+ */
+export function sanitizeBreaks(d: unknown): BreakPreset[] {
+  if (!Array.isArray(d)) return DEFAULT_BREAKS.map((b) => ({ ...b }));
+  const out: BreakPreset[] = [];
+  for (const x of d) {
+    if (out.length >= MAX_BREAKS || !x || typeof x !== 'object') continue;
+    const r = x as Record<string, unknown>;
+    const name = typeof r.name === 'string' ? r.name.trim().slice(0, 24) : '';
+    const m = Number(r.minutes);
+    if (!name || !Number.isFinite(m) || (r.status !== 'OFF' && r.status !== 'ON')) continue;
+    out.push({ name, minutes: Math.min(240, Math.max(5, Math.round(m / 5) * 5)), status: r.status });
+  }
+  return out;
+}
+/** A logged row's note for a break: the name travels with the row, so renaming a button never relabels history. */
+export const BREAK_NOTE = 'break:';
+export const breakNote = (name: string) => `${BREAK_NOTE}${name}`;
+
 export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
+  breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
 
 /**
@@ -146,7 +179,9 @@ export function parseSaved(raw: string | null): State {
       config: sanitizeConfig(s.config),
       trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
       split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
-      loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) } };
+      loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) },
+      // a save from before break buttons has none: it gets the default; a damaged list is cleaned, not trusted
+      breakPresets: s.breakPresets === undefined ? DEFAULT_BREAKS.map((b) => ({ ...b })) : sanitizeBreaks(s.breakPresets) };
     // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
     // every day boundary without a word, so ask again through the first-run zone prompt instead.
     if (typeof s.config?.timeZone === 'string' && s.config.timeZone !== merged.config.timeZone) merged.tzChosen = false;
@@ -674,6 +709,7 @@ export function applyTheme(t: Theme) {
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };
 export function segLabel(status: DutyStatus, note?: string): string {
+  if (note && note.startsWith(BREAK_NOTE) && note.length > BREAK_NOTE.length) return `${note.slice(BREAK_NOTE.length)} (${status})`;
   return note && SUB_STATUS[note] ? `${SUB_STATUS[note]} (${status})` : STATUS_LABEL[status];
 }
 

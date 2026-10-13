@@ -1272,7 +1272,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/Delete this entry/.test(h)) throw new Error('delete lives in the edit panel');
   if (!/<main[^>]*\binert\b/.test(h)) throw new Error('the Log must be inert behind the panel');
   openSheet({ kind: 'add' });
-  if (!/Add something I forgot/.test(out('log/add panel'))) throw new Error('the add panel must open');
+  if (!/Add a break or something I forgot/.test(out('log/add panel'))) throw new Error('the add panel must open'); // title names breaks since 2026-10-13
   openSheet(null);
   setLaunchNotice(true);
   // 4. the panel's actions: refuse the impossible, save, delete, undo
@@ -1901,5 +1901,70 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(true);
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('cab look (dials, keys, capsule, sleeper colour): OK');
+}
+// --- break buttons (driver report 2026-10-13: "I try to edit the logs but I can't find a way to add break")
+{
+  const { INITIAL_STATE: IS, parseSaved: ps, sanitizeBreaks, segLabel: sl, breakNote, getState: gs, allSegments: all } = await import('../src/store.ts');
+  const { addEntry, breakHint, openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  // 1. one default, the federal one; a carrier's breaks are the driver's to add
+  if (IS.breakPresets.length !== 1 || IS.breakPresets[0].name !== '30-min break' || IS.breakPresets[0].minutes !== 30 || IS.breakPresets[0].status !== 'OFF') throw new Error('the only default is a 30-min break, off duty');
+  // 2. storage: an old save gets the default; a damaged list is cleaned, not trusted; an emptied list stays empty
+  if (ps(JSON.stringify({ segments: [] })).breakPresets.length !== 1) throw new Error('a save from before break buttons gets the default');
+  if (ps(JSON.stringify({ segments: [], breakPresets: [] })).breakPresets.length !== 0) throw new Error('a driver who removed every button keeps none');
+  const loaded = ps(JSON.stringify({ segments: [], breakPresets: [{ name: 'Nap', minutes: 30, status: 'SB' }, { name: 'Lunch', minutes: 999, status: 'OFF' }] })).breakPresets;
+  if (loaded.length !== 1 || loaded[0].name !== 'Lunch' || loaded[0].minutes !== 240) throw new Error(`a damaged saved list must be cleaned on load (got ${JSON.stringify(loaded)})`);
+  const dirty = sanitizeBreaks([{ name: '  20-min paid  ', minutes: 22, status: 'ON' }, { name: '', minutes: 30, status: 'OFF' }, { name: 'x', minutes: 'abc', status: 'OFF' },
+    { name: 'Nap', minutes: 30, status: 'SB' }, { name: 'Tiny', minutes: 1, status: 'OFF' }, { name: 'Huge', minutes: 999, status: 'OFF' }, 'junk', null,
+    { name: 'A', minutes: 30, status: 'OFF' }, { name: 'B', minutes: 30, status: 'OFF' }, { name: 'C', minutes: 30, status: 'OFF' }, { name: 'D', minutes: 30, status: 'OFF' }]);
+  if (dirty.length !== 6 || dirty[0].name !== '20-min paid' || dirty[0].minutes !== 20 || dirty[0].status !== 'ON') throw new Error(`a damaged list must be cleaned (got ${JSON.stringify(dirty)})`);
+  if (dirty.some((b) => b.status !== 'OFF' && b.status !== 'ON')) throw new Error('a break is never logged as Driving or Sleeper');
+  if (dirty[1].minutes !== 5 || dirty[2].minutes !== 240) throw new Error('lengths are kept within 5–240 minutes');
+  if (sanitizeBreaks('nope').length !== 1) throw new Error('something that is not a list falls back to the default');
+  // 3. the label travels with the row, as personal conveyance does
+  if (sl('ON', breakNote('20-min paid')) !== '20-min paid (ON)' || sl('OFF', 'break:') !== 'Off Duty') throw new Error('a break row is labelled by its name and the status it was logged as');
+  // 4. the rule, said plainly
+  const h20 = breakHint(20, 'ON', 70).join(' '), h40 = breakHint(40, 'OFF', 70).join(' '), h30 = breakHint(30, 'OFF', 60).join(' ');
+  if (!/does not satisfy the 30-minute break rule/.test(h20) || !/uses 20m of your 70-hour week/.test(h20)) throw new Error('a short on-duty break: not enough alone, and it costs week hours');
+  if (!/Long enough for the 30-minute break rule/.test(h40) || !/relieved of all work/.test(h40) || !/paid is not part of that test/.test(h40)) throw new Error('an off-duty break: enough, and the off-duty test');
+  if (/week/.test(h30)) throw new Error('an off-duty break costs no week hours');
+  // 5. ...and the rule is what the engine does: 20 min alone does not reset the 8 hours; 20 on + 40 off back to back does; 30 on duty does
+  const M = (h) => Math.floor(Date.UTC(2026, 9, 13, 0, 0) / 60000) + Math.round(h * 60);
+  const cfg = { cycle: '70/8', dayStartHour: 0, timeZone: 'UTC', shortHaul: false };
+  const base = [{ status: 'OFF', start: M(-12), end: M(6) }, { status: 'D', start: M(6), end: M(11) }];
+  const breakLeft = (extra, at) => evaluate([...base, ...extra], { asOf: at, config: cfg }).shift.breakRemaining;
+  if (breakLeft([{ status: 'OFF', start: M(11), end: M(11 + 20 / 60) }], M(11 + 20 / 60)) !== 180) throw new Error('20 minutes alone must not reset the 8 hours');
+  if (breakLeft([{ status: 'ON', start: M(11), end: M(11 + 20 / 60) }, { status: 'OFF', start: M(11 + 20 / 60), end: M(12) }], M(12)) !== 480) throw new Error('20 on duty + 40 off, back to back, must reset the 8 hours');
+  if (breakLeft([{ status: 'ON', start: M(11), end: M(11.5) }], M(11.5)) !== 480) throw new Error('30 minutes on duty not driving counts (since 2020)');
+  // 6. adding a break from the Log into a drive already logged splits it, and the clocks follow
+  setLaunchNotice(false);
+  setState({ nowOverride: M(14), tab: 'log', historyAcknowledged: true, tentative: [], current: null, config: { ...gs().config, timeZone: 'UTC', dayStartHour: 0 },
+    breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }, { name: '20-min paid', minutes: 20, status: 'ON' }, { name: '40-min lunch', minutes: 40, status: 'OFF' }],
+    segments: [{ status: 'OFF', start: M(-12), end: M(8), createdAt: 1 }, { status: 'D', start: M(8), end: M(14), createdAt: 2 }] });
+  if (evaluate(all(gs(), M(14)), { asOf: M(14), config: gs().config }).shift.breakRemaining !== 120) throw new Error('setup: 6h of driving leaves 2h before the break is due');
+  if (addEntry('OFF', M(11), M(11.5), M(14), breakNote('30-min break')) !== null) throw new Error('the break must add');
+  const after = evaluate(all(gs(), M(14)), { asOf: M(14), config: gs().config }).shift;
+  if (after.breakRemaining !== 330 || after.driveUsed !== 330) throw new Error(`the break must split the drive: the 8 hours restart at 11:30, 2h30 driven since (330m left, got ${after.breakRemaining}); 5h30 driven in all (got ${after.driveUsed})`);
+  let h = out('log/break row');
+  if (!/30-min break \(OFF\)/.test(h)) throw new Error('the Log shows the break by name');
+  // 7. the add panel leads with the break buttons
+  openSheet({ kind: 'add' });
+  h = out('log/add panel with breaks');
+  if (!/Add a break or something I forgot/.test(h)) throw new Error('the panel says it adds breaks');
+  if (!/role="group" aria-label="Break buttons"><button data-first="true" aria-pressed="false">30-min break<\/button><button aria-pressed="false">20-min paid<\/button><button aria-pressed="false">40-min lunch<\/button>/.test(h)) throw new Error('every break button is offered, first in the panel');
+  if (!/>Or anything else</.test(h)) throw new Error('the four statuses follow, as the other way in');
+  setState({ breakPresets: [] });
+  h = out('log/add panel, no breaks');
+  if (/Break buttons/.test(h) || !/>What you were doing</.test(h)) throw new Error('with no break buttons the panel shows the statuses only');
+  openSheet(null);
+  // 8. Settings: the buttons are the driver's to set
+  setState({ tab: 'settings', breakPresets: [{ name: '20-min paid', minutes: 20, status: 'ON' }] });
+  h = out('settings/break buttons');
+  if (!/Break buttons/.test(h) || !/aria-label="20-min paid: 5 minutes shorter"/.test(h) || !/Logged on duty/.test(h) || !/Remove “20-min paid”/.test(h) || !/Add a break button/.test(h)) throw new Error('Settings lists each button with its length, status and remove, and offers another');
+  setState({ breakPresets: sanitizeBreaks(Array.from({ length: 6 }, (_, i) => ({ name: `B${i}`, minutes: 30, status: 'OFF' }))) });
+  if (/Add a break button/.test(out('settings/six breaks'))) throw new Error('six is the most');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null, breakPresets: sanitizeBreaks(undefined) });
+  console.log('break buttons (add a break from the Log): OK');
 }
 console.log('OK');
