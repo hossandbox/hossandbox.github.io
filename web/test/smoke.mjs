@@ -2064,6 +2064,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (across !== `This takes over part of your Off Duty from ${ck(M(-12))} to ${ck(M(8))}, Driving from ${ck(M(8))} to now. Where they overlap, that time will count as On Duty instead.`) throw new Error(`an entry across two says which, and who wins (got ${across})`);
   if (overlapNote(rows, { status: 'D', start: M(9), len: 30 }, NOW) !== null) throw new Error('driving inside driving changes nothing worth a warning');
   if (draftNotes({ status: 'ON', start: 0, len: 30 }, 70)[0] !== 'Long enough for the 30-minute break rule: 30 minutes in a row without driving.' || draftNotes({ status: 'D', start: 0, len: 60 }, 70).length) throw new Error('the 30-minute rule note fits what counts');
+  // The threshold itself, on both sides (§395.3(a)(3)(ii): 30 CONSECUTIVE minutes). A note calling 29 minutes
+  // enough tells a driver he may drive on when he may not, and nothing above pinned it: with the plain-entry
+  // threshold moved to 15 the whole suite stayed green. Pinned for plain entries and for break buttons.
+  for (const st of ['OFF', 'SB', 'ON']) if (draftNotes({ status: st, start: 0, len: 29 }, 70).length) throw new Error(`29 minutes of ${st} must not be called long enough for the 30-minute break rule`);
+  for (const st of ['OFF', 'ON']) {
+    if (!/does not satisfy the 30-minute break rule/.test(app.breakHint(29, st, 70)[0])) throw new Error(`a 29-minute ${st} break must say it does not satisfy the 30-minute break rule on its own`);
+    if (!/^Long enough for the 30-minute break rule/.test(app.breakHint(30, st, 70)[0])) throw new Error(`a 30-minute ${st} break must say it is long enough for the 30-minute break rule`);
+  }
   // 5. Back goes back a step (the panel's Back and the phone's), and only closes at the first question
   const d = { ...plain };
   const steps = [[{ kind: 'add' }, null], [{ kind: 'add', step: 'when', draft: d }, 'what'], [{ kind: 'add', step: 'long', draft: d }, 'when'], [{ kind: 'add', step: 'check', draft: d }, 'long'],

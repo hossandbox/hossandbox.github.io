@@ -710,3 +710,37 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
      legibility in direct sun; scroll smoothness on an older Android (the glows are CSS drop-shadows);
      the driving view at calm / under an hour / zero in both looks (the night look should frame, never
      flood); each status key lit, obvious at arm's length.
+- **Log editor series (2026-10-14, `d9586e8`..`895a401`, base `25064aa`)** — four commits from Opus 5.5,
+  driven by a driver's report ("very confusing"; "I can't find a way to add break"):
+  1. **Break buttons** (`d9586e8`): add a break from the Log in one tap. Each button is a name, a length
+     (5–240 min) and the status it is logged as — **Off or On duty only, never Driving or Sleeper**.
+     Default is the federal 30-min break; a carrier's own breaks are the driver's to add (max 6).
+     `breakPresets` is a device setting, **not exported**, and `sanitizeBreaks()` cleans a damaged saved
+     list on load. The row's note is `break:<name>`, so renaming a button never relabels history.
+  2. **PC and yard move from the Log** (`e274185`); `noteFits()`: a label never outlives its status
+     (PC only on OFF, YM only on ON, a break on OFF/ON).
+  3. **No names** (`568ab07`): tester and employer names removed from tracked files. (Two earlier
+     commit messages of ours, incl. `c47935c`, named the tester; history was left as is.)
+  4. **One question per screen** (`895a401`): what → when → how long → check. Saving still goes
+     through `addEntry()`/`saveEntry()`, so every earlier guard (R1 what-if-from-now, logged-time-is-past)
+     applies. Logged time cannot start at/after now or run past it; a fixed-length break that "would still
+     be going" is refused; the overlap is described before saving (newest wins, as the engine does). The
+     Log's grid now draws the **resolved** timeline (what the clocks use), not rows as typed.
+  - **Rule copy verified against primary sources before shipping:**
+    - Off duty = relieved of all duty + "at liberty to pursue activities of his/her own choosing"
+      (FMCSA guidance, 78 FR 41852, 2013; fmcsa.dot.gov guidance page). Pay is not a condition — the
+      FMCSA Drivers Guide: "not doing any work (paid or unpaid) for a motor carrier".
+    - PC: §395.8 Q26 as revised by 83 FR 26377 (2018): not to "enhance the operational readiness" or
+      continue a trip for a business purpose; carriers may restrict or ban it.
+    - A break of 30+ min of OFF/SB/ON-not-driving satisfies §395.3(a)(3)(ii).
+  - **Verified:** patch SHA-256 64/64; pre-images exact on `25064aa`; resulting tree `721e190a…` =
+    the author's; no URLs/network/eval; engine untouched (99/99); contrast 44/44 both themes; 45 blocks.
+    Commit 4 removed 6 assertions — 4 were commit 1's own panel layout (replaced), 2 older ones
+    (labelled steppers; label passed to the new row) have equivalent replacements.
+  - **Independently falsified 20/20** (`reviews/falsify-logeditor.py`). **One real gap found and closed:**
+    with the plain-entry threshold moved from 30 to 15 minutes — so 15–29 min off duty would read "Long
+    enough for the 30-minute break rule" — the whole suite stayed green. Added boundary assertions on both
+    sides (29 never "long enough", 30 always, for OFF/SB/ON entries and OFF/ON break buttons); falsified
+    by off-by-one mutations in both directions.
+  - **Phone checks still owed:** one break tap from the Log on a phone; the editor's steps with the
+    phone's Back (Android hardware Back on a home-screen install); a PC row edited to Driving loses "PC".
