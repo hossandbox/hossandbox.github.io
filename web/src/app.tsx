@@ -655,12 +655,17 @@ function SplitPairLine({ ev }: { ev: FullEvaluation }) {
 function HeroDrive({ ev }: { ev: FullEvaluation }) {
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const left = dur(ev.driveNow);
+  // The full-date stop time from Declutter #1 is too wide for one line inside the dial at phone
+  // widths — it wrapped mid-string and crossed the ring. Stack it deliberately instead: the date
+  // as a quiet line over a larger time (patch #1.1). Split from clockFull so the dial can never
+  // disagree with the wording every other surface shows.
+  const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
     <section class="hero">
       <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270}>
         <div class="hero-label">You can drive</div>
         <div class={`hero-value ${tone}${left.length > 6 ? ' long' : ''}`}>{left}</div>
-        <div class="hero-stop">Stop by {clockFull(ev.mustStopBy)}</div>
+        <div class="hero-stop"><span class="hero-stop-date">Stop by {stopDate}</span>{' '}<span class="hero-stop-time">{stopTime}</span></div>
       </Dial>
       <div class="hero-foot">
         <span class="limit-plate">limited by {bindingLabel(ev)}</span>
@@ -859,7 +864,10 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
     { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining,
       text: `${dur(ev.cycle.remaining)} left in this ${ev.cycle.windowDays}-day period.` },
   ];
-  const when = (left: number) => (left <= 0 ? 'Now' : left > 1440 ? 'Not today' : clock(now + left));
+  // Patch #1.1: rule end times carry the full date, like the sheet title above them — a stop
+  // after midnight read as today's time when the rows showed weekday + time only. The
+  // 'Not today' branch stays: a rule more than a day out does not need a date here.
+  const when = (left: number) => (left <= 0 ? 'Now' : left > 1440 ? 'Not today' : clockFull(now + left));
   return (
     <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>

@@ -581,6 +581,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/class="app is-demo"/.test(hh)) throw new Error('a fresh clock must carry the demo stamp class on the shell');
   if (!/Planning only — not a log, not an ELD/.test(hh)) throw new Error('every screen must carry the one-line planning-only disclaimer');
   if (/Recap<\/button>/.test(hh)) throw new Error('Recap must not take a tab-bar slot');
+  // patch #1.1 (2026-11-05): the dial stacks its stop-by as date over time so the full date from
+  // #1 fits the ring at phone widths (pinned on the Now render in the hero section below), and
+  // the Why sheet's per-rule end times use the full date (pinned in the Why-panel section).
   setState({ current: { status: 'D', since: T } });
   hh = out('log/after tapping Driving');
   if (!/History incomplete/.test(hh)) throw new Error('tapping a status is a statement about now, not about the days behind it');
@@ -1118,7 +1121,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   let h = out('now/fuel stop');
   let t = txt(h);
   if (!/You can drive 7h 30m Stop by /.test(t)) throw new Error(`Now must lead with driving time and stop time (got ${t.slice(0, 200)})`);
-  if (!t.includes(`Stop by ${clockFull(L(18, 15))}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
+  // Patch #1.1: the dial stacks the stop date over the stop time, so the rendered text has no comma.
+  if (!t.includes(`Stop by ${clockFull(L(18, 15)).replace(', ', ' ')}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
+  if (!/class="hero-stop-date"/.test(h) || !/class="hero-stop-time"/.test(h)) throw new Error('the dial stop-by must stack date over time as separate lines (patch #1.1)');
   if (!/limited by 11-hour driving limit/.test(t)) throw new Error('the hero must name the limit in full');
   for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break due in 8h 00m/, /70-hr \/ 8-day cycle 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
   if (!/class="meter on"[^>]*><span class="meter-label">11-hr driving/.test(h)) throw new Error('the limit that sets the stop time must be marked');
@@ -1143,7 +1148,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   t = txt(h);
   if (!t.includes(`Why stop by ${clockFull(L(18, 15))}?`)) throw new Error('the Why panel must restate the stop time it explains');
   // the break's time is labelled as the latest start (driver question, 2026-10-10)
-  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', `latest start ${clock(L(18, 45))}`], ['14-hour window', clock(L(20))], ['70-hour / 8-day cycle', 'Not today']]) {
+  // Patch #1.1: per-rule end times carry the full date, matching the sheet title.
+  for (const [rule, at] of [['11-hour driving', clockFull(L(18, 15))], ['30-minute break', `latest start ${clockFull(L(18, 45))}`], ['14-hour window', clockFull(L(20))], ['70-hour / 8-day cycle', 'Not today']]) {
     if (!t.includes(`${rule} ${at}`)) throw new Error(`Why panel: ${rule} should end at ${at}`);
   }
   if ((h.match(/Earliest — this sets your stop time/g) || []).length !== 1) throw new Error('exactly one rule is the earliest');
@@ -1212,6 +1218,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 1. cruising: one number, the stop time, the limit, one button — no header, no tab bar
   let h = at(12, 30), t = txt(h);
   if (!/<main class="drive calm"/.test(h)) throw new Error('driving with time left must show the calm driving view');
+  // (the driving view's stop-by is a full-width glance line of its own, not the dial — it keeps
+  // the single-line full date; only the Now hero dial stacks date over time, patch #1.1)
   if (!t.includes(`Driving left 6h 00m Stop by ${clockFull(L(18, 30))} limited by 11-hour driving limit`)) throw new Error(`driving view content wrong: ${t.slice(0, 220)}`);
   if (/<header|<nav/.test(h)) throw new Error('the driving view hides the header and tab bar');
   if ((h.match(/<button/g) || []).length > 3) throw new Error('while driving there must be almost nothing to tap: Details and I’ve stopped (plus the launch notice)');
