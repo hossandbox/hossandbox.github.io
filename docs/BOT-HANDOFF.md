@@ -744,3 +744,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     by off-by-one mutations in both directions.
   - **Phone checks still owed:** one break tap from the Log on a phone; the editor's steps with the
     phone's Back (Android hardware Back on a home-screen install); a PC row edited to Driving loses "PC".
+- **Split pair named on screen (2026-11-05, Lorico approved, wording only).** A tester's live-app pass
+  (14 scenarios, 2026-11-04) reported scenario 4 — 3h sleeper + 7h off duty — as wrongly granted split
+  credit. **Not an engine bug**: the engine refuses that pair (§395.1(g)(1)(ii)(B)), and on a Friday-only
+  log gives the tester's own expected answer (0h, drive again 03:00). The tester's log still held
+  scenario 3's Thursday sleeper (13:00 → the 06:00 tap to Driving, 17h), so the clock paired *that* reset
+  with Friday's 7h off — a legal FMCSA FAQ 22 pair — and showed 3h; the 70-hr figure (54h, not 62h) proved
+  the carry-over. The defect was that no screen said which rests were paired, and the Split Lab printed
+  "Period A … counts against your 14" beside "Active split", which read as a contradiction. Now, Why and
+  the Split Lab name both rests and the rule (RULES-GROUNDING, record handling). Engine untouched (99/99).
+  Smoke block "split pair named on screen" failed on the old `app.tsx` and passes now; falsified **10/10**
+  (`reviews/falsify-splitpair.py`). Two of my first attempts were wrong: four mutations broke *typecheck*
+  so smoke never ran, and the Why-panel assertion was **vacuous** because the inert Now tab behind the
+  panel carries the same line — it is now scoped to the panel's own markup. Lesson for multi-scenario
+  reports: replay each scenario alone *and* with the earlier ones still in the log.

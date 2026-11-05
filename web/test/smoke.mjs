@@ -2165,4 +2165,79 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null, breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }] });
   console.log('log editor (one question per screen): OK');
 }
+// --- the split pair is named on screen (tester scenario 4, 2026-11-04) ---------------------------
+// A tester's log still held the previous day's sleeper, so the clock paired it (a legal FMCSA FAQ 22
+// pair: a 17h sleeper reset + a 7h off-duty rest) and gave 3h. Nothing on screen said which rests were
+// paired, so a correct clock read as a bug, and the Split Lab said the 7h rest "counts against your 14"
+// while the clocks were excluding it. Presentation only: the engine numbers are pinned unchanged below.
+{
+  const { openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const { evaluate, localToMinute } = await import('../../engine/src/index.ts');
+  setLaunchNotice(false);
+  const Z = 'America/Chicago';
+  const t = (d, hr) => localToMinute(2026, 11, d, hr, Z);
+  const txt = (x) => x.replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const fri = [
+    { status: 'D', start: t(6, 6), end: t(6, 10) }, { status: 'SB', start: t(6, 10), end: t(6, 13) },
+    { status: 'D', start: t(6, 13), end: t(6, 17) },
+  ];
+  const thu = [
+    { status: 'D', start: t(5, 2), end: t(5, 6) }, { status: 'OFF', start: t(5, 6), end: t(5, 9) },
+    { status: 'D', start: t(5, 9), end: t(5, 13) }, { status: 'SB', start: t(5, 13), end: t(6, 6) },
+  ];
+  const NOW = t(7, 0);
+  const show = (segments, tab = 'now', at = NOW, since = t(6, 17), status = 'OFF') => {
+    setState({ tab, segments, tentative: [], current: { status, since }, nowOverride: at, historyAcknowledged: true, tzChosen: true, config: { ...getState().config, timeZone: Z } });
+    return txt(render(h(App, {})));
+  };
+  // the engine reading this screen describes — unchanged by this fix
+  const ev = evaluate([...thu, ...fri, { status: 'OFF', start: t(6, 17), end: NOW }], { asOf: NOW, config: { ...getState().config, timeZone: Z } });
+  if (ev.driveNow !== 180 || ev.shift.anchor !== t(6, 6) || ev.shift.chain.length !== 2) throw new Error(`scenario 4 engine reading moved (driveNow ${ev.driveNow}, anchor ${ev.shift.anchor})`);
+  const pairText = `${clock(t(5, 13))}–${clock(t(6, 6))} sleeper (17h 00m) + ${clock(t(6, 17))}–${clock(NOW)} off duty (7h 00m) — split pair (FMCSA FAQ 22)`;
+
+  // 1. Now names both rests and the rule, and says where the clocks count from
+  let s4 = show([...thu, ...fri]);
+  if (!s4.includes('You can drive 3h 00m')) throw new Error('scenario 4: Now must still read 3h');
+  if (!s4.includes(pairText)) throw new Error(`Now must name the split pair (want "${pairText}")\n got: ${s4.slice(0, 900)}`);
+  if (!s4.includes(`Your 11-hour driving limit and 14-hour window count from ${clock(t(6, 6))}, the end of the first rest. The second rest does not count against your 14-hour window.`)) throw new Error('Now must say where the paired clocks count from');
+  if (!s4.includes(`Your ${clock(t(6, 17))}–${clock(NOW)} rest can also be the first half of your next pair.`)) throw new Error('Now must explain the "split leg pending" tag when a pair is in use');
+  // the line reads the shift's limits, never a hardcoded 11/14: adverse conditions make it 13/16
+  setState({ config: { ...getState().config, adverseShifts: [ev.shift.shiftStart] } });
+  const adv = txt(render(h(App, {})));
+  setState({ config: { ...getState().config, adverseShifts: [] } });
+  if (!adv.includes(`Your 13-hour driving limit and 16-hour window count from ${clock(t(6, 6))}`)) throw new Error('the split-pair line must use the shift limits (13/16 under adverse conditions)');
+  // the same Friday with no earlier sleeper: no pair, so nothing may claim one
+  const lone = show(fri);
+  if (/split pair|Split in use/.test(lone)) throw new Error('a log with no qualifying pair must not show a split pair');
+  // 2. Why panel names it too, and the 11-hour row says where it counts from
+  show([...thu, ...fri]);
+  openSheet({ kind: 'why' });
+  // scoped to the panel itself: the Now tab still renders (inert) behind it and carries the same line
+  const whyHtml = render(h(App, {}));
+  s4 = txt(whyHtml.slice(whyHtml.indexOf('<div class="sheet" role="dialog"')));
+  openSheet(null);
+  if (!/Why /.test(s4.slice(0, 200))) throw new Error('the Why panel scope must start at the panel');
+  if (!s4.includes(pairText)) throw new Error('the Why panel must name the split pair');
+  if (!s4.includes(`You have driven 8h 00m since ${clock(t(6, 6))}, the end of the first rest in your split pair.`)) throw new Error('the Why panel’s 11-hour row must say where a split counts from');
+  // 3. Split Lab: the pair in use and the possible next pair read as two different things
+  s4 = show([...thu, ...fri], 'split');
+  if (!s4.includes(`Split in use: ${pairText}.`)) throw new Error('Split Lab must name the pair the clocks are using');
+  if (/Period A logged/.test(s4) || /counts against your 14/.test(s4)) throw new Error('with a pair in use, Split Lab must not say its second rest counts against the 14 — the clocks exclude it');
+  if (!s4.includes(`Next pair (optional): your ${clock(t(6, 17))}–${clock(NOW)} rest (7h 00m off duty) can also be the first half of your next split. It needs a later rest with 7h+ in a row in the sleeper.`)) throw new Error('Split Lab must describe the possible next pair as optional');
+  // with no pair in use, the existing pending-leg wording is unchanged
+  const loneLab = show(fri, 'split');
+  if (!/Period A logged: 7h 00m ending/.test(loneLab) || !/counts against your 14/.test(loneLab)) throw new Error('with no pair in use, the pending-leg wording must stay as it was');
+  // 4. a plain 395.1(g) pair (scenario 3: 3h off + 7h sleeper) cites the regulation, not FAQ 22
+  s4 = show(thu.slice(0, 3), 'now', t(5, 20), t(5, 13), 'SB');
+  const reg = `${clock(t(5, 6))}–${clock(t(5, 9))} off duty (3h 00m) + ${clock(t(5, 13))}–${clock(t(5, 20))} sleeper (7h 00m) — split pair (49 CFR 395.1(g))`;
+  if (!s4.includes(reg)) throw new Error(`a 3/7 pair must cite 49 CFR 395.1(g) (want "${reg}")`);
+  // 5. a rest that mixes off duty and sleeper says so, with its sleeper run
+  s4 = show([...thu.slice(0, 3), { status: 'SB', start: t(5, 13), end: t(5, 20) }, { status: 'OFF', start: t(5, 20), end: t(6, 6) }, ...fri]);
+  if (!s4.includes(`${clock(t(5, 13))}–${clock(t(6, 6))} sleeper and off duty (17h 00m, 7h 00m in a row in the sleeper)`)) throw new Error('a mixed rest must be described with its sleeper run');
+  // no internal codes on screen
+  if (/\b(SB|OFF|DRIVE_11|WINDOW_14)\b/.test(s4.slice(s4.indexOf('split pair') - 200, s4.indexOf('split pair') + 40))) throw new Error('the pair line must not show internal status codes');
+  setLaunchNotice(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
+  console.log('split pair named on screen: OK');
+}
 console.log('OK');

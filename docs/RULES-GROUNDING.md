@@ -121,6 +121,15 @@ Recalculation (iii):
   departure (`TripInput.untilDeparture`) and the UI shows it as an assumed row. Left implicit, a
   delayed departure manufactures a qualifying split leg out of the wait and can call a load legal
   on an assumption nobody made — the app inventing hours is the same failure as the app losing them.
+- **When a split is in use, the screen names the pair.** Now, the Why panel and the Split Lab state both
+  paired rests and the rule that allows them, e.g. *"Thu 13:00–Fri 06:00 sleeper (17h 00m) + Fri
+  17:00–Sat 00:00 off duty (7h 00m) — split pair (FMCSA FAQ 22)"*. The citation is FAQ 22 when the first
+  rest is itself a ≥10h reset used as a leg, otherwise 49 CFR 395.1(g). Without it a correct clock is
+  uncheckable: a tester's log still held the previous day's sleeper, the engine paired it legally, and with
+  nothing on screen naming the pair the 3h answer read as a bug (2026-11-04). Presentation only — the
+  engine chose the chain; `activePair()` in `web/src/app.tsx` names the last pair completed by now. In the
+  Split Lab, the rest that could start the *next* pair is labelled "Next pair (optional)" and never
+  "counts against your 14" while the clocks are excluding it as the second rest of the pair in use.
 - Driver-facing copy never shows internal ids or timestamps: no `DRIVE_11`/`BREAK_30` in an
   itinerary or a violation heading, no ISO/UTC stamp in a violation. The engine emits plain English;
   the UI renders clock times from the minute values. The enum ids are internal and stay internal.

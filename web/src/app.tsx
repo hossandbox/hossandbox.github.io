@@ -22,7 +22,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan,
+  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
   useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
@@ -612,6 +612,44 @@ function Dial({ share, hours, tone, size, children }: { share: number; hours: nu
   );
 }
 
+/**
+ * The split pair the clocks are using right now: the most recent pair in the chosen chain whose second
+ * rest has finished by asOf. Null when no pair is in use (a planned pair still to come does not count).
+ * Presentation only — the engine chose the chain; this just names it so a driver can check the clock.
+ */
+export function activePair(ev: FullEvaluation): [RestPeriod, RestPeriod] | null {
+  const c = ev.shift.chain;
+  for (let i = c.length - 1; i >= 1; i--) if (c[i].end <= ev.asOf) return [c[i - 1], c[i]];
+  return null;
+}
+/** One rest in driver words: "Thu 13:00–Fri 06:00 sleeper (17h 00m)". */
+function restWords(r: RestPeriod): string {
+  const allSB = r.longestSB >= r.duration;
+  const kind = allSB ? 'sleeper' : r.longestSB > 0 ? 'sleeper and off duty' : 'off duty';
+  const len = !allSB && r.longestSB > 0 ? `${dur(r.duration)}, ${dur(r.longestSB)} in a row in the sleeper` : dur(r.duration);
+  return `${clock(r.start)}–${clock(r.end)} ${kind} (${len})`;
+}
+/**
+ * Both rests and what allows the pair. A first rest of 10h+ is a full reset being used as a split leg,
+ * which FMCSA FAQ 22 (July 2026) allows when it holds 7h+ in a row in the sleeper; any other pair is the
+ * split itself, §395.1(g)(1)(ii).
+ */
+export function pairWords([a, b]: [RestPeriod, RestPeriod]): string {
+  return `${restWords(a)} + ${restWords(b)} — split pair (${a.isReset ? 'FMCSA FAQ 22' : '49 CFR 395.1(g)'})`;
+}
+/** Now's line under the hero: which rests the clocks paired, and where they count from. */
+function SplitPairLine({ ev }: { ev: FullEvaluation }) {
+  const pair = activePair(ev);
+  if (!pair) return null;
+  const leg = ev.shift.pendingSplitLeg;
+  return (
+    <p class="muted small split-pair">
+      <b>Split in use:</b> {pairWords(pair)}. Your {ev.shift.limits.drive / 60}-hour driving limit and {ev.shift.limits.window / 60}-hour window count from {clock(ev.shift.anchor)}, the end of the first rest. The second rest does not count against your {ev.shift.limits.window / 60}-hour window.
+      {leg && leg.start === pair[1].start && leg.end === pair[1].end ? ` Your ${clock(leg.start)}–${clock(leg.end)} rest can also be the first half of your next pair.` : ''}
+    </p>
+  );
+}
+
 /** The one number a driver needs, in the size he needs it: driving left, the stop time, and why. */
 function HeroDrive({ ev }: { ev: FullEvaluation }) {
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
@@ -678,6 +716,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
+      <SplitPairLine ev={ev} />
       <Meters ev={ev} />
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
@@ -803,9 +842,12 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
 function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   const sh = ev.shift;
   const split = sh.chain.length >= 2;
+  const pair = activePair(ev);
   const rows = [
     { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining,
-      text: `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
+      text: pair
+        ? `You have driven ${dur(sh.driveUsed)} since ${clock(sh.anchor)}, the end of the first rest in your split pair. ${dur(sh.driveRemaining)} more is allowed.`
+        : `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
     // The time on this row is the LATEST the break can start, not a time it must be finished by, and
     // the break can come any time before it. "After 8 hours of driving you need 30 minutes" next to a
     // bare clock time left a driver asking which (Lorico, 2026-10-10).
@@ -820,6 +862,7 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   return (
     <Sheet title={ev.driveNow > 0 ? `Why stop by ${clock(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
+      {pair && <p class="small"><b>Split in use:</b> {pairWords(pair)}.</p>}
       <ul class="why">{rows.map((r) => (
         <li key={r.key} class={ev.binding === r.key ? 'on' : ''}>
           <div class="why-head"><b>{r.name}</b><span class="why-time">{'timeLabel' in r && r.left > 0 && r.left <= 1440 && <small>{r.timeLabel}</small>}{when(r.left)}</span></div>
@@ -1576,6 +1619,15 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const planViol = after.violations.filter((v) => v.start >= t0);
   const strictViol = atDriveEnd.noSplit.violations.filter((v) => v.start >= t0);
   const sh = safeHaven(after, s.mph);
+  // The pair the clocks use now, and the rest that could start the next one — shown as two different
+  // things. Side by side as "Period A … counts against your 14" and "Active split", a tester read them
+  // as a contradiction (2026-11-04): the clocks were excluding the very rest that line said counted.
+  const activeNow = activePair(ev);
+  const pl = ev.shift.pendingSplitLeg;
+  const nextLeg = activeNow && pl && pl.start === activeNow[1].start && pl.end === activeNow[1].end ? pl : null;
+  const nextMin = nextLeg ? Math.max(nextLeg.qualifiesLongSB ? LIMITS.SPLIT_MIN_SHORT : LIMITS.SPLIT_MIN_SB, LIMITS.SPLIT_TOTAL - nextLeg.duration) : 0;
+  const nextNeed = !nextLeg ? '' : nextLeg.qualifiesLongSB ? `a later rest of at least ${dur(nextMin)}`
+    : nextMin <= LIMITS.SPLIT_MIN_SB ? 'a later rest with 7h+ in a row in the sleeper' : `a later rest of at least ${dur(nextMin)}, with 7h+ in a row in the sleeper`;
 
   const commit = () => setState({ tentative: plan });
   const clear = () => setState({ tentative: [] });
@@ -1583,13 +1635,18 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   return (
     <>
       <BackToPlan />
-      <Card title="Current pair status" tone={ev.shift.pendingSplitLeg ? 'warn' : undefined}>
-        {ev.shift.pendingSplitLeg && ev.shift.pendingSplitLeg.isReset
+      <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
+        {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest. {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
+        {activeNow
+          ? (nextLeg
+            ? <p class="muted"><b>Next pair (optional):</b> your {clock(nextLeg.start)}–{clock(nextLeg.end)} rest ({dur(nextLeg.duration)} {nextLeg.longestSB >= nextLeg.duration ? 'sleeper' : nextLeg.longestSB > 0 ? 'sleeper and off duty' : 'off duty'}) can also be the first half of your next split. It needs {nextNeed}. This does not change the pair above.</p>
+            : null)
+          : ev.shift.pendingSplitLeg && ev.shift.pendingSplitLeg.isReset
           ? <p><b>Your {dur(ev.shift.pendingSplitLeg.duration)} reset included 7+ hours in the sleeper.</b> Under FMCSA FAQ 22 (July 2026) a later break of 2h+ can pair with it and be <b>excluded from your 14</b> — it won't give back driving time, but it buys window. Clocks below assume the plain reset until you take that break.</p>
           : ev.shift.pendingSplitLeg
           ? <p><b>Period A logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
           : <p class="muted">No qualifying break (≥2h) pending since your anchor at {clock(ev.shift.anchor)}.</p>}
-        {ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
+        {!activeNow && ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
       </Card>
 
       <Card title="What if… (starts at the end of your log)">
