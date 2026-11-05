@@ -758,3 +758,21 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   so smoke never ran, and the Why-panel assertion was **vacuous** because the inert Now tab behind the
   panel carries the same line — it is now scoped to the panel's own markup. Lesson for multi-scenario
   reports: replay each scenario alone *and* with the earlier ones still in the log.
+- **Declutter #1 (2026-11-05, `dd9af40`, base `9d2576d`, from a reviewer's patch; Lorico approved the live
+  deploy).** Presentation only, 3 web files, engine untouched. A fresh clock is stamped
+  **"DEMO — not your day."** with a faint DEMO watermark on the hero (`.app.is-demo`); the header ends
+  with **"Planning only — not a log, not an ELD"** on every screen (the driving view has no header, by
+  design — §392.80); every "Stop by" uses `clockFull()` (weekday + date + time); "8-hour rule" → "8 hours
+  of driving"; "70-hr week" → "70-hr / 8-day cycle" (from `cycle.windowDays`); the tab bar went 5 → 4
+  with **Recap under More** (a row at the top of More; `navOf` maps recap → More).
+  - Verified: diff applied cleanly on `9d2576d` and is byte-identical to the patch's full-file copies;
+    safety scan clean; engine 99/99 before and after (the reviewer's note first said 101 — always quote
+    the run); smoke green, contrast 44/44 both themes; build OK. Independently falsified
+    (`reviews/falsify-declutter.py`): the new smoke fails on the pre-patch files, and 7/7 mutations (one
+    per change) each fail with their own assertion.
+  - Deploy was held at Claudia's instruction until Lorico's explicit go, then shipped
+    (`deploy 2026-11-05T13:25Z from dd9af40`); served `app.js` and `styles.css` byte-identical to `dist/`;
+    live DOM shows the four tabs, the DEMO stamp and the disclaimer line.
+  - **Still open:** on a phone, whether "Stop by Thu Nov 5, 16:26" fits inside the dial and whether the
+    extra header line pushes the 70-hr row further below the fold; the Why panel's per-rule times still
+    show weekday + time while its title now shows the full date (outside this patch, deliberately left).
