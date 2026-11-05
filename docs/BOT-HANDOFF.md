@@ -776,3 +776,19 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   - **Still open:** on a phone, whether "Stop by Thu Nov 5, 16:26" fits inside the dial and whether the
     extra header line pushes the 70-hr row further below the fold; the Why panel's per-rule times still
     show weekday + time while its title now shows the full date (outside this patch, deliberately left).
+- **Patch 1.1 (2026-11-05, `87aa008`, base `8ca5e7e`, reviewer's follow-up to Declutter #1; Lorico's
+  explicit go relayed by Claudia — the reviewer's own "GO" header was treated as a request).** Fixes the
+  two defects the #1 live check found. (1) The full-date stop time ran past the dial's ring at phone
+  widths; `HeroDrive` now stacks it, split from `clockFull()`: `.hero-stop-date` ("Stop by Wed Nov 11",
+  13px) over `.hero-stop-time` ("13:00", 21px). The driving view keeps its single full-width line.
+  (2) The Why panel's per-rule end times use `clockFull()`, matching its title.
+  - Verified: engine 99/99 before and after; smoke + contrast 44/44 both themes; build OK; the updated
+    smoke fails on the pre-patch `app.tsx`; 4/4 markup/wording mutations caught
+    (`reviews/falsify-patch11.py`).
+  - **Known gap — no automated test reads the CSS.** Removing the `.hero-stop` flex stacking ships green.
+    Measured instead (`reviews/measure-dialfit.mjs`, headless Chromium, font loaded, text ink vs the
+    ring's inner radius): 81.3px vs 101.3px at 360–412px wide (96.8px at 320px). The pre-patch build
+    crossed the ring (105.3 vs 101.3). The live deploy measured 81.8 vs 101.3. A headless layout test
+    would close this; Lorico has not asked for one — open follow-up, his call.
+  - Deployed `deploy 2026-11-05T18:01Z from 87aa008`; served `app.js` and `styles.css` byte-identical to
+    `dist/`. iOS Safari font rendering is still unmeasured — the reviewer's phone-width check covers it.
