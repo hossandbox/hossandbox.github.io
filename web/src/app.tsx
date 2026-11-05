@@ -139,12 +139,12 @@ const severityWord: Record<Violation['severity'], string> = { nominal: 'minor', 
  * they owe a break they already took — so only say it when the counter has actually run out.
  */
 function bindingLabel(ev: FullEvaluation): string {
-  if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : `8-hour rule (30-min break in ${dur(ev.shift.breakRemaining)})`;
+  if (ev.binding === 'BREAK_30') return ev.shift.breakRemaining <= 0 ? '30-min break due' : `8 hours of driving (30-min break in ${dur(ev.shift.breakRemaining)})`;
   // Name the limit in full, with its number: "driving limit" did not say which one (redesign).
   switch (ev.binding) {
     case 'DRIVE_11': return `${ev.shift.limits.drive / 60}-hour driving limit`;
     case 'WINDOW_14': return `${ev.shift.limits.window / 60}-hour window`;
-    case 'CYCLE': return `${ev.cycle.limit / 60}-hour week`;
+    case 'CYCLE': return `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`;
     default: return 'no limit';
   }
 }
@@ -492,10 +492,11 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
         </span>
       </div>
       {!onNow && (ev.driveNow > 0
-        ? <div class="compact"><b>{dur(ev.driveNow)}</b> of driving · Stop by <b>{clock(ev.mustStopBy)}</b></div>
+        ? <div class="compact"><b>{dur(ev.driveNow)}</b> of driving · Stop by <b>{clockFull(ev.mustStopBy)}</b></div>
         : again && again.off !== null && status !== 'D' && <div class="compact">{ev.binding === 'BREAK_30' ? '30-min break due' : ev.binding === 'CYCLE' ? `Out of ${ev.cycle.limit / 60}-hour hours` : 'Out of hours'} · <b>drive again at {clock(again.off)}</b></div>)}
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
       {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
+      <div class="disclaimer-line">Planning only — not a log, not an ELD</div>
     </header>
   );
 }
@@ -513,7 +514,7 @@ function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) 
         <div class="warnbox small">
           {hist === 'fresh' ? (
             <>
-              <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
+              <b class="demo-word">DEMO — not your day.</b> <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
               Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
             </>
           ) : (
@@ -659,7 +660,7 @@ function HeroDrive({ ev }: { ev: FullEvaluation }) {
       <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270}>
         <div class="hero-label">You can drive</div>
         <div class={`hero-value ${tone}${left.length > 6 ? ' long' : ''}`}>{left}</div>
-        <div class="hero-stop">Stop by {clock(ev.mustStopBy)}</div>
+        <div class="hero-stop">Stop by {clockFull(ev.mustStopBy)}</div>
       </Dial>
       <div class="hero-foot">
         <span class="limit-plate">limited by {bindingLabel(ev)}</span>
@@ -681,7 +682,7 @@ function Meters({ ev }: { ev: FullEvaluation }) {
     ...(Number.isFinite(sh.breakRemaining)
       ? [{ key: 'BREAK_30' as const, label: '30-min break', left: sh.breakRemaining, of: 480, value: sh.breakRemaining <= 0 ? 'due now' : `due in ${dur(sh.breakRemaining)}` }]
       : []),
-    { key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr week`, left: ev.cycle.remaining, of: ev.cycle.limit },
+    { key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining, of: ev.cycle.limit },
   ];
   return (
     <section class="meters" aria-label="Your limits">
@@ -798,8 +799,8 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
           <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
           <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
         </Dial>
-        <div class="drive-head">{level === 'bad' ? 'Park as soon as it is safe' : level === 'warn' ? 'Plan where you\u2019ll park' : `Stop by ${clock(ev.mustStopBy)}`}</div>
-        <div class="drive-why">{level === 'bad' ? `Over the ${alertReason(ev)}` : level === 'warn' ? `Stop by ${clock(ev.mustStopBy)} · ${bindingLabel(ev)}` : `limited by ${bindingLabel(ev)}`}</div>
+        <div class="drive-head">{level === 'bad' ? 'Park as soon as it is safe' : level === 'warn' ? 'Plan where you\u2019ll park' : `Stop by ${clockFull(ev.mustStopBy)}`}</div>
+        <div class="drive-why">{level === 'bad' ? `Over the ${alertReason(ev)}` : level === 'warn' ? `Stop by ${clockFull(ev.mustStopBy)} · ${bindingLabel(ev)}` : `limited by ${bindingLabel(ev)}`}</div>
         {level === 'bad' && again?.off != null && <div class="drive-why">Off duty from now: drive again at <b>{clock(again.off)}</b></div>}
       </div>
       <div class="drive-foot">
@@ -855,12 +856,12 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
       text: `Stop for 30 minutes in a row before your driving adds up to 8 hours. Take it any time before then: off duty, sleeper, or on duty without driving (fueling, an inspection) all count. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
     { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining,
       text: `No driving once ${sh.limits.window / 60} hours have passed since your shift started — breaks don't stop it${split ? ', except a qualifying sleeper split' : ''}.` },
-    { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour week`, left: ev.cycle.remaining,
+    { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining,
       text: `${dur(ev.cycle.remaining)} left in this ${ev.cycle.windowDays}-day period.` },
   ];
   const when = (left: number) => (left <= 0 ? 'Now' : left > 1440 ? 'Not today' : clock(now + left));
   return (
-    <Sheet title={ev.driveNow > 0 ? `Why stop by ${clock(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
+    <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
       {pair && <p class="small"><b>Split in use:</b> {pairWords(pair)}.</p>}
       <ul class="why">{rows.map((r) => (
@@ -1679,7 +1680,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Drive left" value={dur(after.shift.driveRemaining)} tone={after.shift.driveRemaining < 60 ? 'bad' : ''} />
           <Stat label="14-hr left" value={dur(after.shift.windowRemaining)} tone={after.shift.windowRemaining < 60 ? 'bad' : ''} />
           <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel(after)} />
-          <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clock(after.mustStopBy)}`} />
+          <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clockFull(after.mustStopBy)}`} />
         </div>
         <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
         <h3>Plan violations (if you complete both breaks)</h3><ViolationList items={planViol} />
@@ -1976,7 +1977,7 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'}>
         <div class="clocks">
           <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
-          <Stat label="Hard stop" value={clock(ev.mustStopBy)} sub={bindingLabel(ev)} />
+          <Stat label="Hard stop" value={clockFull(ev.mustStopBy)} sub={bindingLabel(ev)} />
         </div>
         <table class="cutoffs"><tbody>{sh.cutoffs.map((c) => <tr key={c.bufferMinutes}><td>{c.bufferMinutes} min buffer</td><td>park by <b>{clock(c.by, false)}</b></td><td>≤ {c.miles} mi</td></tr>)}</tbody></table>
         <p class="muted small">Net speed (fuel, traffic, scales) is what matters — set it in Settings. Parking after 17:00 fills fast; plan the 60-min line, not the 0.</p>
@@ -2124,6 +2125,10 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
   };
   return (
     <>
+      <button class="rowbtn" onClick={() => setState({ tab: 'recap' })}>
+        <span><span class="muted">Recap</span><br /><b>Hours coming back, day by day</b></span>
+        <Icon d={I.next} />
+      </button>
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
         <label>Carrier day starts at<select value={c.dayStartHour} onChange={(e) => setC({ dayStartHour: Number((e.target as HTMLSelectElement).value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
@@ -2262,9 +2267,12 @@ export function App() {
       </main></div>
     );
   }
-  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['recap', 'Recap', I.recap], ['settings', 'More', I.more]];
-  // The planning screens sit under Plan: the tab bar shows where you are, not a sixth tab.
-  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t);
+  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['settings', 'More', I.more]];
+  // The planning screens sit under Plan and Recap sits under More: the tab bar shows where you are,
+  // not a fifth or sixth tab (declutter patch, 2026-11-05).
+  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t === 'recap' ? 'settings' : t);
+  // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
+  const fresh = historyBasis(s, now) === 'fresh';
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
   const blocked = disclaimer || sheet !== null;
   if (showsDrivingView(s)) {
@@ -2279,7 +2287,7 @@ export function App() {
     );
   }
   return (
-    <div class="app">
+    <div class={fresh ? 'app is-demo' : 'app'}>
       {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>

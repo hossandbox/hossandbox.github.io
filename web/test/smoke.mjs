@@ -11,7 +11,7 @@ globalThis.alert = (m) => { throw new Error('alert: ' + m); };
 globalThis.__BUILD__ = 'smoke';
 
 const { App } = await import('../src/app.tsx');
-const { setState, getState, nowMin, clock, toInput, DEFAULT_TRIP } = await import('../src/store.ts');
+const { setState, getState, nowMin, clock, clockFull, toInput, DEFAULT_TRIP } = await import('../src/store.ts');
 
 const now = nowMin();
 const out = (label) => {
@@ -105,9 +105,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const evm = evaluate([...base, ...plan], { asOf: endB2, config: getState().config });
   const m = hh.match(/stop by ([^<]+)</);
   if (!m) throw new Error('Split Lab rendered no stop-by value');
-  if (m[1] !== clock(evm.mustStopBy)) throw new Error(`Split Lab stop-by ${m[1]} != ${clock(evm.mustStopBy)} — result cards must share one evaluation instant`);
+  if (m[1] !== clockFull(evm.mustStopBy)) throw new Error(`Split Lab stop-by ${m[1]} != ${clockFull(evm.mustStopBy)} — result cards must share one evaluation instant`);
   if (!/8h 30m/.test(hh)) throw new Error('Split Lab 14-hr balance should be 8h 30m at the end of Break 2');
-  if (m[1] !== clock(endB2 + 360)) throw new Error(`stop-by ${m[1]} should be 6h after Break 2 ends (${clock(endB2 + 360)})`);
+  if (m[1] !== clockFull(endB2 + 360)) throw new Error(`stop-by ${m[1]} should be 6h after Break 2 ends (${clockFull(endB2 + 360)})`);
   setState({ nowOverride: null });
   console.log('split stop-by boundary: OK');
 }
@@ -574,6 +574,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...reset, tab: 'log' });
   hh = out('log/nothing logged');
   if (!/Assumed fresh clock/.test(hh)) throw new Error('an empty app must say it is assuming a fresh clock');
+  // declutter patch (2026-11-05): a fresh clock is stamped as the demo it is, the one-line
+  // planning-only disclaimer rides every screen's header, and Recap no longer takes a tab-bar
+  // slot (it lives under More). Each of these fails on the pre-patch app.tsx.
+  if (!/DEMO — not your day/.test(hh)) throw new Error('a fresh clock must be stamped DEMO — not your day');
+  if (!/class="app is-demo"/.test(hh)) throw new Error('a fresh clock must carry the demo stamp class on the shell');
+  if (!/Planning only — not a log, not an ELD/.test(hh)) throw new Error('every screen must carry the one-line planning-only disclaimer');
+  if (/Recap<\/button>/.test(hh)) throw new Error('Recap must not take a tab-bar slot');
   setState({ current: { status: 'D', since: T } });
   hh = out('log/after tapping Driving');
   if (!/History incomplete/.test(hh)) throw new Error('tapping a status is a statement about now, not about the days behind it');
@@ -780,14 +787,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     { status: 'OFF', start: t - 34, end: t },      // 34-minute break — qualifies
   ] });
   const bx = out('now/after a qualifying break');
-  if (!/limited by 8-hour rule \(30-min break in 8h 00m\)/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break, not claim one is due');
+  if (!/limited by 8 hours of driving \(30-min break in 8h 00m\)/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break, not claim one is due');
   if (/30-min break due/.test(bx)) throw new Error('the label still says a break is due after the driver took one');
 
   // Approaching 8 hours with no break: the label must still say "break" (round-3 finding — the first
   // fix dropped the word until the counter hit zero, the moment the driver most needs it).
   setState({ segments: [{ status: 'D', start: t - 465, end: t }] });
   const ax = out('now/break 15 min away');
-  if (!/limited by 8-hour rule \(30-min break in 15m\)/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
+  if (!/limited by 8 hours of driving \(30-min break in 15m\)/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
   if (/30-min break due/.test(ax)) throw new Error('a break 15 min away is not yet due');
 
   // The other half: once the counter has genuinely run out, it must still say so.
@@ -1111,9 +1118,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   let h = out('now/fuel stop');
   let t = txt(h);
   if (!/You can drive 7h 30m Stop by /.test(t)) throw new Error(`Now must lead with driving time and stop time (got ${t.slice(0, 200)})`);
-  if (!t.includes(`Stop by ${clock(L(18, 15))}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
+  if (!t.includes(`Stop by ${clockFull(L(18, 15))}`)) throw new Error('the stop time must be 6:15 PM (11-hour limit) for this day');
   if (!/limited by 11-hour driving limit/.test(t)) throw new Error('the hero must name the limit in full');
-  for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break due in 8h 00m/, /70-hr week 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
+  for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break due in 8h 00m/, /70-hr \/ 8-day cycle 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
   if (!/class="meter on"[^>]*><span class="meter-label">11-hr driving/.test(h)) throw new Error('the limit that sets the stop time must be marked');
   if ((h.match(/class="dock"/g) || []).length !== 1 || !/aria-pressed="true"[^>]*>[\s\S]{0,400}On Duty/.test(h)) throw new Error('Now must end with the status buttons, the current one pressed');
   if (/class="stat-value"/.test(header(h))) throw new Error('the header must no longer carry the clock tiles');
@@ -1127,16 +1134,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 4. away from Now, one line of driving time in the header
   setState({ tab: 'log' });
   h = out('log/header line');
-  if (!txt(header(h)).includes(`7h 30m of driving · Stop by ${clock(L(18, 15))}`)) throw new Error('other screens must keep one line of driving time in the header');
+  if (!txt(header(h)).includes(`7h 30m of driving · Stop by ${clockFull(L(18, 15))}`)) throw new Error('other screens must keep one line of driving time in the header');
 
   // 5. Why: every rule's own end time, the earliest marked
   setState({ tab: 'now' });
   openSheet({ kind: 'why' });
   h = out('now/why panel');
   t = txt(h);
-  if (!t.includes(`Why stop by ${clock(L(18, 15))}?`)) throw new Error('the Why panel must restate the stop time it explains');
+  if (!t.includes(`Why stop by ${clockFull(L(18, 15))}?`)) throw new Error('the Why panel must restate the stop time it explains');
   // the break's time is labelled as the latest start (driver question, 2026-10-10)
-  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', `latest start ${clock(L(18, 45))}`], ['14-hour window', clock(L(20))], ['70-hour week', 'Not today']]) {
+  for (const [rule, at] of [['11-hour driving', clock(L(18, 15))], ['30-minute break', `latest start ${clock(L(18, 45))}`], ['14-hour window', clock(L(20))], ['70-hour / 8-day cycle', 'Not today']]) {
     if (!t.includes(`${rule} ${at}`)) throw new Error(`Why panel: ${rule} should end at ${at}`);
   }
   if ((h.match(/Earliest — this sets your stop time/g) || []).length !== 1) throw new Error('exactly one rule is the earliest');
@@ -1205,7 +1212,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 1. cruising: one number, the stop time, the limit, one button — no header, no tab bar
   let h = at(12, 30), t = txt(h);
   if (!/<main class="drive calm"/.test(h)) throw new Error('driving with time left must show the calm driving view');
-  if (!t.includes(`Driving left 6h 00m Stop by ${clock(L(18, 30))} limited by 11-hour driving limit`)) throw new Error(`driving view content wrong: ${t.slice(0, 220)}`);
+  if (!t.includes(`Driving left 6h 00m Stop by ${clockFull(L(18, 30))} limited by 11-hour driving limit`)) throw new Error(`driving view content wrong: ${t.slice(0, 220)}`);
   if (/<header|<nav/.test(h)) throw new Error('the driving view hides the header and tab bar');
   if ((h.match(/<button/g) || []).length > 3) throw new Error('while driving there must be almost nothing to tap: Details and I’ve stopped (plus the launch notice)');
   if (!/I've stopped/.test(h)) throw new Error('the driving view needs its one big button');
@@ -1867,7 +1874,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/<path class="dial-fill"/.test(h) || !/<circle class="dial-cap"/.test(h)) throw new Error('the dial shows what is left');
   // 3h30 driven: the 30-minute break binds first (4h30 left of 8h), so the dial is the break's
   if (!/class="dial-center"><div class="hero-label">You can drive<\/div><div class="hero-value good">4h 30m<\/div>/.test(h)) throw new Error('the number sits in the middle of the dial');
-  if (!/<span class="limit-plate">limited by 8-hour rule \(30-min break in 4h 30m\)<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
+  if (!/<span class="limit-plate">limited by 8 hours of driving \(30-min break in 4h 30m\)<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
   if (!/<text class="dial-scale"[^>]*>8h<\/text>/.test(h)) throw new Error('the dial is scaled to the limit that binds (the break: 8h)');
   // the RENDERED arc must be the driver's real share (4h30 left of the 8h break rule), not just "a fill":
   // a dial wired to a constant reads full while the driver runs out. The share is a literal here on
