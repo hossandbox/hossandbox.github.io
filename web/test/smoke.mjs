@@ -1163,6 +1163,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     if (!t.includes(`${rule} ${at}`)) throw new Error(`Why panel: ${rule} should end at ${at}`);
   }
   if ((h.match(/Earliest — this sets your stop time/g) || []).length !== 1) throw new Error('exactly one rule is the earliest');
+  // Patch #3: every Why row names its rule — show your work, the citation under the prose
+  for (const cite of ['49 CFR 395.3(a)(3)(i)', '49 CFR 395.3(a)(3)(ii)', '49 CFR 395.3(a)(2)', '49 CFR 395.3(b)(2)']) if (!t.includes(cite)) throw new Error(`Why panel: the rows must carry their citations (missing ${cite})`);
+  if ((h.match(/class="why-cite"/g) || []).length !== 4) throw new Error('each Why row carries exactly one citation line');
   if (!/<li class="on"><div class="why-head"><b>11-hour driving/.test(h)) throw new Error('the earliest rule must be the 11-hour one here');
   for (const tag of ['header', 'main', 'nav']) if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(h)) throw new Error(`<${tag}> must be inert while a panel is open`);
   if (!/role="dialog" aria-modal="true" aria-labelledby="sheet-title"/.test(h)) throw new Error('a panel must be a labelled modal dialog');

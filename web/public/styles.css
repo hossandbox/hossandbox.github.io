@@ -247,6 +247,7 @@ button.sheet-backdrop { position: absolute; inset: 0; width: 100%; height: 100%;
 .why-time { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 .why-time small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
 .why-tag { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--on-accent); background: var(--accent-solid); border-radius: 8px; padding: 3px 10px; letter-spacing: .04em; }
+.why-cite { font-size: 11px; color: var(--muted); margin-top: 3px; letter-spacing: .03em; }
 
 /* Driving view: a glance, not a read. Night keeps the dark ground and frames the screen instead of
    flooding the cab with light; day floods amber at an hour left and red at zero. */

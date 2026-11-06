@@ -850,18 +850,18 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   const split = sh.chain.length >= 2;
   const pair = activePair(ev);
   const rows = [
-    { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining,
+    { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining, cite: '49 CFR 395.3(a)(3)(i)',
       text: pair
         ? `You have driven ${dur(sh.driveUsed)} since ${clock(sh.anchor)}, the end of the first rest in your split pair. ${dur(sh.driveRemaining)} more is allowed.`
         : `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
     // The time on this row is the LATEST the break can start, not a time it must be finished by, and
     // the break can come any time before it. "After 8 hours of driving you need 30 minutes" next to a
     // bare clock time left a driver asking which (Lorico, 2026-10-10).
-    ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining, timeLabel: 'latest start',
+    ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining, timeLabel: 'latest start', cite: '49 CFR 395.3(a)(3)(ii)',
       text: `Stop for 30 minutes in a row before your driving adds up to 8 hours. Take it any time before then: off duty, sleeper, or on duty without driving (fueling, an inspection) all count. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
-    { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining,
+    { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining, cite: '49 CFR 395.3(a)(2)',
       text: `No driving once ${sh.limits.window / 60} hours have passed since your shift started — breaks don't stop it${split ? ', except a qualifying sleeper split' : ''}.` },
-    { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining,
+    { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining, cite: `49 CFR 395.3(b)(${ev.cycle.windowDays === 7 ? '1' : '2'})`,
       text: `${dur(ev.cycle.remaining)} left in this ${ev.cycle.windowDays}-day period.` },
   ];
   // Patch #1.1: rule end times carry the full date, like the sheet title above them — a stop
@@ -876,6 +876,7 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
         <li key={r.key} class={ev.binding === r.key ? 'on' : ''}>
           <div class="why-head"><b>{r.name}</b><span class="why-time">{'timeLabel' in r && r.left > 0 && r.left <= 1440 && <small>{r.timeLabel}</small>}{when(r.left)}</span></div>
           <div class="small">{r.text}</div>
+          <div class="why-cite">{r.cite}</div>
           {ev.binding === r.key && <div class="why-tag">Earliest — this sets your stop time</div>}
         </li>
       ))}</ul>
