@@ -847,3 +847,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   - Known caveat (carried): `navigator.share` is device-dependent; the suite pins composition and affordance,
     so the first real-device tap is the true test.
   - Deployed `deploy 2026-11-06T13:39Z from eaeb606`; served `app.js`/`styles.css` byte-identical to `dist/`.
+- **Patch 5 + 5.1 (2026-11-06, `f53a6e4` then `f2242b5`, deploy go under the Ada rule; #5 parked then the
+  stack shipped).** State resilience: `setState` keeps the save it replaced as `hos-sandbox-v1-backup` (the
+  last-known-good), and `loadSaved()` falls back to it when the current save is unparseable or wrong-shape,
+  so one bad write can't blank a driver's record. The undo is persisted (`hos-sandbox-undo-v1`) and restored
+  at launch; a restored undo survives a relaunch while the record still reads as the action left it
+  (value-compared, since identity is gone), and retires the moment the record moves. 5.1 tightens
+  `usableSave` to also reject a malformed live `current` (wrong status, non-finite `since`, non-object) so
+  it can't both render junk and rotate into the backup slot over a good copy — the same shape-check
+  `importProblem` gives an import. 3 files (#5) + 2 files (#5.1), engine untouched.
+  - Verified: engine 99/99; smoke + contrast 44/44 both themes; build OK; applied files byte-identical to
+    each package's `files/`; falsified the #5 backup fallback and the #5.1 status-whitelist (each fails smoke
+    at its own "patch 5[.1]" assertion) and restored byte-identical.
+  - Deployed `deploy 2026-11-06T19:53Z from f2242b5`; served `app.js`/`styles.css` byte-identical to `dist/`;
+    the two new storage keys are in the live bundle and absent from the prior deploy.
