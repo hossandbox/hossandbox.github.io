@@ -792,3 +792,21 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     would close this; Lorico has not asked for one — open follow-up, his call.
   - Deployed `deploy 2026-11-05T18:01Z from 87aa008`; served `app.js` and `styles.css` byte-identical to
     `dist/`. iOS Safari font rendering is still unmeasured — the reviewer's phone-width check covers it.
+- **Patch 2 (2026-11-06, `da17fb9`, base `1e832ee`, test only; deploy go from the reviewer relayed by
+  Claudia's inbox lane, which carries Lorico's authority under the 2026-11-05 rule).** Closes the gap
+  recorded under Patch 1.1: check **3b** in `web/test/smoke.mjs` (+10/−0) reads `styles.css` and fails
+  unless `.hero .hero-stop` is a centred uppercase flex column and `.hero-stop-time` is larger than
+  `.hero-stop-date`. No app, CSS or engine change.
+  - Verified: engine 99/99 before and after; smoke + contrast 44/44; build OK. Falsified on the patched
+    tree (`reviews/falsify-patch2.py`): control green, **9/9** CSS mutations fail at 3b. That covers all
+    three rules deleted, the stack rule deleted, each of the four stacking properties removed singly,
+    the sizes swapped, the sizes equal, and the date size removed. My first run reported 4 of those as BAD
+    MUTATION because ` display: flex;` occurs 40× in the stylesheet. Mutate inside the rule, not the file.
+  - **Known limit (fails loud, never green):** 3b's `px()` reads only `Npx`. A legitimate move to
+    `rem`/`em` on `.hero-stop-date`/`.hero-stop-time` reads as 0 and fails the suite. Widen the parser,
+    or compare computed values, if those rules ever change units. It checks the stylesheet's text, not the
+    rendered fit. The fit itself is measured, not tested: `reviews/measure-dialfit.mjs`.
+  - Deployed `deploy 2026-11-06T04:50Z from da17fb9`. Served `app.js`/`styles.css` byte-identical to
+    `dist/`. `app.js` differs from the previous deploy only in its build stamp, as a test-only patch should.
+  - Process note: the first pre-apply check hit an approval prompt that timed out (`BLOCKED`). Nothing
+    was retried until Lorico was back and asked for it again.
