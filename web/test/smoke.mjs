@@ -1168,6 +1168,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if ((h.match(/class="why-cite"/g) || []).length !== 4) throw new Error('each Why row carries exactly one citation line');
   // Patch #3.1: the citation line's quiet style is pinned too — a render cannot see it
   if (!/\.why-cite \{[^}]*color: var\(--muted\)/.test(css)) throw new Error('the citation line must stay a quiet muted line (patch #3)');
+  // Patch #4: the verdict as plain text for dispatch — this section's day, word for word
+  const { shareText } = await import('../src/app.tsx');
+  const { evaluate: evShareFn } = await import('../../engine/src/index.ts');
+  const stS = gs();
+  const evShare = evShareFn([...stS.segments, { status: stS.current.status, start: stS.current.since, end: T }], { asOf: T, config: stS.config });
+  const wantShare = `I can drive 7h 30m. Stop by ${clockFull(L(18, 15))}.\nLimited by 11-hour driving limit (49 CFR 395.3(a)(3)(i)).`;
+  if (shareText(evShare, null) !== wantShare) throw new Error(`the share text must be the dial's verdict in dispatch words (got ${shareText(evShare, null)})`);
+  if (!/M12 14V4/.test(h) || !/Share<\/button>/.test(h)) throw new Error('the Now hero must offer Share beside Why? (patch #4)');
   if (!/<li class="on"><div class="why-head"><b>11-hour driving/.test(h)) throw new Error('the earliest rule must be the 11-hour one here');
   for (const tag of ['header', 'main', 'nav']) if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(h)) throw new Error(`<${tag}> must be inert while a panel is open`);
   if (!/role="dialog" aria-modal="true" aria-labelledby="sheet-title"/.test(h)) throw new Error('a panel must be a labelled modal dialog');
@@ -1194,6 +1202,21 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!t.includes('16-hour window') || !t.includes('16-hour day §395.1(o)')) throw new Error('a 16-hour day must qualify the window citation (patch #3.1)');
   setState({ config: { ...gs().config, sixteenHourShifts: [] } });
   openSheet(null);
+
+  // 5c. Patch #4, stopped: the share text names the limit and when driving comes back
+  const stoppedSegs = [
+    { status: 'OFF', start: L(-4), end: L(6), createdAt: 1 },
+    { status: 'D', start: L(6), end: L(17), createdAt: 2 },
+  ];
+  const evStop = evShareFn([...stoppedSegs, { status: 'OFF', start: L(17), end: L(17) }], { asOf: L(17), config: gs().config });
+  if (evStop.driveNow !== 0 || evStop.binding !== 'DRIVE_11') throw new Error('the stopped share scenario must sit at the 11-hour limit');
+  const { driveAgainAt } = await import('../../engine/src/index.ts');
+  const againStop = driveAgainAt(stoppedSegs, { asOf: L(17), config: gs().config }, 'OFF');
+  const wantStop = `I'm out of driving time — limited by 11-hour driving limit (49 CFR 395.3(a)(3)(i)).\nI can drive again at ${clockFull(L(27))}.`;
+  if (againStop !== L(27) || shareText(evStop, againStop) !== wantStop) throw new Error(`the stopped share text must say when driving comes back (got ${shareText(evStop, againStop)})`);
+  setState({ segments: stoppedSegs, current: { status: 'OFF', since: L(17), createdAt: 3 }, tab: 'now' });
+  if (!/Share<\/button>/.test(out('now/stopped share'))) throw new Error('the stopped hero must offer Share beside Why? (patch #4)');
+  setState({ ...base });
 
   // 6. status panel: "started earlier" — never reaching back past the status being left
   const offs = startOffsets(gs(), T).map((o) => `${o.minutes}:${o.ok}`).join(' ');

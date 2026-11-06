@@ -148,6 +148,61 @@ function bindingLabel(ev: FullEvaluation): string {
     default: return 'no limit';
   }
 }
+/**
+ * The binding rule's citation — the Why rows' mapping (see WhySheet), for the binding row only.
+ * Keep the two in step: a text to dispatch that names a different paragraph than the panel does
+ * would be worse than none.
+ */
+function bindingCite(ev: FullEvaluation): string | null {
+  const sh = ev.shift;
+  const adv = sh.exceptionKeys.adverse !== null;
+  const six = sh.exceptionKeys.sixteen !== null;
+  switch (ev.binding) {
+    case 'DRIVE_11': return `49 CFR 395.3(a)(3)(i)${adv ? ' · adverse §395.1(b)(1)' : ''}`;
+    case 'BREAK_30': return '49 CFR 395.3(a)(3)(ii)';
+    case 'WINDOW_14': return `49 CFR 395.3(a)(2)${adv ? ' · adverse §395.1(b)(1)' : ''}${six ? ' · 16-hour day §395.1(o)' : ''}`;
+    case 'CYCLE': return `49 CFR 395.3(b)(${ev.cycle.windowDays === 7 ? '1' : '2'})`;
+    default: return null;
+  }
+}
+/**
+ * Patch #4: the verdict as plain text for dispatch — the same numbers the dial shows, in two
+ * lines a dispatcher can read at a glance, with the binding rule's citation attached (the
+ * "show your work" layer, Patch #3, in the driver's pocket). Pure: the smoke suite pins its
+ * exact wording. `againOff` is the drive-again time when stopped (null = not within 36h).
+ */
+export function shareText(ev: FullEvaluation, againOff: number | null): string {
+  const cite = bindingCite(ev);
+  const by = `limited by ${bindingLabel(ev)}${cite ? ` (${cite})` : ''}`;
+  if (ev.driveNow > 0) {
+    return `I can drive ${dur(ev.driveNow)}. Stop by ${clockFull(ev.mustStopBy)}.\n${by.charAt(0).toUpperCase() + by.slice(1)}.`;
+  }
+  const back = againOff !== null ? `I can drive again at ${clockFull(againOff)}.` : 'Driving does not come back within 36 hours of rest.';
+  return `I'm out of driving time — ${by}.\n${back}`;
+}
+/**
+ * Hand the text to the OS share sheet where there is one; elsewhere copy it, following the
+ * bug report's clipboard pattern. A cancelled share sheet is the driver's choice, not a
+ * failure to route around — it does NOT fall through to a copy he didn't ask for.
+ */
+async function shareVerdictText(text: string): Promise<'shared' | 'copied' | 'failed'> {
+  if ('share' in navigator) {
+    try { await navigator.share({ text }); return 'shared'; }
+    catch (e) { if ((e as Error)?.name === 'AbortError') return 'failed'; }
+  }
+  try { await navigator.clipboard.writeText(text); return 'copied'; } catch { return 'failed'; }
+}
+/** The Share button for the hero feet: the label itself is the feedback (Copied / Couldn't share). */
+function useShareButton(text: string) {
+  const [note, setNote] = useState('');
+  const onClick = async () => {
+    const r = await shareVerdictText(text);
+    if (r === 'shared') return;
+    setNote(r === 'copied' ? 'Copied ✓' : 'Couldn’t share');
+    window.setTimeout(() => setNote(''), 2500);
+  };
+  return <button class="link" onClick={onClick}><Icon d={I.share} size={18} /> {note || 'Share'}</button>;
+}
 /** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
 const violationLabel: Record<Violation['kind'], string> = {
   DRIVE_11: '11-hour driving limit',
@@ -189,6 +244,7 @@ const I = {
   moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
   sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5',
+  share: 'M12 14V4M7 9l5-5 5 5M5 13v8h14v-8',
   x: 'M6 6l12 12M18 6 6 18',
   back: 'M15 5l-7 7 7 7',
   next: 'M9 5l7 7-7 7',
@@ -358,13 +414,14 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
   const cycleWord = `${ev.cycle.limit / 60}-hour`;
   const lead = status === 'D' ? <p class="hero-lead">No driving time left — stop driving.</p> : null;
   const why = <button class="link" onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>;
+  const share = useShareButton(shareText(ev, again.off));
   if (off === null) {
     return (
       <section class="hero bad">
         {lead}
         <div class="hero-label">Out of driving time</div>
         <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</p>
-        <div class="hero-foot">{why}</div>
+        <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
       </section>
     );
   }
@@ -381,7 +438,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         {lead}
         {time('30-min break needed — you can drive again at')}
         <p class="hero-text">Any 30 minutes in a row without driving counts — off duty, sleeper, or on-duty work like fueling.</p>
-        <div class="hero-foot">{why}</div>
+        <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
       </section>
     );
   }
@@ -391,7 +448,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         {lead}
         {time(`Out of ${cycleWord} hours — ${resting ? 'if you stay off duty, you' : 'go off duty now and you'} can drive again at`)}
         <p class="hero-text">On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</p>
-        <div class="hero-foot">{why}</div>
+        <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
       </section>
     );
   }
@@ -400,7 +457,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
       <section class="hero">
         {time('You can drive again at')}
         <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
-        <div class="hero-foot">{why}</div>
+        <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
       </section>
     );
   }
@@ -411,7 +468,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
       {time('Go off duty now and you can drive again at')}
       {sb !== null && sb < off && <p class="hero-text">In the sleeper berth instead: <b>{clock(sb)}</b> ({dur(sb - now)} from now) — that completes a split.</p>}
       {before >= 30 && before < 600 && <p class="hero-text">Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</p>}
-      <div class="hero-foot">{why}</div>
+      <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
     </section>
   );
 }
@@ -653,6 +710,7 @@ function SplitPairLine({ ev }: { ev: FullEvaluation }) {
 
 /** The one number a driver needs, in the size he needs it: driving left, the stop time, and why. */
 function HeroDrive({ ev }: { ev: FullEvaluation }) {
+  const share = useShareButton(shareText(ev, null));
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const left = dur(ev.driveNow);
   // The full-date stop time from Declutter #1 is too wide for one line inside the dial at phone
@@ -669,7 +727,7 @@ function HeroDrive({ ev }: { ev: FullEvaluation }) {
       </Dial>
       <div class="hero-foot">
         <span class="limit-plate">limited by {bindingLabel(ev)}</span>
-        <button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>
+        <span class="hero-actions">{share}<button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button></span>
       </div>
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
         <div class="muted small">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
