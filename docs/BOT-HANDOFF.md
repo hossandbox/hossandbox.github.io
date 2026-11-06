@@ -823,3 +823,13 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     (b)(2) passes smoke.
   - Deployed `deploy 2026-11-06T07:02Z from 511d48b`; served `app.js`/`styles.css` byte-identical to
     `dist/`; the citation strings and `.why-cite` are in the live bundle and absent from the previous one.
+- **Patch 3.1 (2026-11-06, `0650f17`, deploy go under the Ada rule; base `822217c`).** The Why rows now
+  name an active exception beside the base cite — adverse adds "· adverse §395.1(b)(1)" to the driving and
+  window rows; a 16-hour short-haul day adds "· 16-hour day §395.1(o)" to the window row only — read from
+  `ev.shift.exceptionKeys`, the same source as the toggles. With no exception the #3 output is unchanged.
+  Also closes #3's two guard holes: the `.why-cite` style is pinned in smoke, and section 5b renders the Why
+  panel under 60/7, adverse and 16-hour configs (restoring config after), so a wrong citation direction or a
+  dropped qualifier fails. 2 files +28/−2, engine untouched. Engine 99/99; smoke + contrast 44/44; build OK;
+  applied files byte-identical to the patch's copies. Falsified 4/4 (`reviews/falsify-patch31.py`).
+  - Deployed `deploy 2026-11-06T07:51Z from 0650f17`; served `app.js`/`styles.css` byte-identical to `dist/`.
+    The qualifiers appear in the minified bundle as `\xA7`-escaped `§`, same as earlier deploys.
