@@ -172,7 +172,8 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
  * Could this string be a save at all? parseSaved merges whatever JSON it is given, so a save that
  * parses but whose record lists are the wrong shape (a string where the segments belong) would flow
  * straight into the state and blank the app on every render, not just on load. Only a plain object
- * whose lists — when present — are lists counts as usable.
+ * whose lists — when present — are lists, and whose live segment — when present — is a real one,
+ * counts as usable.
  */
 function usableSave(raw: string | null): raw is string {
   if (!raw) return false;
@@ -182,6 +183,18 @@ function usableSave(raw: string | null): raw is string {
     const o = s as Record<string, unknown>;
     if (o.segments !== undefined && !Array.isArray(o.segments)) return false;
     if (o.tentative !== undefined && !Array.isArray(o.tentative)) return false;
+    // The live segment gets the same check importProblem gives an imported file: present-and-not-null
+    // means an object with a known duty status and a finite start. Nothing else sanitizes `current`
+    // on the load path, so without this a save whose ONLY defect is a malformed one counts as usable:
+    // it renders as a nonsense status row, and worse, setState rotates it into the backup slot,
+    // evicting a genuinely good copy (Claudia's catch reviewing patch 5). The statuses are spelled
+    // out here because this runs at module load, before the STATUSES set further down exists.
+    if (o.current !== undefined && o.current !== null) {
+      const c = o.current as Record<string, unknown>;
+      if (typeof c !== 'object' || Array.isArray(c)) return false;
+      if (c.status !== 'OFF' && c.status !== 'SB' && c.status !== 'D' && c.status !== 'ON') return false;
+      if (!Number.isFinite(c.since)) return false;
+    }
     return true;
   } catch { return false; }
 }

@@ -2356,4 +2356,35 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
   console.log('patch 5 (damaged save falls back; undo survives a relaunch): OK');
 }
+// --- patch 5.1: usableSave validates the live segment too (Claudia's catch on patch 5) — a save
+//     whose only defect is a malformed `current` falls back like any other wrong-shape save, and
+//     never rotates into the backup slot over a good copy
+{
+  const { loadSaved, setState: ss } = await import('../src/store.ts');
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup';
+  const rowsA = [{ status: 'OFF', start: 1000, end: 1600, createdAt: 1 }];
+  const rowsX = [{ status: 'D', start: 5000, end: 5600, createdAt: 9 }];
+  const save = (segments, current) => JSON.stringify({ segments, tentative: [], current });
+  // the backup holds a known-good record; a bad save carries different segments so a fallback shows
+  mem.set(BAK, save(rowsA, null));
+  // 1. every malformed flavour of `current` makes the save unusable: the backup's record comes back
+  for (const cur of ['Driving', 42, [], { status: 'DRIVING', since: 2000 }, { status: 'D', since: 'soon' }, { status: 'D' }, { since: 2000 }]) {
+    mem.set(KEY, save(rowsX, cur));
+    if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA)) throw new Error(`patch 5.1: a save whose current is ${JSON.stringify(cur)} must fall back to the backup`);
+  }
+  // 2. a healthy save still wins over the backup: a live segment loads intact, a null one stays null
+  mem.set(KEY, save(rowsX, { status: 'D', since: 2000, note: 'Loaded', createdAt: 7 }));
+  const live = loadSaved();
+  if (JSON.stringify(live.segments) !== JSON.stringify(rowsX) || live.current?.status !== 'D' || live.current?.since !== 2000) throw new Error('patch 5.1: a healthy save with a valid current must load as itself, live segment intact');
+  mem.set(KEY, save(rowsX, null));
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsX) || loadSaved().current !== null) throw new Error('patch 5.1: a healthy save with no live segment must load as itself');
+  // 3. rotation: a malformed-current save sitting in the slot is never copied over the good backup
+  mem.set(BAK, save(rowsA, null));
+  mem.set(KEY, save(rowsX, { status: 'D', since: 'soon' }));
+  ss({ segments: rowsX, tentative: [], current: { status: 'ON', since: 3000 } });
+  if (JSON.stringify(JSON.parse(mem.get(BAK)).segments) !== JSON.stringify(rowsA)) throw new Error('patch 5.1: a malformed-current save must never rotate into the backup slot');
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
+  console.log('patch 5.1 (malformed current falls back; never evicts the backup): OK');
+}
 console.log('OK');
