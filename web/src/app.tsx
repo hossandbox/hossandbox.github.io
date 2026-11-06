@@ -1009,16 +1009,53 @@ function Grid({ segments, from, to, tz, mark }: { segments: Segment[]; from: num
  */
 type Saved = Pick<State, 'segments' | 'tentative' | 'current' | 'historyAcknowledged'>;
 type Undo = { label: string; before: Saved; after: Saved };
+const UNDO_KEY = 'hos-sandbox-undo-v1';
 let undoNow: Undo | null = null;
+/** True when undoNow was restored from storage at launch: its snapshot was re-read, so its arrays are new objects and identity cannot vouch for it (see currentUndo). */
+let undoRestored = false;
 const undoSubs = new Set<() => void>();
-function setUndo(u: Undo | null) { undoNow = u; undoSubs.forEach((f) => f()); }
+function setUndo(u: Undo | null) {
+  undoNow = u; undoRestored = false;
+  // The offer is persisted too: a driver who deletes an entry and has the app closed on him — the
+  // phone restarted, the PWA swiped away — before he reconsiders has not lost the way back. Storage
+  // failing (full, blocked) leaves the in-session undo working exactly as before.
+  try {
+    if (u) localStorage.setItem(UNDO_KEY, JSON.stringify(u)); else localStorage.removeItem(UNDO_KEY);
+  } catch { /* the undo still works for this session */ }
+  undoSubs.forEach((f) => f());
+}
+/**
+ * What a launch does with the stored undo (exported so tests can exercise it without a reload).
+ * A damaged stored undo is dropped, never fatal.
+ */
+export function restoreUndo(raw: string | null) {
+  undoNow = null; undoRestored = false;
+  if (!raw) return;
+  try {
+    const u = JSON.parse(raw) as Undo;
+    if (u && typeof u.label === 'string' && u.before && u.after
+      && Array.isArray(u.before.segments) && Array.isArray(u.before.tentative)
+      && Array.isArray(u.after.segments) && Array.isArray(u.after.tentative)) { undoNow = u; undoRestored = true; }
+  } catch { /* dropped */ }
+}
+try { restoreUndo(localStorage.getItem(UNDO_KEY)); } catch { /* no storage at launch: nothing to restore */ }
 const pick = (s: State): Saved => ({ segments: s.segments, tentative: s.tentative, current: s.current, historyAcknowledged: s.historyAcknowledged });
+/** A record and a snapshot reading the same, field by field — the restored undo's only possible check. */
+const sameSaved = (s: State, a: Saved): boolean =>
+  JSON.stringify(s.segments) === JSON.stringify(a.segments)
+  && JSON.stringify(s.tentative) === JSON.stringify(a.tentative)
+  && JSON.stringify(s.current ?? null) === JSON.stringify(a.current ?? null);
 /** The pending undo, or null once the record has changed since (compared by identity: every change makes new arrays). */
 export function currentUndo(): Undo | null {
   if (!undoNow) return null;
   const s = getState(), a = undoNow.after;
-  if (s.segments !== a.segments || s.tentative !== a.tentative || s.current !== a.current) undoNow = null;
-  return undoNow;
+  if (s.segments === a.segments && s.tentative === a.tentative && s.current === a.current) return undoNow;
+  // A restored undo's snapshot was re-read from storage, so identity is gone: it stands only while
+  // the record still reads exactly as the action left it, compared by value.
+  if (undoRestored && sameSaved(s, a)) return undoNow;
+  if (undoRestored) { try { localStorage.removeItem(UNDO_KEY); } catch { /* ignore */ } }
+  undoNow = null; undoRestored = false;
+  return null;
 }
 function useUndo(): Undo | null {
   const [, force] = useState(0);

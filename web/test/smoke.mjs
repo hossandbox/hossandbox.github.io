@@ -2313,4 +2313,47 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('split pair named on screen: OK');
 }
+// --- patch 5: state resilience — a damaged save falls back, and the undo survives a relaunch
+{
+  const { loadSaved, setState: ss, getState: gs } = await import('../src/store.ts');
+  const { deleteEntry, currentUndo, undoLast, restoreUndo } = await import('../src/app.tsx');
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup', UKEY = 'hos-sandbox-undo-v1';
+  const rowsA = [{ status: 'OFF', start: 1000, end: 1600, createdAt: 1 }];
+  const rowsB = [...rowsA, { status: 'D', start: 1600, end: 1900, createdAt: 2 }];
+  // 1. every save keeps the one it replaced as the last-known-good copy
+  mem.delete(BAK);
+  ss({ segments: rowsA, tentative: [], current: null });
+  ss({ segments: rowsB, tentative: [], current: null });
+  const bak = JSON.parse(mem.get(BAK) ?? 'null');
+  if (!bak || JSON.stringify(bak.segments) !== JSON.stringify(rowsA)) throw new Error('patch 5: the save a write replaces must be kept as the backup');
+  // 2. a damaged current save falls back to that copy, record intact — truncated JSON and a
+  //    wrong-shape record alike; a healthy save still wins over the backup
+  mem.set(KEY, '{"segments": "junk"');
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA)) throw new Error('patch 5: an unparseable save must fall back to the last-known-good copy');
+  mem.set(KEY, JSON.stringify({ segments: 'junk', tentative: [] }));
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA)) throw new Error('patch 5: a wrong-shape save must fall back to the last-known-good copy');
+  mem.set(KEY, JSON.stringify({ segments: rowsB, tentative: [], current: null }));
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsB)) throw new Error('patch 5: a healthy save must win over the backup');
+  // 3. a delete writes its undo to storage, in the shape a relaunch restores from
+  ss({ segments: rowsB.map((r) => ({ ...r })), tentative: [], current: null, historyAcknowledged: true });
+  deleteEntry(gs().segments[1]);
+  const stored = JSON.parse(mem.get(UKEY) ?? 'null');
+  if (!stored || !/^Deleted Driving/.test(stored.label)) throw new Error('patch 5: a delete must persist its undo');
+  if (JSON.stringify(stored.after.segments) !== JSON.stringify([rowsA[0]])) throw new Error('patch 5: the stored undo must snapshot the record as the delete left it');
+  // 4. simulated relaunch: the record is re-read from storage (new objects, identity gone) and the
+  //    stored undo restored from its key — the undo still stands, and using it puts the entry back
+  ss(loadSaved());
+  restoreUndo(mem.get(UKEY) ?? null);
+  if (!currentUndo()) throw new Error('patch 5: the undo must survive a relaunch while the record is untouched');
+  if (!undoLast() || JSON.stringify(gs().segments) !== JSON.stringify(rowsB)) throw new Error('patch 5: the restored undo must put the deleted entry back');
+  // 5. ...but a restored undo retires the moment the record has moved on, exactly as in-session
+  deleteEntry(gs().segments[1]);
+  restoreUndo(mem.get(UKEY) ?? null);
+  ss({ segments: [...gs().segments, { status: 'ON', start: 1900, end: 1930, createdAt: 3 }] });
+  if (currentUndo() !== null || undoLast() !== false) throw new Error('patch 5: a restored undo must retire once the record changes');
+  if (gs().segments.length !== 2) throw new Error('patch 5: a retired undo must change nothing');
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
+  console.log('patch 5 (damaged save falls back; undo survives a relaunch): OK');
+}
 console.log('OK');

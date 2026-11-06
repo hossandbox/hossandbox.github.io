@@ -87,6 +87,8 @@ export interface State {
 }
 
 const KEY = 'hos-sandbox-v1';
+/** The save the current one replaced, kept by setState as the last-known-good copy (see loadSaved). */
+const BACKUP_KEY = 'hos-sandbox-v1-backup';
 /** The browser's zone — what every `clock()` on screen renders in, which may differ from the terminal. */
 export const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
 
@@ -166,8 +168,37 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
   return cfg;
 }
 
-function load(): State {
-  try { return parseSaved(localStorage.getItem(KEY)); } catch { return INITIAL_STATE; }
+/**
+ * Could this string be a save at all? parseSaved merges whatever JSON it is given, so a save that
+ * parses but whose record lists are the wrong shape (a string where the segments belong) would flow
+ * straight into the state and blank the app on every render, not just on load. Only a plain object
+ * whose lists — when present — are lists counts as usable.
+ */
+function usableSave(raw: string | null): raw is string {
+  if (!raw) return false;
+  try {
+    const s: unknown = JSON.parse(raw);
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return false;
+    const o = s as Record<string, unknown>;
+    if (o.segments !== undefined && !Array.isArray(o.segments)) return false;
+    if (o.tentative !== undefined && !Array.isArray(o.tentative)) return false;
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * What a launch reads: the current save — or, when it is damaged (unparseable, or the wrong shape),
+ * the last-known-good copy setState kept, so one bad write cannot blank the app or cost the driver
+ * his record. Exported so tests can exercise it without a reload, like parseSaved.
+ */
+export function loadSaved(): State {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (usableSave(raw)) return parseSaved(raw);
+    const bak = localStorage.getItem(BACKUP_KEY);
+    if (usableSave(bak)) return parseSaved(bak);
+    return parseSaved(raw);
+  } catch { return INITIAL_STATE; }
 }
 
 /** What load() does with the saved string (exported so tests can exercise it without a reload). */
@@ -200,14 +231,20 @@ export function parseSaved(raw: string | null): State {
   } catch { return INITIAL_STATE; }
 }
 
-let state: State = load();
+let state: State = loadSaved();
 const subs = new Set<() => void>();
 
 export function getState() { return state; }
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)) {
   const p = typeof patch === 'function' ? patch(state) : patch;
   state = { ...state, ...p };
-  localStorage.setItem(KEY, JSON.stringify(state));
+  // Autosave, with the save being replaced kept as the last-known-good copy: if the new write is
+  // ever found damaged, loadSaved falls back to it instead of a fresh, empty record. Only a usable
+  // save is kept — rotating a damaged one in would destroy the very copy the fallback needs.
+  const prev = localStorage.getItem(KEY);
+  const next = JSON.stringify(state);
+  if (prev && prev !== next && usableSave(prev)) localStorage.setItem(BACKUP_KEY, prev);
+  localStorage.setItem(KEY, next);
   subs.forEach((f) => f());
 }
 
