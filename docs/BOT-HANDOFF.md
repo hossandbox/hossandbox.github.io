@@ -833,3 +833,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   applied files byte-identical to the patch's copies. Falsified 4/4 (`reviews/falsify-patch31.py`).
   - Deployed `deploy 2026-11-06T07:51Z from 0650f17`; served `app.js`/`styles.css` byte-identical to `dist/`.
     The qualifiers appear in the minified bundle as `\xA7`-escaped `§`, same as earlier deploys.
+- **Patch 4 (2026-11-06, `eaeb606`, deploy go under the Ada rule; base `1f17383`).** A **Share** button sits
+  beside Why? in the Now hero foot (driving and every stopped state). It composes the live verdict as two
+  lines of plain text — `I can drive 7h 30m. Stop by <full date>.` / `Limited by <binding label> (<cite>).`,
+  and when stopped `I'm out of driving time — limited by …` / `I can drive again at <full date>.` (or
+  "Driving does not come back within 36 hours of rest.") — from a new `bindingCite(ev)` that mirrors the
+  WhySheet mapping for the binding row only, including the #3.1 exception qualifiers. Hands it to
+  `navigator.share` when present, else `navigator.clipboard` with "Copied ✓"; a cancelled share sheet
+  (AbortError) does NOT fall through to a clipboard copy. No network, no analytics, no branding line, and
+  the driving view is untouched. 3 web files +88/−6, engine untouched. Engine 99/99; smoke + contrast
+  44/44; build OK; applied files byte-identical to the patch's copies; my own mutation (dropping the cite
+  from `shareText`) fails smoke at the exact-share-wording assertion.
+  - Known caveat (carried): `navigator.share` is device-dependent; the suite pins composition and affordance,
+    so the first real-device tap is the true test.
+  - Deployed `deploy 2026-11-06T13:39Z from eaeb606`; served `app.js`/`styles.css` byte-identical to `dist/`.
