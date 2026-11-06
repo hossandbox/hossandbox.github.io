@@ -1136,6 +1136,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const top = css.match(/\n\.top \{[^}]*\}/)[0];
   if (/transparent|gradient/.test(top) || !/background: var\(--bg\)/.test(top)) throw new Error(`the sticky header must be opaque: ${top}`);
 
+  // 3b. Patch #2: the stacked stop-by is a LAYOUT property — a string render cannot see it.
+  // Mutation testing (Claudia, 2026-11-05) showed reverting these rules alone shipped GREEN:
+  // the single line overflows the dial ring at phone widths. Pin the stack itself.
+  const heroStop = (css.match(/\.hero \.hero-stop \{[^}]*\}/) || [''])[0];
+  if (!/display: flex/.test(heroStop) || !/flex-direction: column/.test(heroStop) || !/align-items: center/.test(heroStop) || !/text-transform: uppercase/.test(heroStop)) throw new Error(`the dial stop-by must stack as a centred uppercase column (patch #1.1): ${heroStop}`);
+  const stopDate = (css.match(/\.hero-stop-date \{[^}]*\}/) || [''])[0];
+  const stopTime = (css.match(/\.hero-stop-time \{[^}]*\}/) || [''])[0];
+  const px = (rule) => Number((rule.match(/font-size: (\d+)px/) || [])[1] || 0);
+  if (!(px(stopDate) > 0) || !(px(stopTime) > px(stopDate))) throw new Error(`the stacked stop-by needs a quiet date line over a larger time (patch #1.1): date ${stopDate} · time ${stopTime}`);
+
   // 4. away from Now, one line of driving time in the header
   setState({ tab: 'log' });
   h = out('log/header line');
