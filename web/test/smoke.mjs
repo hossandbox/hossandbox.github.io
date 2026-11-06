@@ -1166,12 +1166,34 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // Patch #3: every Why row names its rule — show your work, the citation under the prose
   for (const cite of ['49 CFR 395.3(a)(3)(i)', '49 CFR 395.3(a)(3)(ii)', '49 CFR 395.3(a)(2)', '49 CFR 395.3(b)(2)']) if (!t.includes(cite)) throw new Error(`Why panel: the rows must carry their citations (missing ${cite})`);
   if ((h.match(/class="why-cite"/g) || []).length !== 4) throw new Error('each Why row carries exactly one citation line');
+  // Patch #3.1: the citation line's quiet style is pinned too — a render cannot see it
+  if (!/\.why-cite \{[^}]*color: var\(--muted\)/.test(css)) throw new Error('the citation line must stay a quiet muted line (patch #3)');
   if (!/<li class="on"><div class="why-head"><b>11-hour driving/.test(h)) throw new Error('the earliest rule must be the 11-hour one here');
   for (const tag of ['header', 'main', 'nav']) if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(h)) throw new Error(`<${tag}> must be inert while a panel is open`);
   if (!/role="dialog" aria-modal="true" aria-labelledby="sheet-title"/.test(h)) throw new Error('a panel must be a labelled modal dialog');
   openSheet(null);
   h = out('now/panel closed');
   if (/<main[^>]*\binert\b/.test(h)) throw new Error('closing the panel must make the screen usable again');
+
+  // 5b. Patch #3.1: render the OTHER configs — a hard-coded (b)(2), or a citation that
+  // ignores an active exception, must fail here rather than ship green
+  const evNow31 = (await import('../../engine/src/index.ts')).evaluate;
+  const st31 = gs();
+  const ss31 = evNow31([...st31.segments, { status: st31.current.status, start: st31.current.since, end: T }], { asOf: T, config: st31.config }).shift.shiftStart;
+  setState({ config: { ...gs().config, cycle: '60/7' } });
+  openSheet({ kind: 'why' });
+  t = txt(out('now/why panel 60/7'));
+  if (!t.includes('60-hour / 7-day cycle') || !t.includes('49 CFR 395.3(b)(1)')) throw new Error('a 60/7 config must cite (b)(1) on the cycle row (patch #3)');
+  setState({ config: { ...gs().config, cycle: '70/8', adverseShifts: [ss31] } });
+  openSheet({ kind: 'why' });
+  t = txt(out('now/why panel adverse'));
+  if (!t.includes('13-hour driving') || (t.match(/adverse §395\.1\(b\)\(1\)/g) || []).length !== 2) throw new Error('adverse driving must qualify both the driving and the window citations (patch #3.1)');
+  setState({ config: { ...gs().config, adverseShifts: [], sixteenHourShifts: [ss31] } });
+  openSheet({ kind: 'why' });
+  t = txt(out('now/why panel 16h'));
+  if (!t.includes('16-hour window') || !t.includes('16-hour day §395.1(o)')) throw new Error('a 16-hour day must qualify the window citation (patch #3.1)');
+  setState({ config: { ...gs().config, sixteenHourShifts: [] } });
+  openSheet(null);
 
   // 6. status panel: "started earlier" — never reaching back past the status being left
   const offs = startOffsets(gs(), T).map((o) => `${o.minutes}:${o.ok}`).join(' ');

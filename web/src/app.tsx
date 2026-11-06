@@ -849,8 +849,12 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   const sh = ev.shift;
   const split = sh.chain.length >= 2;
   const pair = activePair(ev);
+  // Patch #3.1: an active exception changes the numbers under a different paragraph —
+  // name it beside the base cite, or a 13-hour row next to (a)(3)(i) reads as a contradiction.
+  const adv = sh.exceptionKeys.adverse !== null;
+  const six = sh.exceptionKeys.sixteen !== null;
   const rows = [
-    { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining, cite: '49 CFR 395.3(a)(3)(i)',
+    { key: 'DRIVE_11', name: `${sh.limits.drive / 60}-hour driving`, left: sh.driveRemaining, cite: `49 CFR 395.3(a)(3)(i)${adv ? ' · adverse §395.1(b)(1)' : ''}`,
       text: pair
         ? `You have driven ${dur(sh.driveUsed)} since ${clock(sh.anchor)}, the end of the first rest in your split pair. ${dur(sh.driveRemaining)} more is allowed.`
         : `You have driven ${dur(sh.driveUsed)} since your last 10-hour rest${split ? ' (counting your sleeper split)' : ''}. ${dur(sh.driveRemaining)} more is allowed.` },
@@ -859,7 +863,7 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
     // bare clock time left a driver asking which (Lorico, 2026-10-10).
     ...(Number.isFinite(sh.breakRemaining) ? [{ key: 'BREAK_30', name: '30-minute break', left: sh.breakRemaining, timeLabel: 'latest start', cite: '49 CFR 395.3(a)(3)(ii)',
       text: `Stop for 30 minutes in a row before your driving adds up to 8 hours. Take it any time before then: off duty, sleeper, or on duty without driving (fueling, an inspection) all count. ${sh.driveSinceBreak > 0 ? `You have driven ${dur(sh.driveSinceBreak)} since your last one.` : 'Your last stop counted, so the 8 hours start when you next drive.'}` }] : []),
-    { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining, cite: '49 CFR 395.3(a)(2)',
+    { key: 'WINDOW_14', name: `${sh.limits.window / 60}-hour window`, left: sh.windowRemaining, cite: `49 CFR 395.3(a)(2)${adv ? ' · adverse §395.1(b)(1)' : ''}${six ? ' · 16-hour day §395.1(o)' : ''}`,
       text: `No driving once ${sh.limits.window / 60} hours have passed since your shift started — breaks don't stop it${split ? ', except a qualifying sleeper split' : ''}.` },
     { key: 'CYCLE', name: `${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day cycle`, left: ev.cycle.remaining, cite: `49 CFR 395.3(b)(${ev.cycle.windowDays === 7 ? '1' : '2'})`,
       text: `${dur(ev.cycle.remaining)} left in this ${ev.cycle.windowDays}-day period.` },
