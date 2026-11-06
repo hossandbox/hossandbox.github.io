@@ -810,3 +810,16 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     `dist/`. `app.js` differs from the previous deploy only in its build stamp, as a test-only patch should.
   - Process note: the first pre-apply check hit an approval prompt that timed out (`BLOCKED`). Nothing
     was retried until Lorico was back and asked for it again.
+- **Patch 3 (2026-11-06, `511d48b`, deploy go under the Ada rule; base code `48379f0`, applied at
+  `defb982` which adds only a docs commit).** Each Why-sheet row now carries its own CFR paragraph as a
+  quiet `.why-cite` line (11px muted) under the prose, instead of only the part-level "49 CFR 395.3"
+  footer: driving (a)(3)(i), break (a)(3)(ii), window (a)(2), cycle (b)(1) for 60/7 or (b)(2) for 70/8
+  (from `cycle.windowDays`). The Now dial and driving view stay citation-free by design. 3 web files,
+  +9/−4, engine untouched. Engine 99/99; smoke + contrast 44/44; build OK; applied files byte-identical
+  to the patch's copies; new smoke fails on the pre-patch app.tsx (missing citations).
+  - **Two guard holes carried over (Ada's 3.1 is aimed at them):** `.why-cite` has no CSS guard (deleting
+    the rule ships green, same class as the Patch 2 hero-stack gap); and nothing asserts the 60/7 vs 70/8
+    citation direction, because the smoke Why-panel check renders only the default 70/8. Hard-coding
+    (b)(2) passes smoke.
+  - Deployed `deploy 2026-11-06T07:02Z from 511d48b`; served `app.js`/`styles.css` byte-identical to
+    `dist/`; the citation strings and `.why-cite` are in the live bundle and absent from the previous one.
