@@ -2848,4 +2848,139 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(true);
   console.log('patch 7.2 (Your last 8 days — logged only, not-logged stays not logged, the ELD is the record): OK');
 }
+// --- patch 8: "Start from my ELD clocks" — a mid-shift driver types the four clocks the ELD
+// already shows instead of rebuilding a day the ELD knows. The synthesis is pessimism-bound:
+// where the four numbers disagree, the stricter reading wins and a clock may come out LOWER
+// than typed, never higher; earlier cycle usage is placed as recently as the numbers allow, so
+// recap hours come back as late as possible; and split answers carry an Estimate label while
+// they rest on the typed-in rows. Manual entry only — photo/voice entry is a later patch.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, synthesizeEldSeed, applyEldSeed, splitEstimateActive, historyBasis, loadSaved, parseSaved, ELD_SEED_NOTE } = await import('../src/store.ts');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const { openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  setLaunchNotice(false);
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  const NOW8 = L(12, 12); // Mon Oct 12 2026, 12:00 in Chicago
+  const CFG8 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const CANON = { driveLeft: 300, windowLeft: 420, breakDueIn: 200, cycleLeft: 2400 };
+  const clocksOf = (segs, cfg = CFG8, at = NOW8) => {
+    const ev = evaluate(segs, { asOf: at, config: cfg, forecastDays: 9 });
+    return { ev, drive: ev.shift.driveRemaining, window: ev.shift.windowRemaining, brk: ev.shift.breakRemaining, cycle: ev.cycle.remaining };
+  };
+
+  // (a) round-trip: a consistent set of four clocks comes back exactly — the app's own
+  //     computation shows what was typed, and the seeded record manufactures no violations
+  const seedA = synthesizeEldSeed(CANON, CFG8, NOW8, 1);
+  const a = clocksOf(seedA.segments);
+  if (a.drive !== 300 || a.window !== 420 || a.brk !== 200 || a.cycle !== 2400)
+    throw new Error(`patch 8: a consistent seed must round-trip exactly (saw drive ${a.drive} window ${a.window} break ${a.brk} cycle ${a.cycle})`);
+  if (seedA.notes.length !== 0) throw new Error(`patch 8: a consistent seed needs no adjustments (saw ${seedA.notes.join('; ')})`);
+  if (a.ev.violations.length !== 0) throw new Error('patch 8: a seeded record must not manufacture violations');
+  // the corners round-trip too: a full clock and a spent one
+  for (const [input, want] of [
+    [{ driveLeft: 660, windowLeft: 840, breakDueIn: 480, cycleLeft: 4200 }, { drive: 660, window: 840, brk: 480, cycle: 4200 }],
+    [{ driveLeft: 0, windowLeft: 0, breakDueIn: 0, cycleLeft: 0 }, { drive: 0, window: 0, brk: 0, cycle: 0 }],
+  ]) {
+    const c = clocksOf(synthesizeEldSeed(input, CFG8, NOW8, 1).segments);
+    if (c.drive !== want.drive || c.window !== want.window || c.brk !== want.brk || c.cycle !== want.cycle)
+      throw new Error(`patch 8: corner seed ${JSON.stringify(input)} must round-trip (saw ${JSON.stringify({ drive: c.drive, window: c.window, brk: c.brk, cycle: c.cycle })})`);
+  }
+  // and under the other cycle: 60/7 with its own limit and window length
+  const c60 = clocksOf(synthesizeEldSeed({ ...CANON, cycleLeft: 1800 }, { ...CFG8, cycle: '60/7' }, NOW8, 1).segments, { ...CFG8, cycle: '60/7' });
+  if (c60.cycle !== 1800 || c60.drive !== 300) throw new Error(`patch 8: a 60/7 seed must round-trip its own cycle (saw cycle ${c60.cycle} drive ${c60.drive})`);
+
+  // (b) pessimism: where the numbers disagree, every clock comes out at or below what was
+  //     typed — the break clock implies 7h of driving the drive clock denies, so driving
+  //     counts (drive left drops to 4h) and the window stretches to hold it (drops to 7h)
+  const b1 = clocksOf(synthesizeEldSeed({ driveLeft: 660, windowLeft: 840, breakDueIn: 60, cycleLeft: 4200 }, CFG8, NOW8, 1).segments);
+  if (b1.brk !== 60 || b1.drive !== 240) throw new Error(`patch 8: driving implied by the break clock must count (saw drive ${b1.drive} break ${b1.brk})`);
+  if (b1.drive > 660 || b1.window > 840 || b1.brk > 60 || b1.cycle > 4200) throw new Error('patch 8: no clock may come out above what was typed');
+  // drive left greater than window left is not an error — the usable time is the smaller one
+  const b2 = clocksOf(synthesizeEldSeed({ driveLeft: 600, windowLeft: 300, breakDueIn: 480, cycleLeft: 4200 }, CFG8, NOW8, 1).segments);
+  if (b2.drive !== 600 || b2.window !== 300 || b2.ev.driveNow !== 300) throw new Error(`patch 8: usable time must be the most restrictive clock (saw drive ${b2.drive} window ${b2.window} driveNow ${b2.ev.driveNow})`);
+  // over-max values clamp to the legal ceiling, and the clamping is said out loud
+  const over = synthesizeEldSeed({ driveLeft: 900, windowLeft: 1000, breakDueIn: 481, cycleLeft: 5000 }, CFG8, NOW8, 1);
+  const b3 = clocksOf(over.segments);
+  if (b3.drive !== 660 || b3.window !== 840 || b3.brk !== 480 || b3.cycle !== 4200) throw new Error('patch 8: over-max clocks must clamp to the legal ceilings');
+  if (!over.notes.some((n) => /Drive time left can't be more than 11h 00m/.test(n)) || !over.notes.some((n) => /Cycle time left can't be more than 70h 00m/.test(n)))
+    throw new Error('patch 8: a clamped clock must be named in the notes');
+  const strict = synthesizeEldSeed({ driveLeft: 660, windowLeft: 840, breakDueIn: 60, cycleLeft: 4200 }, CFG8, NOW8, 1);
+  if (!strict.notes.some((n) => /stricter one won/.test(n))) throw new Error('patch 8: a disagreement between the clocks must be named in the notes');
+
+  // (c) cycle placement: the canonical seed's earlier usage (30h) sits against the recent end
+  //     of the window — 4h 30m on Oct 10 and 19h on Oct 11, nothing on the oldest day — so it
+  //     drops off at the LATEST forecast steps (Oct 18 and Oct 19), never early
+  const days = a.ev.cycle.days;
+  if (days[0].label !== '2026-10-05' || days[0].onDuty !== 0) throw new Error('patch 8: no synthesized usage may sit on the oldest window day (it would hand hours back early)');
+  if (days[5].onDuty !== 270 || days[6].onDuty !== 1140 || days[7].onDuty !== 390)
+    throw new Error(`patch 8: earlier usage must pack against the recent days (saw ${days.map((d) => `${d.label}:${d.onDuty}`).join(' ')})`);
+  const fc = a.ev.cycle.forecast;
+  if (fc.slice(0, 5).some((f) => f.dropsOff !== 0) || fc[5].dropsOff !== 270 || fc[6].dropsOff !== 1140)
+    throw new Error(`patch 8: seeded usage must come back at the latest possible days (saw ${fc.map((f) => `${f.label}:${f.dropsOff}`).join(' ')})`);
+
+  // (d) seeding ends the DEMO state: rows carry the provenance note, the stamp is set, and
+  //     the driver is left Off Duty at now — the seed invents nothing after now
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: NOW8, tab: 'now', config: { ...CFG8 } });
+  const { patch } = applyEldSeed(gs(), CANON, NOW8);
+  ss(patch);
+  if (historyBasis(gs(), NOW8) === 'fresh') throw new Error('patch 8: seeding must end the DEMO state');
+  if (gs().seededAt !== NOW8) throw new Error('patch 8: the seed stamp must be recorded');
+  if (!gs().current || gs().current.status !== 'OFF' || gs().current.since !== NOW8) throw new Error('patch 8: the driver must be left Off Duty at now');
+  if (gs().segments.length === 0 || !gs().segments.every((x) => x.note === ELD_SEED_NOTE)) throw new Error('patch 8: every seeded row must carry the provenance note');
+  if (gs().segments.some((x) => x.end > NOW8)) throw new Error('patch 8: the seed must not invent time after now');
+  if (gs().tentative.length !== 0) throw new Error('patch 8: seeding replaces any what-if rows, never mixes with them');
+
+  // (f) the seeded save passes the patch 5.2 validation and reloads identically — and a
+  //     pre-patch-8 save (no stamp, no marked rows) still loads as itself
+  const loaded = loadSaved();
+  if (JSON.stringify(loaded.segments) !== JSON.stringify(gs().segments) || loaded.seededAt !== NOW8)
+    throw new Error('patch 8: a seeded save must survive validation and reload unchanged');
+  const preEight = JSON.stringify({ segments: [{ status: 'OFF', start: NOW8 - 600, end: NOW8 }], current: null, config: { ...CFG8 } });
+  localStorage.setItem('hos-sandbox-v1', preEight);
+  const old = loadSaved();
+  if (old.seededAt !== null || old.segments.length !== 1 || old.segments[0].start !== NOW8 - 600)
+    throw new Error('patch 8: a pre-patch-8 save must still load, read as never seeded');
+  if (parseSaved(preEight).seededAt !== null) throw new Error('patch 8: a save with no stamp parses as never seeded');
+
+  // (e) the Estimate label: up while the current shift stands on seeded rows, rendered on
+  //     screen, and gone once the driver's own record covers that ground — a real reset
+  //     taken after seeding firms the estimate up even though seeded rows remain behind it
+  if (!splitEstimateActive(gs(), NOW8)) throw new Error('patch 8: a fresh seed must read as an estimate');
+  let h = out('patch 8/seeded now');
+  if (/DEMO — not your day/.test(h) || /is-demo/.test(h)) throw new Error('patch 8: a seeded app must leave the DEMO state behind');
+  if (!/Estimate — from the clocks you entered; firms up as your own entries replace them\./.test(h))
+    throw new Error('patch 8: split answers must carry the Estimate label while they rest on the seed');
+  const firmed = {
+    segments: [...seedA.segments,
+      { status: 'OFF', start: NOW8 + 60, end: NOW8 + 660 },
+      { status: 'D', start: NOW8 + 660, end: NOW8 + 720 }],
+    current: { status: 'OFF', since: NOW8 + 720 },
+  };
+  if (splitEstimateActive({ ...gs(), ...firmed }, NOW8 + 720)) throw new Error("patch 8: a real reset after seeding must clear the Estimate label");
+  const realOnly = { segments: [{ status: 'OFF', start: NOW8 - 1500, end: NOW8 - 900 }, { status: 'D', start: NOW8 - 900, end: NOW8 - 600 }], current: { status: 'OFF', since: NOW8 - 600 } };
+  if (splitEstimateActive({ ...gs(), ...realOnly }, NOW8)) throw new Error('patch 8: a record with no seeded rows is never an estimate');
+
+  // (g) the way in: the DEMO banner offers the quick start, the panel carries the four clocks
+  //     as numeric boxes, and the wiring runs through the tested store path
+  if (!/openSheet\(\{ kind: 'quickstart' \}\)/.test(app)) throw new Error('patch 8: the DEMO banner must offer the quick start');
+  const sheetBody = app.slice(app.indexOf('function QuickStartSheet'), app.indexOf('function StatusSheet'));
+  if (!/applyEldSeed\(getState\(\), clocks, now\)/.test(sheetBody)) throw new Error('patch 8: the panel must seed through the tested store path');
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', config: { ...CFG8 } });
+  h = out('patch 8/demo entry');
+  if (!/Start from my ELD clocks/.test(h)) throw new Error('patch 8: a fresh install must offer the quick start');
+  openSheet({ kind: 'quickstart' });
+  h = out('patch 8/quickstart panel');
+  for (const label of ['Drive time left', 'Shift time left', 'Break due in', 'Cycle time left'])
+    if (!h.includes(label)) throw new Error(`patch 8: the panel must ask for the ${label} clock`);
+  if ((h.match(/inputmode="numeric"/g) || []).length < 8) throw new Error('patch 8: every clock needs hours and minutes boxes on the numeric keypad');
+  if (!/Type the four clocks your ELD shows/.test(h)) throw new Error('patch 8: the panel must say what to type, in driver words');
+  openSheet(null);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG8 } });
+  setLaunchNotice(true);
+  console.log('patch 8 (Start from my ELD clocks — round-trip exact, pessimism-bound, estimate labelled): OK');
+}
 console.log('OK');

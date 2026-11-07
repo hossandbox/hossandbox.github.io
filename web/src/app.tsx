@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -275,6 +275,7 @@ const STATUS_ICON: Record<DutyStatus, string> = { OFF: I.cup, SB: I.bunk, D: I.w
  */
 export type SheetKind =
   | { kind: 'status' }
+  | { kind: 'quickstart' }
   | { kind: 'why' }
   | { kind: 'exceptions' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
@@ -577,6 +578,10 @@ function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) 
             <>
               <b class="demo-word">DEMO — not your day.</b> <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
               Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+              <span class="qs-cta">
+                <button class="primary" onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button>
+                <span class="small">Already mid-shift? Type the four clocks your ELD shows — about 20 seconds — and start from your real day instead.</span>
+              </span>
             </>
           ) : (
             <>
@@ -584,6 +589,12 @@ function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) 
               <button class="mini" onClick={() => setState({ historyAcknowledged: true })}>It really does start here</button>
             </>
           )}
+        </div>
+      )}
+      {splitEstimateActive(s, now) && (
+        <div class="warnbox small">
+          <b>Estimate — from the clocks you entered; firms up as your own entries replace them.</b>{' '}
+          Split answers rest on those typed-in clocks until a stretch you logged yourself covers the ground they stand on.
         </div>
       )}
       {meaningfulGaps(ev.gaps).length > 0 && (
@@ -886,6 +897,82 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
 }
 
 /* ============================================================ panels */
+
+/**
+ * "Start from my ELD clocks" (patch 8): the four clocks the ELD already shows on one screen,
+ * typed once — the app builds a starting record from them (store.ts: synthesizeEldSeed) instead
+ * of asking a mid-shift driver to rebuild a day the ELD already knows. Manual entry only; the
+ * numbers are read the strict way where they disagree, and the adjustments are named on the
+ * result step rather than applied in silence.
+ */
+function QuickStartSheet({ s, now }: { s: State; now: number }) {
+  const cyc = cycleParamsOf(s.config);
+  const fields: { key: keyof EldClocks; label: string; sub: string; max: number }[] = [
+    { key: 'driveLeft', label: 'Drive time left', sub: '11-hour driving clock', max: LIMITS.DRIVE },
+    { key: 'windowLeft', label: 'Shift time left', sub: '14-hour window clock', max: LIMITS.WINDOW },
+    { key: 'breakDueIn', label: 'Break due in', sub: 'until a 30-minute break is required', max: LIMITS.BREAK_AFTER },
+    { key: 'cycleLeft', label: 'Cycle time left', sub: `${cyc.limit / 60}-hour / ${cyc.windowDays}-day clock`, max: cyc.limit },
+  ];
+  // Text state, like the Slider's box: the driver can clear a box and retype without the value
+  // snapping back mid-edit. The boxes open on the full clocks — the DEMO assumption — so a
+  // driver whose ELD agrees taps one button; everyone else edits what differs.
+  const [txt, setTxt] = useState<Record<string, [string, string]>>(() =>
+    Object.fromEntries(fields.map((f) => [f.key, [String(Math.floor(f.max / 60)), String(f.max % 60)]])));
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<{ notes: string[] } | null>(null);
+  const confirm = () => {
+    const clocks = {} as EldClocks;
+    for (const f of fields) {
+      const [hs, ms] = txt[f.key];
+      const hv = hs.trim() === '' ? 0 : Number(hs);
+      const mv = ms.trim() === '' ? 0 : Number(ms);
+      if (!Number.isFinite(hv) || !Number.isFinite(mv) || hv < 0 || mv < 0) {
+        setErr(`The ${f.label.toLowerCase()} boxes need plain numbers — check them and try again.`);
+        return;
+      }
+      clocks[f.key] = Math.round(hv) * 60 + Math.round(mv);
+    }
+    const { patch, notes } = applyEldSeed(getState(), clocks, now);
+    setState(patch);
+    setDone({ notes });
+  };
+  if (done) {
+    return (
+      <Sheet title="Start from my ELD clocks">
+        <p>Your clocks are set from those four numbers.</p>
+        {done.notes.length > 0 ? (
+          <>
+            <p class="small">Read the strict way, because the numbers disagreed or ran past a limit:</p>
+            <ul class="small">{done.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+          </>
+        ) : <p class="small">Nothing had to be adjusted.</p>}
+        <p class="small">You're set to <b>Off Duty</b> for now — tap your real status when it changes. The rows this built are marked “ELD clocks” on the Log, and split answers carry an <b>Estimate</b> label until your own entries replace them.</p>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
+      </Sheet>
+    );
+  }
+  return (
+    <Sheet title="Start from my ELD clocks">
+      <p class="small">Type the four clocks your ELD shows. The app builds a starting record from them — an estimate that firms up as you log your real day.</p>
+      {fields.map((f) => (
+        <div class="qs-row" key={f.key}>
+          <span class="qs-label">{f.label}<span class="muted small"> — {f.sub}</span></span>
+          <span class="qs-inputs">
+            <input type="number" class="num" inputMode="numeric" min={0} aria-label={`${f.label}, hours`} value={txt[f.key][0]}
+              onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => ({ ...p, [f.key]: [v, p[f.key][1]] })); }} />
+            <span aria-hidden="true">h</span>
+            <input type="number" class="num" inputMode="numeric" min={0} aria-label={`${f.label}, minutes`} value={txt[f.key][1]}
+              onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => ({ ...p, [f.key]: [p[f.key][0], v] })); }} />
+            <span aria-hidden="true">m</span>
+          </span>
+        </div>
+      ))}
+      {s.config.shortHaul && <p class="muted small">You're set as break-exempt (short-haul), so the break clock won't bind — type it anyway if your ELD shows one.</p>}
+      {err && <p class="warnbox small">{err}</p>}
+      <div class="row"><button class="primary" data-first onClick={confirm}>Set my clocks</button></div>
+    </Sheet>
+  );
+}
 
 function StatusSheet({ s, now }: { s: State; now: number }) {
   const [ago, setAgo] = useState(0);
@@ -2540,6 +2627,7 @@ export function App() {
         return <button key={k} class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setState({ tab: k })}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+      {!disclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}

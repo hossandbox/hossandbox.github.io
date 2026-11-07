@@ -430,3 +430,11 @@ p.warnbox { margin: 0; font-size: 15px; line-height: 1.35; }
 .app.is-demo .hero { overflow: hidden; }
 .app.is-demo .hero::after { content: "DEMO"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 96px; font-weight: 800; letter-spacing: .1em; transform: rotate(-14deg); color: rgba(255,255,255,.06); pointer-events: none; }
 :root[data-theme="day"] .app.is-demo .hero::after { color: rgba(11,17,23,.05); }
+
+/* ELD clocks quick start (patch 8): the demo banner's way in, and the four clocks as
+   hours + minutes boxes on the 56px number-field floor patch 6 set. */
+.qs-cta { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.qs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.qs-label { flex: 1; font-weight: 600; }
+.qs-inputs { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.qs-inputs input.num { width: 78px; }

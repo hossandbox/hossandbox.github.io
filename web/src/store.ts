@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Segment, RulesConfig, DutyStatus } from '../../engine/src/index.ts';
-import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel } from '../../engine/src/index.ts';
+import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel, evaluate, minutesOf, LIMITS } from '../../engine/src/index.ts';
 
 /**
  * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
@@ -62,6 +62,12 @@ export interface State {
    * missing, which the merge reads as false — the full box shows once more, then compact.
    */
   disclaimerAcked: boolean;
+  /**
+   * When the record was seeded from the four ELD clocks (patch 8), else null. Informational —
+   * the rows themselves carry the provenance (see ELD_SEED_NOTE); this just dates the seeding.
+   * A save from before the field existed has it missing, which parseSaved reads as null.
+   */
+  seededAt: number | null;
   /**
    * The driver has confirmed the home terminal time zone. Until then the app is using the phone's
    * zone, which is wrong for a driver who installed while on the road — and a wrong zone silently
@@ -162,7 +168,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
-  disclaimerAcked: false,
+  disclaimerAcked: false, seededAt: null,
   tzChosen: false, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
@@ -283,6 +289,9 @@ export function parseSaved(raw: string | null): State {
     // literal true: a save from before patch 7 (missing) and a damaged one (anything else) both
     // read as not acknowledged, and the full box shows once more.
     if (s.disclaimerAcked !== true) merged.disclaimerAcked = false;
+    // The ELD seed stamp counts only as a real minute: a save from before patch 8 (missing) and
+    // a damaged one (anything else) both read as never seeded.
+    if (typeof s.seededAt !== 'number' || !Number.isFinite(s.seededAt)) merged.seededAt = null;
     return merged;
   } catch { return INITIAL_STATE; }
 }
@@ -858,6 +867,138 @@ export function historyDays(s: State, now: number): HistoryDay[] {
     const notLogged = items.reduce((n, x) => (x.status === null ? n + (x.end - x.start) : n), 0);
     return { start: dayStart, end: dayEnd, label: dayLabel(dayStart, cfg), isToday: i === starts.length - 1, items, totals, notLogged };
   });
+}
+
+/* ---------- "Start from my ELD clocks" (patch 8) ---------- */
+
+/**
+ * The note every row built from the four ELD clocks carries. Provenance lives on the rows, not
+ * only in state, so it survives edits and exports and the estimate can be recognised wherever the
+ * rows travel. `note` is the field the save validators deliberately leave unchecked (patch 5.2),
+ * so seeded rows pass validation exactly like hand-typed ones, and a pre-patch-8 save — which
+ * simply has no such rows — loads unchanged.
+ */
+export const ELD_SEED_NOTE = 'ELD clocks';
+
+/** The four clocks, in minutes, exactly as the driver read them off the ELD's clocks screen. */
+export interface EldClocks { driveLeft: number; windowLeft: number; breakDueIn: number; cycleLeft: number }
+
+export interface EldSeed { segments: Segment[]; notes: string[]; anchor: number }
+
+const WORK_SET = new Set(['D', 'ON']);
+
+/** The cycle limit and window length for a config — the engine's own parameters, restated. */
+export function cycleParamsOf(cfg: RulesConfig): { limit: number; windowDays: number } {
+  return cfg.cycle === '60/7' ? { limit: LIMITS.CYCLE_60_7, windowDays: 7 } : { limit: LIMITS.CYCLE_70_8, windowDays: 8 };
+}
+
+/**
+ * Build an ordinary record that makes the app's clocks read the four numbers the driver typed —
+ * or less, never more.
+ *
+ * The layout, ending at `now`: a 10-hour rest (the reset the current shift counts from), then
+ * inside the shift: on-duty filler for window time that was neither driving nor the break, the
+ * driving done before the break, a 30-minute break, and the driving done since it. Earlier cycle
+ * usage is one on-duty block ending right where that reset begins — placed as RECENTLY as the
+ * numbers allow, so recap hours come back as LATE as possible, never early.
+ *
+ * Pessimism is the hard rule (the codebase's law for estimates: never optimistic). Each clock is
+ * first clamped to its legal range; then, where the four numbers disagree among themselves, the
+ * stricter reading wins and the loser comes out LOWER than typed — driving implied by the break
+ * clock counts even when the drive clock denies it, and the window is stretched until it can hold
+ * the driving and the break, which lowers the shift time left. Cycle time left likewise absorbs
+ * the shift's own on-duty time. Every such adjustment is reported in `notes`, in driver words.
+ * No split pair is ever synthesised: the only rests are the opening reset and the 30-minute
+ * break, so no split answer can rest on a pair the driver never took.
+ */
+export function synthesizeEldSeed(input: EldClocks, cfg: RulesConfig, now: number, createdAt: number): EldSeed {
+  const notes: string[] = [];
+  const { limit: cycleLimit, windowDays } = cycleParamsOf(cfg);
+  const clampIn = (v: number, max: number, label: string): number => {
+    const r = Math.round(v);
+    if (!Number.isFinite(r) || r < 0) { notes.push(`${label} can't be under zero — counted as 0m.`); return 0; }
+    if (r > max) { notes.push(`${label} can't be more than ${dur(max)} — counted as ${dur(max)}.`); return max; }
+    return r;
+  };
+  const driveLeft = clampIn(input.driveLeft, LIMITS.DRIVE, 'Drive time left');
+  const windowLeft = clampIn(input.windowLeft, LIMITS.WINDOW, 'Shift time left');
+  const breakDueIn = clampIn(input.breakDueIn, LIMITS.BREAK_AFTER, 'Break due in');
+  const cycleLeft = clampIn(input.cycleLeft, cycleLimit, 'Cycle time left');
+
+  // Driving used, and driving since the last break. If the break clock implies more driving
+  // than the drive clock leaves room for, the break clock wins — it is the stricter reading.
+  let driveUsed = LIMITS.DRIVE - driveLeft;
+  const sinceBreak = LIMITS.BREAK_AFTER - breakDueIn;
+  if (sinceBreak > driveUsed) {
+    driveUsed = sinceBreak;
+    notes.push('Your drive and break clocks disagreed — the stricter one won, so Drive time left came out lower than you typed.');
+  }
+  const earlyDrive = driveUsed - sinceBreak;
+  const breakLen = earlyDrive > 0 ? LIMITS.BREAK_LEN : 0;
+  // Window elapsed. It must at least hold the driving and the break; stretching it lowers the
+  // shift time left rather than granting time none of the four clocks showed.
+  let windowUsed = LIMITS.WINDOW - windowLeft;
+  if (windowUsed < driveUsed + breakLen) {
+    windowUsed = driveUsed + breakLen;
+    notes.push('Your shift clock was too small to hold the driving and the break — Shift time left came out lower than you typed.');
+  }
+
+  const anchor = now - windowUsed;
+  const segments: Segment[] = [];
+  const push = (status: DutyStatus, a: number, b: number) => {
+    if (b > a) segments.push({ status, start: a, end: b, note: ELD_SEED_NOTE, createdAt });
+  };
+  let t = anchor;
+  const filler = windowUsed - driveUsed - breakLen;
+  if (filler > 0) { push('ON', t, t + filler); t += filler; }
+  if (earlyDrive > 0) { push('D', t, t + earlyDrive); t += earlyDrive; push('OFF', t, t + LIMITS.BREAK_LEN); t += LIMITS.BREAK_LEN; }
+  if (sinceBreak > 0) { push('D', t, t + sinceBreak); t += sinceBreak; }
+
+  // Cycle: the shift just built already spends some of the cycle inside the window. Whatever
+  // usage is still missing goes on duty in one block ending where the opening reset begins —
+  // the most recent placement possible, so those hours drop off at the latest day they can.
+  let winStart = carrierDayStart(now, cfg);
+  for (let i = 1; i < windowDays; i++) winStart = carrierDayStart(winStart - 1, cfg);
+  const shiftWork = minutesOf(segments, WORK_SET, winStart, now);
+  const stillNeeded = (cycleLimit - cycleLeft) - shiftWork;
+  if (stillNeeded < 0) notes.push("Your cycle clock shows more time left than fits with this shift's work — Cycle time left came out lower than you typed.");
+  const out: Segment[] = [];
+  if (stillNeeded > 0) out.push({ status: 'ON', start: anchor - LIMITS.RESET - stillNeeded, end: anchor - LIMITS.RESET, note: ELD_SEED_NOTE, createdAt });
+  out.push({ status: 'OFF', start: anchor - LIMITS.RESET, end: anchor, note: ELD_SEED_NOTE, createdAt }, ...segments);
+  return { segments: out, notes, anchor };
+}
+
+/**
+ * Seed the state from the four ELD clocks. The DEMO state ends (the record is no longer empty),
+ * and the driver lands on Now set to Off Duty: the seed describes the day up to now and invents
+ * nothing after it, so the driver sets their real status with the normal controls.
+ */
+export function applyEldSeed(s: State, input: EldClocks, now: number): { patch: Partial<State>; notes: string[] } {
+  const seed = synthesizeEldSeed(input, s.config, now, stamp());
+  return {
+    notes: seed.notes,
+    patch: {
+      segments: seed.segments, tentative: [],
+      current: { status: 'OFF', since: now, createdAt: stamp() },
+      seededAt: now, tab: 'now',
+    },
+  };
+}
+
+/**
+ * Do split answers still rest on the typed-in ELD clocks? True while any seeded row stands
+ * inside the ground the current shift's split math is measured over: the shift itself plus the
+ * rest that opened it. Once the driver's own entries — or a reset they actually took — cover
+ * that whole stretch, the estimate has firmed up and the label clears. A seeded row the driver
+ * edited keeps its note and still counts: it is still the ELD's number, not a logged entry.
+ */
+export function splitEstimateActive(s: State, now: number): boolean {
+  if (!s.segments.some((x) => x.note === ELD_SEED_NOTE)) return false;
+  try {
+    const ev = evaluate(allSegments(s, now), { asOf: now, config: s.config });
+    const from = ev.shift.shiftStart - LIMITS.RESET;
+    return s.segments.some((x) => !x.tentative && x.note === ELD_SEED_NOTE && x.end > from && x.start <= now);
+  } catch { return false; }
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };
