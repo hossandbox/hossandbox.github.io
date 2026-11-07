@@ -31,7 +31,7 @@ The lane above is superseded for pushing and verification:
 - **Claudia's bot lane is retained as fallback**, unchanged, until Lorico says otherwise.
 - First deploy under the new lane: **Patch 9 + 9.1 + 9.2** ("Check against my ELD"), deployed
   2026-11-07 — source commit `27dac51`, gh-pages `a612baf`, live app.js sha256
-  `8b285efdbfc81b1a02f53378254d91648a7b9ec6f70277c7e067b1349ee64536`. The originally
+  `209fe22934ba5b853d950b3c7348f1baf1fc87f84cda977769fc016686ba2a3d`. The originally
   bot-verified Patch 9 package was held and never deployed (two defects found on independent
   re-verification); 9.1/9.2 are its corrections.
 
