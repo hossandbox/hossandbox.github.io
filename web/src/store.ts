@@ -1001,6 +1001,146 @@ export function splitEstimateActive(s: State, now: number): boolean {
   } catch { return false; }
 }
 
+/* ---------- reading the ELD boxes (patches 8 + 9, whole numbers only — patch 9.2) ---------- */
+
+export type EldEntryRead = { ok: true; minutes: number } | { ok: false; problem: 'fraction' | 'junk' };
+
+/**
+ * Reading one hours+minutes pair off an ELD panel — the quick start's four clocks and the
+ * drift check's one number share this, so the two panels can never drift apart in how they
+ * read a typed clock. The boxes take WHOLE numbers only, and a fraction is refused, never
+ * rounded and never converted: patches 8/9 read the boxes with `Math.round`, so "7.25"
+ * hours silently became 420 (15 minutes lost — enough to turn a correct log into a
+ * "missing" verdict whose back-fill wrote driving that never happened) and "0.5" became
+ * 60 (30 invented). There is no safe silent reading of a fraction: rounding invents or
+ * destroys minutes, and converting it (7.25 → 7h 15m) guesses that the driver meant a
+ * decimal hour rather than a mistyped 7:25. So the entry is refused with the problem
+ * named — 'fraction' so the panel can teach the fix (whole hours in the hours box, the
+ * rest in minutes), 'junk' for anything else that is not plain digits. An empty box is
+ * zero, as it has always been on these panels. The invariant the panels rely on: the
+ * minutes used are exactly 60 × (whole hours entered) + (minutes entered).
+ */
+export function readEldEntry(hoursText: string, minutesText: string): EldEntryRead {
+  const box = (t: string): number | 'fraction' | 'junk' => {
+    const v = t.trim();
+    if (v === '') return 0;
+    if (/^\d+$/.test(v)) return Number(v);
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && v.includes('.') ? 'fraction' : 'junk';
+  };
+  const h = box(hoursText), m = box(minutesText);
+  if (h === 'fraction' || m === 'fraction') return { ok: false, problem: 'fraction' };
+  if (h === 'junk' || m === 'junk') return { ok: false, problem: 'junk' };
+  return { ok: true, minutes: h * 60 + m };
+}
+
+/* ---------- "Check against my ELD" — the drift check (patch 9) ---------- */
+
+/**
+ * The note a back-filled row carries. Provenance lives on the row, like the seed's (patch 8):
+ * `note` is the field the save validators deliberately leave unchecked (patch 5.2), so a filled
+ * row passes validation exactly like a hand-typed one, and the Log shows where it came from.
+ */
+export const DRIFT_NOTE = 'Drift check';
+
+/**
+ * How far apart the ELD's number and the app's may sit and still count as agreement. Both work
+ * in whole minutes, but the driver reads the ELD a moment after the app last computed, and a
+ * minute or two of reading time is not drift. Past two minutes, the difference is a real gap
+ * with a cause, and the check says which direction it runs.
+ */
+export const DRIFT_TOLERANCE_MIN = 2;
+
+export type DriftVerdict = 'sync' | 'missing' | 'extra';
+export interface DriftComparison { appLeft: number; eldLeft: number; gap: number; verdict: DriftVerdict }
+
+/**
+ * The logged record, materialized to `now`: the rows in `segments` that are not flagged
+ * tentative, plus the live status — and NOT the tentative list. This is the one selection
+ * both sides of the drift check use (the comparison reads it, the fill places into it), and
+ * it is the same selection the Patch #7.2 history view makes. What-if rows are plans, not
+ * record: they are never evidence about what the driver actually did.
+ */
+export function loggedSegments(s: State, now: number): Segment[] {
+  const logged: Segment[] = s.segments.filter((x) => !x.tentative);
+  if (s.current && now > s.current.since) {
+    logged.push({ status: s.current.status, start: s.current.since, end: now, note: s.current.note, createdAt: s.current.createdAt ?? Number.MAX_SAFE_INTEGER });
+  }
+  return logged;
+}
+
+/**
+ * The drift check's one comparison: the drive time left the driver read off his ELD against the
+ * drive time left this app computes for the same moment — computed on the LOGGED RECORD
+ * (loggedSegments), not on allSegments. The difference matters: allSegments folds in the
+ * tentative list, and a what-if row whose time has gone by — a break the driver planned and
+ * then drove through — otherwise inflates this number and steers the verdict. A stale plan
+ * must never be able to turn a correct log into a "missing driving" verdict with a fill
+ * behind it (patch 9.1; an independent verification probe wrote 30 minutes of driving that
+ * never happened exactly that way). Where a stale what-if still inflates the Now screen,
+ * the check can therefore disagree with the screen — deliberately: the ELD can only be
+ * lined up against what was actually logged.
+ *
+ * `gap` is ELD minus app. Negative is the dangerous direction: the ELD shows LESS left, so the
+ * driver has driven more than the log knows, and every answer the app gives runs optimistic
+ * until the missing driving is in. Positive means the app is the pessimist — something the ELD
+ * credited (most often a break or an off-duty stretch) is missing from the log. That direction
+ * is only ever reported, never "fixed" by taking logged driving back out (see planDriftFill).
+ */
+export function driftCheck(s: State, eldLeftMin: number, now: number): DriftComparison {
+  const ev = evaluate(loggedSegments(s, now), { asOf: now, config: s.config });
+  const appLeft = Math.max(0, Math.round(ev.shift.driveRemaining));
+  const eldLeft = Math.max(0, Math.round(eldLeftMin));
+  const gap = eldLeft - appLeft;
+  const verdict: DriftVerdict = Math.abs(gap) <= DRIFT_TOLERANCE_MIN ? 'sync' : gap < 0 ? 'missing' : 'extra';
+  return { appLeft, eldLeft, gap, verdict };
+}
+
+export interface DriftFillPlan { start: number; end: number; filled: number; remainder: number }
+
+/**
+ * Where a back-fill of `minutes` of missing driving can honestly go: ONE Driving block in an
+ * unlogged stretch of the logged record, anchored at that stretch's end so it butts against
+ * whatever the driver did next — usually the status he is in now, which is what makes "you
+ * started driving earlier than you tapped" read as one run of driving.
+ *
+ * Which stretch: the most recent one that can hold the whole gap. If none can, the most recent
+ * stretch there is fills what fits and `remainder` names the rest — the fill is never split
+ * across the day and never forced. The fences, all deliberate:
+ *  - Logged rows only. Tentative (what-if) rows are never read and never touched, and the fill
+ *    takes only time no logged row claims in the resolved timeline — it overlaps nothing.
+ *  - Never past now, and never before the record begins: the time before the first row is the
+ *    driver's stated beginning, not a hole to fill.
+ *  - The fill only ever ADDS driving. Nothing here deletes, shortens or re-statusses a row, in
+ *    either drift direction — a re-sync must not be a tool for erasing duty.
+ * Returns null when the record has no unlogged stretch at all.
+ */
+export function planDriftFill(s: State, minutes: number, now: number): DriftFillPlan | null {
+  const want = Math.max(0, Math.round(minutes));
+  if (want <= 0) return null;
+  const logged = loggedSegments(s, now);
+  if (logged.length === 0) return null;
+  const rows = normalize(logged, { merge: false });
+  const stretches: { start: number; end: number }[] = [];
+  let prevEnd: number | null = null;
+  for (const r of rows) {
+    // A stretch is clipped to `now`: a logged row can be dated in the future (an import can
+    // carry one — the engine warns about them rather than refusing them), and the unlogged
+    // time in front of such a row runs past the present. None of that time exists yet, so
+    // no fill minute may land in it (patch 9.1; an independent verification probe wrote a
+    // fill at 12:10–13:00 with now at 12:00 before this clip).
+    const end = Math.min(r.start, now);
+    if (prevEnd !== null && end > prevEnd) stretches.push({ start: prevEnd, end });
+    prevEnd = prevEnd === null ? r.end : Math.max(prevEnd, r.end);
+  }
+  if (prevEnd !== null && now > prevEnd) stretches.push({ start: prevEnd, end: now });
+  if (stretches.length === 0) return null;
+  const whole = [...stretches].reverse().find((g) => g.end - g.start >= want);
+  const best = whole ?? stretches[stretches.length - 1];
+  const filled = Math.min(want, best.end - best.start);
+  return { start: best.end - filled, end: best.end, filled, remainder: want - filled };
+}
+
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };
 // Sleeper has its own colour: the accent is the ice blue of the dials and links in the cab look.
 export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', SB: 'var(--sb)', D: 'var(--good)', ON: 'var(--warn)' };

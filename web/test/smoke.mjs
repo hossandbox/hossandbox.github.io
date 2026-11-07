@@ -2983,4 +2983,362 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(true);
   console.log('patch 8 (Start from my ELD clocks — round-trip exact, pessimism-bound, estimate labelled): OK');
 }
+// --- patch 9: "Check against my ELD" — the drift check. Mid-shift the log and the real world
+// drift apart (a drive stretch never got tapped) and every answer inherits the error. The driver
+// types ONE number — the ELD's drive time left — and the app compares it with its own: in sync,
+// nothing changes; ELD shows less, the missing driving is named and one tap back-fills it into
+// the unlogged stretch it belongs in; ELD shows more, nothing is ever taken out of the log —
+// the missing break belongs on the Log. The fill is an ordinary row (note "Drift check"),
+// undo-able like any other add, and tentative rows are never read or touched.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, allSegments, driftCheck, planDriftFill, loadSaved, historyBasis, DRIFT_NOTE, DRIFT_TOLERANCE_MIN } = await import('../src/store.ts');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const { openSheet, setLaunchNotice, addDriftFill, currentUndo, undoLast } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  setLaunchNotice(false);
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  const NOW9 = L(12, 12); // Mon Oct 12 2026, 12:00 in Chicago
+  const CFG9 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const snap = () => JSON.stringify({ segments: gs().segments, tentative: gs().tentative, current: gs().current });
+  // The main scenario: a 10h rest, 2h driving, 30m on duty, then a 50-minute hole nobody
+  // logged, and the driver on duty since 11:20. The app's drive clock reads 9h 00m left;
+  // a driver who actually drove the hole reads 8h 10m on his ELD.
+  const gap50 = () => ss({
+    segments: [
+      { status: 'OFF', start: L(11, 22), end: L(12, 8) },
+      { status: 'D', start: L(12, 8), end: L(12, 10) },
+      { status: 'ON', start: L(12, 10), end: L(12, 10, 30) },
+    ],
+    tentative: [{ status: 'D', start: NOW9 + 120, end: NOW9 + 240, tentative: true }],
+    current: { status: 'ON', since: L(12, 11, 20) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+
+  // (a) in sync: the ELD number equal to the app's — and within the 2-minute tolerance either
+  //     way — reports agreement and writes nothing at all
+  gap50();
+  const clean = snap();
+  const mine = evaluate(allSegments(gs(), NOW9), { asOf: NOW9, config: gs().config });
+  const sync = driftCheck(gs(), 540, NOW9);
+  if (sync.appLeft !== Math.round(mine.shift.driveRemaining) || sync.appLeft !== 540)
+    throw new Error(`patch 9: the check must read the app's own number (saw appLeft ${sync.appLeft}, engine ${mine.shift.driveRemaining})`);
+  if (sync.verdict !== 'sync' || sync.gap !== 0) throw new Error('patch 9: equal numbers must read as in sync');
+  if (driftCheck(gs(), 540 - DRIFT_TOLERANCE_MIN, NOW9).verdict !== 'sync' || driftCheck(gs(), 540 + DRIFT_TOLERANCE_MIN, NOW9).verdict !== 'sync')
+    throw new Error('patch 9: a difference inside the tolerance must still read as in sync');
+  if (driftCheck(gs(), 540 - DRIFT_TOLERANCE_MIN - 1, NOW9).verdict !== 'missing')
+    throw new Error('patch 9: one minute past the tolerance is drift, not agreement');
+  if (addDriftFill(540, NOW9) !== null || snap() !== clean) throw new Error('patch 9: an in-sync check must write nothing');
+
+  // (b) missing driving: a known 50-minute gap, named exactly — the gap comes from the app's
+  //     own evaluation minus the typed number, not from echoing the input
+  const miss = driftCheck(gs(), 490, NOW9);
+  if (miss.verdict !== 'missing' || miss.gap !== -50 || miss.appLeft !== 540 || miss.eldLeft !== 490)
+    throw new Error(`patch 9: the gap must be named exactly (saw ${JSON.stringify(miss)})`);
+  if (snap() !== clean) throw new Error('patch 9: comparing must never write');
+
+  // (c) the back-fill: one Driving row of exactly the gap, in the unlogged stretch, ending
+  //     where the driver's current status begins; after it, the clocks agree to the minute
+  const plan = planDriftFill(gs(), 50, NOW9);
+  if (!plan || plan.start !== L(12, 10, 30) || plan.end !== L(12, 11, 20) || plan.filled !== 50 || plan.remainder !== 0)
+    throw new Error(`patch 9: the fill must land in the hole, whole (saw ${JSON.stringify(plan)})`);
+  const rowsBefore = gs().segments.length;
+  const tentBefore = JSON.stringify(gs().tentative);
+  const r = addDriftFill(490, NOW9);
+  if (!r) throw new Error('patch 9: a fillable gap must fill');
+  if (r.row.status !== 'D' || r.row.note !== DRIFT_NOTE || DRIFT_NOTE !== 'Drift check' || r.row.end - r.row.start !== 50)
+    throw new Error('patch 9: the fill must be one Driving row of the gap length, carrying the provenance note');
+  if (gs().segments.length !== rowsBefore + 1 || JSON.stringify(gs().tentative) !== tentBefore)
+    throw new Error('patch 9: the fill adds exactly one row and never touches what-if rows');
+  for (const old of JSON.parse(clean).segments)
+    if (r.row.start < old.end && old.start < r.row.end) throw new Error('patch 9: the fill must not overlap a logged row');
+  if (r.after.verdict !== 'sync' || r.after.appLeft !== 490 || driftCheck(gs(), 490, NOW9).gap !== 0)
+    throw new Error(`patch 9: after the fill the clocks must agree exactly (saw ${JSON.stringify(r.after)})`);
+
+  // (f) the fill is an ordinary edit: the saved record passes validation and reloads
+  //     identically, and the Log's undo takes the row back out, gap and all
+  if (!/^Added Driving/.test(currentUndo()?.label ?? '')) throw new Error('patch 9: the fill must be undo-able like any other add');
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(gs().segments))
+    throw new Error('patch 9: a record carrying the fill must pass save validation and reload unchanged');
+  if (!undoLast() || snap() !== clean || driftCheck(gs(), 490, NOW9).gap !== -50)
+    throw new Error('patch 9: undoing the fill must restore the record exactly, gap included');
+
+  // (c2) placement precedence: when the most recent stretch cannot hold the gap, an earlier
+  //      stretch that can takes the whole fill — anchored at its end — rather than splitting
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 20), end: L(12, 6) },
+      { status: 'D', start: L(12, 7, 20), end: L(12, 9, 20) },
+      { status: 'ON', start: L(12, 9, 20), end: L(12, 9, 50) },
+    ],
+    tentative: [], current: { status: 'ON', since: L(12, 10, 25) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  const p2 = planDriftFill(gs(), 50, NOW9);
+  if (!p2 || p2.start !== L(12, 6, 30) || p2.end !== L(12, 7, 20) || p2.filled !== 50 || p2.remainder !== 0)
+    throw new Error(`patch 9: the whole fill goes in the most recent stretch that holds it (saw ${JSON.stringify(p2)})`);
+  const r2 = addDriftFill(490, NOW9);
+  if (!r2 || r2.after.verdict !== 'sync' || r2.after.appLeft !== 490)
+    throw new Error(`patch 9: an earlier-stretch fill must still true the clock up (saw ${JSON.stringify(r2?.after)})`);
+  if (!undoLast()) throw new Error('patch 9: the earlier-stretch fill must be undo-able too');
+
+  // (e) partial fill: the only stretch takes 35 of the 50 minutes — what fits goes in and the
+  //     remainder is named, in the plan and in the still-open gap afterwards
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 22), end: L(12, 8) },
+      { status: 'D', start: L(12, 8), end: L(12, 10) },
+      { status: 'ON', start: L(12, 10), end: L(12, 10, 30) },
+    ],
+    tentative: [], current: { status: 'ON', since: L(12, 11, 5) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  const p3 = planDriftFill(gs(), 50, NOW9);
+  if (!p3 || p3.filled !== 35 || p3.remainder !== 15 || p3.start !== L(12, 10, 30) || p3.end !== L(12, 11, 5))
+    throw new Error(`patch 9: a short stretch fills what fits and names the rest (saw ${JSON.stringify(p3)})`);
+  const r3 = addDriftFill(490, NOW9);
+  if (!r3 || r3.after.gap !== -15 || r3.after.appLeft !== 505)
+    throw new Error(`patch 9: after a partial fill the named remainder must be the gap that is left (saw ${JSON.stringify(r3?.after)})`);
+
+  // (d) the other direction: the ELD shows MORE left than the app. Nothing is offered and
+  //     nothing is written — the record comes out byte-identical, because a re-sync must
+  //     never be a way to take driving back out of a log
+  gap50();
+  const beforeExtra = snap();
+  const extra = driftCheck(gs(), 600, NOW9);
+  if (extra.verdict !== 'extra' || extra.gap !== 60) throw new Error(`patch 9: the pessimistic direction must be named, not fixed (saw ${JSON.stringify(extra)})`);
+  if (addDriftFill(600, NOW9) !== null || snap() !== beforeExtra)
+    throw new Error('patch 9: the ELD-shows-more direction must leave the record byte-identical');
+
+  // (g) the way in: no entry on the DEMO clock (the panel itself routes to the quick start),
+  //     a plan-item entry on a real record, and the panel asks for the one number in driver
+  //     words, on the big numeric fields, wired through the tested paths
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', config: { ...CFG9 } });
+  let h = out('patch 9/demo now');
+  if (/Check against my ELD/.test(h)) throw new Error('patch 9: the DEMO clock has no day to check — the entry must not show');
+  openSheet({ kind: 'drift' });
+  h = out('patch 9/demo drift panel');
+  if (!/nothing to check yet/.test(h) || !/Start from my ELD clocks/.test(h))
+    throw new Error('patch 9: on the DEMO clock the panel must route the driver to the quick start');
+  openSheet(null);
+  gap50();
+  h = out('patch 9/logged now');
+  if (!/Check against my ELD/.test(h)) throw new Error('patch 9: a real record must offer the check on Now');
+  openSheet({ kind: 'drift' });
+  h = out('patch 9/drift panel');
+  if (!/Drive time left on your ELD/.test(h)) throw new Error('patch 9: the panel must ask for the one number, in driver words');
+  if (!/Your ELD is the official record/.test(h)) throw new Error('patch 9: the panel must name the ELD as the record');
+  if ((h.match(/inputmode="numeric"/g) || []).length < 2) throw new Error('patch 9: the number needs hours and minutes boxes on the numeric keypad');
+  openSheet(null);
+  if (historyBasis(gs(), NOW9) === 'fresh') throw new Error('patch 9: the main scenario must be a real record');
+  const sheetBody = app.slice(app.indexOf('function DriftSheet'), app.indexOf('function StatusSheet'));
+  if (!/driftCheck\(getState\(\), eld, now\)/.test(sheetBody) || !/addDriftFill\(eld, at\)/.test(sheetBody))
+    throw new Error('patch 9: the panel must run through the tested comparison and fill paths');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG9 } });
+  setLaunchNotice(true);
+  console.log('patch 9 (Check against my ELD — one number, named gap, back-fill only ever adds driving): OK');
+}
+
+// --- patch 9.1: the drift check hardened. An independent verification of patch 9 (Opus,
+// Nov 7) reproduced every patch 9 result and then found two ways the fill could still write
+// time that never happened, plus three behaviours the patch 9 section asserted but did not
+// actually pin. These probes are those findings, as tests: (h) a future-dated logged row
+// must not let a fill land past now; (i) a stale what-if row must not steer the comparison —
+// the check reads the logged record only, the same selection the fill places into; (j) the
+// tolerance is the literal two minutes, pinned behaviourally on both sides; (k) inside the
+// tolerance the fill path itself must write nothing — the verdict guard is under test;
+// (l) when two stretches both hold the gap, the most recent one takes it.
+{
+  const { setState: ss, getState: gs, driftCheck, planDriftFill, DRIFT_TOLERANCE_MIN } = await import('../src/store.ts');
+  const { addDriftFill } = await import('../src/app.tsx');
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  const NOW9 = L(12, 12); // Mon Oct 12 2026, 12:00 in Chicago
+  const CFG9 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const snap = () => JSON.stringify({ segments: gs().segments, tentative: gs().tentative, current: gs().current });
+
+  // (h) never past now: a logged row dated in the FUTURE (an import can carry one, and the
+  //     engine warns about them rather than refusing them) leaves an unlogged stretch that
+  //     runs past now — 12:00 to 13:00 here. The fill must clip to now and take the whole
+  //     gap from the stretch that is really there: 10:00–11:50, anchored at its end.
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 22), end: L(12, 8) },
+      { status: 'D', start: L(12, 8), end: L(12, 10) },
+      { status: 'OFF', start: L(12, 13), end: L(12, 14) },
+    ],
+    tentative: [], current: { status: 'ON', since: L(12, 11, 50) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  const planH = planDriftFill(gs(), 50, NOW9);
+  if (!planH || planH.start !== L(12, 11) || planH.end !== L(12, 11, 50) || planH.filled !== 50 || planH.remainder !== 0)
+    throw new Error(`patch 9.1: no fill minute may land past now, even with a future-dated row in the record (saw ${JSON.stringify(planH)})`);
+  const rH = addDriftFill(490, NOW9);
+  if (!rH || rH.row.start !== L(12, 11) || rH.row.end !== L(12, 11, 50) || rH.row.end > NOW9)
+    throw new Error('patch 9.1: the written row must sit wholly at or before now');
+  if (rH.after.verdict !== 'sync' || driftCheck(gs(), 490, NOW9).gap !== 0)
+    throw new Error('patch 9.1: after a now-clipped fill the clocks must agree');
+  if (!gs().segments.some((x) => x.start === L(12, 13) && x.end === L(12, 14)))
+    throw new Error('patch 9.1: the future-dated row is the driver\'s data — it must be left exactly as logged');
+
+  // (i) stale what-if: the driver planned OFF 10:00–12:00, then just kept driving from
+  //     08:00 instead. The logged record is correct and complete (a 10h rest, a 30-minute
+  //     unlogged hole before the driving started, then driving through to 12:30), and the
+  //     ELD's 6h 30m is the truth. The comparison must read the logged record only: a plan
+  //     the driver never took must not inflate the app's side into a "missing" verdict
+  //     with a fill behind it — that would write driving that never happened.
+  const NOW91 = L(12, 12, 30);
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 21, 30), end: L(12, 7, 30) },
+    ],
+    tentative: [{ status: 'OFF', start: L(12, 10), end: L(12, 12), tentative: true }],
+    current: { status: 'D', since: L(12, 8) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW91, tab: 'now', config: { ...CFG9 },
+  });
+  const snapI = snap();
+  const chkI = driftCheck(gs(), 390, NOW91);
+  if (chkI.verdict !== 'sync' || chkI.appLeft !== 390 || chkI.gap !== 0)
+    throw new Error(`patch 9.1: a stale what-if must not steer the comparison — the logged record agrees with the ELD (saw ${JSON.stringify(chkI)})`);
+  if (addDriftFill(390, NOW91) !== null || snap() !== snapI)
+    throw new Error('patch 9.1: with a correct log the check must write nothing, what-if or not');
+
+  // (j) the tolerance is two minutes — pinned with LITERALS on both sides, not the
+  //     constant, so widening DRIFT_TOLERANCE_MIN turns this section red (the patch 9
+  //     section scales its probes with the constant and cannot catch that). The main
+  //     patch 9 geometry: the app's number is 540.
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 22), end: L(12, 8) },
+      { status: 'D', start: L(12, 8), end: L(12, 10) },
+      { status: 'ON', start: L(12, 10), end: L(12, 10, 30) },
+    ],
+    tentative: [], current: { status: 'ON', since: L(12, 11, 20) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  if (DRIFT_TOLERANCE_MIN !== 2) throw new Error('patch 9.1: the drift tolerance is two minutes');
+  if (driftCheck(gs(), 538, NOW9).verdict !== 'sync' || driftCheck(gs(), 542, NOW9).verdict !== 'sync')
+    throw new Error('patch 9.1: two minutes either way is still agreement');
+  if (driftCheck(gs(), 537, NOW9).verdict !== 'missing')
+    throw new Error('patch 9.1: three minutes short is drift (missing), not agreement');
+  if (driftCheck(gs(), 543, NOW9).verdict !== 'extra')
+    throw new Error('patch 9.1: three minutes over is drift (extra), not agreement');
+
+  // (k) the verdict guard itself: at gap −2 the verdict is sync, so the fill path must
+  //     return null AND write nothing. At gap 0 this would prove little — a zero-minute
+  //     fill plans to null on its own — but at −2 a missing guard writes a real
+  //     two-minute row into the most recent stretch.
+  const snapK = snap();
+  if (addDriftFill(538, NOW9) !== null || snap() !== snapK)
+    throw new Error('patch 9.1: inside the tolerance the fill path must write nothing at all');
+
+  // (l) precedence when TWO stretches both hold the gap (80 minutes at 06:00–07:20 and
+  //     35 at 09:50–10:25, gap 30): the most recent takes it, whole, anchored at its
+  //     end. Patch 9's case (c2) has only one stretch that fits, so it cannot catch a
+  //     precedence flip — this one can.
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 20), end: L(12, 6) },
+      { status: 'D', start: L(12, 7, 20), end: L(12, 9, 20) },
+      { status: 'ON', start: L(12, 9, 20), end: L(12, 9, 50) },
+    ],
+    tentative: [], current: { status: 'ON', since: L(12, 10, 25) },
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  const planL = planDriftFill(gs(), 30, NOW9);
+  if (!planL || planL.start !== L(12, 9, 55) || planL.end !== L(12, 10, 25) || planL.filled !== 30 || planL.remainder !== 0)
+    throw new Error(`patch 9.1: with two stretches that fit, the most recent takes the fill (saw ${JSON.stringify(planL)})`);
+  const rL = addDriftFill(510, NOW9);
+  if (!rL || rL.row.start !== L(12, 9, 55) || rL.row.end !== L(12, 10, 25) || rL.after.verdict !== 'sync' || rL.after.appLeft !== 510)
+    throw new Error(`patch 9.1: the most-recent fill must land whole and true the clock up (saw ${JSON.stringify(rL?.after)})`);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG9 } });
+  console.log('patch 9.1 (drift check hardened — fills clipped to now, comparison reads the logged record only, tolerance and precedence pinned): OK');
+}
+
+// --- patch 9.2: the F1 fix. The ELD boxes on BOTH panels (the patch 8 quick start and the
+// patch 9 drift check) read hours with Math.round, so a fractional entry was silently
+// rounded: "7.25" hours became 420 (15 minutes lost) and turned a correct log into a
+// "missing" verdict whose fill wrote driving that never happened; "0.5" became 60
+// (30 invented). An independent verification (Opus, Nov 7) reproduced both directions.
+// The fix is one shared whole-number parse: the boxes refuse fractions outright instead
+// of rounding or converting them, and every verdict states the ELD number the app used.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, driftCheck, planDriftFill, readEldEntry } = await import('../src/store.ts');
+  const { addDriftFill } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  const NOW9 = L(12, 12); // Mon Oct 12 2026, 12:00 in Chicago
+  const CFG9 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+
+  // (m) the parse itself: exact whole numbers, and a fraction is refused in BOTH
+  //     directions — never rounded down to 420, never rounded up to 60, never converted
+  const exact = readEldEntry('7', '15');
+  if (!exact.ok || exact.minutes !== 435) throw new Error(`patch 9.2: a plain entry must read exactly (saw ${JSON.stringify(exact)})`);
+  const down = readEldEntry('7.25', '');
+  if (down.ok) throw new Error('patch 9.2: "7.25" hours must be refused — rounded down it reads 420 and writes phantom driving');
+  if (down.problem !== 'fraction') throw new Error('patch 9.2: a fractional entry must be named as one, so the panel can teach the fix');
+  if (readEldEntry('0.5', '').ok) throw new Error('patch 9.2: "0.5" hours must be refused — rounded up it invents 30 minutes');
+  if (readEldEntry('7', '15.5').ok) throw new Error('patch 9.2: fractional minutes must be refused too — no rounding anywhere on this path');
+  if (readEldEntry('abc', '').ok || readEldEntry('-1', '').ok || readEldEntry('1e3', '').ok)
+    throw new Error('patch 9.2: anything that is not plain digits must be refused');
+  const blanks = readEldEntry('', '30');
+  const whole = readEldEntry('7', '');
+  const spaced = readEldEntry(' 7 ', ' 15 ');
+  if (!blanks.ok || blanks.minutes !== 30 || !whole.ok || whole.minutes !== 420 || !spaced.ok || spaced.minutes !== 435)
+    throw new Error('patch 9.2: an empty box is zero and whole hours are exact — 7 typed whole IS 420 minutes');
+
+  // (m2) neither panel may round a typed clock, and both must run through the shared parse
+  if (/Math\.round\(hv\)/.test(app)) throw new Error('patch 9.2: no panel may round a typed clock');
+  const qsBody = app.slice(app.indexOf('function QuickStartSheet'), app.indexOf('function DriftSheet'));
+  const driftBody = app.slice(app.indexOf('function DriftSheet'), app.indexOf('function StatusSheet'));
+  if (!/readEldEntry\(/.test(qsBody) || !/readEldEntry\(/.test(driftBody))
+    throw new Error('patch 9.2: both panels must read their boxes through the shared whole-number parse');
+
+  // (n) the echo: every drift verdict states the ELD number the app actually used, and on
+  //     the missing verdict it stands BEFORE the fill is offered — a driver whose entry
+  //     was misread gets the cue before anything is written. The quick-start result step
+  //     likewise states the four clocks as read. (Verdict screens render after a tap the
+  //     string harness cannot dispatch, so — like patch 9 (g) — these are source pins.)
+  if ((driftBody.match(/Your ELD says:/g) || []).length < 3)
+    throw new Error('patch 9.2: every drift verdict (sync, extra, missing) must echo the ELD number the app used');
+  if ((driftBody.match(/Your ELD says: <b>\{dur\(check\.eldLeft\)\}<\/b>/g) || []).length < 3
+      || /Your ELD says: <b>\{dur\(check\.appLeft\)\}/.test(driftBody))
+    throw new Error('patch 9.2: the echo must state the ELD number (check.eldLeft) on every verdict, never the app number');
+  if (!(driftBody.lastIndexOf('Your ELD says:') < driftBody.indexOf('It fits as Driving'))
+      || !(driftBody.lastIndexOf('Your ELD says:') < driftBody.indexOf('Add the missing driving')))
+    throw new Error('patch 9.2: the missing verdict must state the ELD number before the fill is offered');
+  if (!/clocks as read/.test(qsBody) || !/dur\(done\.clocks\[f\.key\]\)/.test(qsBody))
+    throw new Error('patch 9.2: the quick-start result must state the four clocks as read');
+
+  // (o) F2: the trailing stretch's clip at now, pinned. With no live status the record
+  //     ends at 10:30 and now is 12:00; the gap is 140 but only the 90 minutes up to now
+  //     exist — the plan takes those and names the 50 remainder, and the written row
+  //     ends AT now, never past it. (Before 9.2 nothing pinned this clip: stretching the
+  //     trailing end to now+60 shipped green.)
+  ss({
+    segments: [
+      { status: 'OFF', start: L(11, 22), end: L(12, 8) },
+      { status: 'D', start: L(12, 8), end: L(12, 10) },
+      { status: 'ON', start: L(12, 10), end: L(12, 10, 30) },
+    ],
+    tentative: [], current: null,
+    historyAcknowledged: false, seededAt: null, nowOverride: NOW9, tab: 'now', config: { ...CFG9 },
+  });
+  const pO = planDriftFill(gs(), 140, NOW9);
+  if (!pO || pO.start !== L(12, 10, 30) || pO.end !== NOW9 || pO.filled !== 90 || pO.remainder !== 50)
+    throw new Error(`patch 9.2: the trailing stretch is clipped at now — 90 of the 140 fit, 50 named (saw ${JSON.stringify(pO)})`);
+  const rO = addDriftFill(400, NOW9);
+  if (!rO || rO.row.start !== L(12, 10, 30) || rO.row.end !== NOW9)
+    throw new Error('patch 9.2: a trailing-stretch fill must end at now, never past it');
+  if (driftCheck(gs(), 400, NOW9).gap !== -50)
+    throw new Error('patch 9.2: after a clipped fill the remainder must still be the gap that is left');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG9 } });
+  console.log('patch 9.2 (ELD boxes take whole numbers only — fractions refused, never rounded; verdicts echo the number used; trailing clip pinned): OK');
+}
 console.log('OK');

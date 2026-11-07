@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -276,6 +276,7 @@ const STATUS_ICON: Record<DutyStatus, string> = { OFF: I.cup, SB: I.bunk, D: I.w
 export type SheetKind =
   | { kind: 'status' }
   | { kind: 'quickstart' }
+  | { kind: 'drift' }
   | { kind: 'why' }
   | { kind: 'exceptions' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
@@ -804,6 +805,16 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
       </button>
+      {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
+          Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
+          notice already offers the quick start that creates one. */}
+      {historyBasis(s, now) !== 'fresh' && (
+        <button class="plan-item" onClick={() => openSheet({ kind: 'drift' })}>
+          <span class="plan-icon"><Icon d={I.check} size={26} /></span>
+          <span class="plan-text"><b>Check against my ELD</b><span class="muted small">One number lines this app up with your ELD.</span></span>
+          <Icon d={I.next} />
+        </button>
+      )}
       <Meters ev={ev} />
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
@@ -919,27 +930,32 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
   const [txt, setTxt] = useState<Record<string, [string, string]>>(() =>
     Object.fromEntries(fields.map((f) => [f.key, [String(Math.floor(f.max / 60)), String(f.max % 60)]])));
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ notes: string[] } | null>(null);
+  const [done, setDone] = useState<{ notes: string[]; clocks: EldClocks } | null>(null);
   const confirm = () => {
     const clocks = {} as EldClocks;
     for (const f of fields) {
       const [hs, ms] = txt[f.key];
-      const hv = hs.trim() === '' ? 0 : Number(hs);
-      const mv = ms.trim() === '' ? 0 : Number(ms);
-      if (!Number.isFinite(hv) || !Number.isFinite(mv) || hv < 0 || mv < 0) {
-        setErr(`The ${f.label.toLowerCase()} boxes need plain numbers — check them and try again.`);
+      // Whole numbers only (patch 9.2, store.ts: readEldEntry): a fraction is refused,
+      // never rounded — rounding "7.25" hours destroyed 15 minutes here in patch 8.
+      const r = readEldEntry(hs, ms);
+      if (!r.ok) {
+        setErr(r.problem === 'fraction'
+          ? `The ${f.label.toLowerCase()} boxes take whole hours only — part of an hour goes in the minutes box (7.25 hours is 7 in the hours box, 15 in the minutes).`
+          : `The ${f.label.toLowerCase()} boxes need plain numbers — check them and try again.`);
         return;
       }
-      clocks[f.key] = Math.round(hv) * 60 + Math.round(mv);
+      clocks[f.key] = r.minutes;
     }
     const { patch, notes } = applyEldSeed(getState(), clocks, now);
     setState(patch);
-    setDone({ notes });
+    setDone({ notes, clocks });
   };
   if (done) {
     return (
       <Sheet title="Start from my ELD clocks">
         <p>Your clocks are set from those four numbers.</p>
+        <p class="small">The four clocks as read:</p>
+        <ul class="small">{fields.map((f) => <li key={f.key}>{f.label}: <b>{dur(done.clocks[f.key])}</b></li>)}</ul>
         {done.notes.length > 0 ? (
           <>
             <p class="small">Read the strict way, because the numbers disagreed or ran past a limit:</p>
@@ -954,6 +970,7 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
   return (
     <Sheet title="Start from my ELD clocks">
       <p class="small">Type the four clocks your ELD shows. The app builds a starting record from them — an estimate that firms up as you log your real day.</p>
+      <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
       {fields.map((f) => (
         <div class="qs-row" key={f.key}>
           <span class="qs-label">{f.label}<span class="muted small"> — {f.sub}</span></span>
@@ -970,6 +987,137 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
       {s.config.shortHaul && <p class="muted small">You're set as break-exempt (short-haul), so the break clock won't bind — type it anyway if your ELD shows one.</p>}
       {err && <p class="warnbox small">{err}</p>}
       <div class="row"><button class="primary" data-first onClick={confirm}>Set my clocks</button></div>
+    </Sheet>
+  );
+}
+
+/**
+ * "Check against my ELD" (patch 9): the drift check. Mid-shift the log and the real world
+ * quietly drift apart — a fuel-stop drive stretch never got tapped — and every answer the app
+ * gives inherits the error. The driver types ONE number, the drive time left his ELD shows,
+ * and the app compares it against its own (store.ts: driftCheck). In sync: nothing changes.
+ * ELD shows less: the missing driving is named and one tap back-fills it where it belongs
+ * (planDriftFill). ELD shows more: no fix is offered — this check never takes driving out of
+ * a log; the likely missing break belongs on the Log.
+ */
+function DriftSheet({ s, now }: { s: State; now: number }) {
+  const [txt, setTxt] = useState<[string, string]>(['', '']);
+  const [err, setErr] = useState<string | null>(null);
+  const [found, setFound] = useState<{ check: DriftComparison; at: number; eld: number } | null>(null);
+  const [filled, setFilled] = useState<{ plan: DriftFillPlan; after: DriftComparison } | null>(null);
+
+  // On the DEMO clock there is no real day to compare against — send the driver to the quick
+  // start that creates one instead of running a comparison against assumed numbers.
+  if (historyBasis(s, now) === 'fresh') {
+    return (
+      <Sheet title="Check against my ELD">
+        <p class="small">There's nothing to check yet — this app is still on its demo clock, so there's no real day to compare with your ELD. Start from your ELD clocks first; the check works once your real day is in.</p>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button></div>
+      </Sheet>
+    );
+  }
+
+  const compare = () => {
+    const [hs, ms] = txt;
+    if (hs.trim() === '' && ms.trim() === '') { setErr('Type the drive time left your ELD shows — hours and minutes.'); return; }
+    // Whole numbers only (patch 9.2, store.ts: readEldEntry): this parse used to round,
+    // and rounding "7.25" hours to 420 turned a correct log into a "missing" verdict
+    // whose one-tap fill wrote driving that never happened.
+    const r = readEldEntry(hs, ms);
+    if (!r.ok) {
+      setErr(r.problem === 'fraction'
+        ? 'Whole hours in the hours box — part of an hour goes in the minutes box (7.25 hours is 7 in the hours box, 15 in the minutes).'
+        : 'The boxes need plain numbers — check them and try again.');
+      return;
+    }
+    const eld = r.minutes;
+    setErr(null);
+    setFound({ check: driftCheck(getState(), eld, now), at: now, eld });
+  };
+
+  if (filled && found) {
+    const { plan, after } = filled;
+    return (
+      <Sheet title="Check against my ELD">
+        {after.verdict === 'sync' ? (
+          <p><b>Now in sync</b> — drive time left matches your ELD: {dur(after.eldLeft)}.</p>
+        ) : (
+          <p>Added {dur(plan.filled)} of driving. This app now shows {dur(after.appLeft)} of driving left against your ELD's {dur(after.eldLeft)} — the two still differ, so the rest needs a look in the <b>Log</b>.</p>
+        )}
+        <p class="small">The added driving is on the Log, marked “{DRIFT_NOTE}” — Undo there takes it back out.</p>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
+      </Sheet>
+    );
+  }
+
+  if (found) {
+    const { check, at, eld } = found;
+    if (check.verdict === 'sync') {
+      return (
+        <Sheet title="Check against my ELD">
+          <p><b>You're in sync</b> — this app and your ELD agree. Drive time left: {dur(check.appLeft)} either way you read it.</p>
+          <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
+          <p class="small">Nothing was changed.</p>
+          <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>Done</button></div>
+        </Sheet>
+      );
+    }
+    if (check.verdict === 'extra') {
+      return (
+        <Sheet title="Check against my ELD">
+          <p>Your ELD shows <b>{dur(check.gap)} more</b> driving left than this app ({dur(check.eldLeft)} against {dur(check.appLeft)}).</p>
+          <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
+          <p class="small">This check never takes driving out of a log, so there's no one-tap fix in this direction. The usual reason: a break or an off-duty stretch your ELD counted isn't in the log yet. Add it on the Log and the two will line up.</p>
+          <div class="row">
+            <button class="primary" data-first onClick={() => { setState({ tab: 'log' }); openSheet(null); }}>Open the Log</button>
+            <button onClick={() => openSheet(null)}>Not now</button>
+          </div>
+        </Sheet>
+      );
+    }
+    const plan = planDriftFill(getState(), -check.gap, at);
+    return (
+      <Sheet title="Check against my ELD">
+        <p>Your ELD shows <b>{dur(-check.gap)} less</b> driving left than this app — about {dur(-check.gap)} of driving isn't in the log yet. Until it's in, every answer here runs optimistic.</p>
+        <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
+        {plan && plan.filled > 0 ? (
+          <>
+            <p class="small">It fits as Driving, {clock(plan.start)} → {clock(plan.end)}, in the unlogged stretch before what you did next{plan.remainder > 0 ? <> — only {dur(plan.filled)} of the {dur(-check.gap)} fits there; the rest needs a look in the Log</> : ''}. It goes on the Log marked “{DRIFT_NOTE}”, and Undo there takes it back out.</p>
+            <div class="row">
+              <button class="primary" data-first onClick={() => { const r = addDriftFill(eld, at); if (r) setFilled({ plan: r.plan, after: r.after }); }}>Add the missing driving</button>
+              <button onClick={() => openSheet(null)}>Not now</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p class="small">There's no unlogged stretch in the record to put it in — add the driving on the Log tab instead.</p>
+            <div class="row">
+              <button class="primary" data-first onClick={() => { setState({ tab: 'log' }); openSheet(null); }}>Open the Log</button>
+              <button onClick={() => openSheet(null)}>Not now</button>
+            </div>
+          </>
+        )}
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet title="Check against my ELD">
+      <p class="small">Your ELD is the official record — this just lines the app up with it. Type the drive time left your ELD shows, and the app compares it with its own.</p>
+      <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
+      <div class="qs-row">
+        <span class="qs-label">Drive time left on your ELD<span class="muted small"> — the {LIMITS.DRIVE / 60}-hour driving clock</span></span>
+        <span class="qs-inputs">
+          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, hours" value={txt[0]}
+            onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [v, p[1]]); }} />
+          <span aria-hidden="true">h</span>
+          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, minutes" value={txt[1]}
+            onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [p[0], v]); }} />
+          <span aria-hidden="true">m</span>
+        </span>
+      </div>
+      {err && <p class="warnbox small">{err}</p>}
+      <div class="row"><button class="primary" data-first onClick={compare}>Compare</button></div>
     </Sheet>
   );
 }
@@ -1205,6 +1353,21 @@ export function addEntry(status: DutyStatus, start: number, end: number, now: nu
   const row: Segment = { status, start, end, createdAt: stamp(), ...(note ? { note } : {}) };
   undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
   return null;
+}
+/**
+ * Add the driving a drift check found missing, as one ordinary row on the Log (patch 9).
+ * Undo-able like any other add. Refused — returns null — unless the comparison says driving
+ * is missing AND an unlogged stretch can take some of it: the check never writes in the
+ * "ELD shows more" direction, and never writes at all when the two already agree.
+ */
+export function addDriftFill(eldLeftMin: number, now: number): { row: Segment; plan: DriftFillPlan; check: DriftComparison; after: DriftComparison } | null {
+  const check = driftCheck(getState(), eldLeftMin, now);
+  if (check.verdict !== 'missing') return null;
+  const plan = planDriftFill(getState(), -check.gap, now);
+  if (!plan || plan.filled <= 0) return null;
+  const row: Segment = { status: 'D', start: plan.start, end: plan.end, note: DRIFT_NOTE, createdAt: stamp() };
+  undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
+  return { row, plan, check, after: driftCheck(getState(), eldLeftMin, now) };
 }
 /** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
 export function startOver(now: number) {
@@ -2628,6 +2791,7 @@ export function App() {
       })}</nav>
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
+      {!disclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
