@@ -183,6 +183,18 @@ export function buzz(urgent: boolean): void {
   try { navigator.vibrate?.(urgent ? [400, 150, 400, 150, 400] : [300, 150, 300]); } catch { /* ignore */ }
 }
 
+/**
+ * One short tick under the finger when a tap lands on a control (patch #6), so the tap confirms
+ * itself even when the driver is not looking at the screen. Android web only: iPhones do not let
+ * web apps vibrate, so the press state stays the confirmation there and this no-ops. Feature-
+ * detected and swallowed — a haptic must never throw into a tap.
+ */
+export function tapTick(): void {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(12);
+  } catch { /* ignore */ }
+}
+
 export type NotifyState = 'granted' | 'denied' | 'default' | 'unsupported';
 export function notifyState(): NotifyState {
   if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';

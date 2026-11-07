@@ -1253,8 +1253,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     if (!/class="back"/.test(h)) throw new Error(`${tab} must lead back to Plan`);
     if (!/aria-current="page"[^>]*>[\s\S]{0,400}Plan<\/button>/.test(h)) throw new Error(`${tab} must keep Plan lit in the tab bar`);
   }
-  // 9. tap targets: nothing on Now smaller than 44px by its own CSS
-  if (!/\nbutton \{[^}]*min-height: 44px/.test(css)) throw new Error('buttons must be at least 44px tall');
+  // 9. tap targets: nothing on Now smaller than 48px by its own CSS (floor raised by patch #6;
+  //    the per-class pins live in the patch 6 section at the end of this file)
+  if (!/\nbutton \{[^}]*min-height: 48px/.test(css)) throw new Error('buttons must be at least 48px tall');
   setLaunchNotice(true);
   if (!/HOS Sandbox is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
@@ -2448,5 +2449,54 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // leave the store as the other sections expect to find it
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
   console.log('patch 5.2 (malformed rows fall back; never evict the backup): OK');
+}
+// --- patch 6: big touch (Lorico's ELD-phone report) — hit areas at a 48px floor, 56px for primary
+// controls, steppers and number fields; number fields ask the phone for the numeric keyboard; one
+// guarded tap tick on Android. A string render can see none of that — a hit area, a keyboard and a
+// buzz leave no trace in the HTML — so, like patch #2's dial stack, these pins read the sources.
+// All sizes in the stylesheet are px, and the reader below reads px only (patch #2's caveat).
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const css = rf('public/styles.css', 'utf8');
+  const app = rf('src/app.tsx', 'utf8');
+  const alerts = rf('src/alerts.ts', 'utf8');
+  const rule = (re) => (css.match(re) || [''])[0];
+  const pxProp = (r, prop) => Number(((r.match(new RegExp(prop + ': (\\d+)px')) || [])[1]) || 0);
+  const minH = (re, floor, what) => {
+    const r = rule(re); const v = pxProp(r, 'min-height');
+    if (!(v >= floor)) throw new Error(`patch 6: ${what} must keep a hit area of at least ${floor}px (got ${v || 'none'}): ${r}`);
+  };
+  // the floor: nothing tappable under 48px tall
+  minH(/\nbutton \{[^}]*\}/, 48, 'the base button');
+  minH(/\.toggle button \{[^}]*\}/, 48, 'segmented toggle buttons');
+  minH(/\.theme-btn \{[^}]*\}/, 48, 'the header theme button');
+  minH(/label input, label select \{[^}]*\}/, 48, 'labelled fields and selects');
+  minH(/label\.check \{[^}]*\}/, 48, 'checkbox rows');
+  minH(/\.ed-days button \{[^}]*\}/, 48, 'the editor day chips');
+  // icon buttons are square: both dimensions at the floor
+  const icon = rule(/\.icon-btn \{[^}]*\}/);
+  if (!(pxProp(icon, 'width') >= 48) || !(pxProp(icon, 'height') >= 48)) throw new Error(`patch 6: icon buttons must stay at least 48x48: ${icon}`);
+  // primary controls, steppers and number fields at 56
+  minH(/\.tabs button \{[^}]*\}/, 56, 'the tab bar');
+  minH(/\.chips button \{[^}]*\}/, 56, 'preset chips');
+  minH(/\.quick button \{[^}]*\}/, 56, 'the Now quick actions');
+  minH(/\.slider-row \.mini \{[^}]*\}/, 56, 'the slider steppers');
+  minH(/\.tstep-row button \{[^}]*\}/, 56, 'the time steppers');
+  minH(/\.brk-len button \{[^}]*\}/, 56, 'the break-length steppers');
+  minH(/input\.num \{[^}]*\}/, 56, 'the slider number field');
+  minH(/input\.hrs \{[^}]*\}/, 56, 'the recap hour fields');
+  // the slider's own touch strip
+  const range = rule(/\.slider input\[type=range\] \{[^}]*\}/);
+  if (!(pxProp(range, 'height') >= 48)) throw new Error(`patch 6: the slider touch strip must stay at least 48px tall: ${range}`);
+  // numeric keypads: every number-only field must ask the phone for the number keyboard
+  if (!/class="num" inputMode="numeric"/.test(app)) throw new Error('patch 6: the slider number field must keep inputMode="numeric"');
+  if ((app.match(/class="hrs" inputMode="decimal"/g) || []).length !== 2) throw new Error('patch 6: both quarter-hour recap fields must keep inputMode="decimal"');
+  if (!/class="hrs" inputMode="numeric"/.test(app)) throw new Error('patch 6: the whole-hour recap field must keep inputMode="numeric"');
+  if (!/type="number" inputMode="numeric" min=\{1\} max=\{3000\}/.test(app)) throw new Error('patch 6: the load-check miles field must keep inputMode="numeric"');
+  // the tap tick: feature-detected (a refactor that drops the guard fails here), and wired to
+  // completed button taps only — never to drags
+  if (!/typeof navigator !== 'undefined' && 'vibrate' in navigator/.test(alerts) || !/navigator\.vibrate\(12\)/.test(alerts)) throw new Error('patch 6: the tap tick must stay feature-detected (no vibrate API, no buzz, no throw)');
+  if (!/addEventListener\('click'/.test(app) || !/closest\?\.\('button'\)/.test(app) || !/tapTick\(\)/.test(app)) throw new Error('patch 6: the tap tick must stay wired to button clicks');
+  console.log('patch 6 (big touch targets; numeric keypads; guarded tap tick): OK');
 }
 console.log('OK');

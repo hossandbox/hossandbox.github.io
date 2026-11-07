@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
-import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
+import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -1817,9 +1817,9 @@ function DayEditor({ day, hasData, onApply }: { day: { start: number; end: numbe
   };
   return (
     <div class="dayedit">
-      <label>Drive h<input type="number" class="hrs" min={0} max={13} step={0.25} value={drive} onInput={(e) => setDrive(Number((e.target as HTMLInputElement).value))} /></label>
-      <label>On h<input type="number" class="hrs" min={0} max={14} step={0.25} value={on} onInput={(e) => setOn(Number((e.target as HTMLInputElement).value))} /></label>
-      <label>Start (h after day start)<input type="number" class="hrs" min={0} max={23} step={1} value={startH} onInput={(e) => setStartH(Number((e.target as HTMLInputElement).value))} /></label>
+      <label>Drive h<input type="number" class="hrs" inputMode="decimal" min={0} max={13} step={0.25} value={drive} onInput={(e) => setDrive(Number((e.target as HTMLInputElement).value))} /></label>
+      <label>On h<input type="number" class="hrs" inputMode="decimal" min={0} max={14} step={0.25} value={on} onInput={(e) => setOn(Number((e.target as HTMLInputElement).value))} /></label>
+      <label>Start (h after day start)<input type="number" class="hrs" inputMode="numeric" min={0} max={23} step={1} value={startH} onInput={(e) => setStartH(Number((e.target as HTMLInputElement).value))} /></label>
       <span class="muted small">{Number.isFinite(startH) ? clock(day.start + startH * 60) : '—'}</span>
       <button class="mini primary" onClick={apply}>OK</button>
       <button class="mini" onClick={() => setOpen(false)}>✕</button>
@@ -2343,6 +2343,17 @@ export function App() {
     const f = () => { const was = audioReady(); unlockAudio(); if (!was) setTimeout(() => redraw((x) => x + 1), 50); };
     document.addEventListener('pointerdown', f, true);
     return () => document.removeEventListener('pointerdown', f, true);
+  }, []);
+  // A completed tap on any button gets one short buzz under the finger on Android (patch #6), so
+  // the tap confirms itself without the driver looking at the screen. A click — not a press — so
+  // drags and scrolls stay silent, and a disabled button never ticks. iPhones no-op in tapTick.
+  useEffect(() => {
+    const f = (e: Event) => {
+      const b = (e.target as HTMLElement | null)?.closest?.('button');
+      if (b && !(b as HTMLButtonElement).disabled) tapTick();
+    };
+    document.addEventListener('click', f, true);
+    return () => document.removeEventListener('click', f, true);
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
