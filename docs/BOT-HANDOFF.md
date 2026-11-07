@@ -951,3 +951,21 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     "yesterday's totals must exclude the tentative-flagged row (saw D420 ON30 OFF180)".
   - Deployed `deploy 2026-11-07T09:06Z from dba61f7`; served app.js + styles.css byte-identical to `dist/`
     (5bdecb38… / f1bacf8d…); the new strings are in the live bundle and absent from the prior deploy.
+- **Patch 8 (2026-11-07, `1f91e55`, deploy go under the Ada rule; base `3c0a2aa`).** "**Start from my ELD
+  clocks**" — a quick start for a mid-shift driver. The DEMO banner now offers it; a panel asks for the four
+  clocks the ELD already shows (drive / shift-window / break-due / cycle, as hours+minutes boxes on the
+  numeric keypad) and `synthesizeEldSeed` (store.ts) builds a starting record ending at now — a 10h reset,
+  then on-duty filler + driving + the 30-min break, and earlier cycle usage placed as recently as the numbers
+  allow so recap hours return as late as possible. **Pessimism-bound**: every clock is clamped to its legal
+  ceiling, and where the four disagree the stricter reading wins (a break clock implying more drive than the
+  drive clock allows lowers drive-left; a too-small window is stretched up to `driveUsed + break`, lowering
+  shift-left), each adjustment reported in driver words. No split pair is ever synthesised. Rows carry the
+  `ELD clocks` provenance note; state records `seededAt` (null for pre-patch-8 saves). While any seeded row
+  stands over the current shift+reset, split answers carry an "**Estimate** — from the clocks you entered"
+  label. Manual entry only — photo/voice/display-zone choice are explicitly not here. 4 files +375/−3
+  (styles.css, app.tsx, store.ts, smoke.mjs); engine untouched.
+  - Verified: engine 99/99; smoke exit 0 with the patch-8 line OK; contrast 44/44 both themes; build OK;
+    applied files byte-identical to the package's files/; falsified `splitEstimateActive` returning true →
+    "patch 8: a record with no seeded rows is never an estimate".
+  - Deployed `deploy 2026-11-07T09:42Z from 1f91e55`; served app.js + styles.css byte-identical to `dist/`
+    (f2528c8b… / a9877581…); all new fragments are in the live bundle and absent from the prior deploy.
