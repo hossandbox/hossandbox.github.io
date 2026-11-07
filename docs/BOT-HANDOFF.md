@@ -920,3 +920,20 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     Minified bundle escapes em-dashes (`\u2014`), so they don't match a raw-string grep — that is expected,
     not a miss. Device-only caveats carried: the real dark-flip + OS-flip listener (no `window` in the
     harness), datalist `label` per browser, and the feel of the compact disclaimer and Testing card on a phone.
+- **Patch 7.1 (2026-11-07, `6bfb010`, deploy go under the Ada rule; base `e822bab`).** The final
+  four-item package. (1) Now's duplicate "Take a load?" quick-row button is gone — the load question keeps
+  its prominent plan-item entry; "Plan a split" quick-row stays. (2) The verdict screen gains "Check
+  another load", the one deliberate clear (`loadCheck = { ...DEFAULT_LOADCHECK }` + step 1). (3) Planning
+  screens record `planReturn` (now/plan/recap) and their back buttons honour it, so from Now the load flow's
+  back no longer strands the driver on Plan (Lorico hit this on his Pixel, live patch 7); old/damaged saves
+  fall back to 'plan'. (4) The app takes its launch name **Split Decision** across the title, manifest,
+  README, bug-mail subject and every driver-facing string — while the storage keys (`hos-sandbox-v1*`,
+  `hos-sandbox-undo-v1`) and the `REPO` constant stay exactly where they were, so no installed log is lost and
+  the repo is not renamed. 6 files +190/−33 (README, index.html, manifest, app.tsx, store.ts, smoke.mjs);
+  engine untouched. sw.js cache prefix and the REPO/repo path were NOT changed, per the fence.
+  - Verified: engine 99/99; smoke exit 0 with the patch-7.1 line OK; contrast 44/44 both themes; build OK;
+    applied files byte-identical to the package's files/; falsified Now's load door recording 'plan' →
+    "patch 7.1: Now's load door must record Now as the return".
+  - Deployed `deploy 2026-11-07T08:20Z from 6bfb010`; served app.js + styles.css byte-identical to `dist/`
+    (54457837… / f1bacf8d…); the manifest now serves the launch name and short name. Minified template
+    literals (Back to Now/Recap) split across concatenations, so they don't grep as one string — not a miss.
