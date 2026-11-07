@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -113,7 +113,9 @@ function TimeZoneField({ value, onChange }: { value: string; onChange: (v: strin
     <>
       <label>Home terminal time zone
         <input list="tz-list" aria-label="Home terminal time zone" value={text} onInput={(e) => typed((e.target as HTMLInputElement).value)} />
-        <datalist id="tz-list">{TIME_ZONES.map((z) => <option key={z} value={z} />)}</datalist>
+        {/* The saved value stays the IANA name; common zones also carry the driver's own words
+            as the option label, so the list can be scanned by "Central", not by path (patch 7). */}
+        <datalist id="tz-list">{TIME_ZONES.map((z) => <option key={z} value={z} label={zoneLabel(z)} />)}</datalist>
       </label>
       {bad && (shortName(text)
         ? <div class="warnbox small">"{text.trim()}" is an old short name, so the setting is unchanged: some of these never switch to daylight saving time. Pick your terminal's city from the list — for example <b>America/New_York</b>.</div>
@@ -538,7 +540,9 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
  */
 function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; again: DriveAgain | null; onNow: boolean }) {
   const status = s.current?.status ?? 'OFF';
-  const next = s.theme === 'day' ? 'night' : 'day';
+  // The switch flips what is on screen — the effective theme — and the tap records the choice, so
+  // from then on the phone's setting no longer moves it (patch 7).
+  const next = effectiveTheme(s, devicePrefersDark()) === 'day' ? 'night' : 'day';
   return (
     <header class="top" inert={inert}>
       <div class="top-row">
@@ -608,7 +612,7 @@ function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) 
         </div>
       )}
       {s.config.timeZone !== deviceTz && (
-        <div class="muted small">
+        <div class="warnbox">
           <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
         </div>
       )}
@@ -781,6 +785,14 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
       <SplitPairLine ev={ev} />
+      {/* The load question is the hook of the whole app, and it sat two taps away behind Plan
+          (3 a.m. review, patch 7). It now rides Now itself, in the same dress the Plan hub and
+          Recap give it, one tap from the screen the app opens on. */}
+      <button class="plan-item" onClick={() => setState({ tab: 'load' })}>
+        <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
+        <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
+        <Icon d={I.next} />
+      </button>
       <Meters ev={ev} />
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
@@ -1745,7 +1757,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     <>
       <BackToPlan />
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
-        {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest. {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
+        {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
           ? (nextLeg
             ? <p class="muted"><b>Next pair (optional):</b> your {clock(nextLeg.start)}–{clock(nextLeg.end)} rest ({dur(nextLeg.duration)} {nextLeg.longestSB >= nextLeg.duration ? 'sleeper' : nextLeg.longestSB > 0 ? 'sleeper and off duty' : 'off duty'}) can also be the first half of your next split. It needs {nextNeed}. This does not change the pair above.</p>
@@ -1753,9 +1765,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           : ev.shift.pendingSplitLeg && ev.shift.pendingSplitLeg.isReset
           ? <p><b>Your {dur(ev.shift.pendingSplitLeg.duration)} reset included 7+ hours in the sleeper.</b> Under FMCSA FAQ 22 (July 2026) a later break of 2h+ can pair with it and be <b>excluded from your 14</b> — it won't give back driving time, but it buys window. Clocks below assume the plain reset until you take that break.</p>
           : ev.shift.pendingSplitLeg
-          ? <p><b>Period A logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
-          : <p class="muted">No qualifying break (≥2h) pending since your anchor at {clock(ev.shift.anchor)}.</p>}
-        {!activeNow && ev.shift.chain.length >= 2 && <p class="ok">Active split: clocks anchored at {clock(ev.shift.anchor)} (end of first paired rest). {ev.candidates >= 999_999 ? 'Over a million' : ev.candidates.toLocaleString('en-US')} interpretation{ev.candidates === 1 ? '' : 's'} considered.</p>}
+          ? <p><b>First break logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
+          : <p class="muted">No qualifying break (≥2h) pending since your clocks started at {clock(ev.shift.anchor)}.</p>}
+        {!activeNow && ev.shift.chain.length >= 2 && <p class="ok">Active split: your clocks count from {clock(ev.shift.anchor)} (end of first paired rest).</p>}
       </Card>
 
       <Card title="What if… (starts at the end of your log)">
@@ -1790,7 +1802,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel(after)} />
           <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clockFull(after.mustStopBy)}`} />
         </div>
-        <p class="muted small">Anchor: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
+        <p class="muted small">Clocks count from: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
         <h3>Plan violations (if you complete both breaks)</h3><ViolationList items={planViol} />
         {strictViol.length > 0 && <div class="warnbox"><b>If you skip Break 2:</b> the {dur(drive)} drive ends {clock(endDrive)} with {strictViol.map((v) => `${violationLabel[v.kind]} ${dur(v.minutes)}`).join(', ')} — Break 1 only pays off once Break 2 is done.</div>}
       </Card>
@@ -2246,10 +2258,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
-        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={s.theme} onChange={(v) => chooseTheme(v as Theme)} /></label>
-        <p class="muted small">Day is the default — it is the readable one outdoors, which is where most planning happens. Night flips to the dark palette for low light. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
-        <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
-        <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
+        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
+        <p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
       </Card>
       <DrivingAlertsCard s={s} />
       <BreakButtonsCard s={s} />
@@ -2270,6 +2280,14 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <p class="small">HOS Sandbox is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
         <p class="muted small">Build {__BUILD__} · now {clock(now)}</p>
       </Card>
+      {/* Kept apart at the bottom of More on purpose (patch 7): a testing clock sat in the Planning
+          card, one stray tap from the settings a driver actually uses, and every clock in the app
+          then quietly lied. While it is set, a banner rides every screen — see App. */}
+      <Card title="Testing">
+        <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
+        <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
+        <p class="muted small">For trying the app against a made-up time. Nothing is logged against it, and alerts never sound while it is set.</p>
+      </Card>
     </>
   );
 }
@@ -2280,8 +2298,12 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
  * Startup disclaimer. Standing rule: this is never an ELD, never FMCSA-registered and never a legal
  * record of duty status — and a driver who believes otherwise will treat a scratchpad as evidence.
  * Shown on every launch: the driver who needs to read it is not the one who read it last week.
+ * Since patch 7 it shows in two sizes: the full box until the driver's first "I understand"
+ * (state.disclaimerAcked), and a compact version — the header's one line plus a short paragraph —
+ * on every launch after that. It never disappears entirely, and the home-terminal question still
+ * rides along in both sizes until the zone is confirmed.
  */
-function Disclaimer({ onClose, tz, needsTz }: { onClose: (tz?: string) => void; tz: string; needsTz: boolean }) {
+function Disclaimer({ onClose, tz, needsTz, compact }: { onClose: (tz?: string) => void; tz: string; needsTz: boolean; compact?: boolean }) {
   // Move focus into the dialog: keyboard and screen-reader users start on its only control.
   const btn = useRef<HTMLButtonElement>(null);
   const [choice, setChoice] = useState(tz);
@@ -2290,15 +2312,24 @@ function Disclaimer({ onClose, tz, needsTz }: { onClose: (tz?: string) => void; 
     <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
       <div class="modal">
         <h2 id="disclaimer-title">Before you use this</h2>
-        <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
-        <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
-        <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
+        {compact ? (
+          <>
+            <p><b>Planning only — not a log, not an ELD.</b></p>
+            <p class="small">HOS Sandbox is a planning scratchpad. Your ELD is your official record of duty status — when it and this app disagree, the ELD governs.</p>
+          </>
+        ) : (
+          <>
+            <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
+            <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
+            <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
+          </>
+        )}
         {needsTz && (
           <>
             <h3>Where is your home terminal?</h3>
             {/* Name the zone actually saved. Naming the phone's zone and pre-filling it replaced an existing
                 driver's terminal zone with the phone's on one tap of "I understand" (re-check N1). */}
-            <p class="small">Every clock here is worked out in your <b>terminal's</b> time zone. It is set to <b>{tz}</b>{tz === deviceTz ? <>, your phone's zone right now</> : <>. Your phone's zone right now is <b>{deviceTz}</b></>}. If your terminal is somewhere else, change it here — the zone moves every day boundary and the whole recap.</p>
+            <p class="small">Clock times on screen are shown in your <b>phone's</b> time zone; your carrier day — and the recap hours that come back with it — is worked out in your <b>terminal's</b> time zone. It is set to <b>{tz}</b>{tz === deviceTz ? <>, your phone's zone right now</> : <>. Your phone's zone right now is <b>{deviceTz}</b></>}. If your terminal is somewhere else, change it here — the zone moves every day boundary and the whole recap.</p>
             <TimeZoneField value={choice} onChange={setChoice} />
           </>
         )}
@@ -2326,7 +2357,16 @@ export function App() {
   const [, redraw] = useState(0);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
-  useEffect(() => { applyTheme(s.theme); }, [s.theme]);
+  // The screen wears the EFFECTIVE theme (patch 7): an un-chosen default follows the phone, so a
+  // phone that flips to dark at sunset takes an un-chosen app with it; a chosen theme never moves.
+  useEffect(() => {
+    applyTheme(effectiveTheme(s, devicePrefersDark()));
+    if (s.themeChosen || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onFlip = () => applyTheme(effectiveTheme(getState(), devicePrefersDark()));
+    mq.addEventListener?.('change', onFlip);
+    return () => mq.removeEventListener?.('change', onFlip);
+  }, [s.theme, s.themeChosen]);
   // evaluate() runs outside every tab's error boundary, so a throw here used to blank the whole app on
   // every launch (bug report C2). Catch it and offer a way out instead.
   const result = useMemo(() => {
@@ -2397,7 +2437,7 @@ export function App() {
   if (showsDrivingView(s)) {
     return (
       <div class="app">
-        {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+        {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setState({ disclaimerAcked: true }); setDisclaimer(false); }} />}
         <div inert={blocked}>
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
@@ -2407,9 +2447,12 @@ export function App() {
   }
   return (
     <div class={fresh ? 'app is-demo' : 'app'}>
-      {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setDisclaimer(false); }} />}
+      {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setState({ disclaimerAcked: true }); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>
+        {s.nowOverride !== null && (
+          <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. <button class="mini" onClick={() => setState({ nowOverride: null })}>Use real clock</button></p>
+        )}
         {s.themeNotice && (
           <div class="card warn">
             <div class="row">

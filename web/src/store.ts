@@ -57,6 +57,12 @@ export interface State {
   /** True once, if a legacy save (night was then the default) was moved to the new day default. */
   themeNotice: boolean;
   /**
+   * The driver has tapped "I understand" on the full startup disclaimer at least once (patch 7).
+   * Later launches show the compact version instead; a save from before this flag existed has it
+   * missing, which the merge reads as false — the full box shows once more, then compact.
+   */
+  disclaimerAcked: boolean;
+  /**
    * The driver has confirmed the home terminal time zone. Until then the app is using the phone's
    * zone, which is wrong for a driver who installed while on the road — and a wrong zone silently
    * moves day boundaries and corrupts the recap. So it is asked for rather than assumed (round-3 item 3).
@@ -147,6 +153,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
+  disclaimerAcked: false,
   tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
@@ -259,6 +266,10 @@ export function parseSaved(raw: string | null): State {
       merged.theme = 'day';
       merged.themeNotice = true;
     }
+    // The compact disclaimer is earned by one tap on the full box, so the flag counts only as a
+    // literal true: a save from before patch 7 (missing) and a damaged one (anything else) both
+    // read as not acknowledged, and the full box shows once more.
+    if (s.disclaimerAcked !== true) merged.disclaimerAcked = false;
     return merged;
   } catch { return INITIAL_STATE; }
 }
@@ -391,6 +402,28 @@ export const TIME_ZONES: string[] = (() => {
     'America/Anchorage', 'Pacific/Honolulu', 'America/Toronto', 'America/Winnipeg', 'America/Edmonton',
     'America/Vancouver', 'UTC'];
 })();
+
+/**
+ * The picker's friendly names for the zones drivers actually pick between (patch 7): the value
+ * saved is still the IANA name — the engine and daylight-saving rules need it — but the list can
+ * lead with the words a driver uses ("Central"), not a programmer's path. Zones not listed here
+ * show their IANA name, exactly as before.
+ */
+export const ZONE_LABELS: Record<string, string> = {
+  'America/New_York': 'Eastern — New York',
+  'America/Chicago': 'Central — Chicago',
+  'America/Denver': 'Mountain — Denver',
+  'America/Phoenix': 'Mountain, no daylight time — Phoenix',
+  'America/Los_Angeles': 'Pacific — Los Angeles',
+  'America/Anchorage': 'Alaska — Anchorage',
+  'Pacific/Honolulu': 'Hawaii — Honolulu',
+  'America/Toronto': 'Eastern — Toronto',
+  'America/Winnipeg': 'Central — Winnipeg',
+  'America/Edmonton': 'Mountain — Edmonton',
+  'America/Vancouver': 'Pacific — Vancouver',
+  'UTC': 'UTC',
+};
+export const zoneLabel = (z: string): string | undefined => ZONE_LABELS[z];
 
 /**
  * An invalid zone makes `Intl.DateTimeFormat` throw inside the engine, which would blank every tab.
@@ -764,6 +797,26 @@ export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', S
  * looks.
  */
 export type Theme = 'night' | 'day';
+
+/** Does the phone itself run dark? Guarded like everything DOM here: the node harness has no window. */
+export function devicePrefersDark(): boolean {
+  try {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch { return false; }
+}
+
+/**
+ * The theme the screen actually wears (patch 7). A theme the driver picked by hand always wins.
+ * Until then the stored value is only the old day default nobody chose, so the screen follows the
+ * phone: dark phone, night palette — no more light blast in a dark cab at 3 a.m. `prefersDark` is a
+ * parameter so the rule is testable without a DOM; callers pass devicePrefersDark().
+ */
+export function effectiveTheme(s: Pick<State, 'theme' | 'themeChosen'>, prefersDark: boolean): Theme {
+  if (s.themeChosen) return s.theme;
+  return prefersDark ? 'night' : 'day';
+}
+
 export function applyTheme(t: Theme) {
   if (typeof document === 'undefined') return; // the node test harness has no DOM
   const root = document.documentElement;

@@ -66,7 +66,7 @@ cd web && npm run build && npm run smoke  # UI bundle + render smoke test
 node server.mjs                           # serves dist/ on :8776 (watchdog cron keeps it alive)
 ```
 
-Phone: https://hermes-vps.tail49c89e.ts.net:8777 (Tailscale). Add to home screen.
+Phone: open https://hossandbox.github.io/ in the phone's browser and add it to the home screen.
 
 ## Engine design in one paragraph
 

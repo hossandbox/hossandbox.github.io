@@ -43,7 +43,7 @@ setState({
   ],
 });
 const html = out('split/pending-pair');
-const pending = /Period A logged/.test(html);
+const pending = /First break logged/.test(html); // patch 7 renamed the internal "Period A" into the driver's words
 console.log('pending leg shown:', pending);
 setState({ tab: 'log' }); out('log/violations view');
 
@@ -472,14 +472,18 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 {
   const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
   const T = M('2026-09-23T17:00:00Z');
-  const { applyTheme, STATUS_COLOR, deviceTz, INITIAL_STATE } = await import('../src/store.ts');
+  const { applyTheme, STATUS_COLOR, deviceTz, INITIAL_STATE, chooseTheme } = await import('../src/store.ts');
 
   // Day is the product default (Lorico, 2026-09-25 — he drives in daylight; night is the opt-in).
   // Assert the FRESH-INSTALL default, not the current value: asserting a value the test just set
   // would pass no matter what the default actually was.
   if (INITIAL_STATE.theme !== 'day') throw new Error(`a fresh install must start in day, got ${INITIAL_STATE.theme}`);
 
-  setState({ theme: 'day', tab: 'log', nowOverride: T, current: { status: 'ON', since: T },
+  // Patch 7: the header switch flips the EFFECTIVE theme, and a theme only counts as picked when
+  // it comes through chooseTheme — a bare stored value now follows the phone. So this section picks
+  // its themes the way a driver does, instead of writing the field directly.
+  chooseTheme('day');
+  setState({ tab: 'log', nowOverride: T, current: { status: 'ON', since: T },
     segments: [{ status: 'OFF', start: M('2026-09-23T01:00:00Z'), end: M('2026-09-23T11:00:00Z') }],
     config: { ...getState().config, timeZone: deviceTz } });
 
@@ -490,7 +494,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     if (!STATUS_COLOR[k].startsWith('var(--')) throw new Error(`${k} chip colour is not theme-aware: ${STATUS_COLOR[k]}`);
   }
 
-  setState({ theme: 'night' });
+  chooseTheme('night');
   hh = out('log/night, theme control');
   if (!/aria-label="Switch to day theme"/.test(hh)) throw new Error('the header switch must offer the way back');
 
@@ -2298,9 +2302,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!s4.includes(`Split in use: ${pairText}.`)) throw new Error('Split Lab must name the pair the clocks are using');
   if (/Period A logged/.test(s4) || /counts against your 14/.test(s4)) throw new Error('with a pair in use, Split Lab must not say its second rest counts against the 14 — the clocks exclude it');
   if (!s4.includes(`Next pair (optional): your ${clock(t(6, 17))}–${clock(NOW)} rest (7h 00m off duty) can also be the first half of your next split. It needs a later rest with 7h+ in a row in the sleeper.`)) throw new Error('Split Lab must describe the possible next pair as optional');
-  // with no pair in use, the existing pending-leg wording is unchanged
+  // with no pair in use, the pending leg still says its time counts against the 14, with the same
+  // numbers — patch 7 changed only the label ("Period A" was internal shorthand drivers never used)
   const loneLab = show(fri, 'split');
-  if (!/Period A logged: 7h 00m ending/.test(loneLab) || !/counts against your 14/.test(loneLab)) throw new Error('with no pair in use, the pending-leg wording must stay as it was');
+  if (!/First break logged: 7h 00m ending/.test(loneLab) || !/counts against your 14/.test(loneLab)) throw new Error('with no pair in use, the pending leg must still say it counts against your 14');
   // 4. a plain 395.1(g) pair (scenario 3: 3h off + 7h sleeper) cites the regulation, not FAQ 22
   s4 = show(thu.slice(0, 3), 'now', t(5, 20), t(5, 13), 'SB');
   const reg = `${clock(t(5, 6))}–${clock(t(5, 9))} off duty (3h 00m) + ${clock(t(5, 13))}–${clock(t(5, 20))} sleeper (7h 00m) — split pair (49 CFR 395.1(g))`;
@@ -2499,5 +2504,114 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/navigator\.vibrate\(12\)/.test(alerts)) throw new Error('patch 6: the tap tick must still fire a 12ms buzz');
   if (!/addEventListener\('click'/.test(app) || !/closest\?\.\('button'\)/.test(app) || !/tapTick\(\)/.test(app)) throw new Error('patch 6: the tap tick must stay wired to button clicks');
   console.log('patch 6 (big touch targets; numeric keypads; guarded tap tick): OK');
+}
+// --- patch 7: first open at 3 a.m. (the ChatGPT tired-trucker review, verified by Ada) — an
+// un-chosen theme follows the phone instead of blasting day white; the load question rides Now;
+// the simulated clock is quarantined in More → Testing and banners every screen while set; the
+// two-zones note is a notice, not a footnote, and the disclaimer stops contradicting it; the zone
+// picker speaks "Central"; Split Lab drops its internal terms; and the disclaimer, once read in
+// full, comes back compact — never gone.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, parseSaved: ps7, effectiveTheme, zoneLabel, deviceTz: dtz } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  const store = rf('src/store.ts', 'utf8');
+  const main = rf('src/main.tsx', 'utf8');
+  const readme = rf('../README.md', 'utf8');
+
+  // 1. the effective theme: a hand-picked theme always wins; an un-chosen one follows the phone
+  const et = effectiveTheme;
+  if (et({ theme: 'day', themeChosen: false }, true) !== 'night') throw new Error('patch 7: an un-chosen theme on a dark phone must be night');
+  if (et({ theme: 'day', themeChosen: false }, false) !== 'day') throw new Error('patch 7: an un-chosen theme on a light phone must be day');
+  if (et({ theme: 'night', themeChosen: false }, false) !== 'day') throw new Error('patch 7: a stored-but-unchosen night must still follow the phone');
+  if (et({ theme: 'day', themeChosen: true }, true) !== 'day') throw new Error('patch 7: a chosen day must never be overridden by the phone');
+  if (et({ theme: 'night', themeChosen: true }, false) !== 'night') throw new Error('patch 7: a chosen night must never be overridden by the phone');
+  if (!/prefers-color-scheme: dark/.test(store)) throw new Error('patch 7: the store must read the phone palette');
+  if (!/effectiveTheme\(getState\(\), devicePrefersDark\(\)\)/.test(main)) throw new Error('patch 7: the first paint must apply the effective theme');
+  if (!/effectiveTheme\(s, devicePrefersDark\(\)\) === 'day'/.test(app)) throw new Error('patch 7: the header switch must flip the effective theme');
+
+  // 2. the disclaimer flag: only a literal true is earned — old saves (missing) and damaged ones
+  //    (anything else) read as not acknowledged, so the full box shows once more
+  if (ps7(JSON.stringify({ segments: [] })).disclaimerAcked !== false) throw new Error('patch 7: a save from before the flag must read as not acknowledged');
+  if (ps7(JSON.stringify({ segments: [], disclaimerAcked: true })).disclaimerAcked !== true) throw new Error('patch 7: an acknowledged save must stay acknowledged');
+  if (ps7(JSON.stringify({ segments: [], disclaimerAcked: 'yes' })).disclaimerAcked !== false) throw new Error('patch 7: a damaged flag must read as not acknowledged');
+
+  // 3. full box until the first "I understand", compact after — and the zone question, with the
+  //    corrected time-zone sentence, rides in BOTH sizes while the zone is unconfirmed
+  ss({ segments: [], tentative: [], current: null, tab: 'now', disclaimerAcked: false, tzChosen: true, nowOverride: null });
+  setLaunchNotice(true);
+  let h = out('patch 7/disclaimer full');
+  if (!/HOS Sandbox is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('patch 7: the first launch must show the full disclaimer');
+  if (/when it and this app disagree/.test(h)) throw new Error('patch 7: the full disclaimer must not carry the compact wording');
+  ss({ disclaimerAcked: true });
+  h = out('patch 7/disclaimer compact');
+  if (!/<b>Planning only — not a log, not an ELD\.<\/b>/.test(h)) throw new Error('patch 7: later launches must show the compact disclaimer');
+  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('patch 7: the compact disclaimer must still name the ELD as the record');
+  if (/395\.34|It sends nothing anywhere/.test(h)) throw new Error('patch 7: the compact disclaimer must be compact — the full text stays in the first box only');
+  ss({ tzChosen: false });
+  h = out('patch 7/disclaimer compact, zone unconfirmed');
+  if (!/Where is your home terminal\?/.test(h)) throw new Error('patch 7: the compact disclaimer must still ask the terminal zone');
+  if (!/Clock times on screen are shown in your/.test(h)) throw new Error('patch 7: the zone section must say clock times ride the phone zone');
+  if (/Every clock here is worked out in your/.test(h)) throw new Error('patch 7: the stale worked-out-in-your-terminal sentence must be gone');
+  ss({ tzChosen: true });
+
+  // 4. Now carries the load question as a full entry, not just the quick row
+  setLaunchNotice(false);
+  ss({ tab: 'now', current: { status: 'ON', since: now - 60 } });
+  h = out('patch 7/now load entry');
+  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Answer three questions, get a yes or no/.test(h)) throw new Error('patch 7: Now must offer the load question as a prominent plan-item entry');
+
+  // 5. the simulated clock banners every screen while set — and is gone when it is not
+  ss({ nowOverride: now + 120 });
+  h = out('patch 7/sim banner on');
+  if (!/Simulated clock\.<\/b>/.test(h) || !/Use real clock/.test(h)) throw new Error('patch 7: a set simulated clock must banner the screen');
+  ss({ nowOverride: null });
+  h = out('patch 7/sim banner off');
+  if (/Simulated clock\.<\/b>/.test(h)) throw new Error('patch 7: no banner may show on the real clock');
+  if (!(app.indexOf('Simulated "now" (testing)') > app.indexOf('title="Testing"'))) throw new Error('patch 7: the simulated-clock setting must live in the Testing card, below the rest of More');
+  ss({ tab: 'settings' });
+  h = out('patch 7/settings testing card');
+  const heads = [...h.matchAll(/<h2>(.*?)<\/h2>/g)].map((m) => m[1]);
+  if (heads[heads.length - 1] !== 'Testing') throw new Error(`patch 7: Testing must be the last card in More (saw ${heads.join(' | ')})`);
+
+  // 6. two zones in play reads as a notice, not a footnote
+  const otherZone = dtz === 'America/New_York' ? 'America/Chicago' : 'America/New_York';
+  ss({ tab: 'now', config: { ...gs().config, timeZone: otherZone } });
+  h = out('patch 7/two zones notice');
+  if (!/class="warnbox">\s*<b>Two time zones in play\.<\/b>/.test(h)) throw new Error('patch 7: the two-zones note must render as a warnbox notice');
+  ss({ config: { ...gs().config, timeZone: dtz } });
+
+  // 7. the zone picker leads with the driver's words; the saved value stays the IANA name
+  if (zoneLabel('America/Chicago') !== 'Central — Chicago') throw new Error('patch 7: America/Chicago must be labelled Central — Chicago');
+  ss({ tab: 'settings' });
+  h = out('patch 7/zone labels');
+  if (!/label="Central — Chicago"/.test(h)) throw new Error('patch 7: the zone list must show the friendly label');
+  if (!/value="America\/Chicago"/.test(h)) throw new Error('patch 7: the zone value must stay the IANA name');
+
+  // 8. Split Lab in the driver's words — and none of the internal terms left on screen
+  const t0 = now - 60 * 15;
+  ss({ tab: 'split', current: { status: 'SB', since: now - 120 },
+    segments: [
+      { status: 'OFF', start: t0 - 600, end: t0 },
+      { status: 'D', start: t0, end: t0 + 300 },
+      { status: 'OFF', start: t0 + 300, end: t0 + 480 },
+      { status: 'ON', start: t0 + 480, end: t0 + 510 },
+      { status: 'D', start: t0 + 510, end: t0 + 780 },
+    ] });
+  h = out('patch 7/split words');
+  if (!/First break logged:/.test(h)) throw new Error('patch 7: the pending leg must read "First break logged"');
+  if (!/Clocks count from:/.test(h)) throw new Error('patch 7: the plan anchor line must read "Clocks count from"');
+  if (/Period A logged|interpretations considered/.test(h)) throw new Error('patch 7: internal terms must not reach the driver');
+  if (/Period A logged|interpretations considered/.test(app)) throw new Error('patch 7: the sources must not carry the old driver-facing terms');
+
+  // 9. the public README names no private host
+  if (/ts\.net|hermes-vps/.test(readme)) throw new Error('patch 7: the README must not name the Tailscale host');
+  if (!/hossandbox\.github\.io/.test(readme)) throw new Error('patch 7: the README phone line must point at the deployed site');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', disclaimerAcked: false });
+  setLaunchNotice(true);
+  console.log('patch 7 (first open at 3 a.m.; compact disclaimer): OK');
 }
 console.log('OK');
