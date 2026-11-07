@@ -861,3 +861,16 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
     at its own "patch 5[.1]" assertion) and restored byte-identical.
   - Deployed `deploy 2026-11-06T19:53Z from f2242b5`; served `app.js`/`styles.css` byte-identical to `dist/`;
     the two new storage keys are in the live bundle and absent from the prior deploy.
+- **Patch 5.2 (2026-11-07, `5844acc`, deploy go under the Ada rule; base `f2242b5` + the docs commit).**
+  Tightens the #5 autosave fallback to validate the ROWS inside `segments` and `tentative`, not just that
+  the lists are lists: each row must be an object with a valid duty status, finite start/end, and end after
+  start (mirroring `rowProblem` on the import path). A save whose only defect is a malformed row now falls
+  back to the backup instead of loading the junk row or rotating over the last-known-good copy. Optional row
+  fields (note, tentative, createdAt) stay unchecked, matching the import path. 2 files
+  `web/src/store.ts` +21/−2, `web/test/smoke.mjs` +62/−0; engine untouched, no styles.css, no app.tsx.
+  - Verified: engine 99/99; smoke exit 0 with the "patch 5.2 (malformed rows fall back…): OK" line;
+    contrast 44/44 both themes; build OK; applied files byte-identical to the package's files/; falsified
+    the row-status whitelist -> smoke fails at "a save whose segments hold an unknown status must fall back".
+  - Deployed `deploy 2026-11-07T00:33Z from 5844acc`; served `app.js` byte-identical to `dist/` (ff20c43b…),
+    `styles.css` unchanged. Ada's caveats: the row rules are not tightened beyond the import path, and #5's
+    real-PWA relaunch undo-row check still awaits Lorico's phone.
