@@ -937,3 +937,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   - Deployed `deploy 2026-11-07T08:20Z from 6bfb010`; served app.js + styles.css byte-identical to `dist/`
     (54457837… / f1bacf8d…); the manifest now serves the launch name and short name. Minified template
     literals (Back to Now/Recap) split across concatenations, so they don't grep as one string — not a miss.
+- **Patch 7.2 (2026-11-07, `dba61f7`, deploy go under the Ada rule; base `27a6be9`).** "**Your last 8
+  days**" — a read-only reflection view reached from Recap (door records `planReturn: 'recap'`; back names
+  Recap and lands there). It renders the last 8 **carrier** days (engine's own day arithmetic, terminal
+  zone / dayStartHour) newest-first, per-day totals + a row list. Three deliberate fences: LOGGED rows only
+  (the tentative list is never read and tentative-flagged segment rows are dropped; the live status counts,
+  clipped at now); unlogged time shows as "Not logged", never filled in as rest; and it names the ELD as the
+  official record ("For your own review — your ELD holds the official record"). Read-only by construction:
+  no click handler, no editor, no state write; the smoke pins that. Fresh install shows an empty state.
+  3 files +217/−4 (app.tsx, store.ts, smoke.mjs); engine untouched; no styles.css, no key/save changes.
+  - Verified: engine 99/99; smoke exit 0 with the patch-7.2 line OK; contrast 44/44 both themes; build OK;
+    applied files byte-identical to the package's files/. Falsified the tentative filter and smoke failed at
+    "yesterday's totals must exclude the tentative-flagged row (saw D420 ON30 OFF180)".
+  - Deployed `deploy 2026-11-07T09:06Z from dba61f7`; served app.js + styles.css byte-identical to `dist/`
+    (5bdecb38… / f1bacf8d…); the new strings are in the live bundle and absent from the prior deploy.
