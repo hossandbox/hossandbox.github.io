@@ -2495,7 +2495,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/type="number" inputMode="numeric" min=\{1\} max=\{3000\}/.test(app)) throw new Error('patch 6: the load-check miles field must keep inputMode="numeric"');
   // the tap tick: feature-detected (a refactor that drops the guard fails here), and wired to
   // completed button taps only — never to drags
-  if (!/typeof navigator !== 'undefined' && 'vibrate' in navigator/.test(alerts) || !/navigator\.vibrate\(12\)/.test(alerts)) throw new Error('patch 6: the tap tick must stay feature-detected (no vibrate API, no buzz, no throw)');
+  if (!/typeof navigator !== 'undefined' && 'vibrate' in navigator/.test(alerts)) throw new Error('patch 6: the tap tick must stay feature-detected (no vibrate API, no buzz, no throw)');
+  if (!/navigator\.vibrate\(12\)/.test(alerts)) throw new Error('patch 6: the tap tick must still fire a 12ms buzz');
   if (!/addEventListener\('click'/.test(app) || !/closest\?\.\('button'\)/.test(app) || !/tapTick\(\)/.test(app)) throw new Error('patch 6: the tap tick must stay wired to button clicks');
   console.log('patch 6 (big touch targets; numeric keypads; guarded tap tick): OK');
 }

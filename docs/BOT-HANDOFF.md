@@ -888,3 +888,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   - Deployed `deploy 2026-11-07T01:33Z from 1c9a862`; served app.js and styles.css byte-identical to `dist/`
     (61e7c116… / f1bacf8d…). Device-only caveats carried: real feel of the bigger targets, OEM `inputmode`
     behaviour on `type="number"`, and the buzz (Lorico's Pixel is the first real test; iOS gets none).
+  - **Correction to that gate (same night; `web/test/smoke.mjs` only, a test file that is not served).**
+    Two defects, both fixed after the deploy:
+    1. The patch's tap-tick guard assertion was **vacuous**. `if (!/typeof navigator !== 'undefined'
+       && 'vibrate' in navigator/.test(alerts) || !/navigator\.vibrate\(12\)/.test(alerts))` — `&&`
+       inside the first regex binds tighter than the `||`, so it threw only when the guard was
+       ABSENT. Deleting the 12 ms call while keeping the guard passed the whole suite. Split into two
+       `if` lines with their own messages; falsified each half separately (guard removed -> the
+       feature-detect line throws; `navigator.vibrate(12)` replaced by `void 0` -> the new buzz line
+       throws). A first attempt at the second mutation was a syntax error, not a bite — the harness
+       reported "no Error line" and the stage had to be identified from `error TS1109`.
+    2. My own falsification claim overstated the run: the single `inputMode="numeric"` -> `text`
+       mutation hit the slider field, the miles field AND the recap field at once, so it proved only
+       the first assertion to throw (the slider's). Corrected here rather than left standing.
+    No app code changed and **no redeploy followed** — the served bundle is unaffected by a test file.
