@@ -902,3 +902,21 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
        mutation hit the slider field, the miles field AND the recap field at once, so it proved only
        the first assertion to throw (the slider's). Corrected here rather than left standing.
     No app code changed and **no redeploy followed** — the served bundle is unaffected by a test file.
+- **Patch 7 (2026-11-07, `22c6181`, deploy go under the Ada rule; base `a8328fe`).** The "first open at
+  3 a.m." review. An un-chosen theme now follows the phone's light/dark setting (`effectiveTheme` +
+  `devicePrefersDark`), so a dark phone no longer blasts day-white at night; a hand-picked theme still wins
+  and the header/Settings read the effective theme. The load question rides Now as a plan-item entry (not
+  just the quick row, which stays). The simulated clock moves to its own More→Testing card and, while set,
+  banners every screen. The two-zones note becomes a warnbox; the zone picker offers friendly labels while
+  saving the IANA name; the startup disclaimer shows the full box once, then a compact version every launch
+  after (flag `disclaimerAcked`, literal-true-only). Split Lab drops internal terms ("First break logged",
+  "Clocks count from"). README's phone line names the public site, not the Tailscale host.
+  5 files +242/−31 (README, app.tsx, main.tsx, store.ts, smoke.mjs); engine untouched. Every existing user
+  sees the full disclaimer once more, then compact — the flag cannot be back-earned, by design.
+  - Verified: engine 99/99; smoke exit 0 with "patch 7 (first open at 3 a.m.; compact disclaimer): OK";
+    contrast 44/44 both themes; build OK; applied files byte-identical to the package's files/; falsified
+    `effectiveTheme` ignoring the phone -> smoke fails at "an un-chosen theme on a dark phone must be night".
+  - Deployed `deploy 2026-11-07T06:36Z from 22c6181`; served app.js byte-identical to `dist/` (0e074684…).
+    Minified bundle escapes em-dashes (`\u2014`), so they don't match a raw-string grep — that is expected,
+    not a miss. Device-only caveats carried: the real dark-flip + OS-flip listener (no `window` in the
+    harness), datalist `label` per browser, and the feel of the compact disclaimer and Testing card on a phone.
