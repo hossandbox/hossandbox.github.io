@@ -1,4 +1,4 @@
-const CACHE = 'hos-sandbox-' + ("2026-11-07 13:01");
+const CACHE = 'hos-sandbox-' + ("2026-11-07 14:40");
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-512.png',
   './fonts/atkinson-next-400.woff2', './fonts/atkinson-next-600.woff2', './fonts/atkinson-next-700.woff2', './fonts/atkinson-next-800.woff2',
   './fonts/atkinson-mono-500.woff2', './fonts/atkinson-mono-700.woff2'];
