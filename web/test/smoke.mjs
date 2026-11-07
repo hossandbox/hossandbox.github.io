@@ -2747,4 +2747,105 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(true);
   console.log('patch 7.1 (one load door on Now; Check another load; the Split Decision rename; back returns to where you came from): OK');
 }
+// --- patch 7.2: "Your last 8 days" — a read-only reflection of what was actually logged,
+// reached from Recap. Three fences define it: logged rows only (planned/what-if time never
+// poses as history, in either of its two storage forms), unlogged time reads "Not logged"
+// rather than being filled in as rest, and the days are carrier days in the terminal zone —
+// with the ELD named as the official record, because roadside proof is its job, not this app's.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, historyDays } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  setLaunchNotice(false);
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  const NOW72 = L(12, 12); // Mon Oct 12 2026, 12:00 in Chicago
+
+  // (a) the seed: yesterday worked 06:00–14:30 then went quiet; today sleeper until 07:00,
+  //     drove 3h, and is on duty now. A what-if row sits in the tentative list over today's
+  //     on-duty hours, and a tentative-flagged row sits inside yesterday's quiet stretch —
+  //     neither may contribute a minute.
+  ss({ tab: 'history', planReturn: 'recap', nowOverride: NOW72, historyAcknowledged: false, current: { status: 'ON', since: L(12, 10) },
+    config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 },
+    segments: [
+      { status: 'D', start: L(11, 6), end: L(11, 11) },
+      { status: 'ON', start: L(11, 11), end: L(11, 11, 30) },
+      { status: 'OFF', start: L(11, 11, 30), end: L(11, 14, 30) },
+      { status: 'D', start: L(11, 15), end: L(11, 17), tentative: true },
+      { status: 'SB', start: L(12, 0), end: L(12, 7) },
+      { status: 'D', start: L(12, 7), end: L(12, 10) },
+    ],
+    tentative: [{ status: 'OFF', start: L(12, 10), end: L(12, 12) }] });
+  const days = historyDays(gs(), NOW72);
+  if (days.length !== 8) throw new Error('patch 7.2: the view must cover today plus the previous 7 days');
+  if (!days[7].isToday || days[7].label !== '2026-10-12' || days[6].label !== '2026-10-11' || days[0].label !== '2026-10-05')
+    throw new Error('patch 7.2: the 8 days must run oldest→today, labelled by carrier day');
+
+  // (b)+(c) per-day totals are the LOGGED entries only: today D 3h / ON 2h (the live status) /
+  //     SB 7h with NO off duty (the what-if row over 10:00–12:00 contributes nothing);
+  //     yesterday D 5h / ON 30m / OFF 3h (the flagged row in the quiet stretch adds nothing)
+  const t = days[7].totals, y = days[6].totals;
+  if (t.D !== 180 || t.ON !== 120 || t.SB !== 420 || t.OFF !== 0) throw new Error(`patch 7.2: today's totals must be the logged rows only (saw D${t.D} ON${t.ON} SB${t.SB} OFF${t.OFF})`);
+  if (y.D !== 300 || y.ON !== 30 || y.OFF !== 180 || y.SB !== 0) throw new Error(`patch 7.2: yesterday's totals must exclude the tentative-flagged row (saw D${y.D} ON${y.ON} OFF${y.OFF})`);
+  if (days[7].notLogged !== 0) throw new Error('patch 7.2: today is fully logged — no not-logged time may be invented');
+
+  // (d) unlogged time is not logged: yesterday has two quiet stretches — before the 06:00
+  //     start (6h) and after 14:30 (9h 30m) — and both count as not logged, 15h 30m in all;
+  //     a day with nothing at all is one plain not-logged stretch — never assumed rest
+  if (days[6].notLogged !== 930) throw new Error(`patch 7.2: yesterday's quiet stretches must count as not logged (saw ${days[6].notLogged})`);
+  if (days[0].items.length !== 1 || days[0].items[0].status !== null || days[0].notLogged !== 1440)
+    throw new Error('patch 7.2: a day with nothing logged must be one not-logged stretch, not a day of rest');
+
+  // (a)+(d)+(f) the render: 8 day sections, the totals in the driver's words, "Not logged" on
+  //     screen, and the ELD named as the official record
+  let h = out('patch 7.2/history seeded');
+  if ((h.match(/<h2>/g) || []).length !== 8) throw new Error('patch 7.2: the view must render 8 day sections');
+  if (!/Today — 2026-10-12/.test(h) || !/2026-10-05/.test(h)) throw new Error('patch 7.2: the day sections must run from the oldest day to Today');
+  if (!/Driving <b>5h 00m<\/b>/.test(h) || !/Sleeper <b>7h 00m<\/b>/.test(h) || !/Not logged <b>15h 30m<\/b>/.test(h))
+    throw new Error('patch 7.2: the rendered per-day totals must match the seeded logged entries');
+  if (!/>Not logged</.test(h)) throw new Error('patch 7.2: unlogged stretches must render as Not logged');
+  if (!/For your own review — your ELD holds the official record\./.test(h)) throw new Error('patch 7.2: the view must name the ELD as the official record');
+
+  // (g) read-only: the view wires no click handler, opens no editor and offers no add/delete —
+  //     the only button on the screen is the shared back bar, which lives outside the component
+  const body = app.slice(app.indexOf('function HistoryTab'), app.indexOf('/* ============================================================ Can I take this load?'));
+  if (/onClick|openSheet|setState|undoable/.test(body)) throw new Error('patch 7.2: the reflection view must not wire any editing or state-changing control');
+  if (/Edit|Delete|Add a break/.test(h)) throw new Error('patch 7.2: the rendered view must carry no edit, delete or add controls');
+
+  // the door and the way back: Recap offers the view, entering records Recap as the origin
+  // (the patch 7.1 pattern), and the back bar names Recap and lands there
+  if (!/setState\(\{ tab: 'history', planReturn: 'recap' \}\)/.test(app)) throw new Error("patch 7.2: Recap's door must record Recap as the return");
+  ss({ tab: 'recap' });
+  h = out('patch 7.2/recap door');
+  if (!/Your last 8 days/.test(h)) throw new Error('patch 7.2: Recap must offer the last-8-days view');
+  ss({ tab: 'history' });
+  h = out('patch 7.2/back names recap');
+  if (!/class="back"(?:(?!<\/button>)[\s\S])*Recap<\/button>/.test(h)) throw new Error("patch 7.2: the view's back bar must name Recap");
+  ss({ tab: gs().planReturn });
+  if (gs().tab !== 'recap') throw new Error("patch 7.2: the view's back must land on Recap");
+
+  // (e) the DEMO/fresh state shows the empty state, not a week of invented history
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'history' });
+  h = out('patch 7.2/history fresh');
+  if (!/Nothing logged yet — this fills in as you enter your real day\./.test(h)) throw new Error('patch 7.2: a fresh install must show the empty state');
+  if ((h.match(/<h2>/g) || []).length !== 0 || />Not logged</.test(h)) throw new Error('patch 7.2: the fresh state must render no day sections and no not-logged rows');
+  if (!/For your own review — your ELD holds the official record\./.test(h)) throw new Error('patch 7.2: the ELD note must ride the empty state too');
+
+  // (h) bucketing follows the TERMINAL zone: 03:30–04:30 UTC is one stretch on the phone's
+  //     clock but straddles the New York carrier midnight (04:00 UTC), so it must split
+  //     30/30 across the two carrier days — phone-midnight bucketing would put all 60 on today
+  const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  ss({ tab: 'history', nowOverride: M('2026-10-12T12:00:00Z'), current: null, tentative: [],
+    config: { ...gs().config, timeZone: 'America/New_York', dayStartHour: 0 },
+    segments: [{ status: 'OFF', start: M('2026-10-12T03:30:00Z'), end: M('2026-10-12T04:30:00Z') }] });
+  const zd = historyDays(gs(), M('2026-10-12T12:00:00Z'));
+  if (zd[7].label !== '2026-10-12' || zd[6].label !== '2026-10-11') throw new Error('patch 7.2: day labels must be the terminal-zone carrier days');
+  if (zd[6].totals.OFF !== 30 || zd[7].totals.OFF !== 30) throw new Error(`patch 7.2: a stretch crossing the terminal midnight must split across carrier days (saw ${zd[6].totals.OFF}/${zd[7].totals.OFF})`);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', planReturn: 'plan',
+    config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 } });
+  setLaunchNotice(true);
+  console.log('patch 7.2 (Your last 8 days — logged only, not-logged stays not logged, the ELD is the record): OK');
+}
 console.log('OK');

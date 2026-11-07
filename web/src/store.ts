@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Segment, RulesConfig, DutyStatus } from '../../engine/src/index.ts';
-import { DEFAULT_CONFIG, normalize } from '../../engine/src/index.ts';
+import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel } from '../../engine/src/index.ts';
 
 /**
  * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
@@ -75,7 +75,7 @@ export interface State {
    * planning screens; 'settings' is labelled "More". Navigation, not data: every
    * launch opens on 'now' (see parseSaved).
    */
-  tab: 'now' | 'log' | 'plan' | 'split' | 'recap' | 'trip' | 'load' | 'settings';
+  tab: 'now' | 'log' | 'plan' | 'split' | 'recap' | 'trip' | 'load' | 'settings' | 'history';
   /**
    * Where a planning screen's back button returns to: the screen the driver entered it from
    * (patch 7.1). 'load' is entered from Now (patch 7), from the Plan hub, and from Recap;
@@ -797,6 +797,67 @@ export function currentRunStart(s: State, now: number): number {
     start = r.start;
   }
   return start;
+}
+
+/** One stretch of a carrier day in the reflection view: a logged row, or `status: null` for time no entry covers. */
+export interface HistoryItem { start: number; end: number; status: DutyStatus | null; note?: string }
+export interface HistoryDay {
+  start: number; end: number; label: string; isToday: boolean;
+  items: HistoryItem[];
+  totals: Record<DutyStatus, number>;
+  /** Minutes inside the day that no logged row covers — shown as not logged, never as rest. */
+  notLogged: number;
+}
+
+/**
+ * The last 8 carrier days as the driver actually logged them (patch 7.2) — the data behind the
+ * read-only "Your last 8 days" reflection view. Pure selection and arithmetic over the record:
+ * nothing here writes state, and nothing here touches the engine.
+ *
+ * Three fences, all deliberate:
+ *  - LOGGED rows only. The tentative list is never read, and a row inside `segments` that is
+ *    flagged tentative is dropped too: planned time must not pose as history. The live status
+ *    counts — it is logged time, materialized up to now the way allSegments does it — or today
+ *    would show nothing since the driver's last status change.
+ *  - Unlogged time stays unlogged. A stretch no row covers comes back as a `status: null` item,
+ *    never as off duty: going quiet is not the same as resting, and a view that filled gaps with
+ *    rest would invent exactly the history it claims only to reflect.
+ *  - Days are CARRIER days, rolled at dayStartHour in the terminal zone via the engine's own
+ *    day arithmetic — the same boundaries Recap uses — not the phone's midnight.
+ *
+ * Rows are resolved (overlaps settled the way the clocks settle them) and joined for display the
+ * way the Log's resolved timeline joins them, so the totals here are the totals the clocks count.
+ * Today is clipped at `now`: the view never shows time that has not happened yet.
+ */
+export function historyDays(s: State, now: number): HistoryDay[] {
+  const cfg = s.config;
+  const logged: Segment[] = s.segments.filter((x) => !x.tentative);
+  if (s.current && now > s.current.since) {
+    logged.push({ status: s.current.status, start: s.current.since, end: now, note: s.current.note, createdAt: s.current.createdAt ?? Number.MAX_SAFE_INTEGER });
+  }
+  const resolved = joinDisplayRows(normalize(logged, { merge: false }));
+  const starts: number[] = [];
+  let start = carrierDayStart(now, cfg);
+  for (let i = 0; i < 8; i++) { starts.unshift(start); start = carrierDayStart(start - 1, cfg); }
+  return starts.map((dayStart, i) => {
+    const dayEnd = i + 1 < starts.length ? starts[i + 1] : nextCarrierDayStart(dayStart, cfg);
+    const until = Math.min(dayEnd, now);
+    const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+    const items: HistoryItem[] = [];
+    let cursor = dayStart;
+    for (const r of resolved) {
+      if (r.end <= dayStart || r.start >= until) continue;
+      const a = Math.max(r.start, dayStart), b = Math.min(r.end, until);
+      if (b <= a) continue;
+      if (a > cursor) items.push({ start: cursor, end: a, status: null });
+      items.push({ start: a, end: b, status: r.status, note: r.note });
+      totals[r.status] += b - a;
+      cursor = Math.max(cursor, b);
+    }
+    if (until > cursor) items.push({ start: cursor, end: until, status: null });
+    const notLogged = items.reduce((n, x) => (x.status === null ? n + (x.end - x.start) : n), 0);
+    return { start: dayStart, end: dayEnd, label: dayLabel(dayStart, cfg), isToday: i === starts.length - 1, items, totals, notLogged };
+  });
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };

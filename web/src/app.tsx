@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 
 /* ============================================================ shared bits */
@@ -1943,6 +1943,56 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
       </button>
+      <button class="plan-item" onClick={() => setState({ tab: 'history', planReturn: 'recap' })}>
+        <span class="plan-icon"><Icon d={I.recap} size={26} /></span>
+        <span class="plan-text"><b>Your last 8 days</b><span class="muted small">What you logged, day by day — for your own review.</span></span>
+        <Icon d={I.next} />
+      </button>
+    </>
+  );
+}
+
+/* ============================================================ Your last 8 days */
+
+/**
+ * The last 8 carrier days as logged — a mirror, not a record (patch 7.2). Read-only by design:
+ * no edit, delete or add controls anywhere on this screen, and nothing here writes state. It is
+ * for the driver's own review; roadside proof of duty status is the ELD's job, and this view
+ * never presents itself as that — planned (what-if) time is excluded entirely, and time no entry
+ * covers reads "Not logged" rather than being quietly filled in as rest. The day math lives in
+ * the store (historyDays); this component only lays it out, newest day first.
+ */
+function HistoryTab({ s, now }: { s: State; now: number }) {
+  const foot = <p class="muted small">For your own review — your ELD holds the official record. Planned (what-if) time isn't shown here; only what you logged.</p>;
+  if (historyBasis(s, now) === 'fresh') {
+    return (
+      <>
+        <BackToPlan s={s} />
+        <h1 class="screen-title">Your last 8 days</h1>
+        <Card>
+          <p>Nothing logged yet — this fills in as you enter your real day.</p>
+          {foot}
+        </Card>
+      </>
+    );
+  }
+  const days = historyDays(s, now).slice().reverse();
+  return (
+    <>
+      <BackToPlan s={s} />
+      <h1 class="screen-title">Your last 8 days</h1>
+      <p class="muted small">What you logged, day by day, on your carrier's clock — days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}, and the times below read in your device zone ({deviceTz}), like everywhere else in the app.</p>
+      {days.map((d) => (
+        <Card key={d.start} title={d.isToday ? `Today — ${d.label}` : d.label}>
+          <p class="small">Driving <b>{dur(d.totals.D)}</b> · On duty <b>{dur(d.totals.ON)}</b> · Off duty <b>{dur(d.totals.OFF)}</b> · Sleeper <b>{dur(d.totals.SB)}</b>{d.notLogged > 0 && <> · Not logged <b>{dur(d.notLogged)}</b></>}</p>
+          <ul class="seglist">{d.items.map((it, i) => it.status === null ? (
+            <li key={i}><span /><span class="muted">Not logged</span><span class="muted">{clock(it.start)} → {clock(it.end)} · {dur(it.end - it.start)}</span></li>
+          ) : (
+            <li key={i}><span class="dot" style={{ background: STATUS_COLOR[it.status] }} /><span>{segLabel(it.status, it.note)}</span><span class="muted">{clock(it.start)} → {clock(it.end)} · {dur(it.end - it.start)}</span></li>
+          ))}</ul>
+        </Card>
+      ))}
+      {foot}
     </>
   );
 }
@@ -2440,7 +2490,7 @@ export function App() {
   const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['settings', 'More', I.more]];
   // The planning screens sit under Plan and Recap sits under More: the tab bar shows where you are,
   // not a fifth or sixth tab (declutter patch, 2026-11-05).
-  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t === 'recap' ? 'settings' : t);
+  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t === 'recap' || t === 'history' ? 'settings' : t);
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
@@ -2479,6 +2529,7 @@ export function App() {
           {s.tab === 'plan' && <PlanTab />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
           {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
+          {s.tab === 'history' && <HistoryTab s={s} now={now} />}
           {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
           {s.tab === 'load' && <LoadTab s={s} now={now} ev={ev} />}
           {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
