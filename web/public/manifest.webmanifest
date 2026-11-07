@@ -1,6 +1,6 @@
 {
-  "name": "HOS Sandbox",
-  "short_name": "HOS Sandbox",
+  "name": "Split Decision — HOS What-If Planner",
+  "short_name": "Split Decision",
   "description": "Split-sleeper, recap and trip planning scratchpad for truck drivers. Not an ELD.",
   "start_url": "./",
   "scope": "./",

@@ -224,7 +224,7 @@ function reportBug(s: State, ev: FullEvaluation) {
   navigator.clipboard?.writeText(json).catch(() => {});
   if (s.bugEmail) {
     const body = ['What I did:', '', 'What the app showed:', '', 'What I expected (ELD / reg):', '', `Build: ${__BUILD__}`, `Clocks: ${clocks}`, '', json.length < 1500 ? json : '(log copied to clipboard — paste here)'].join('\n');
-    location.href = `mailto:${s.bugEmail}?subject=${encodeURIComponent('HOS Sandbox bug')}&body=${encodeURIComponent(body)}`;
+    location.href = `mailto:${s.bugEmail}?subject=${encodeURIComponent('Split Decision bug')}&body=${encodeURIComponent(body)}`;
     return;
   }
   const q = new URLSearchParams({ template: 'bug-report.yml', title: '[bug] ', build: __BUILD__, clocks, log: json.length < 2500 ? json : '(log too long — it is on your clipboard; paste it here)' });
@@ -788,7 +788,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       {/* The load question is the hook of the whole app, and it sat two taps away behind Plan
           (3 a.m. review, patch 7). It now rides Now itself, in the same dress the Plan hub and
           Recap give it, one tap from the screen the app opens on. */}
-      <button class="plan-item" onClick={() => setState({ tab: 'load' })}>
+      <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'now' })}>
         <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
@@ -801,8 +801,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       </button>
       {warn.map((n, i) => <p key={i} class="warnbox small">{n}</p>)}
       <div class="quick">
-        <button onClick={() => setState({ tab: 'load' })}><Icon d={I.truck} /> Take a load?</button>
-        <button onClick={() => setState({ tab: 'split' })}><Icon d={I.bunk} /> Plan a split</button>
+        <button onClick={() => setState({ tab: 'split', planReturn: 'now' })}><Icon d={I.bunk} /> Plan a split</button>
       </div>
       <StatusDock s={s} />
     </>
@@ -1687,15 +1686,21 @@ function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
 
 /* ============================================================ Plan */
 
-/** "Back to Plan" for the planning screens, which are reached from Plan rather than the tab bar. */
-function BackToPlan() {
-  return <button class="back" onClick={() => setState({ tab: 'plan' })}><Icon d={I.back} /> Plan</button>;
+/**
+ * Back out of a planning screen — to wherever the driver entered it from (patch 7.1). The Plan hub
+ * is the default and the label says so, but patch 7 put doors to these screens on Now and Recap,
+ * and a back button that always lands on Plan strands a driver who never came through Plan
+ * (Lorico, on his Pixel, live patch 7). The label names the real destination.
+ */
+function BackToPlan({ s }: { s: State }) {
+  const label = s.planReturn === 'now' ? 'Now' : s.planReturn === 'recap' ? 'Recap' : 'Plan';
+  return <button class="back" onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /> {label}</button>;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
 function PlanTab() {
   const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
-    <button class="plan-item" onClick={() => setState({ tab })}>
+    <button class="plan-item" onClick={() => setState({ tab, planReturn: 'plan' })}>
       <span class="plan-icon"><Icon d={icon} size={26} /></span>
       <span class="plan-text"><b>{title}</b><span class="muted small">{sub}</span></span>
       <Icon d={I.next} />
@@ -1755,7 +1760,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
   return (
     <>
-      <BackToPlan />
+      <BackToPlan s={s} />
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
         {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
@@ -1933,7 +1938,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
       <Card title="Hours coming back">
         <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
       </Card>
-      <button class="plan-item" onClick={() => setState({ tab: 'load' })}>
+      <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'recap' })}>
         <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
@@ -1948,7 +1953,8 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
  * Redesign 4/5: the load check as three questions, one per screen, then a plain answer. It lived as a
  * card at the bottom of Recap, with two sliders; at the dock, with a dispatcher waiting, the driver
  * wants the question asked and the answer given. Every answer is kept (the store), so leaving and
- * coming back changes nothing.
+ * coming back changes nothing — the one deliberate clear is the answer screen's "Check another
+ * load" (patch 7.1), which resets the draft to the defaults and starts the questions over.
  */
 function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const lc = s.loadCheck;
@@ -1971,10 +1977,13 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const openGaps = meaningfulGaps(ev.gaps);
   const provisional = openGaps.length > 0;
   const leaveWord = lc.leaveIn ? `in ${dur(lc.leaveIn)}` : 'now';
+  // Back out of the flow returns to wherever the driver entered it from (patch 7.1): Now, the
+  // Plan hub, or Recap — not always Plan, which is where it landed before. The label names it.
+  const returnLabel = s.planReturn === 'now' ? 'Now' : s.planReturn === 'recap' ? 'Recap' : 'Plan';
   const head = (n: number) => (
     <>
       <div class="flow-head">
-        <button class="icon-btn" aria-label={n === 1 ? 'Back to Plan' : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: 'plan' }) : setStep(n - 1))}><Icon d={I.back} /></button>
+        <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n - 1))}><Icon d={I.back} /></button>
         <b>Can I take this load?</b>
         <span class="muted">{n} of 3</span>
       </div>
@@ -2032,7 +2041,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   return (
     <>
       <div class="flow-head">
-        <button class="icon-btn" aria-label="Back to Plan" onClick={() => setState({ tab: 'plan' })}><Icon d={I.back} /></button>
+        <button class="icon-btn" aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /></button>
         <b>Can I take this load?</b><span />
       </div>
       <section class={`verdict ${best.feasible ? 'yes' : 'no'}`}>
@@ -2055,6 +2064,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <Card title="How it goes"><PlanCompare both={both} from={now} /></Card>
       <p class="muted small">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
       <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
+      <button class="wide" onClick={() => { setState({ loadCheck: { ...DEFAULT_LOADCHECK } }); setStep(1); }}>Check another load</button>
     </>
   );
 }
@@ -2093,7 +2103,7 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
   return (
     <>
-      <BackToPlan />
+      <BackToPlan s={s} />
       <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'}>
         <div class="clocks">
           <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
@@ -2171,7 +2181,7 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <p class="muted small">
         {notif === 'granted' ? 'Notifications are on: if the app is open behind another app, alerts also show as notifications. ' : ''}
         {notif === 'denied' ? 'Notifications are blocked for this site in your browser settings. ' : ''}
-        Alerts only work while HOS Sandbox is open — when the phone locks or the app is closed, the phone stops it. Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive. <b>Your ELD is your official warning.</b>
+        Alerts only work while Split Decision is open — when the phone locks or the app is closed, the phone stops it. Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive. <b>Your ELD is your official warning.</b>
       </p>
     </Card>
   );
@@ -2277,7 +2287,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">
-        <p class="small">HOS Sandbox is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <p class="small">Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <p class="muted small">Your HOS what-if planner.</p>
         <p class="muted small">Build {__BUILD__} · now {clock(now)}</p>
       </Card>
       {/* Kept apart at the bottom of More on purpose (patch 7): a testing clock sat in the Planning
@@ -2315,11 +2326,11 @@ function Disclaimer({ onClose, tz, needsTz, compact }: { onClose: (tz?: string) 
         {compact ? (
           <>
             <p><b>Planning only — not a log, not an ELD.</b></p>
-            <p class="small">HOS Sandbox is a planning scratchpad. Your ELD is your official record of duty status — when it and this app disagree, the ELD governs.</p>
+            <p class="small">Split Decision is a planning scratchpad. Your ELD is your official record of duty status — when it and this app disagree, the ELD governs.</p>
           </>
         ) : (
           <>
-            <p><b>HOS Sandbox is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
+            <p><b>Split Decision is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
             <p>Your official record is your ELD. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
             <p class="muted small">The point of this tool is to show you what you will have <b>after</b> the nap and the bunk time — not to prove what you had.</p>
           </>
@@ -2412,7 +2423,7 @@ export function App() {
     return (
       <div class="app"><main>
         <div class="card warn">
-          <h3>HOS Sandbox could not calculate your clocks</h3>
+          <h3>Split Decision could not calculate your clocks</h3>
           <p class="small">Your log is still saved. The error was:</p>
           <pre class="small" style="white-space:pre-wrap">{result.err}</pre>
           <p class="small">Resetting the rules settings (cycle, carrier day, time zone, exceptions) usually fixes this and keeps your log.</p>

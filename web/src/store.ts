@@ -72,10 +72,19 @@ export interface State {
   nowOverride: number | null;
   /**
    * Which screen is showing. 'now' is home (redesign, 2026-10-10); 'split', 'trip' and 'load' are the
-   * planning screens reached from 'plan'; 'settings' is labelled "More". Navigation, not data: every
+   * planning screens; 'settings' is labelled "More". Navigation, not data: every
    * launch opens on 'now' (see parseSaved).
    */
   tab: 'now' | 'log' | 'plan' | 'split' | 'recap' | 'trip' | 'load' | 'settings';
+  /**
+   * Where a planning screen's back button returns to: the screen the driver entered it from
+   * (patch 7.1). 'load' is entered from Now (patch 7), from the Plan hub, and from Recap;
+   * 'split' from Now's quick row and the hub. Before this field the back buttons were hard-wired
+   * to Plan, so a driver who came from Now landed on Plan instead (Lorico, on his Pixel, live
+   * patch 7). Defaults to 'plan' — the behaviour before the field existed — and parseSaved takes
+   * only the three real origins, so an old or damaged save behaves exactly as the app did before.
+   */
+  planReturn: 'now' | 'plan' | 'recap';
   /** where "Report a bug" sends mail */
   bugEmail: string;
   /** Sound, vibration and notification alerts while driving (driver report 2026-10-06). Device setting: not exported. */
@@ -154,7 +163,7 @@ export const INITIAL_STATE: State = {
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   disclaimerAcked: false,
-  tzChosen: false, nowOverride: null, tab: 'now', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
+  tzChosen: false, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
 
@@ -258,6 +267,10 @@ export function parseSaved(raw: string | null): State {
     // Every launch opens on Now: the screen a driver opens the app for. The last tab is navigation, not
     // data, and reopening into a half-finished planning screen hides the clocks (redesign, 2026-10-10).
     merged.tab = 'now';
+    // The planning screens' back target counts only as one of the three real origins: a save from
+    // before the field existed (missing) and a damaged one (anything else) both read as 'plan',
+    // which is where those buttons went before the field existed.
+    if (s.planReturn !== 'now' && s.planReturn !== 'plan' && s.planReturn !== 'recap') merged.planReturn = 'plan';
     // Legacy save: night was the DEFAULT when it was written, so a stored 'night' far more often means
     // "never touched it" than "chose night" — and `themeChosen` did not exist yet to tell them apart
     // (round-3 item 2). Move it to the new day default once, and raise a notice rather than rewriting
@@ -707,9 +720,9 @@ const rowProblem = (x: unknown): string | null => {
  * (bug report C1). Returns a driver-facing reason, or null when the payload is usable.
  */
 export function importProblem(d: unknown): string | null {
-  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'This is not an HOS Sandbox export (expected a JSON object).';
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'This is not a Split Decision export (expected a JSON object).';
   const o = d as Record<string, unknown>;
-  if (!Array.isArray(o.segments)) return 'This is not an HOS Sandbox export: it has no "segments" list.';
+  if (!Array.isArray(o.segments)) return 'This is not a Split Decision export: it has no "segments" list.';
   if (o.tentative !== undefined && !Array.isArray(o.tentative)) return 'The "tentative" field is not a list.';
   for (const [name, list] of [['segments', o.segments], ['tentative', (o.tentative ?? []) as unknown[]]] as const) {
     for (let i = 0; i < list.length; i++) {

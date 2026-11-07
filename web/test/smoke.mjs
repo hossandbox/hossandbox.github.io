@@ -815,8 +815,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now' });
 
   // Startup disclaimer — never an ELD, never a legal log.
+  // (patch 7.1 renamed the app: the pins in this file that quoted the disclaimer now quote
+  // "Split Decision is a planning scratchpad" — the invariants they guard are unchanged.)
   const dx = out('startup disclaimer');
-  if (!/HOS Sandbox is a planning scratchpad/.test(dx)) throw new Error('the startup disclaimer must appear at launch');
+  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('the startup disclaimer must appear at launch');
   if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
   if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
   // While the dialog is open nothing behind it can take focus or be read as current (round-3 finding).
@@ -835,7 +837,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tzChosen: true });
   const fz2 = out('terminal zone already confirmed');
   if (/Where is your home terminal\?/.test(fz2)) throw new Error('once the zone is confirmed the app must stop asking');
-  if (!/HOS Sandbox is a planning scratchpad/.test(fz2)) throw new Error('the disclaimer itself must still show on every launch');
+  if (!/Split Decision is a planning scratchpad/.test(fz2)) throw new Error('the disclaimer itself must still show on every launch');
 
   // A legacy save (night was the default when it was written) is moved to the new day default ONCE and
   // says so — never silently (round-3 item 2).
@@ -1261,7 +1263,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   //    the per-class pins live in the patch 6 section at the end of this file)
   if (!/\nbutton \{[^}]*min-height: 48px/.test(css)) throw new Error('buttons must be at least 48px tall');
   setLaunchNotice(true);
-  if (!/HOS Sandbox is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
+  if (!/Split Decision is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('redesign 1 (Now, header, panels, Plan): OK');
 }
@@ -1413,7 +1415,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'plan' });
   if (!/Can I take this load\?/.test(out('plan/load link'))) throw new Error('Plan must offer the load question');
   setState({ tab: 'now', current: { status: 'ON', since: L(12, 9), createdAt: 2 } });
-  if (!/Take a load\?/.test(out('now/load link'))) throw new Error('Now must offer the load question');
+  // patch 7.1: the quick row's smaller duplicate "Take a load?" button is gone — Now offers the
+  // load question through the prominent plan-item entry patch 7 put under the hero. The invariant
+  // this line guards (Now must offer the load question) is unchanged; the patch 7.1 section at
+  // the end of this file pins the duplicate's absence.
+  if (!/Can I take this load\?/.test(out('now/load link'))) throw new Error('Now must offer the load question');
   setState({ tab: 'recap' });
   h = out('recap/load link');
   if (!/Can I take this load\?/.test(h)) throw new Error('Recap must link to the load question');
@@ -2542,7 +2548,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, tab: 'now', disclaimerAcked: false, tzChosen: true, nowOverride: null });
   setLaunchNotice(true);
   let h = out('patch 7/disclaimer full');
-  if (!/HOS Sandbox is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('patch 7: the first launch must show the full disclaimer');
+  if (!/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('patch 7: the first launch must show the full disclaimer');
   if (/when it and this app disagree/.test(h)) throw new Error('patch 7: the full disclaimer must not carry the compact wording');
   ss({ disclaimerAcked: true });
   h = out('patch 7/disclaimer compact');
@@ -2613,5 +2619,132 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', disclaimerAcked: false });
   setLaunchNotice(true);
   console.log('patch 7 (first open at 3 a.m.; compact disclaimer): OK');
+}
+// --- patch 7.1: one load door on Now, a way to start the load question over, and the rename —
+// patch 7 left Now with two doors (the prominent plan-item entry and the quick row's smaller
+// duplicate), and a finished load check could only be edited answer by answer: reopening it
+// landed on the old verdict with no road back to a fresh set of questions. The duplicate comes
+// out, and the verdict screen gains "Check another load" — the one deliberate clear, resetting
+// the draft to the defaults. Nothing auto-clears: reopening a finished check still lands on its
+// verdict. And the app takes its launch name, Split Decision — every driver-facing surface,
+// while the storage keys and the repo path stay exactly where they were. Folded in last (Lorico
+// hit it on his Pixel against live patch 7 and approved the fold-in in voice): the planning
+// screens' back buttons were hard-wired to Plan, so entering the load check from Now and
+// backing out landed on Plan — the entry now records where the driver came from and the
+// back buttons honour it.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, DEFAULT_LOADCHECK: DL71, parseSaved } = await import('../src/store.ts');
+  const { setLaunchNotice } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+
+  // (a) the duplicate is gone from source and screen; the other doors and Plan a split stay
+  if (/Take a load\?/.test(app)) throw new Error('patch 7.1: the quick-row duplicate must be gone from the source');
+  setLaunchNotice(false);
+  ss({ segments: [], tentative: [], current: { status: 'ON', since: now - 60 }, tab: 'now', nowOverride: null });
+  let h = out('patch 7.1/now dedupe');
+  if (/Take a load\?/.test(h)) throw new Error('patch 7.1: Now must not render the duplicate load button');
+  if (!/Plan a split/.test(h)) throw new Error('patch 7.1: the quick row must keep Plan a split');
+  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h)) throw new Error('patch 7.1: Now must keep the prominent load entry');
+
+  // (b) the verdict screen carries the reset, wired to clear the draft and restart the questions
+  if (!/setState\(\{ loadCheck: \{ \.\.\.DEFAULT_LOADCHECK \} \}\); setStep\(1\)/.test(app)) throw new Error('patch 7.1: Check another load must reset the draft to the defaults and return to question 1');
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
+  ss({ nowOverride: L(12, 10), historyAcknowledged: true, tentative: [], current: { status: 'ON', since: L(12, 9) },
+    segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 9) }],
+    config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 },
+    loadCheck: { miles: 300, dwell: 60, dwellOff: true, leaveIn: 30, waitOff: true, answered: true }, tab: 'load' });
+  h = out('patch 7.1/verdict with reset');
+  if (!/Load distance<\/span><b>300 mi<\/b>/.test(h)) throw new Error('patch 7.1: the seeded finished check must open on its verdict');
+  if (!/>Check another load</.test(h)) throw new Error('patch 7.1: the verdict screen must offer Check another load');
+  if (!/>Done</.test(h)) throw new Error('patch 7.1: the verdict screen must keep Done');
+
+  // (c) the reset itself: the draft returns to the defaults and the flow opens on question 1.
+  //     The harness renders to string and cannot click, so it performs the same store write the
+  //     button's handler is pinned to above, then re-renders — the step half of the handler is
+  //     covered by that source pin and by redesign 4 (1): an unanswered check opens on question 1.
+  ss({ loadCheck: { ...DL71 } });
+  const lc = gs().loadCheck;
+  if (lc.miles !== 1200 || lc.dwell !== 120 || lc.dwellOff !== false || lc.leaveIn !== 0 || lc.waitOff !== false || lc.answered !== false)
+    throw new Error('patch 7.1: the reset must restore the default load draft');
+  h = out('patch 7.1/after reset');
+  if (!/How far is the load\?/.test(h) || !/1 of 3/.test(h)) throw new Error('patch 7.1: after the reset the flow must open on question 1');
+  if (!/<b>1200<\/b> mi/.test(h)) throw new Error('patch 7.1: question 1 must show the default miles after the reset');
+  if (/Verdict|Check another load/.test(h)) throw new Error('patch 7.1: question 1 must not show the verdict or its reset');
+
+  // (d) the rename (added at Lorico's direction mid-build): every surface a driver sees says
+  //     Split Decision, and the two things a rename must never touch — the storage keys and the
+  //     repo path — are exactly where they were, or every installed copy loses its log / links.
+  const store = rf('src/store.ts', 'utf8');
+  const idx = rf('public/index.html', 'utf8');
+  const mf = JSON.parse(rf('public/manifest.webmanifest', 'utf8'));
+  const readme = rf('../README.md', 'utf8');
+  if (!/<title>Split Decision — HOS What-If Planner<\/title>/.test(idx)) throw new Error('patch 7.1: the page title must be the launch lockup');
+  if (mf.name !== 'Split Decision — HOS What-If Planner' || mf.short_name !== 'Split Decision') throw new Error('patch 7.1: the manifest must carry the launch name and short name');
+  if (!/^# Split Decision — HOS What-If Planner/.test(readme) || /HOS Sandbox/.test(readme)) throw new Error('patch 7.1: the README must lead with the launch name and drop the codename');
+  if (!/const KEY = 'hos-sandbox-v1'/.test(store) || !/'hos-sandbox-v1-backup'/.test(store) || !/UNDO_KEY = 'hos-sandbox-undo-v1'/.test(app)) throw new Error('patch 7.1: the storage keys must not move — renaming them wipes every log');
+  if (!/REPO = 'hossandbox\/hossandbox\.github\.io'/.test(app)) throw new Error('patch 7.1: the repo path must not move — the repo is not renamed');
+  ss({ tab: 'settings', nowOverride: null });
+  h = out('patch 7.1/about name');
+  if (!/Split Decision — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: About must open with the launch lockup');
+  if (!/Your HOS what-if planner\./.test(h)) throw new Error('patch 7.1: About must carry the voice line');
+  if (/what-if machine/.test(h)) throw new Error('patch 7.1: the retired "machine" line must not render');
+  if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: no rendered surface may carry the old name');
+  ss({ tab: 'now', disclaimerAcked: true });
+  setLaunchNotice(true);
+  h = out('patch 7.1/compact disclaimer name');
+  if (!/Split Decision is a planning scratchpad/.test(h)) throw new Error('patch 7.1: the compact disclaimer must carry the new name');
+  if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: the compact disclaimer must not carry the old name');
+  ss({ disclaimerAcked: false });
+
+  // (e) the back buttons return to wherever the driver entered from (folded in after Lorico hit
+  //     it on his Pixel against live patch 7: from Now, the load flow's back landed on Plan).
+  //     The entry handlers are pinned in the source; the flow is then driven by performing the
+  //     same store writes the handlers make — the harness renders to string and cannot click.
+  if (!/setState\(\{ tab: 'load', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's load door must record Now as the return");
+  if (!/setState\(\{ tab: 'load', planReturn: 'recap' \}\)/.test(app)) throw new Error("patch 7.1: Recap's load door must record Recap as the return");
+  if (!/setState\(\{ tab, planReturn: 'plan' \}\)/.test(app)) throw new Error('patch 7.1: the Plan hub doors must record Plan as the return');
+  if (!/setState\(\{ tab: 'split', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's split door must record Now as the return");
+  if ((app.match(/setState\(\{ tab: s\.planReturn \}\)/g) || []).length < 3) throw new Error("patch 7.1: the load flow's two backs and the planning back bar must all honour the recorded return");
+  // from Now: question 1's back is labelled for Now and lands there
+  ss({ segments: [], tentative: [], current: { status: 'ON', since: now - 60 }, tab: 'load', planReturn: 'now', loadCheck: { ...DL71 }, nowOverride: null });
+  h = out('patch 7.1/load from now');
+  if (!/How far is the load\?/.test(h)) throw new Error('patch 7.1: an unanswered check from Now must open on question 1');
+  if (!/aria-label="Back to Now"/.test(h)) throw new Error("patch 7.1: from Now, question 1's back must say Back to Now");
+  ss({ tab: gs().planReturn });
+  if (gs().tab !== 'now') throw new Error("patch 7.1: from Now, the load flow's back must land on Now");
+  h = out('patch 7.1/back landed on now');
+  if (!/class="plan-item"/.test(h)) throw new Error('patch 7.1: after the back, Now must be showing');
+  // the verdict's back says the same (the seeded finished check, entered from Now)
+  ss({ nowOverride: L(12, 10), historyAcknowledged: true, tentative: [], current: { status: 'ON', since: L(12, 9) },
+    segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 9) }],
+    config: { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 },
+    loadCheck: { miles: 300, dwell: 60, dwellOff: true, leaveIn: 30, waitOff: true, answered: true }, tab: 'load', planReturn: 'now' });
+  h = out('patch 7.1/verdict from now');
+  if (!/aria-label="Back to Now"/.test(h)) throw new Error("patch 7.1: from Now, the verdict's back must say Back to Now");
+  // from the Plan hub: question 1's back is labelled for Plan and lands there, as it always did
+  ss({ tab: 'load', planReturn: 'plan', loadCheck: { ...DL71 }, nowOverride: null });
+  h = out('patch 7.1/load from plan');
+  if (!/aria-label="Back to Plan"/.test(h)) throw new Error("patch 7.1: from Plan, question 1's back must say Back to Plan");
+  ss({ tab: gs().planReturn });
+  if (gs().tab !== 'plan') throw new Error("patch 7.1: from Plan, the load flow's back must land on Plan");
+  h = out('patch 7.1/back landed on plan');
+  if (!/Plan a run/.test(h)) throw new Error('patch 7.1: after the back, the Plan hub must be showing');
+  // Split from Now: its back bar names Now and lands there
+  ss({ tab: 'split', planReturn: 'now' });
+  h = out('patch 7.1/split from now');
+  if (!/class="back"(?:(?!<\/button>)[\s\S])*Now<\/button>/.test(h)) throw new Error("patch 7.1: from Now, Split's back bar must name Now");
+  ss({ tab: gs().planReturn });
+  if (gs().tab !== 'now') throw new Error("patch 7.1: from Now, Split's back must land on Now");
+  // the recorded return is validated on load: garbage and absence both fall back to Plan,
+  // and a real origin survives — old and damaged saves behave exactly as the app did before
+  if (parseSaved(JSON.stringify({ planReturn: 'mars' })).planReturn !== 'plan') throw new Error('patch 7.1: a garbage recorded return must fall back to Plan');
+  if (parseSaved(JSON.stringify({})).planReturn !== 'plan') throw new Error('patch 7.1: a save with no recorded return must fall back to Plan');
+  if (parseSaved(JSON.stringify({ planReturn: 'recap' })).planReturn !== 'recap') throw new Error('patch 7.1: a real recorded return must survive a reload');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', planReturn: 'plan', loadCheck: { ...DL71 } });
+  setLaunchNotice(true);
+  console.log('patch 7.1 (one load door on Now; Check another load; the Split Decision rename; back returns to where you came from): OK');
 }
 console.log('OK');
