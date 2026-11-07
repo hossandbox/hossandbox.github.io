@@ -4,9 +4,10 @@
 
 ## The decision
 
-Lorico has handed HOS Sandbox **development** to you. The working model is **you author, the HOS bot applies**:
+Lorico has handed HOS Sandbox **development** to you. The working model was **you author, the
+HOS bot applies**; it changed on 2026-11-07 (Lorico's decision, below).
 
-- **You** — research, design, write the patch, verify it locally, email it.
+- **You** — research, design, write the patch, verify it locally.
 - **HOS Sandbox bot** — independently verifies the package, applies it, runs the full suite,
   commits, pushes, and deploys (subject to Lorico's deploy rule).
 - **Lorico** — decision-maker on pricing, launch, money, and the employer question.
@@ -17,6 +18,22 @@ line before a driver sees anything. No patch skips it — yours included.
 
 **You do not need a git token.** You never push; you email patches. (If that ever changes, ask
 Lorico for a repo-scoped fine-grained token — never the account-wide one.)
+
+## Lane update — 2026-11-07 (Lorico's decision)
+
+The lane above is superseded for pushing and verification:
+
+- **Ada pushes** via the Muse GitHub connector — OAuth under Lorico's own GitHub identity,
+  the Muse GitHub App scoped to this repository only, every write individually approved.
+  There is no token. Lorico's per-deploy go remains the gate; only the hands changed.
+- **Opus (Claude Code, Lorico's Pro plan) verifies at checkpoints** — after the record-writing
+  feature groups and in a final adversarial pass — instead of per-patch bot verification.
+- **Claudia's bot lane is retained as fallback**, unchanged, until Lorico says otherwise.
+- First deploy under the new lane: **Patch 9 + 9.1 + 9.2** ("Check against my ELD"), deployed
+  2026-11-07 — source commit `27dac51`, gh-pages `a612baf`, live app.js sha256
+  `8b285efdbfc81b1a02f53378254d91648a7b9ec6f70277c7e067b1349ee64536`. The originally
+  bot-verified Patch 9 package was held and never deployed (two defects found on independent
+  re-verification); 9.1/9.2 are its corrections.
 
 ## The product, in one paragraph
 
