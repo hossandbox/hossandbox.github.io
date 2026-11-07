@@ -2387,4 +2387,66 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
   console.log('patch 5.1 (malformed current falls back; never evicts the backup): OK');
 }
+// --- patch 5.2: usableSave validates the ROWS inside segments/tentative too — the import path
+//     (rowProblem) has always required each row to be an object with a known duty status, finite
+//     start/end, and end after start; the load path checked only that the lists were lists. A save
+//     whose only defect is a malformed row now falls back like any other wrong-shape save, and
+//     never rotates into the backup slot over a good copy
+{
+  const { loadSaved, setState: ss } = await import('../src/store.ts');
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup';
+  const rowsA = [{ status: 'OFF', start: 1000, end: 1600, createdAt: 1 }];
+  const rowsX = [{ status: 'D', start: 5000, end: 5600, createdAt: 9 }];
+  const good = { status: 'OFF', start: 5000, end: 5600 };
+  const save = (segments, tentative = []) => JSON.stringify({ segments, tentative, current: null });
+  // the backup holds a known-good record; a bad save carries different segments so a fallback shows
+  mem.set(BAK, save(rowsA));
+  // 1. every malformed row flavour in `segments` makes the save unusable: the backup comes back.
+  //    The flavours mirror rowProblem on the import path, one per requirement.
+  const badSegs = [
+    ['a string', ['junk']],
+    ['a number', [42]],
+    ['null', [null]],
+    ['an array', [[]]],
+    ['an unknown status', [{ ...good, status: 'DRIVING' }]],
+    ['a missing status', [{ start: 5000, end: 5600 }]],
+    ['a string start', [{ ...good, start: '09:00' }]],
+    ['a missing end', [{ status: 'OFF', start: 5000 }]],
+    ['a non-finite end', [{ ...good, end: null }]],
+    ['an end equal to its start', [{ ...good, end: 5000 }]],
+    ['an end before its start', [{ ...good, start: 5600, end: 5000 }]],
+    ['one bad row among good ones', [good, { ...good, status: 'XX' }]],
+  ];
+  for (const [label, segs] of badSegs) {
+    mem.set(KEY, save(segs));
+    if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA)) throw new Error(`patch 5.2: a save whose segments hold ${label} must fall back to the backup`);
+  }
+  // 2. the same for `tentative`: one malformed what-if row makes the whole save unusable
+  for (const [label, tent] of [
+    ['an unknown status', [{ ...good, status: 'DRIVING', tentative: true }]],
+    ['a missing start', [{ status: 'SB', end: 5600, tentative: true }]],
+    ['an end before its start', [{ ...good, start: 5600, end: 5000, tentative: true }]],
+  ]) {
+    mem.set(KEY, save(rowsX, tent));
+    if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA)) throw new Error(`patch 5.2: a save whose tentative holds ${label} must fall back to the backup`);
+  }
+  // 3. a healthy save still wins over the backup: rows with the fields the app itself writes —
+  //    notes, tentative flags, createdAt stamps — load as themselves, record intact
+  const healthy = [
+    { status: 'OFF', start: 5000, end: 5600, note: 'PC', createdAt: 9 },
+    { status: 'D', start: 5600, end: 5900, createdAt: 10 },
+  ];
+  const healthyTent = [{ status: 'SB', start: 5900, end: 6500, tentative: true, note: 'what-if', createdAt: 11 }];
+  mem.set(KEY, save(healthy, healthyTent));
+  const live = loadSaved();
+  if (JSON.stringify(live.segments) !== JSON.stringify(healthy) || JSON.stringify(live.tentative) !== JSON.stringify(healthyTent)) throw new Error('patch 5.2: a healthy save with well-formed rows must load as itself');
+  // 4. rotation: a save with a malformed row sitting in the slot is never copied over the good backup
+  mem.set(BAK, save(rowsA));
+  mem.set(KEY, save([{ ...good, status: 'DRIVING' }]));
+  ss({ segments: rowsX, tentative: [], current: { status: 'ON', since: 3000 } });
+  if (JSON.stringify(JSON.parse(mem.get(BAK)).segments) !== JSON.stringify(rowsA)) throw new Error('patch 5.2: a malformed-row save must never rotate into the backup slot');
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now' });
+  console.log('patch 5.2 (malformed rows fall back; never evict the backup): OK');
+}
 console.log('OK');

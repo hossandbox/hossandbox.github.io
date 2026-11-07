@@ -172,8 +172,8 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
  * Could this string be a save at all? parseSaved merges whatever JSON it is given, so a save that
  * parses but whose record lists are the wrong shape (a string where the segments belong) would flow
  * straight into the state and blank the app on every render, not just on load. Only a plain object
- * whose lists — when present — are lists, and whose live segment — when present — is a real one,
- * counts as usable.
+ * whose lists — when present — are lists of real rows, and whose live segment — when present — is
+ * a real one, counts as usable.
  */
 function usableSave(raw: string | null): raw is string {
   if (!raw) return false;
@@ -183,6 +183,25 @@ function usableSave(raw: string | null): raw is string {
     const o = s as Record<string, unknown>;
     if (o.segments !== undefined && !Array.isArray(o.segments)) return false;
     if (o.tentative !== undefined && !Array.isArray(o.tentative)) return false;
+    // The rows inside the lists get the same check rowProblem gives an imported file's entries:
+    // each must be an object with a known duty status, finite start/end, and an end after its
+    // start. parseSaved does not sanitize rows on the load path either, so without this a save
+    // whose only defect is one malformed row counts as usable: the row flows straight into the
+    // state, and setState rotates the save into the backup slot, evicting a genuinely good copy.
+    // The optional fields (note, tentative, createdAt) are deliberately NOT checked — the import
+    // path does not check them, and the rows the app itself writes carry them in varying
+    // combinations. The statuses are spelled out here for the same reason as `current` below:
+    // this runs at module load, before rowProblem and the STATUSES set further down exist.
+    const rowOk = (x: unknown): boolean => {
+      if (!x || typeof x !== 'object') return false;
+      const r = x as Record<string, unknown>;
+      if (r.status !== 'OFF' && r.status !== 'SB' && r.status !== 'D' && r.status !== 'ON') return false;
+      if (!Number.isFinite(r.start) || !Number.isFinite(r.end)) return false;
+      if ((r.end as number) <= (r.start as number)) return false;
+      return true;
+    };
+    if (Array.isArray(o.segments) && !o.segments.every(rowOk)) return false;
+    if (Array.isArray(o.tentative) && !o.tentative.every(rowOk)) return false;
     // The live segment gets the same check importProblem gives an imported file: present-and-not-null
     // means an object with a known duty status and a finite start. Nothing else sanitizes `current`
     // on the load path, so without this a save whose ONLY defect is a malformed one counts as usable:
