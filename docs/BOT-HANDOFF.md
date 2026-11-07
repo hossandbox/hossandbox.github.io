@@ -874,3 +874,17 @@ Watcher state: `/opt/data/state/hos-regwatch.json`. Both scripts accept `--verbo
   - Deployed `deploy 2026-11-07T00:33Z from 5844acc`; served `app.js` byte-identical to `dist/` (ff20c43b…),
     `styles.css` unchanged. Ada's caveats: the row rules are not tightened beyond the import path, and #5's
     real-PWA relaunch undo-row check still awaits Lorico's phone.
+- **Patch 6 (2026-11-07, `1c9a862`, deploy go under the Ada rule; base `88002bf`).** Touch ergonomics from
+  Lorico's ELD-phone report. The base button floor rises 44→48px (Google's minimum), and primary controls,
+  steppers, chips, the tab bar, quick actions and number fields sit at 56px; `.icon-btn` 44→48 square; the
+  range slider strip 32→48. The Recap hour fields and the slider/miles are `type="number"` with `inputMode`
+  (decimal for the quarter-hour fields, numeric elsewhere) so the phone offers the number keyboard. One
+  guarded `tapTick()` (12ms `navigator.vibrate`, feature-detected and swallowed) fires on completed button
+  `click`s — not drags, not disabled controls; iOS no-ops (WebKit has no Vibration API, noted in code).
+  4 files +102/−27: styles.css, app.tsx, alerts.ts, smoke.mjs. Engine untouched.
+  - Verified: engine 99/99; smoke exit 0 with "patch 6 (big touch targets…): OK"; contrast 44/44 both
+    themes; build OK; applied files byte-identical to the package's files/; falsified the recap numeric
+    inputMode (mutated to `text`) -> smoke fails at "the slider number field must keep inputMode=\"numeric\"".
+  - Deployed `deploy 2026-11-07T01:33Z from 1c9a862`; served app.js and styles.css byte-identical to `dist/`
+    (61e7c116… / f1bacf8d…). Device-only caveats carried: real feel of the bigger targets, OEM `inputmode`
+    behaviour on `type="number"`, and the buzz (Lorico's Pixel is the first real test; iOS gets none).
