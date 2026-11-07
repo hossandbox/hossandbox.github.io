@@ -3341,4 +3341,66 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG9 } });
   console.log('patch 9.2 (ELD boxes take whole numbers only — fractions refused, never rounded; verdicts echo the number used; trailing clip pinned): OK');
 }
+// --- patch 9.3: the seed-synthesis correction (Opus break-test finding #3). The patch 8 seed
+// laid the pre-break driving down as ONE row, and that driving can reach 11h (drive clock
+// spent, break clock freshly reset) — so for 315 of 2,695 realistic clock combinations the
+// seed itself manufactured a BREAK_30 violation and an invented continuous 11h drive in the
+// driver's own log. The synthesis now interrupts that driving every ≤8h with 30 minutes of
+// the shift's own on-duty filler (§395.3(a)(3)(ii) is met by any 30-minute interruption), the
+// minutes coming out of the filler so every clock total is unchanged.
+{
+  const { synthesizeEldSeed: synth93 } = await import('../src/store.ts');
+  const { evaluate: ev93 } = await import('../../engine/src/index.ts');
+  const CFG93 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const NOW93 = Math.floor(Date.UTC(2026, 9, 12, 17, 0) / 60000); // Oct 12 2026, 12:00 Chicago
+  const clocks93 = (segs) => {
+    const ev = ev93(segs, { asOf: NOW93, config: CFG93 });
+    return { ev, drive: ev.shift.driveRemaining, window: ev.shift.windowRemaining, brk: ev.shift.breakRemaining, cycle: ev.cycle.remaining };
+  };
+  const longestDrive = (segs) => Math.max(0, ...segs.filter((x) => x.status === 'D').map((x) => x.end - x.start));
+
+  // the report's canonical repro: drove 8h, took a break, drove 3h, took another — the break
+  // clock stands reset while 11h of driving precedes it. The seed must round-trip EXACTLY,
+  // note nothing, manufacture no violation, and hold no driving row longer than 8h.
+  const canon = synth93({ driveLeft: 0, windowLeft: 120, breakDueIn: 480, cycleLeft: 3000 }, CFG93, NOW93, 1);
+  const cc = clocks93(canon.segments);
+  if (cc.drive !== 0 || cc.window !== 120 || cc.brk !== 480 || cc.cycle !== 3000)
+    throw new Error(`patch 9.3: the 11h-pre-break seed must round-trip exactly (saw drive ${cc.drive} window ${cc.window} break ${cc.brk} cycle ${cc.cycle})`);
+  if (canon.notes.length !== 0) throw new Error(`patch 9.3: a consistent seed needs no adjustments (saw ${canon.notes.join('; ')})`);
+  if (cc.ev.violations.length !== 0) throw new Error('patch 9.3: the canonical seed must manufacture no violations');
+  if (longestDrive(canon.segments) !== 480) throw new Error(`patch 9.3: the pre-break driving must be chunked at the 8h line (longest row ${longestDrive(canon.segments)})`);
+
+  // the report's second repro: the typed window (5h left) cannot hold 9h of driving plus the
+  // two breaks it needs, so the window clamps stricter (4h left) and is NAMED — while drive
+  // and break stay exact and no violation is manufactured.
+  const clamped = synth93({ driveLeft: 120, windowLeft: 300, breakDueIn: 480, cycleLeft: 3000 }, CFG93, NOW93, 1);
+  const kc = clocks93(clamped.segments);
+  if (kc.drive !== 120 || kc.brk !== 480 || kc.window !== 240)
+    throw new Error(`patch 9.3: the too-small window must clamp to 4h with drive and break exact (saw drive ${kc.drive} window ${kc.window} break ${kc.brk})`);
+  if (!clamped.notes.some((n) => /Shift time left came out lower/.test(n))) throw new Error('patch 9.3: a window clamped by the interruption must be named in the notes');
+  if (kc.ev.violations.length !== 0) throw new Error('patch 9.3: the clamped seed must manufacture no violations');
+
+  // boundary sweep: the full sweep (5,865 combos, plus a 7,326-combo edge grid around the
+  // boundary condition) lives in the 9.3 handoff evidence; smoke pins this representative
+  // subset — every drive/break pair on a 30-minute lattice at the two window extremes — so
+  // a regression turns the suite red. A seed must manufacture no violation of any kind, hold
+  // no driving row over 8h, and never read a clock above what was typed.
+  let swept = 0;
+  for (let driveLeft = 0; driveLeft <= 660; driveLeft += 30)
+    for (let breakDueIn = 0; breakDueIn <= 480; breakDueIn += 30)
+      for (const windowLeft of [0, 840]) {
+        const input = { driveLeft, windowLeft, breakDueIn, cycleLeft: 4200 };
+        const s = synth93(input, CFG93, NOW93, 1);
+        const c = clocks93(s.segments);
+        swept++;
+        if (c.ev.violations.length !== 0)
+          throw new Error(`patch 9.3: seed ${JSON.stringify(input)} manufactures ${JSON.stringify(c.ev.violations.map((v) => v.kind))}`);
+        if (longestDrive(s.segments) > 480)
+          throw new Error(`patch 9.3: seed ${JSON.stringify(input)} holds a driving row over 8h`);
+        if (c.drive > driveLeft || c.window > windowLeft || c.brk > breakDueIn || c.cycle > 4200)
+          throw new Error(`patch 9.3: seed ${JSON.stringify(input)} reads a clock above what was typed`);
+      }
+  if (swept !== 782) throw new Error('patch 9.3: the boundary sweep must run its full subset');
+  console.log('patch 9.3 (seed synthesis — pre-break driving interrupted every ≤8h, no manufactured violations): OK');
+}
 console.log('OK');

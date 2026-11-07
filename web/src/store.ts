@@ -898,7 +898,9 @@ export function cycleParamsOf(cfg: RulesConfig): { limit: number; windowDays: nu
  *
  * The layout, ending at `now`: a 10-hour rest (the reset the current shift counts from), then
  * inside the shift: on-duty filler for window time that was neither driving nor the break, the
- * driving done before the break, a 30-minute break, and the driving done since it. Earlier cycle
+ * driving done before the break — interrupted every ≤8 hours by 30 of those filler minutes,
+ * since a longer unbroken stretch would itself break the 30-minute-break rule — a 30-minute
+ * break, and the driving done since it. Earlier cycle
  * usage is one on-duty block ending right where that reset begins — placed as RECENTLY as the
  * numbers allow, so recap hours come back as LATE as possible, never early.
  *
@@ -935,11 +937,20 @@ export function synthesizeEldSeed(input: EldClocks, cfg: RulesConfig, now: numbe
   }
   const earlyDrive = driveUsed - sinceBreak;
   const breakLen = earlyDrive > 0 ? LIMITS.BREAK_LEN : 0;
-  // Window elapsed. It must at least hold the driving and the break; stretching it lowers the
-  // shift time left rather than granting time none of the four clocks showed.
+  // The driving done before the break can itself span more than 8 hours (driveUsed reaches
+  // 11h when the break clock stands freshly reset). §395.3(a)(3)(ii) is met by any 30-minute
+  // interruption — on-duty-not-driving counts — so that driving must be laid down in ≤8h
+  // stretches separated by 30 minutes of the shift's own on-duty filler, or the seed would
+  // manufacture a break violation and an invented continuous drive. The interruption minutes
+  // come out of the filler, never out of the driving, so every clock total is unchanged;
+  // the window stretch below must hold them alongside the driving and the break.
+  const extraBreaks = earlyDrive > LIMITS.BREAK_AFTER ? Math.floor((earlyDrive - 1) / LIMITS.BREAK_AFTER) : 0;
+  // Window elapsed. It must at least hold the driving, the break and those interruptions;
+  // stretching it lowers the shift time left rather than granting time none of the four
+  // clocks showed.
   let windowUsed = LIMITS.WINDOW - windowLeft;
-  if (windowUsed < driveUsed + breakLen) {
-    windowUsed = driveUsed + breakLen;
+  if (windowUsed < driveUsed + breakLen + extraBreaks * LIMITS.BREAK_LEN) {
+    windowUsed = driveUsed + breakLen + extraBreaks * LIMITS.BREAK_LEN;
     notes.push('Your shift clock was too small to hold the driving and the break — Shift time left came out lower than you typed.');
   }
 
@@ -950,8 +961,18 @@ export function synthesizeEldSeed(input: EldClocks, cfg: RulesConfig, now: numbe
   };
   let t = anchor;
   const filler = windowUsed - driveUsed - breakLen;
-  if (filler > 0) { push('ON', t, t + filler); t += filler; }
-  if (earlyDrive > 0) { push('D', t, t + earlyDrive); t += earlyDrive; push('OFF', t, t + LIMITS.BREAK_LEN); t += LIMITS.BREAK_LEN; }
+  // The filler leads, minus the minutes held back to interrupt the pre-break driving (the
+  // stretch above guarantees the filler covers them, so this never goes negative).
+  const fillerLead = filler - extraBreaks * LIMITS.BREAK_LEN;
+  if (fillerLead > 0) { push('ON', t, t + fillerLead); t += fillerLead; }
+  let preBreak = earlyDrive;
+  while (preBreak > LIMITS.BREAK_AFTER) {
+    push('D', t, t + LIMITS.BREAK_AFTER); t += LIMITS.BREAK_AFTER;
+    push('ON', t, t + LIMITS.BREAK_LEN); t += LIMITS.BREAK_LEN;
+    preBreak -= LIMITS.BREAK_AFTER;
+  }
+  if (preBreak > 0) { push('D', t, t + preBreak); t += preBreak; }
+  if (earlyDrive > 0) { push('OFF', t, t + LIMITS.BREAK_LEN); t += LIMITS.BREAK_LEN; }
   if (sinceBreak > 0) { push('D', t, t + sinceBreak); t += sinceBreak; }
 
   // Cycle: the shift just built already spends some of the cycle inside the window. Whatever
