@@ -1,0 +1,56 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Engine tests
+        working-directory: engine
+        run: node --test
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Web smoke suite
+        working-directory: web
+        run: npm run smoke
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+      - name: Publish dist to gh-pages (mirrors web/deploy.sh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TMP=$(mktemp -d)
+          cp -r web/dist/. "$TMP"/
+          touch "$TMP/.nojekyll"
+          cd "$TMP"
+          git init -q -b gh-pages
+          git config user.name "hos-sandbox deploy (CI)"
+          git config user.email "deploy@users.noreply.github.com"
+          git add -A
+          git commit -q -m "deploy $(date -u +%Y-%m-%dT%H:%MZ) from ${GITHUB_SHA:0:7} (CI)"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages:gh-pages
