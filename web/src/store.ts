@@ -11,6 +11,15 @@ import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLab
 export interface OpenSegment { status: DutyStatus; since: number; note?: string; createdAt?: number }
 
 /**
+ * A day-close bookmark (patch 13): the driver tapped "End my day" and meant it. OFF duty is a
+ * status; this is a deliberate close of the DAY — a label the history view prints on the day it
+ * belongs to, and nothing more. `dayStart` is that carrier day (terminal zone, the same day
+ * math as Recap/history) and `at` the tap moment, both epoch minutes. App-layer only: no rule
+ * math reads a bookmark, ever.
+ */
+export interface DayClose { dayStart: number; at: number }
+
+/**
  * Trip-tab scenario. Kept in the store (not component state) so switching tabs does not silently
  * throw away what the driver was comparing (consumer-review-2).
  */
@@ -69,6 +78,13 @@ export interface State {
    */
   seededAt: number | null;
   /**
+   * Day-close bookmarks (patch 13), one per closed carrier day — the history view spans eight
+   * days, so each closed day keeps its own closing time. Sanitised on load by
+   * sanitizeDayCloses: a save from before the field existed, and a damaged list alike, read as
+   * only their well-formed entries.
+   */
+  dayCloses: DayClose[];
+  /**
    * The driver has confirmed the home terminal time zone. Until then the app is using the phone's
    * zone, which is wrong for a driver who installed while on the road — and a wrong zone silently
    * moves day boundaries and corrupts the recap. So it is asked for rather than assumed (round-3 item 3).
@@ -85,7 +101,7 @@ export interface State {
   /**
    * Where a planning screen's back button returns to: the screen the driver entered it from
    * (patch 7.1). 'load' is entered from Now (patch 7), from the Plan hub, and from Recap;
-   * 'split' from Now's quick row and the hub. Before this field the back buttons were hard-wired
+   * 'split' from the hub. Before this field the back buttons were hard-wired
    * to Plan, so a driver who came from Now landed on Plan instead (Lorico, on his Pixel, live
    * patch 7). Defaults to 'plan' — the behaviour before the field existed — and parseSaved takes
    * only the three real origins, so an old or damaged save behaves exactly as the app did before.
@@ -168,7 +184,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
-  disclaimerAcked: false, seededAt: null,
+  disclaimerAcked: false, seededAt: null, dayCloses: [],
   tzChosen: false, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
@@ -292,6 +308,11 @@ export function parseSaved(raw: string | null): State {
     // The ELD seed stamp counts only as a real minute: a save from before patch 8 (missing) and
     // a damaged one (anything else) both read as never seeded.
     if (typeof s.seededAt !== 'number' || !Number.isFinite(s.seededAt)) merged.seededAt = null;
+    // The day-close bookmarks (patch 13) are labels, not record — a damaged one costs the label,
+    // never the log. The list is rebuilt from its well-formed entries only, the same treatment
+    // the other self-sanitising fields get above; usableSave never has to reject a whole save
+    // over a bookmark, because this field can be fully repaired here.
+    merged.dayCloses = sanitizeDayCloses(s.dayCloses);
     return merged;
   } catch { return INITIAL_STATE; }
 }
@@ -343,6 +364,92 @@ export function statusTap(cur: State, status: DutyStatus, note: string | undefin
   // still wins over it after it closes.
   if (cur.current && now > cur.current.since) segments.push({ status: cur.current.status, start: cur.current.since, end: now, note: cur.current.note, createdAt: cur.current.createdAt ?? stamp() });
   return { segments, current: { status, since: now, note, createdAt: stamp() } };
+}
+
+/* ============================================================ the day-close bookmark (patch 13) */
+
+/** Bookmarks are labels, not records: keep enough for the history window and then some. */
+export const MAX_DAY_CLOSES = 40;
+
+/**
+ * Rebuild the bookmark list from whatever a save carried: only plain entries whose dayStart and
+ * at are both finite minutes, with the close not before its own day began, survive — one per
+ * carrier day (a day closed twice keeps the latest close), oldest first, capped at the most
+ * recent MAX_DAY_CLOSES. Anything else in the list is dropped, entry by entry, so a damaged
+ * bookmark can never cost the driver his log.
+ */
+export function sanitizeDayCloses(d: unknown): DayClose[] {
+  if (!Array.isArray(d)) return [];
+  const byDay = new Map<number, number>();
+  for (const x of d) {
+    if (!x || typeof x !== 'object') continue;
+    const dayStart = (x as DayClose).dayStart, at = (x as DayClose).at;
+    if (!Number.isFinite(dayStart) || !Number.isFinite(at) || at < dayStart) continue;
+    if (at > (byDay.get(dayStart) ?? -Infinity)) byDay.set(dayStart, at);
+  }
+  return [...byDay.entries()]
+    .map(([dayStart, at]) => ({ dayStart, at }))
+    .sort((a, b) => a.dayStart - b.dayStart)
+    .slice(-MAX_DAY_CLOSES);
+}
+
+/**
+ * The ONE validity rule for a bookmark, shared by the close action's idempotency test, the Now
+ * screen's closed state and the history view's closing line, so the three can never disagree:
+ * a bookmark is honoured only while nothing logged starts after it INSIDE its own carrier day,
+ * and no Driving or On-duty time runs at or across the close either — work that begins in the
+ * very minute of the close, or that straddles it, is work after it in every way that matters
+ * (Verify-13 defect A1; a bookmark whose close falls outside its own carrier day — A3 — is
+ * never honoured).
+ * Work on a later day never reopens an earlier closed day, and what-if time — the tentative
+ * list and tentative-flagged rows — never counts: planning is not activity. The rule is derived
+ * from the log rather than cleared eagerly in every mutation path, so a new way of writing the
+ * log cannot forget to reopen the day, and undo — which restores the log — restores the
+ * bookmark's meaning with it.
+ */
+export function dayCloseFor(s: State, dayStart: number): DayClose | null {
+  const bm = s.dayCloses.find((c) => c.dayStart === dayStart);
+  if (!bm) return null;
+  const dayEnd = nextCarrierDayStart(dayStart, s.config);
+  if (bm.at >= dayEnd) return null;                                        // A3
+  const breaks = (status: DutyStatus, start: number, end: number) =>
+    (start > bm.at && start < dayEnd)                                      // existing rule
+    || ((status === 'D' || status === 'ON') && start <= bm.at && end > bm.at); // A1/A2: work at/over the close
+  if (s.current && breaks(s.current.status, s.current.since, Infinity)) return null;
+  for (const x of s.segments) if (!x.tentative && breaks(x.status, x.start, x.end)) return null;
+  return bm;
+}
+
+/** Today's bookmark, when the day stands closed: the Now screen's question. */
+export function dayCloseToday(s: State, now: number): DayClose | null {
+  return dayCloseFor(s, carrierDayStart(now, s.config));
+}
+
+/**
+ * The "End my day" tap as one pure patch (the statusTap pattern): the open status closes at
+ * the tap moment into a normal logged segment, OFF duty opens at the tap moment, and the
+ * bookmark for the tap's carrier day is recorded — a single patch, so the app's undo machinery
+ * restores all three together. Idempotent: a day that already stands closed returns null.
+ * Re-closing a day that was reopened by later activity replaces its stale bookmark.
+ */
+export function dayClosePatch(cur: State, now: number): Partial<State> | null {
+  const dayStart = carrierDayStart(now, cur.config);
+  if (dayCloseFor(cur, dayStart)) return null;
+  const tap = statusTap(cur, 'OFF', undefined, now);
+  const closes = [...cur.dayCloses.filter((c) => c.dayStart !== dayStart), { dayStart, at: now }]
+    .sort((a, b) => a.dayStart - b.dayStart)
+    .slice(-MAX_DAY_CLOSES);
+  return { ...(tap ?? {}), dayCloses: closes };
+}
+
+/**
+ * "Reopen": clears today's bookmark and ONLY today's bookmark — the segment the close wrote
+ * and the OFF status it opened stay exactly as they are. Null when today carries no bookmark.
+ */
+export function reopenDayPatch(cur: State, now: number): Partial<State> | null {
+  const dayStart = carrierDayStart(now, cur.config);
+  if (!cur.dayCloses.some((c) => c.dayStart === dayStart)) return null;
+  return { dayCloses: cur.dayCloses.filter((c) => c.dayStart !== dayStart) };
 }
 export function useStore(): State {
   const [, tick] = useState(0);

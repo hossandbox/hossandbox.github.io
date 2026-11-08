@@ -209,8 +209,6 @@ button.back { align-self: flex-start; background: transparent; border: 0; paddin
 .meter-value { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 
 button.rowbtn { width: 100%; min-height: 60px; display: flex; align-items: center; justify-content: space-between; text-align: left; background: var(--panel); border-radius: 16px; font-size: 15px; }
-.quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.quick button { min-height: 56px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 15px; background: var(--panel); border-radius: 14px; }
 
 /* The status buttons stay at the bottom of Now, within thumb reach, whatever the page scroll. */
 /* The dock must rest in ONE place. It is sticky inside <main>, so at the end of the page it sits at its own

@@ -99,3 +99,25 @@ Send patches to this thread — the bot and I both watch it.
 Deploys now build in GitHub Actions from main (`.github/workflows/deploy.yml`) and publish
 gh-pages automatically; connector pushes remain text-only. The OCR corpus PNG fixtures are
 generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`).
+
+## Patch 13 — deployed 2026-11-08 (day-done wrap + Now quick-row removal)
+
+- **Item A — "End my day":** one tap on Now (real records only, never the demo clock) closes
+  the open segment at the tap minute, opens OFF, and records a per-carrier-day close bookmark.
+  The bookmark is honoured only while no later same-day work exists **and** no Driving/On-duty
+  time runs at or across the close; "Your last 8 days" shows `Day closed <time>` for honoured
+  days — the bookmark labels the day, it never feeds the totals. Reopen clears today's bookmark
+  only; the whole tap is one undoable action. Malformed bookmarks are dropped at save-load, never
+  poisoning the record.
+- **Item B:** the Now quick-row "Plan a split" shortcut is removed (button, empty row, and its
+  dead CSS). The split planner itself is untouched and stays in the Plan hub.
+- **Verification arc:** Opus Verify-13 returned **FAIL** on Item A — the first validity rule only
+  saw rows starting strictly *after* the close, so same-minute work, straddling rows, a stale
+  bookmark over an imported record, and an out-of-day close timestamp all slipped through. A fix
+  round applied Opus's prescribed widened rule verbatim; **Delta-13 PASS** (124 original probes +
+  61 new repros, new pins bite, 13/14 mutations caught — the survivor errs in the safe direction;
+  engine 99/99, smoke/contrast/typecheck/build green). Item B passed Verify-13 directly.
+- **Standing note:** deleting the only post-close row can re-honour a bookmark. That is the
+  undo-equivalence, stated precisely: after such a delete the log is byte-identical to the moment
+  of closing, so the label reads the log as it stands. (This corrects the earlier local handoff
+  wording, which implied the equivalence covered more than undo.)

@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -797,6 +797,8 @@ function StatusDock({ s }: { s: State }) {
 function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onExitPeek: () => void }) {
   const warn = ev.shift.notes.filter((n) => n.startsWith('⚠'));
   const active = [ev.shift.exceptionKeys.adverse !== null ? 'Adverse conditions' : '', ev.shift.exceptionKeys.sixteen !== null ? '16-hour day' : ''].filter(Boolean);
+  /** Today's day-close bookmark, when the day stands closed (patch 13; the store's one rule). */
+  const closedToday = dayCloseToday(s, now);
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
@@ -820,6 +822,19 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           <Icon d={I.next} />
         </button>
       )}
+      {/* End my day (patch 13): the deliberate day-close. Same gate as the drift check — the
+          demo clock has no real day to close, so on it the control simply does not appear.
+          While today stands closed it shows the closing time and a Reopen that clears the
+          bookmark only; new activity after the close reopens the day on its own (the
+          dayCloseFor rule in the store) and the button comes back. */}
+      {historyBasis(s, now) !== 'fresh' && (closedToday ? (
+        <div class="row undo">
+          <span>Day closed · {clock(closedToday.at, false)}</span>
+          <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
+        </div>
+      ) : (
+        <button class="primary wide" onClick={() => endDay(now)}>End my day</button>
+      ))}
       <Meters ev={ev} />
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
@@ -827,9 +842,6 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <Icon d={I.next} />
       </button>
       {warn.map((n, i) => <p key={i} class="warnbox small">{n}</p>)}
-      <div class="quick">
-        <button onClick={() => setState({ tab: 'split', planReturn: 'now' })}><Icon d={I.bunk} /> Plan a split</button>
-      </div>
       <StatusDock s={s} />
     </>
   );
@@ -1434,7 +1446,7 @@ function Grid({ segments, from, to, tz, mark }: { segments: Segment[]; from: num
  * after anything else has changed the record (a status tap on Now closing a row, another add) would
  * throw that later change away without a word (re-check N2), so any other change retires the undo.
  */
-type Saved = Pick<State, 'segments' | 'tentative' | 'current' | 'historyAcknowledged'>;
+type Saved = Pick<State, 'segments' | 'tentative' | 'current' | 'historyAcknowledged' | 'dayCloses'>;
 type Undo = { label: string; before: Saved; after: Saved };
 const UNDO_KEY = 'hos-sandbox-undo-v1';
 let undoNow: Undo | null = null;
@@ -1466,12 +1478,14 @@ export function restoreUndo(raw: string | null) {
   } catch { /* dropped */ }
 }
 try { restoreUndo(localStorage.getItem(UNDO_KEY)); } catch { /* no storage at launch: nothing to restore */ }
-const pick = (s: State): Saved => ({ segments: s.segments, tentative: s.tentative, current: s.current, historyAcknowledged: s.historyAcknowledged });
+const pick = (s: State): Saved => ({ segments: s.segments, tentative: s.tentative, current: s.current, historyAcknowledged: s.historyAcknowledged, dayCloses: s.dayCloses });
 /** A record and a snapshot reading the same, field by field — the restored undo's only possible check. */
 const sameSaved = (s: State, a: Saved): boolean =>
   JSON.stringify(s.segments) === JSON.stringify(a.segments)
   && JSON.stringify(s.tentative) === JSON.stringify(a.tentative)
-  && JSON.stringify(s.current ?? null) === JSON.stringify(a.current ?? null);
+  && JSON.stringify(s.current ?? null) === JSON.stringify(a.current ?? null)
+  // A stored undo from before patch 13 has no bookmark list in its snapshot; it reads as empty.
+  && JSON.stringify(s.dayCloses ?? []) === JSON.stringify(a.dayCloses ?? []);
 /** The pending undo, or null once the record has changed since (compared by identity: every change makes new arrays). */
 export function currentUndo(): Undo | null {
   if (!undoNow) return null;
@@ -1552,7 +1566,26 @@ export function addDriftFill(eldLeftMin: number, now: number): { row: Segment; p
 }
 /** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
 export function startOver(now: number) {
-  undoable('Started over with a fresh 10-hour rest', () => setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true }));
+  undoable('Started over with a fresh 10-hour rest', () => setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true, dayCloses: [] }));
+}
+/**
+ * "End my day" (patch 13): one undoable close of the day — the open status ends at the tap,
+ * OFF duty opens, and the day-close bookmark is recorded, all in the store's one patch, so a
+ * single Undo restores the segments, the current status and the bookmark together. Tapping
+ * while the day already stands closed does nothing at all — no state change, no undo entry.
+ */
+export function endDay(now: number) {
+  if (!dayClosePatch(getState(), now)) return;
+  undoable('Closed the day', () => setState((cur) => dayClosePatch(cur, now) ?? {}));
+}
+/**
+ * "Reopen" (patch 13): clears today's day-close bookmark and only the bookmark — the segment
+ * the close wrote and the OFF status it opened stay exactly as they are. Undoable like the
+ * close, through the same machinery.
+ */
+export function reopenDay(now: number) {
+  if (!reopenDayPatch(getState(), now)) return;
+  undoable('Reopened the day', () => setState((cur) => reopenDayPatch(cur, now) ?? {}));
 }
 
 /** The carrier day `back` days before the one holding `now`: [start, end) in epoch minutes. */
@@ -2408,6 +2441,11 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
     );
   }
   const days = historyDays(s, now).slice().reverse();
+  // Each day's honoured day-close bookmark (patch 13), through the store's one validity rule —
+  // the same rule the Now screen's closed state uses, so the two can never disagree. The
+  // bookmark is a label on the day only: totals, gaps and the "Not logged" reading above are
+  // computed exactly as before and never see it.
+  const closes = new Map(days.map((d) => [d.start, dayCloseFor(s, d.start)]));
   return (
     <>
       <BackToPlan s={s} />
@@ -2416,6 +2454,7 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
       {days.map((d) => (
         <Card key={d.start} title={d.isToday ? `Today — ${d.label}` : d.label}>
           <p class="small">Driving <b>{dur(d.totals.D)}</b> · On duty <b>{dur(d.totals.ON)}</b> · Off duty <b>{dur(d.totals.OFF)}</b> · Sleeper <b>{dur(d.totals.SB)}</b>{d.notLogged > 0 && <> · Not logged <b>{dur(d.notLogged)}</b></>}</p>
+          {closes.get(d.start) && <p class="small">Day closed {clock(closes.get(d.start)!.at, false)}</p>}
           <ul class="seglist">{d.items.map((it, i) => it.status === null ? (
             <li key={i}><span /><span class="muted">Not logged</span><span class="muted">{clock(it.start)} → {clock(it.end)} · {dur(it.end - it.start)}</span></li>
           ) : (
@@ -2785,7 +2824,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         {ioNote && <p class="muted small">{ioNote}</p>}
         <button class="danger" onClick={() => { if (confirm('Start over? Your log is replaced with a fresh 10-hour rest ending now. You can undo this from the Log.')) { startOver(now); setState({ tab: 'log' }); } }}>Start over: fresh 10-hour rest ending now</button>
         <p class="muted small">Moved here from the Log's add panel, where it sat one tap from Add. It can be undone from the Log.</p>
-        <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
+        <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, dayCloses: [], config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">

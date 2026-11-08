@@ -2490,7 +2490,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // primary controls, steppers and number fields at 56
   minH(/\.tabs button \{[^}]*\}/, 56, 'the tab bar');
   minH(/\.chips button \{[^}]*\}/, 56, 'preset chips');
-  minH(/\.quick button \{[^}]*\}/, 56, 'the Now quick actions');
+  // patch 13: the Now quick row is gone (Lorico, Nov 8 2026 — its last entry, Plan a split, was
+  // removed and the row and its rule with it), so the 56px floor it pinned here now rides on
+  // button.wide, the wide primary actions — Now's End my day among them.
+  minH(/button\.wide \{[^}]*\}/, 56, 'the wide primary actions');
   minH(/\.slider-row \.mini \{[^}]*\}/, 56, 'the slider steppers');
   minH(/\.tstep-row button \{[^}]*\}/, 56, 'the time steppers');
   minH(/\.brk-len button \{[^}]*\}/, 56, 'the break-length steppers');
@@ -2638,13 +2641,18 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const { setLaunchNotice } = await import('../src/app.tsx');
   const app = rf('src/app.tsx', 'utf8');
 
-  // (a) the duplicate is gone from source and screen; the other doors and Plan a split stay
+  // (a) the duplicate is gone from source and screen; the other doors stay (the quick row's
+  //     Plan a split, which this patch kept, was removed later — patch 13, Lorico Nov 8 2026;
+  //     the patch 13 section pins its absence and the split planner's survival via the Plan hub)
   if (/Take a load\?/.test(app)) throw new Error('patch 7.1: the quick-row duplicate must be gone from the source');
   setLaunchNotice(false);
   ss({ segments: [], tentative: [], current: { status: 'ON', since: now - 60 }, tab: 'now', nowOverride: null });
   let h = out('patch 7.1/now dedupe');
   if (/Take a load\?/.test(h)) throw new Error('patch 7.1: Now must not render the duplicate load button');
-  if (!/Plan a split/.test(h)) throw new Error('patch 7.1: the quick row must keep Plan a split');
+  // patch 13 (Lorico, Nov 8 2026): the quick row's remaining entry, Plan a split, is removed
+  // too — the pin that guarded its presence here is deliberately retired and inverted: Now
+  // must not render the shortcut at all. The planner itself is untouched (patch 13 section).
+  if (/Plan a split/.test(h)) throw new Error('patch 13: Now must not render the removed Plan a split shortcut');
   if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h)) throw new Error('patch 7.1: Now must keep the prominent load entry');
 
   // (b) the verdict screen carries the reset, wired to clear the draft and restart the questions
@@ -2704,7 +2712,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/setState\(\{ tab: 'load', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's load door must record Now as the return");
   if (!/setState\(\{ tab: 'load', planReturn: 'recap' \}\)/.test(app)) throw new Error("patch 7.1: Recap's load door must record Recap as the return");
   if (!/setState\(\{ tab, planReturn: 'plan' \}\)/.test(app)) throw new Error('patch 7.1: the Plan hub doors must record Plan as the return');
-  if (!/setState\(\{ tab: 'split', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's split door must record Now as the return");
+  // patch 13 (Lorico, Nov 8 2026): Now's split door itself is gone with the quick row, so there
+  // is no door left to record a return — the pin that required it is inverted to require its
+  // absence. The recorded-return machinery and Split's back bar are untouched, and the flow
+  // pins below still drive Split with a Now return recorded, exactly as before.
+  if (/setState\(\{ tab: 'split', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 13: Now must not carry a split door — the quick row was removed");
   if ((app.match(/setState\(\{ tab: s\.planReturn \}\)/g) || []).length < 3) throw new Error("patch 7.1: the load flow's two backs and the planning back bar must all honour the recorded return");
   // from Now: question 1's back is labelled for Now and lands there
   ss({ segments: [], tentative: [], current: { status: 'ON', since: now - 60 }, tab: 'load', planReturn: 'now', loadCheck: { ...DL71 }, nowOverride: null });
@@ -4447,5 +4459,293 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG12 } });
   setLaunchNotice(true);
   console.log('patch 12 (screenshot import — on-device read, confident label-matched values only, confirm by hand): OK');
+}
+// --- patch 13: the day-done wrap, and the Now quick row's last entry goes with it.
+//     (Fix round, Nov 8 2026 — Opus Verify-13: the shared validity rule also breaks on
+//     Driving/On-duty time that begins in the close's own minute or straddles the close
+//     (defects A1/A2), and never honours a close stamped outside its own carrier day (A3).
+//     The fix-round pins are (f)'s re-seed, (h)'s next-day activity, (i)'s out-of-day case
+//     and the whole of (k).)
+// Item A: "End my day" — OFF duty is a status; this is the driver closing the DAY on purpose.
+// One tap ends the open status at the tap moment, opens OFF, and records a day-close bookmark
+// for the carrier day; the history view labels the day with the closing time and nothing else
+// about the view changes — the bookmark is a label, never an input to the math. The bookmark's
+// validity is DERIVED from the log by one shared rule (dayCloseFor): honoured only while no
+// logged row and no open status starts after it inside its own carrier day, so any later
+// activity reopens the day without any mutation path having to remember to clear it, and undo
+// — which restores the log — restores the bookmark's meaning with it. Item B (Lorico, Nov 8
+// 2026): the quick row's remaining shortcut, "Plan a split", is removed from Now (button and
+// row); the split planner itself is untouched and still opens from the Plan hub.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, parseSaved, loadSaved, dayCloseFor, dayCloseToday, dayClosePatch, applySegmentEdit, clock } = await import('../src/store.ts');
+  const { endDay, reopenDay, undoLast, currentUndo, tapStatus, setLaunchNotice } = await import('../src/app.tsx');
+  const app = rf('src/app.tsx', 'utf8');
+  const css = rf('public/styles.css', 'utf8');
+  setLaunchNotice(false);
+  const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d 2026, CDT
+  const CFG = { ...gs().config, timeZone: 'America/Chicago', dayStartHour: 0 };
+  const snap = () => JSON.stringify({ segments: gs().segments, current: gs().current, dayCloses: gs().dayCloses });
+  const seed = (over) => ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: true, tab: 'now', nowOverride: null, config: { ...CFG }, ...over });
+
+  // the wiring is in the source: the button and the Reopen action call the two actions
+  if (!/onClick=\{\(\) => endDay\(now\)\}>End my day</.test(app)) throw new Error('patch 13: Now must wire its End my day button to endDay');
+  if (!/onClick=\{\(\) => reopenDay\(now\)\}>Reopen</.test(app)) throw new Error('patch 13: the closed state must wire Reopen to reopenDay');
+
+  // (a) the demo clock has no day to close: the control simply does not appear (the demo state
+  //     is the un-acknowledged empty record — historyBasis 'fresh', the drift check's own gate)
+  seed({ nowOverride: L(12, 12), historyAcknowledged: false });
+  let h = out('patch 13/demo has no close control');
+  if (/End my day|Day closed/.test(h)) throw new Error('patch 13: the demo state must not offer End my day or show a closed line');
+
+  // (b) a real record offers the button; the tap closes the open status at the tap moment,
+  //     opens OFF from the tap moment, and bookmarks the carrier day — one undoable action
+  seed({ segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }], current: { status: 'ON', since: L(12, 6) }, nowOverride: L(12, 18, 42) });
+  h = out('patch 13/real record offers the button');
+  if (!/End my day/.test(h) || /Day closed/.test(h)) throw new Error('patch 13: a real, unclosed record must offer End my day and no closed line');
+  const beforeClose = snap();
+  endDay(L(12, 18, 42));
+  const st = gs();
+  const lastSeg = st.segments[st.segments.length - 1];
+  if (!(lastSeg.status === 'ON' && lastSeg.start === L(12, 6) && lastSeg.end === L(12, 18, 42))) throw new Error('patch 13: the tap must close the open status into a logged segment ending at the tap moment');
+  if (!(st.current && st.current.status === 'OFF' && st.current.since === L(12, 18, 42))) throw new Error('patch 13: the tap must open OFF duty at the tap moment');
+  if (JSON.stringify(st.dayCloses) !== JSON.stringify([{ dayStart: L(12, 0), at: L(12, 18, 42) }])) throw new Error('patch 13: the tap must record the bookmark for the tap carrier day at the tap time');
+  if (!dayCloseFor(st, L(12, 0)) || !dayCloseToday(st, L(12, 18, 42))) throw new Error('patch 13: a freshly closed day must read as closed');
+  if (currentUndo()?.label !== 'Closed the day') throw new Error('patch 13: the tap must be one undoable action');
+  h = out('patch 13/now shows the closed state');
+  if (!new RegExp(`Day closed · ${clock(L(12, 18, 42), false)}`).test(h) || !/>Reopen</.test(h) || /End my day/.test(h)) throw new Error('patch 13: while today is closed, Now must show the closed line and Reopen instead of the button');
+  ss({ tab: 'history' });
+  h = out('patch 13/history shows the closing line');
+  if (!new RegExp(`Day closed ${clock(L(12, 18, 42), false)}`).test(h)) throw new Error('patch 13: the history card for a closed day must carry its closing line');
+
+  // (c) idempotent: a second tap while the day stands closed changes nothing — and makes no
+  //     undo entry of its own
+  const closedSnap = snap();
+  endDay(L(12, 19, 5));
+  if (snap() !== closedSnap) throw new Error('patch 13: tapping End my day on a closed day must change nothing');
+  if (currentUndo()?.label !== 'Closed the day') throw new Error('patch 13: the idempotent tap must not replace the close undo');
+  if (dayClosePatch(gs(), L(12, 19, 5)) !== null) throw new Error('patch 13: the close patch itself must refuse a closed day');
+
+  // (d) one Undo restores segments, current and bookmark exactly
+  undoLast();
+  if (snap() !== beforeClose) throw new Error('patch 13: one Undo after the tap must restore segments, current and bookmark exactly');
+
+  // (e) new activity reopens the day — first by a fresh status tap after the close
+  endDay(L(12, 18, 42));
+  ss({ nowOverride: L(12, 19, 30), tab: 'now' });
+  tapStatus('ON');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13: a status starting after the close must reopen the day');
+  h = out('patch 13/activity brings the button back');
+  if (!/End my day/.test(h) || /Day closed/.test(h)) throw new Error('patch 13: once activity reopens the day, Now must offer End my day again');
+  ss({ tab: 'history' });
+  h = out('patch 13/reopened day has no closing line');
+  if (/Day closed/.test(h)) throw new Error('patch 13: a day reopened by later activity must show no closing line');
+
+  // (f) …and by a segment edit that moves a start to after the bookmark, driven through the
+  //     same store edit the Log editor's save calls. An edit entirely before the bookmark
+  //     leaves it intact.
+  // SANCTIONED PIN CHANGE (fix round, Nov 8 2026): this seed used to run the drive to 20:00 —
+  // 1h18m of driving AFTER the 18:42 close, under a bookmark the next line required to "start
+  // out honoured". That setup encoded Opus Verify-13 defect A1: the validity rule then saw
+  // only rows starting strictly after the close, so a straddling row could never reopen the
+  // day. The drive now ends 18:30, before the close, so the honoured start is honest; the
+  // move-the-start-to-19:00 step below still exercises reopen-by-edit.
+  seed({ segments: [{ status: 'D', start: L(12, 17, 30), end: L(12, 18, 30) }], dayCloses: [{ dayStart: L(12, 0), at: L(12, 18, 42) }], nowOverride: L(12, 21) });
+  if (!dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13: the seeded bookmark must start out honoured');
+  ss(applySegmentEdit(gs(), gs().segments[0], { start: L(12, 17, 45) }));
+  if (gs().segments[0].start !== L(12, 17, 45)) throw new Error('patch 13: the before-bookmark edit must actually land');
+  if (!dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13: an edit entirely before the bookmark must leave it intact');
+  ss(applySegmentEdit(gs(), gs().segments[0], { start: L(12, 19) }));
+  if (gs().segments[0].start !== L(12, 19)) throw new Error('patch 13: the after-bookmark edit must actually land');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13: an edit moving a start to after the bookmark must reopen the day');
+
+  // (g) Reopen clears ONLY the bookmark — the segment the close wrote and the OFF status it
+  //     opened stay byte-for-byte — and Reopen itself is undoable
+  seed({ segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }], current: { status: 'ON', since: L(12, 6) }, nowOverride: L(12, 18, 42) });
+  endDay(L(12, 18, 42));
+  const logOnly = JSON.stringify({ segments: gs().segments, current: gs().current });
+  reopenDay(L(12, 19));
+  if (gs().dayCloses.length !== 0) throw new Error('patch 13: Reopen must clear the bookmark');
+  if (JSON.stringify({ segments: gs().segments, current: gs().current }) !== logOnly) throw new Error('patch 13: Reopen must not touch the log or the current status');
+  if (currentUndo()?.label !== 'Reopened the day') throw new Error('patch 13: Reopen must ride the same undo machinery');
+  h = out('patch 13/reopened shows the button');
+  if (!/End my day/.test(h)) throw new Error('patch 13: after Reopen, Now must offer End my day again');
+  undoLast();
+  if (!dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13: undoing a Reopen must restore the bookmark');
+
+  // (h) the bookmark belongs to its carrier day: the next day starts unclosed, yesterday's
+  //     closing line survives into it, and closing the new day keeps both
+  seed({ segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }], current: { status: 'ON', since: L(12, 6) }, nowOverride: L(12, 18, 42) });
+  endDay(L(12, 18, 42));
+  ss({ nowOverride: L(13, 9), tab: 'now' });
+  if (dayCloseToday(gs(), L(13, 9))) throw new Error('patch 13: the next carrier day must start unclosed');
+  h = out('patch 13/next morning offers the button');
+  if (!/End my day/.test(h) || /Day closed/.test(h)) throw new Error('patch 13: the next carrier day must offer End my day, not a closed line');
+  // M3 (Verify-13): work logged on the NEW day must not reach back and erase yesterday's
+  // close. Yesterday's line is only checked after this activity, below — the order is the pin.
+  tapStatus('ON');
+  if (!(gs().current && gs().current.status === 'ON' && gs().current.since === L(13, 9))) throw new Error('patch 13 fix: the next-day activity must actually land');
+  if (!dayCloseFor(gs(), L(12, 0))) throw new Error("patch 13 fix: activity on the next carrier day must not reopen yesterday's close");
+  ss({ tab: 'history' });
+  h = out('patch 13/yesterday keeps its line');
+  if (!new RegExp(`Day closed ${clock(L(12, 18, 42), false)}`).test(h)) throw new Error("patch 13: yesterday's closing line must survive into the next day");
+  endDay(L(13, 21, 30));
+  if (gs().dayCloses.length !== 2) throw new Error('patch 13: closing the next day must add its own bookmark, not replace the first');
+  h = out('patch 13/both days closed');
+  if (!new RegExp(`Day closed ${clock(L(12, 18, 42), false)}`).test(h) || !new RegExp(`Day closed ${clock(L(13, 21, 30), false)}`).test(h)) throw new Error('patch 13: each closed day must show its own closing line');
+
+  // (i) a malformed bookmark is dropped by the save sanitiser and never poisons the record —
+  //     the patches 5.1/5.2 discipline, applied the way the other self-sanitising fields are
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup';
+  const segsOK = [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }];
+  const saveWith = (dayCloses) => JSON.stringify({ segments: segsOK, tentative: [], current: null, dayCloses });
+  mem.set(BAK, saveWith([]));
+  for (const [label, dc] of [
+    ['a string', 'junk'],
+    ['a number', 42],
+    ['a plain object, not a list', { dayStart: L(12, 0), at: L(12, 18) }],
+    ['a list of strings', ['x']],
+    ['null entries', [null]],
+    ['a missing at', [{ dayStart: L(12, 0) }]],
+    ['a missing dayStart', [{ at: L(12, 18) }]],
+    ['a string dayStart', [{ dayStart: 'Mon', at: 5 }]],
+    ['a null at (a NaN as saved)', [{ dayStart: L(12, 0), at: null }]],
+    ['a close before its own day began', [{ dayStart: L(12, 0), at: L(11, 0) }]],
+  ]) {
+    mem.set(KEY, saveWith(dc));
+    const loaded = loadSaved();
+    if (JSON.stringify(loaded.segments) !== JSON.stringify(segsOK)) throw new Error(`patch 13: a save whose bookmark is ${label} must still load its record`);
+    if (loaded.dayCloses.length !== 0) throw new Error(`patch 13: a bookmark that is ${label} must be dropped, not kept`);
+  }
+  // junk around good entries costs only the junk; a re-closed day keeps its latest close
+  mem.set(KEY, saveWith([null, { dayStart: L(12, 0), at: L(12, 18) }, 'x', { dayStart: L(11, 0), at: L(11, 22) }, { dayStart: L(12, 0), at: L(12, 18, 42) }]));
+  const mixed = loadSaved();
+  if (JSON.stringify(mixed.dayCloses) !== JSON.stringify([{ dayStart: L(11, 0), at: L(11, 22) }, { dayStart: L(12, 0), at: L(12, 18, 42) }])) throw new Error('patch 13: well-formed bookmarks must survive a save that also carries junk, one per day, latest close winning');
+  if (parseSaved(saveWith('junk')).dayCloses.length !== 0) throw new Error('patch 13: parseSaved must sanitise the bookmark field directly');
+  // A3 (Verify-13): a close stamped OUTSIDE its own carrier day. The old rule could never
+  // reopen such a day — no row inside the day can start after a close that falls ten days
+  // later — so the day would read closed over anything logged in it. The sanitiser cannot
+  // see carrier days (it has no config), so it keeps the entry; the validity rule must
+  // refuse to honour it instead.
+  mem.set(KEY, saveWith([{ dayStart: L(12, 0), at: L(22, 10) }]));
+  const outOfDay = loadSaved();
+  if (dayCloseFor(outOfDay, L(12, 0))) throw new Error('patch 13 fix: a bookmark whose close falls outside its own carrier day must not be honoured');
+  mem.delete(KEY); mem.delete(BAK);
+
+  // (j) Item B: the quick row and its last shortcut are gone from Now — source, styles and
+  //     screen — while the split planner itself still opens from the Plan hub
+  if (/Plan a split/.test(app)) throw new Error('patch 13: the Plan a split shortcut must be gone from the source');
+  if (/class="quick"/.test(app)) throw new Error('patch 13: the emptied quick row must not linger on Now');
+  if (/\.quick/.test(css)) throw new Error('patch 13: the quick-row styles must go with the row');
+  seed({ segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }], current: { status: 'ON', since: L(12, 6) }, nowOverride: L(12, 12), tab: 'now' });
+  h = out('patch 13/now has no split shortcut');
+  if (/Plan a split/.test(h)) throw new Error('patch 13: Now must not render a Plan a split control');
+  ss({ tab: 'plan' });
+  h = out('patch 13/plan hub keeps the split door');
+  if (!/Plan a sleeper split/.test(h)) throw new Error('patch 13: the Plan hub must keep its split planner entry');
+  ss({ tab: 'split', planReturn: 'plan' }); // the hub entry's own store write
+  h = out('patch 13/split opens from the hub');
+  if (!/Break 1 length/.test(h)) throw new Error('patch 13: the split planner must still open from the Plan hub');
+  if (!/class="back"(?:(?!<\/button>)[\s\S])*Plan<\/button>/.test(h)) throw new Error("patch 13: the split planner's back must still name Plan when entered from the hub");
+
+  // (k) the Verify-13 fix round. A1: the old rule saw only rows that START strictly after
+  //     the close, so work beginning in the close's own minute, or straddling it, sat under
+  //     a "Day closed" label. Each shape below is driven through the path a driver takes,
+  //     and each asserts the activity actually landed before it asserts the reopen, so none
+  //     of them can pass vacuously.
+  const { addEntry, saveEntry, addDriftFill, startOver } = await import('../src/app.tsx');
+  const { applyImportedState } = await import('../src/store.ts');
+  const closeAt1842 = () => {
+    seed({ segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }], current: { status: 'ON', since: L(12, 6) }, nowOverride: L(12, 18, 42) });
+    endDay(L(12, 18, 42));
+    if (!dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: the 18:42 close must start out honoured');
+  };
+
+  // A1 · a status tap in the SAME minute as the close (a mis-tap corrected at once). The tap
+  // writes no row — now == since — so only the open status can give the work away.
+  closeAt1842();
+  tapStatus('ON');
+  if (!(gs().current && gs().current.status === 'ON' && gs().current.since === L(12, 18, 42))) throw new Error('patch 13 fix: the same-minute tap must actually land');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: work begun in the close minute must reopen the day');
+  ss({ tab: 'now' });
+  h = out('patch 13 fix/same-minute tap — Now agrees');
+  if (!/End my day/.test(h) || /Day closed/.test(h)) throw new Error('patch 13 fix: after a same-minute tap, Now must offer End my day and no closed line');
+  ss({ tab: 'history' });
+  h = out('patch 13 fix/same-minute tap — history agrees');
+  if (/Day closed/.test(h)) throw new Error('patch 13 fix: after a same-minute tap, history must show no closing line');
+  // A1 · the same-minute tap, Driving this time: the glance view owns Now while driving, so
+  // this half pins the shared rule itself — the one Now and history both read.
+  closeAt1842();
+  tapStatus('D');
+  if (!(gs().current && gs().current.status === 'D' && gs().current.since === L(12, 18, 42))) throw new Error('patch 13 fix: the same-minute Driving tap must actually land');
+  if (dayCloseFor(gs(), L(12, 0)) || dayCloseToday(gs(), L(12, 18, 42))) throw new Error('patch 13 fix: driving begun in the close minute must reopen the day');
+
+  // A1 · a log add starting exactly at the close minute ("forgot I fuelled after closing")
+  closeAt1842();
+  if (addEntry('ON', L(12, 18, 42), L(12, 19, 10), L(12, 19, 10)) !== null) throw new Error('patch 13 fix: the add at the close minute must save');
+  if (!gs().segments.some((x) => x.status === 'ON' && x.start === L(12, 18, 42) && x.end === L(12, 19, 10))) throw new Error('patch 13 fix: the add at the close minute must actually land');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: an add starting in the close minute must reopen the day');
+
+  // A1 · a log add STRADDLING the close: the drive starts before it and ends after it
+  closeAt1842();
+  if (addEntry('D', L(12, 18), L(12, 19, 30), L(12, 19, 30)) !== null) throw new Error('patch 13 fix: the straddling add must save');
+  if (!gs().segments.some((x) => x.status === 'D' && x.start === L(12, 18) && x.end === L(12, 19, 30))) throw new Error('patch 13 fix: the straddling add must actually land');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: a drive straddling the close must reopen the day');
+
+  // A1 · an edit that extends a row's end across the close (the row itself ends AT the close
+  // the End-my-day tap wrote, then the driver corrects it longer)
+  closeAt1842();
+  const onRow = gs().segments.find((x) => x.status === 'ON');
+  if (!onRow || onRow.end !== L(12, 18, 42)) throw new Error('patch 13 fix: the close must leave an ON row ending at the close for this pin');
+  if (saveEntry(onRow, { status: 'ON', start: onRow.start, end: L(12, 19, 30) }, L(12, 19, 30)) !== null) throw new Error('patch 13 fix: the end extension must save');
+  if (gs().segments.find((x) => x.status === 'ON')?.end !== L(12, 19, 30)) throw new Error('patch 13 fix: the end extension must actually land');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: extending a row across the close must reopen the day');
+
+  // A2 · a whole-record import keeps the (now stale) bookmark — imports do not carry one —
+  // and the imported record is driving since long before the close, with no row starting
+  // after it. The day must not read closed over live driving.
+  closeAt1842();
+  ss((cur) => applyImportedState(cur, {
+    segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 6) }, { status: 'ON', start: L(12, 6), end: L(12, 9) }],
+    current: { status: 'D', since: L(12, 9) },
+  }));
+  if (!(gs().current && gs().current.status === 'D' && gs().current.since === L(12, 9))) throw new Error('patch 13 fix: the import must actually land');
+  if (gs().dayCloses.length !== 1) throw new Error('patch 13 fix: the import must leave the stale bookmark in place — that survival is the A2 setup');
+  if (dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: a record imported over a closed day, driving since before the close, must not read closed');
+
+  // M7 (Verify-13): Reopen clears TODAY's bookmark only — an earlier closed day keeps its
+  // closing line
+  seed({
+    segments: [
+      { status: 'OFF', start: L(10, 20), end: L(11, 6) },
+      { status: 'ON', start: L(11, 6), end: L(11, 22) },
+      { status: 'OFF', start: L(11, 22), end: L(12, 6) },
+      { status: 'ON', start: L(12, 6), end: L(12, 18, 42) },
+    ],
+    current: { status: 'OFF', since: L(12, 18, 42) },
+    dayCloses: [{ dayStart: L(11, 0), at: L(11, 22) }, { dayStart: L(12, 0), at: L(12, 18, 42) }],
+    nowOverride: L(12, 19),
+  });
+  if (!dayCloseFor(gs(), L(11, 0)) || !dayCloseFor(gs(), L(12, 0))) throw new Error('patch 13 fix: both seeded closes must start out honoured');
+  reopenDay(L(12, 19));
+  if (JSON.stringify(gs().dayCloses) !== JSON.stringify([{ dayStart: L(11, 0), at: L(11, 22) }])) throw new Error("patch 13 fix: Reopen must clear only today's bookmark");
+  if (!dayCloseFor(gs(), L(11, 0))) throw new Error("patch 13 fix: yesterday's close must survive a Reopen of today");
+  ss({ tab: 'history' });
+  h = out('patch 13 fix/reopen keeps yesterdays line');
+  if (!new RegExp(`Day closed ${clock(L(11, 22), false)}`).test(h)) throw new Error('patch 13 fix: history must keep the earlier closing line after a Reopen');
+  if (new RegExp(`Day closed ${clock(L(12, 18, 42), false)}`).test(h)) throw new Error("patch 13 fix: history must drop today's closing line after a Reopen");
+
+  // M9 (Verify-13): startOver replaces the whole record, bookmarks included — and its undo
+  // restores them
+  closeAt1842();
+  startOver(L(12, 20));
+  if (gs().dayCloses.length !== 0) throw new Error('patch 13 fix: starting over must clear the day-close bookmarks');
+  undoLast();
+  if (!dayCloseFor(gs(), L(12, 0))) throw new Error("patch 13 fix: undoing a start-over must restore the day's close");
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: false, nowOverride: null, tab: 'now', planReturn: 'plan' });
+  setLaunchNotice(true);
+  console.log('patch 13 (End my day — a deliberate day-close bookmark for the history view; the Now quick row retired): OK');
 }
 console.log('OK');
