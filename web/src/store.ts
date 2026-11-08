@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { Segment, RulesConfig, DutyStatus } from '../../engine/src/index.ts';
-import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel, evaluate, minutesOf, LIMITS } from '../../engine/src/index.ts';
+import type { Segment, RulesConfig, DutyStatus, TripInput, TripPlan, TripStrategy, FullEvaluation } from '../../engine/src/index.ts';
+import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel, evaluate, minutesOf, LIMITS, planTrip, planTripAll, pruneHistory, driveAgainAt, TRIP_STRATEGIES } from '../../engine/src/index.ts';
 
 /**
  * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
@@ -1160,6 +1160,199 @@ export function planDriftFill(s: State, minutes: number, now: number): DriftFill
   const best = whole ?? stretches[stretches.length - 1];
   const filled = Math.min(want, best.end - best.start);
   return { start: best.end - filled, end: best.end, filled, remainder: want - filled };
+}
+
+/* ---------- Patch 10: load-verdict advice + the Why counterfactual ----------
+ * Display-only. Nothing here writes state or a log row: every number is produced by running the
+ * EXISTING engine (planTrip / planTripAll / evaluate / driveAgainAt) on modified inputs — a later
+ * departure, an added rest — never by new rule math in this file.
+ */
+
+/** The plan the verdict screen stands on: earliest arrival, ties to the simplest strategy.
+ *  The same rule as app.tsx's earliestStrategy — keep the two in step. */
+export function verdictPlan(both: Record<TripStrategy, TripPlan>): TripPlan {
+  const key = TRIP_STRATEGIES.reduce<TripStrategy>((a, k) => (both[k].arrival < both[a].arrival ? k : a), TRIP_STRATEGIES[0]);
+  return both[key];
+}
+
+/** How far past the planned departure the "leave by" search may look (12 hours). */
+export const LATEST_DEPARTURE_SPAN_MIN = 720;
+
+/**
+ * Long stops a plan makes EN ROUTE: rests of 10 hours or more (a reset, a recap wait, a
+ * restart) inserted between departure and the last driving minute. A rest counts as ONE
+ * stop however the planner steps it: contiguous OFF/SB steps merge into a single run,
+ * because a reset planned as OFF 30 + OFF 570 ("extend to a full 10") is one 10-hour
+ * stop, not zero stops (checkpoint 1, D3 — counting single steps let that shape slip
+ * through and the leave-by line named a departure 40 minutes too late). Non-contiguous
+ * legs do NOT merge: a split's 7-hour sleeper leg separated by driving is not a
+ * continuous 10-hour rest, and this count stays blind to it by definition.
+ *
+ * Each run is measured only over [departure, driveEnd): the pre-departure wait row is
+ * a step too, but it is the driver's own wait, not a stop the trip costs him — a run
+ * that is only the wait row measures zero here however long he waits — and the
+ * receiver dwell sits after the wheels stop and is likewise his own plan.
+ */
+const longStops = (plan: TripPlan, departure: number): number => {
+  let stops = 0;
+  let runStart: number | null = null;
+  let runEnd = 0;
+  const flush = () => {
+    if (runStart !== null && Math.min(runEnd, plan.driveEnd) - Math.max(runStart, departure) >= LIMITS.RESET) stops++;
+    runStart = null;
+  };
+  for (const st of plan.steps) {
+    const g = st.segment;
+    if (g.status === 'OFF' || g.status === 'SB') {
+      if (runStart !== null && g.start <= runEnd) { if (g.end > runEnd) runEnd = g.end; }
+      else { flush(); runStart = g.start; runEnd = g.end; }
+    } else flush();
+  }
+  flush();
+  return stops;
+};
+
+/**
+ * The latest minute the driver can start this load and still run it the way it is planned — or
+ * null when no honest answer exists inside the search window. "The way it is planned" is the
+ * only departure boundary this simulation has: the planner will complete the load from almost
+ * any departure by inserting a 10-hour stop en route, so bare feasibility never turns. What
+ * turns is the trip's shape. The answer is the last departure whose winning plan needs no MORE
+ * ≥10-hour stops than the planned departure's plan — leave later than that and the load costs
+ * an extra long stop (and arrives that much later). The search stays inside the run containing
+ * the planned departure: a coarse 60-minute scan with the verdict's own winning strategy finds
+ * the bracket where that run ends, and the bracket is then walked MINUTE BY MINUTE with the
+ * scan oracle itself — the stop count is not monotone in departure time (a rest planned as
+ * one step at one minute can be two steps at the next), so a binary search can land on the
+ * wrong side of a notch (checkpoint 1, D3). The boundary is finally confirmed against the
+ * full verdict computation (planTripAll), which may only pull it EARLIER, never later: if
+ * the verdict's own winning plan already needs an extra stop at the scan's boundary minute,
+ * the walk continues down to where the verdict agrees — the printed minute must be safe
+ * under both readings of the trip's shape.
+ */
+export function latestLegalDeparture(segs: Segment[], input: TripInput, strategy: TripStrategy, waitStatus: DutyStatus): number | null {
+  const planned = input.departure;
+  // The wait between now and a later departure must be modelled, never left as a gap: the
+  // engine reads unlogged time as off duty, which would hand the driver rest he may not take.
+  // `waitStatus` is the status the driver said the wait will be (or, for a leave-now check, the
+  // status he is in — on duty when driving or unset, the careful side that earns no rest credit).
+  const waitFrom = input.untilDeparture?.from ?? planned;
+  const sim = (dep: number): TripInput => ({ ...input, departure: dep, untilDeparture: { from: waitFrom, status: waitStatus, label: 'Waiting until departure' } });
+  const baseStops = longStops(verdictPlan(planTripAll(segs, sim(planned))), planned);
+  const quick = (dep: number) => { const p = planTrip(segs, { ...sim(dep), restStrategy: strategy }); return p.feasible && longStops(p, dep) <= baseStops; };
+  const full = (dep: number) => { const p = verdictPlan(planTripAll(segs, sim(dep))); return p.feasible && longStops(p, dep) <= baseStops; };
+  if (!quick(planned)) return null; // caller only asks on a Yes verdict; the scan strategy must agree there
+  let lastOk = 0, firstBad = -1;
+  for (let off = 60; off <= LATEST_DEPARTURE_SPAN_MIN; off += 60) {
+    if (quick(planned + off)) lastOk = off; else { firstBad = off; break; }
+  }
+  if (firstBad === -1) return null; // still the same shape at the cap — no true "latest" inside the window to name
+  // Per-minute walk of the final bracket: the first minute whose plan changes shape
+  // ends the run, whatever the count does afterwards (see the header: not monotone).
+  let boundary = planned + lastOk;
+  for (let m = planned + lastOk + 1; m <= planned + firstBad; m++) {
+    if (!quick(m)) break;
+    boundary = m;
+  }
+  // Confirm against the verdict computation itself: the verdict's winning plan may
+  // only move the boundary earlier. (It never has to move it later: the boundary is
+  // defined by the planned strategy's shape, and where the verdict switches to a
+  // split plan past it — a 7-hour sleeper leg this count is blind to — the printed
+  // minute still names a departure that runs the load the way it was planned.)
+  if (!full(boundary)) {
+    let fixed = -1;
+    for (let d = boundary - 1; d >= planned; d--) if (full(d)) { fixed = d; break; }
+    if (fixed === -1) return null;
+    boundary = fixed;
+  }
+  return boundary;
+}
+
+/** The most pre-departure rest the smallest-fix search may offer (10 hours). */
+export const SMALLEST_FIX_CAP_MIN = 600;
+
+/**
+ * On a No verdict: the smallest added rest before departure (15-minute steps, up to 10 hours)
+ * that flips the load to legal, with the winning plan at that rest — or null when no amount in
+ * range flips it. The rest is modelled exactly the way the app models the wait itself: the
+ * driver's stated wait stays a row in the record, and the extra rest becomes the plan's
+ * untilDeparture lead (off duty, ending at the shifted departure). Every candidate is judged by
+ * the full verdict computation. Rest only ever helps these clocks, so the first feasible step is
+ * found by binary search; both neighbours of the answer are real verdicts, so the printed claim
+ * ("this much flips it") is verified even where the monotonicity assumption is only approximate.
+ */
+export function smallestRestFix(segs: Segment[], input: TripInput): { minutes: number; plan: TripPlan } | null {
+  const planned = input.departure;
+  const hist = [...segs];
+  if (input.untilDeparture && input.untilDeparture.from < planned) {
+    const u = input.untilDeparture;
+    hist.push({ status: u.status, start: u.from, end: planned, tentative: true, note: u.label ?? 'Until departure' });
+  }
+  const at = (r: number) => verdictPlan(planTripAll(hist, {
+    ...input, departure: planned + r,
+    untilDeparture: { from: planned, status: 'OFF' as DutyStatus, label: 'Extra rest before departure' },
+  }));
+  const top = at(SMALLEST_FIX_CAP_MIN);
+  if (!top.feasible) return null;
+  let lo = 0, hi = SMALLEST_FIX_CAP_MIN / 15; // step indices; step hi is feasible, step 0 is the No verdict itself
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (at(mid * 15).feasible) hi = mid; else lo = mid; }
+  const plan = at(hi * 15);
+  return plan.feasible ? { minutes: hi * 15, plan } : null;
+}
+
+export type WhyLever =
+  | { kind: 'rest'; minutes: number; status: 'OFF' | 'SB'; stopBy: number }
+  | { kind: 'recap'; at: number; dropsOff: number; available: number };
+
+/**
+ * The Why sheet's counterfactual: what single change hands the driver more driving time.
+ * The lever is added rest from now (15-minute steps, up to 10 hours), judged by re-running
+ * evaluate() on the logged record extended with that rest — the same construction driveAgainAt
+ * uses. When the cycle binds and no rest in range changes the answer, the true lever is the
+ * next recap gain-back, taken from the evaluation's own forecast. Null when nothing in range
+ * changes the answer — the sheet then omits the line rather than guessing. Callers pass the
+ * logged record (tentative what-if rows excluded, again driveAgainAt's convention) and the
+ * evaluation computed from it.
+ */
+export function whyLever(segs: Segment[], config: RulesConfig, now: number, ev: FullEvaluation): WhyLever | null {
+  const logged = pruneHistory(segs.filter((x) => !x.tentative), now, config);
+  const evalRest = (r: number, status: 'OFF' | 'SB') =>
+    evaluate([...logged, { status, start: now, end: now + r }], { asOf: now + r, config });
+  // The payoff is DRIVING time regained, never the wall clock: any pause pushes a stop-by time
+  // later minute-for-minute while the binding clock waits, so comparing stop-by times would
+  // call every rest a lever. A rest only changes the answer when it hands back driving time the
+  // driver does not already have — a break taken, a split paired, a reset completed, cycle
+  // hours rolled off. While he cannot drive at all, the bar is the driving time the SHORTEST
+  // restoring rest would give him: a longer rest must beat that, not merely restore it.
+  let baseDrive: number | null = null;
+  let firstStep = 1;
+  let resumedBinding: string | null = null;
+  if (ev.driveNow > 0) {
+    baseDrive = ev.driveNow;
+  } else {
+    const again = driveAgainAt(logged, { asOf: now, config }, 'OFF');
+    if (again !== null && again - now <= SMALLEST_FIX_CAP_MIN) {
+      const resumed = evaluate([...logged, { status: 'OFF' as DutyStatus, start: now, end: again }], { asOf: again, config });
+      if (resumed.driveNow > 0) { baseDrive = resumed.driveNow; firstStep = Math.floor((again - now) / 15) + 1; resumedBinding = resumed.binding; }
+    }
+  }
+  if (baseDrive !== null) {
+    for (let step = firstStep; step <= SMALLEST_FIX_CAP_MIN / 15; step++) {
+      const r = step * 15;
+      for (const status of ['SB', 'OFF'] as const) {
+        const e2 = evalRest(r, status);
+        if (e2.driveNow > baseDrive) return { kind: 'rest', minutes: r, status, stopBy: e2.mustStopBy };
+      }
+    }
+  }
+  // The cycle is the lever when it binds now — or when it is what binds once the shortest
+  // restoring rest is taken (a dead window in front of a nearly-dead cycle: the reset is
+  // already assumed in the baseline above, and only the recap moves what comes after it).
+  if (ev.binding === 'CYCLE' || resumedBinding === 'CYCLE') {
+    const f = ev.cycle.forecast.find((x) => x.dayStart > now && x.dropsOff > 0);
+    if (f) return { kind: 'recap', at: f.dayStart, dropsOff: f.dropsOff, available: f.availableAtStart };
+  }
+  return null;
 }
 
 export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: 'Sleeper', D: 'Driving', ON: 'On Duty' };

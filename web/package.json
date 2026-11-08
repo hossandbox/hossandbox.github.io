@@ -9,6 +9,7 @@
     "serve": "node server.mjs",
     "smoke": "npm run typecheck && node test/contrast.mjs && esbuild test/smoke.mjs --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=preact --define:__BUILD__='\"smoke\"' --outfile=dist-test/smoke.mjs --log-level=warning && node dist-test/smoke.mjs",
     "contrast": "node test/contrast.mjs",
+    "ocr-corpus": "node tools/ocr-corpus-run.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [],
@@ -19,11 +20,14 @@
     "node": ">=22.18"
   },
   "dependencies": {
-    "preact": "^10.29.8"
+    "preact": "^10.29.8",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
     "esbuild": "^0.28.2",
     "preact-render-to-string": "^6.7.0",
+    "tesseract.js-core": "^7.0.0",
     "typescript": "^5.9.3"
   }
 }

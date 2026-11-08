@@ -3403,4 +3403,1049 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (swept !== 782) throw new Error('patch 9.3: the boundary sweep must run its full subset');
   console.log('patch 9.3 (seed synthesis — pre-break driving interrupted every ≤8h, no manufactured violations): OK');
 }
+// --- patch 10: the load verdict gains a latest legal departure and a smallest fix, and the
+// Why sheet gains one counterfactual line. All three are computed by re-running the existing
+// planner/evaluator on changed inputs — no new rule math, nothing written.
+// Definitions that matter (see HANDOFF-10): the planner rests its way to legal, so a bare
+// feasible/infeasible flip across departure times essentially never happens; the "latest
+// legal departure" is therefore the last departure whose winning plan needs no MORE
+// ≥10-hour stops than the planned departure's plan — leave later and the load costs an
+// extra long stop. The Why lever's payoff is driving time REGAINED, never the wall-clock
+// stop-by (any pause shifts a stop-by 1:1 while the binding clock waits, so stop-by would
+// call every rest a lever). And a No verdict in practice only occurs when the planner hits
+// its own iteration limit (e.g. 3,000 mi at a 5 mph setting) — there the load advice is
+// suppressed entirely, because the plan failed, not the load, and the sentence "the load
+// itself has to change" would be false.
+{
+  const { openSheet: open10, setLaunchNotice: notice10 } = await import('../src/app.tsx');
+  notice10(false);
+  const { latestLegalDeparture: latest10, smallestRestFix: fix10, whyLever: lever10, getState: gs10 } = await import('../src/store.ts');
+  const { evaluate: evFn10 } = await import('../../engine/src/index.ts');
+  const { readFileSync: rf10 } = await import('node:fs');
+  const CFG10 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const L10 = (d, h, m = 0) => Math.floor(Date.UTC(2026, 9, d, h + 5, m) / 60000);
+  const txt10 = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const NOW10 = L10(12, 10);
+  // the redesign-4 driver: 13h of rest, on duty since 09:00, window ends 23:00
+  const segs10 = [
+    { status: 'OFF', start: L10(11, 20), end: L10(12, 9), createdAt: 1 },
+    { status: 'ON', start: L10(12, 9), end: NOW10, createdAt: 2 },
+  ];
+  const loadState = (lc, mph = 55) => setState({
+    segments: segs10.slice(0, 1), tentative: [], current: { status: 'ON', since: L10(12, 9), createdAt: 2 },
+    historyAcknowledged: true, seededAt: null, nowOverride: NOW10, tab: 'load', mph, config: { ...CFG10 }, loadCheck: lc,
+  });
+
+  // (a) helper level: 300 mi at 55 mph is 328 minutes of driving; the window ends 23:00, so
+  //     the last departure that needs no extra long stop is 17:32 — whether the wait until
+  //     the planned departure is on duty (leave-now check) or off duty (planned +2h). Both
+  //     wait models must agree, because the 09:00 on-duty hour started the shift either way.
+  const inA = { departure: NOW10, distanceMiles: 300, mph: 55, stops: [{ atMile: 300, minutes: 60, status: 'ON', label: 'Receiver' }], config: CFG10 };
+  if (latest10(segs10, inA, 'reset10', 'ON') !== L10(12, 17, 32))
+    throw new Error('patch 10: the latest no-extra-stop departure for the 300 mi load must be 17:32');
+  const inB = { ...inA, departure: NOW10 + 120, untilDeparture: { from: NOW10, status: 'OFF', label: 'Off duty until departure' } };
+  if (latest10(segs10, inB, 'reset10', 'OFF') !== L10(12, 17, 32))
+    throw new Error('patch 10: an off-duty wait to a planned departure must land on the same 17:32 boundary');
+
+  // (b) the verdict screen shows the line, worded for the driver
+  loadState({ miles: 300, dwell: 60, dwellOff: false, leaveIn: 0, waitOff: false, answered: true });
+  let t = txt10(out('load/verdict + leave-by'));
+  if (!/Yes, it’s legal/.test(t)) throw new Error('patch 10: the 300 mi load must still verdict Yes');
+  if (!t.includes(`Leave by ${clockFull(L10(12, 17, 32))} at the latest.`)) throw new Error('patch 10: the verdict must name the latest legal departure');
+
+  // (c) a short hop never changes shape inside the 12h window — no honest "latest" exists,
+  //     so the line stays off rather than naming the search cap
+  loadState({ miles: 50, dwell: 0, dwellOff: false, leaveIn: 0, waitOff: false, answered: true });
+  t = txt10(out('load/verdict no leave-by'));
+  if (!/Yes, it’s legal/.test(t) || /Leave by/.test(t)) throw new Error('patch 10: no leave-by line when the plan shape never changes within 12h');
+
+  // (d) the only No this planner produces: it hits its own iteration limit (3,000 mi at the
+  //     5 mph floor). The verdict and the planner's own warning show; NEITHER load-advice
+  //     line may appear — the fix search is not run and the no-fix sentence stays off,
+  //     because the plan failed, not the load. (Slow pin: the pathological plan takes ~15s.)
+  loadState({ miles: 3000, dwell: 0, dwellOff: false, leaveIn: 0, waitOff: false, answered: true }, 5);
+  t = txt10(out('load/verdict planner-limit No'));
+  if (!/No — not legal as planned/.test(t)) throw new Error('patch 10: the planner-limit trip must verdict No');
+  if (!/iteration limit/.test(t)) throw new Error('patch 10: the planner-limit warning must be the explanation shown');
+  if (/before you leave → legal/.test(t) || /No amount of extra rest/.test(t)) throw new Error('patch 10: no load advice may ride on a planner failure');
+
+  // (e) the fix machinery itself, pinned where the render cannot reach it: the search runs
+  //     0–600 minutes of added rest in 15-minute steps through the planner, the sentence for
+  //     "nothing in range flips it" exists word-for-word, and the helper returns null on the
+  //     planner-limit input (rest cannot fix a plan the planner could not finish).
+  const storeSrc10 = rf10('src/store.ts', 'utf8');
+  const appSrc10 = rf10('src/app.tsx', 'utf8');
+  if (!/SMALLEST_FIX_CAP_MIN = 600/.test(storeSrc10) || !/LATEST_DEPARTURE_SPAN_MIN = 720/.test(storeSrc10))
+    throw new Error('patch 10: the search bounds (600 min fix cap, 12h departure span) must stay as designed');
+  if (!/step \* 15/.test(storeSrc10)) throw new Error('patch 10: the fix search must move in 15-minute steps');
+  if (!appSrc10.includes('No amount of extra rest before leaving makes this one legal — the load itself has to change.'))
+    throw new Error('patch 10: the no-fix sentence must read exactly as specified');
+  if (!/before you leave → legal,/.test(appSrc10) || !/unloaded by \$\{clockFull\(advice\.fix\.plan\.arrival\)\}/.test(appSrc10)) throw new Error('patch 10: the fix line must state its payoff (legal, unloaded by …)');
+  // (the helper-level null on the planner-limit input is evidenced in HANDOFF-10 — a single
+  //  simulation of that input costs ~17s, so the suite pins the UI gate in (d) instead)
+
+  // (f) the Why counterfactual, rest lever: 7h45m driven since 06:15 with no break — the
+  //     30-minute break is the binding limit with 15 minutes of driving left. Thirty minutes
+  //     in the sleeper satisfies it and hands back the full break-clock of driving.
+  const segsC = [
+    { status: 'OFF', start: L10(11, 20), end: L10(12, 6), createdAt: 1 },
+    { status: 'ON', start: L10(12, 6), end: L10(12, 6, 15), createdAt: 2 },
+  ];
+  const segsCfull = [...segsC, { status: 'D', start: L10(12, 6, 15), end: L10(12, 14) }];
+  const levC = lever10(segsCfull, CFG10, L10(12, 14), evFn10(segsCfull, { asOf: L10(12, 14), config: CFG10 }));
+  if (!levC || levC.kind !== 'rest' || levC.minutes !== 30 || levC.status !== 'SB' || levC.stopBy !== L10(12, 17, 45))
+    throw new Error(`patch 10: the break-bound Why lever must be +30m in the sleeper to 17:45 (saw ${JSON.stringify(levC)})`);
+  // (render state: the same record with the driver now ON duty — a live D row would put the
+  // app in the full-screen driving view, where the sheet does not exist)
+  setState({ segments: [...segsC, { status: 'D', start: L10(12, 6, 15), end: L10(12, 14), createdAt: 3 }], tentative: [], current: { status: 'ON', since: L10(12, 14), createdAt: 4 }, historyAcknowledged: true, seededAt: null, nowOverride: L10(12, 14), tab: 'now', config: { ...CFG10 } });
+  open10({ kind: 'why' });
+  t = txt10(out('now/why + counterfactual'));
+  if (!t.includes(`What changes it: +30m in the sleeper → you can drive until ${clockFull(L10(12, 17, 45))}.`))
+    throw new Error('patch 10: the Why sheet must carry the counterfactual line under the binding limit');
+  open10(null);
+  // with what-if rows in play the sheet explains a hypothetical — the lever, computed on the
+  // real record, would mislead, so it stays off
+  setState({ tentative: [{ status: 'OFF', start: L10(12, 20), end: L10(12, 22), tentative: true, createdAt: 5 }] });
+  open10({ kind: 'why' });
+  t = txt10(out('now/why counterfactual suppressed'));
+  if (/What changes it:/.test(t)) throw new Error('patch 10: no counterfactual while what-if rows are in play');
+  open10(null);
+
+  // (g) the Why counterfactual, cycle lever: seven 9h54m days leave 42 minutes of cycle just
+  //     after midnight; the window binds now but the cycle binds after any restoring rest,
+  //     and rest alone never moves a cycle answer — the true lever is the next gain-back.
+  const segsD = [];
+  for (let d = 5; d <= 11; d++) segsD.push({ status: 'ON', start: L10(d, 0), end: L10(d, 9, 54), createdAt: d });
+  const segsDfull = [...segsD, { status: 'ON', start: L10(12, 0), end: L10(12, 0, 30) }];
+  const levD = lever10(segsDfull, CFG10, L10(12, 0, 30), evFn10(segsDfull, { asOf: L10(12, 0, 30), config: CFG10 }));
+  if (!levD || levD.kind !== 'recap' || levD.at !== L10(13, 0) || levD.dropsOff !== 594 || levD.available !== 606)
+    throw new Error(`patch 10: the cycle-bound Why lever must be the Oct 13 gain-back (saw ${JSON.stringify(levD)})`);
+  setState({ segments: segsD, tentative: [], current: { status: 'ON', since: L10(12, 0), createdAt: 9 }, historyAcknowledged: true, seededAt: null, nowOverride: L10(12, 0, 30), tab: 'now', config: { ...CFG10 } });
+  open10({ kind: 'why' });
+  t = txt10(out('now/why + recap lever'));
+  if (!t.includes(`What changes it: your next cycle hours come back ${clockFull(L10(13, 0))} — +9h 54m drops off, 10h 06m available.`))
+    throw new Error('patch 10: the Why sheet must name the next cycle gain-back when the cycle is the real lever');
+  open10(null);
+
+  // (h) checkpoint-1 fix (D3): at 450 mi the planner builds the en-route reset as
+  //     two steps — OFF 30 + OFF 570 — once departure passes 14:19. Counting single
+  //     steps of ≥10h read that reset as ZERO stops and the leave-by line named
+  //     14:59, 40 minutes into the overnight stop it claimed did not exist.
+  //     Merged contiguous runs count it as the one stop it is: the boundary is
+  //     14:19, at helper level and on the rendered card. (Ground truth computed
+  //     per-minute from the engine directly — see HANDOFF-FIXES.)
+  const inD3 = { ...inA, distanceMiles: 450, stops: [{ atMile: 450, minutes: 60, status: 'ON', label: 'Receiver' }] };
+  if (latest10(segs10, inD3, 'reset10', 'ON') !== L10(12, 14, 19))
+    throw new Error('patch 10: the 450 mi leave-by must be 14:19 — a reset planned as OFF 30 + OFF 570 is one long stop');
+  loadState({ miles: 450, dwell: 60, dwellOff: false, leaveIn: 0, waitOff: false, answered: true });
+  t = txt10(out('load/verdict 450mi leave-by'));
+  if (!/Yes, it’s legal/.test(t) || !t.includes(`Leave by ${clockFull(L10(12, 14, 19))} at the latest.`))
+    throw new Error('patch 10: the 450 mi verdict must name the 14:19 departure');
+
+  // (i) the wait-row exclusion (M2): the pre-departure wait is the driver's own
+  //     time, never a stop the trip costs him — an off-duty planned wait that
+  //     grows past 10 hours across the search window must not manufacture a
+  //     leave-by boundary for a short hop whose shape never changes.
+  const inM2 = { departure: NOW10 + 120, distanceMiles: 50, mph: 55, stops: [], config: CFG10, untilDeparture: { from: NOW10, status: 'OFF', label: 'Off duty until departure' } };
+  if (latest10(segs10, inM2, 'reset10', 'OFF') !== null)
+    throw new Error('patch 10: the pre-departure wait must never count as a long stop — no leave-by line for the waiting short hop');
+
+  // leave the store as the other sections expect to find it
+  setState({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', loadCheck: { miles: 1200, dwell: 120, dwellOff: false, leaveIn: 0, waitOff: false, answered: false }, config: { ...CFG10 } });
+  console.log('patch 10 (latest legal departure, smallest fix, Why counterfactual — every number re-run through the planner/evaluator): OK');
+}
+// --- patch 11: voice entry for the four ELD clocks — the driver SAYS the clocks the ELD
+// shows, one at a time, into the same boxes typing uses (voiceclocks.ts). Every accepted
+// value is checked by a pure parser that refuses fractions exactly like the typed boxes
+// (patch 9.2's fence); after the fourth clock the panel reads all four back and nothing
+// seeds until the driver taps "Set my clocks" himself; cancelling — or fumbling the same
+// clock twice — restores the boxes to what they held before voice entry started.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs } = await import('../src/store.ts');
+  const { openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const vc = await import('../src/voiceclocks.ts');
+  const app = rf('src/app.tsx', 'utf8');
+  setLaunchNotice(false);
+  const CFG11 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+
+  // (a) the parser table: utterances → whole hours + minutes, or a named refusal. The
+  //     ceiling passed is the field's own maximum, like the panel passes.
+  const P = vc.parseClockUtterance;
+  const good = [
+    ['seven hours fifteen minutes', 660, 7, 15], ['seven fifteen', 660, 7, 15],
+    ['seven oh five', 660, 7, 5], ['nine oh nine', 660, 9, 9],
+    ['eleven', 660, 11, 0], ['five thirty', 660, 5, 30], ['zero', 660, 0, 0],
+    ['7 hours 30 minutes', 660, 7, 30], ['an hour', 660, 1, 0], ['two hours', 660, 2, 0],
+    ['forty five minutes', 480, 0, 45], ['twenty minutes', 480, 0, 20], ['one minute', 480, 0, 1],
+    ['sixty two hours', 4200, 62, 0], ['forty-five minutes', 480, 0, 45],
+  ];
+  for (const [said, max, hh, mm] of good) {
+    const r = P(said, max);
+    if (!r.ok || r.hours !== hh || r.minutes !== mm || r.total !== hh * 60 + mm)
+      throw new Error(`patch 11: "${said}" must parse to ${hh}h ${mm}m (saw ${JSON.stringify(r)})`);
+  }
+  const refused = [
+    ['seven and a half', 660, 'fraction'], ['seven point five', 660, 'fraction'], ['7.5 hours', 660, 'fraction'],
+    ['seven hours seventy minutes', 660, 'junk'], ['seven seventy', 660, 'junk'],
+    // a minutes part of exactly 60 is not a clock either (checkpoint 1, M5: the
+    // boundary case the table used to miss — "seven sixty" must refuse, never
+    // land as 8h 0m), in every shape that can carry it
+    ['seven sixty', 660, 'junk'], ['sixty minutes', 660, 'junk'],
+    ['seven hours sixty minutes', 660, 'junk'], ['one hour sixty minutes', 660, 'junk'], ['seven sixty one', 660, 'junk'],
+    // the checkpoint's own hostile fraction forms
+    ['three quarters', 660, 'fraction'], ['half an hour', 660, 'fraction'],
+    ['62.0 hours', 4200, 'fraction'], ['7,5 hours', 660, 'fraction'],
+    ['banana', 660, 'junk'], ['', 660, 'junk'], ['minus three hours', 660, 'junk'], ['one hundred', 660, 'junk'],
+    ['twelve', 480, 'range'], ['ninety hours', 4200, 'range'],
+  ];
+  for (const [said, max, why] of refused) {
+    const r = P(said, max);
+    if (r.ok || r.reason !== why)
+      throw new Error(`patch 11: "${said}" must be refused as ${why} (saw ${JSON.stringify(r)})`);
+  }
+
+  // (b) the read-back: one string, the panel's field order, spoken words — the exact
+  //     line the driver hears is the line the panel composed.
+  const rb = vc.composeReadBack([
+    { label: 'Drive time left', minutes: 435 }, { label: 'Shift time left', minutes: 580 },
+    { label: 'Break due in', minutes: 330 }, { label: 'Cycle time left', minutes: 3720 },
+  ]);
+  if (rb !== 'Drive time left: 7 hours 15. Shift time left: 9 hours 40. Break due in: 5 hours 30. Cycle time left: 62 hours.')
+    throw new Error(`patch 11: the read-back must name all four clocks in order (saw "${rb}")`);
+  if (vc.spokenDuration(60) !== '1 hour' || vc.spokenDuration(1) !== '1 minute' || vc.spokenDuration(0) !== '0 minutes')
+    throw new Error('patch 11: spoken durations must singularise and name zero plainly');
+
+  // (c) the session flow over the boxes: accepts land in the boxes the typist uses and
+  //     walk the panel's field order; the session ends in the read-back, never in a seed.
+  const KEYS11 = ['driveLeft', 'windowLeft', 'breakDueIn', 'cycleLeft'];
+  const boxes0 = { driveLeft: ['11', '0'], windowLeft: ['14', '0'], breakDueIn: ['8', '0'], cycleLeft: ['70', '0'] };
+  let flow = vc.beginVoice(boxes0);
+  let boxes = boxes0;
+  const said = [['seven fifteen', 435], ['nine forty', 580], ['five thirty', 330], ['sixty two hours', 3720]];
+  said.forEach(([text], i) => {
+    const p = P(text, 4200);
+    if (!p.ok) throw new Error(`patch 11: "${text}" must parse inside the flow`);
+    const a = vc.voiceAccept(flow, boxes, KEYS11[i], p, KEYS11.length);
+    flow = a.flow; boxes = a.boxes;
+    if (flow.done !== (i === said.length - 1)) throw new Error('patch 11: the session must finish exactly at the fourth clock');
+  });
+  if (boxes.driveLeft.join(':') !== '7:15' || boxes.windowLeft.join(':') !== '9:40' || boxes.breakDueIn.join(':') !== '5:30' || boxes.cycleLeft.join(':') !== '62:0')
+    throw new Error(`patch 11: spoken values must land in the boxes (saw ${JSON.stringify(boxes)})`);
+  if (boxes0.driveLeft.join(':') !== '11:0') throw new Error('patch 11: accepting must not mutate the boxes it was handed');
+
+  // (d) start over restores the pre-voice boxes exactly, and so does the two-failure
+  //     exit — a voice session the driver abandons changes nothing at all.
+  if (JSON.stringify(vc.voiceDiscard(flow)) !== JSON.stringify(boxes0))
+    throw new Error('patch 11: start over must restore the pre-voice boxes');
+  let f2 = vc.beginVoice(boxes0);
+  const acc = vc.voiceAccept(f2, boxes0, 'driveLeft', { hours: 7, minutes: 15 }, KEYS11.length);
+  const fail1 = vc.voiceFailure(acc.flow, acc.boxes);
+  if (fail1.exited || fail1.flow === null || fail1.boxes.driveLeft.join(':') !== '7:15')
+    throw new Error('patch 11: the first refusal re-asks and keeps what was already said');
+  const fail2 = vc.voiceFailure(fail1.flow, fail1.boxes);
+  if (!fail2.exited || fail2.flow !== null || JSON.stringify(fail2.boxes) !== JSON.stringify(boxes0))
+    throw new Error('patch 11: the second refusal on one clock must exit with the pre-voice boxes restored');
+
+  // (e) the panel wiring: voice exists only where the browser offers recognition —
+  //     no API, no button (and no dead control) — and the panel seeds only through
+  //     its one confirm path, so voice can never seed on its own.
+  const sheetBody = app.slice(app.indexOf('function QuickStartSheet'), app.indexOf('function DriftSheet'));
+  if ((sheetBody.match(/applyEldSeed/g) || []).length !== 1)
+    throw new Error('patch 11: the quick-start panel must keep exactly one seeding call — its confirm');
+  if (!/speechRecognitionCtor\(\)/.test(sheetBody) || !/Say my clocks/.test(sheetBody))
+    throw new Error('patch 11: the panel must offer voice entry behind the feature detect');
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', config: { ...CFG11 } });
+  openSheet({ kind: 'quickstart' });
+  let h = out('patch 11/quickstart panel, no speech API');
+  if (/Say my clocks/.test(h)) throw new Error('patch 11: with no speech-recognition API the voice button must not render');
+  globalThis.webkitSpeechRecognition = function () { /* stand-in: presence is all the detect reads */ };
+  try {
+    h = out('patch 11/quickstart panel, speech API present');
+    if (!/Say my clocks/.test(h)) throw new Error('patch 11: with a speech-recognition API the voice button must render');
+  } finally {
+    delete globalThis.webkitSpeechRecognition;
+  }
+  openSheet(null);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG11 } });
+  setLaunchNotice(true);
+  console.log('patch 11 (voice entry — say the four clocks, read back, confirm by hand; boxes restored on cancel): OK');
+}
+// --- patch 12: screenshot import for the four ELD clocks — the driver picks a
+// screenshot of the ELD's clocks screen and the words an on-device reader found
+// (eldocr.ts) prefill the same boxes typing and voice use. The bar is asymmetric:
+// a value lands only when it is exactly clock-shaped, read confidently, claimed
+// by its clock's label, unclaimed by any rival, and inside the clock's own
+// maximum — anything else stays out and is named. Nothing here runs the reader
+// itself (that is the browser half, eldcr-run.ts, covered by the OCR corpus);
+// these pins drive the pure extraction with word fixtures, the same discipline
+// patch 11's parser table uses.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { setState: ss, getState: gs, readEldEntry } = await import('../src/store.ts');
+  const { openSheet, setLaunchNotice } = await import('../src/app.tsx');
+  const oc = await import('../src/eldocr.ts');
+  const app = rf('src/app.tsx', 'utf8');
+  const run = rf('src/eldocr-run.ts', 'utf8');
+  setLaunchNotice(false);
+  const CFG12 = { cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const FIELDS12 = [
+    { key: 'driveLeft', max: 660 }, { key: 'windowLeft', max: 840 },
+    { key: 'breakDueIn', max: 480 }, { key: 'cycleLeft', max: 4200 },
+  ];
+  const W = (text, x0, y0, x1, y1, confidence = 96) => ({ text, confidence, bbox: { x0, y0, x1, y1 } });
+  // A clean two-column screen: label words left, one value right, four rows.
+  const row = (label, value, y, conf = 96) => [
+    ...label.split(' ').map((t, i) => W(t, 40 + i * 105, y + 9, 40 + i * 105 + 95, y + 39)),
+    W(value, 624, y, 775, y + 48, conf),
+  ];
+  const clean = [
+    ...row('Drive Time Left', '7:15', 143), ...row('Shift Time Left', '9:40', 268),
+    ...row('Break Due In', '5:30', 393), ...row('Cycle Time Left', '62:00', 518),
+  ];
+
+  // (a) the clean screen: every clock read exactly, nothing left over.
+  {
+    const r = oc.extractEldClocks(clean, FIELDS12);
+    const want = { driveLeft: 435, windowLeft: 580, breakDueIn: 330, cycleLeft: 3720 };
+    for (const [k, m] of Object.entries(want)) {
+      if (r.filled[k]?.minutes !== m) throw new Error(`patch 12: the clean screen must fill ${k} with ${m} (saw ${JSON.stringify(r.filled)})`);
+    }
+    if (r.unplaced.length !== 0 || r.rejected !== 0)
+      throw new Error(`patch 12: the clean screen must leave nothing unplaced or rejected (saw ${JSON.stringify(r)})`);
+  }
+
+  // (b) the stacked layout: each label directly above its value still claims it.
+  {
+    const block = (label, value, y) => [
+      ...label.split(' ').map((t, i) => W(t, 40 + i * 105, y, 40 + i * 105 + 95, y + 24)),
+      W(value, 40, y + 38, 190, y + 86),
+    ];
+    const words = [
+      ...block('Drive Time Left', '6:05', 20), ...block('Shift Time Left', '8:20', 150),
+      ...block('Break Due In', '3:45', 280), ...block('Cycle Time Left', '41:30', 410),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    const want = { driveLeft: 365, windowLeft: 500, breakDueIn: 225, cycleLeft: 2490 };
+    for (const [k, m] of Object.entries(want)) {
+      if (r.filled[k]?.minutes !== m) throw new Error(`patch 12: the stacked screen must fill ${k} with ${m} (saw ${JSON.stringify(r.filled)})`);
+    }
+  }
+
+  // (c) a doubtful digit stays out: the drive value read at low confidence must
+  //     not fill its box — the misread that invents time is the one that matters.
+  {
+    const words = [
+      ...row('Drive Time Left', '7:15', 143, 62), ...row('Shift Time Left', '9:40', 268),
+      ...row('Break Due In', '5:30', 393), ...row('Cycle Time Left', '62:00', 518),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.driveLeft) throw new Error('patch 12: a low-confidence value must not fill a box');
+    if (r.rejected < 1) throw new Error('patch 12: a low-confidence value must be counted as rejected');
+    if (r.filled.windowLeft?.minutes !== 580 || r.filled.cycleLeft?.minutes !== 3720)
+      throw new Error('patch 12: confident neighbours of a rejected value must still fill');
+  }
+
+  // (d) two values claiming one clock at nearly equal strength (two rows, each
+  //     with a clear path to its own drive label): the geometry cannot say
+  //     which the label meant, so NEITHER lands — a mis-assigned clock is worse
+  //     than a blank one.
+  {
+    const words = [
+      W('Drive', 40, 100, 140, 130), W('Time', 150, 100, 240, 130), W('Left', 250, 100, 320, 130),
+      W('7:15', 400, 95, 500, 145),
+      W('Driving', 40, 200, 160, 230), W('8:15', 415, 195, 515, 245),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.driveLeft) throw new Error('patch 12: an ambiguous value must not fill a box');
+    if (!r.unplaced.includes(435) || !r.unplaced.includes(495))
+      throw new Error(`patch 12: both ambiguous values must be reported unplaced (saw ${JSON.stringify(r.unplaced)})`);
+  }
+
+  // (e) a value too big for the clock it sat beside never lands in it: 65:00 by
+  //     the drive label is not a drive reading (and not quietly a cycle one
+  //     either — it is reported unplaced), and 75:00 fits no clock at all.
+  {
+    const beside = [...row('Drive Time Left', '65:00', 143), ...row('Cycle Time Left', '62:00', 518)];
+    const r = oc.extractEldClocks(beside, FIELDS12);
+    if (r.filled.driveLeft || r.filled.cycleLeft?.minutes !== 3720)
+      throw new Error(`patch 12: an over-max value must not fill the clock it sat beside (saw ${JSON.stringify(r.filled)})`);
+    if (!r.unplaced.includes(3900)) throw new Error('patch 12: an over-max value must be reported unplaced');
+    const huge = oc.extractEldClocks(row('Cycle Time Left', '75:00', 518), FIELDS12);
+    if (huge.filled.cycleLeft || huge.rejected < 1)
+      throw new Error('patch 12: a value beyond every clock must be rejected, not placed');
+  }
+
+  // (f) a decimal is not a clock: "7.5" beside the drive label matches no shape,
+  //     is never converted and never lands — the whole-number fence (patch 9.2)
+  //     holds by shape here, and again at the confirm below.
+  {
+    const r = oc.extractEldClocks(row('Drive Time Left', '7.5', 143), FIELDS12);
+    if (r.filled.driveLeft || r.unplaced.length !== 0)
+      throw new Error(`patch 12: a decimal must produce no fill and no placement (saw ${JSON.stringify(r)})`);
+  }
+
+  // (g) the unit shapes: "7h 15m" as two words, "62h" alone, "45m" alone.
+  //     The pair and the minutes-only token fill. The bare "62h" does NOT —
+  //     checkpoint 3's policy (D6b, Lorico's call): an unpaired bare-hours
+  //     token can never fill a box, because every statutory limit is printed
+  //     in exactly that shape and no geometry tells a limit column from a
+  //     value column. It is reported unplaced and the driver types the one
+  //     field. (Before this round this pin expected 3720 to fill; the
+  //     expectation changed with the policy, deliberately.)
+  {
+    const words = [
+      W('Drive', 40, 109, 145, 139), W('7h', 624, 100, 690, 148), W('15m', 705, 100, 790, 148),
+      W('Break', 40, 234, 150, 264), W('45m', 624, 225, 720, 273),
+      W('Cycle', 40, 359, 145, 389), W('62h', 624, 350, 720, 398),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.driveLeft?.minutes !== 435 || r.filled.breakDueIn?.minutes !== 45)
+      throw new Error(`patch 12: the pair and minutes-only unit shapes must fill their clocks (saw ${JSON.stringify(r.filled)})`);
+    if (r.filled.cycleLeft)
+      throw new Error(`patch 12: a bare-hours token must not fill a box under the D6b policy (saw ${JSON.stringify(r.filled)})`);
+    if (!r.unplaced.includes(3720))
+      throw new Error('patch 12: the refused bare-hours value must be reported unplaced');
+  }
+
+  // (h) a confident time with no label near it is scenery (a clock-of-day on the
+  //     ELD's header, say): reported unplaced, never guessed into a box.
+  {
+    const words = [...clean, W('3:25', 624, 700, 775, 748)];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (!r.unplaced.includes(205)) throw new Error('patch 12: an unlabelled time must be reported unplaced');
+    if (Object.keys(r.filled).length !== 4) throw new Error('patch 12: an unlabelled time must not disturb the four reads');
+  }
+
+  // (l) the clear-path rule: an info line that merely CONTAINS a label word —
+  //     "Shift started 06:00" — must not claim its time for that clock; the
+  //     real row, whose label reaches its value across its own phrase only,
+  //     still claims its own.
+  {
+    const words = [
+      W('Shift', 40, 40, 140, 64), W('started', 155, 40, 290, 64), W('06:00', 305, 36, 430, 72),
+      ...row('Shift Time Left', '6:03', 143),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.windowLeft?.minutes !== 363)
+      throw new Error(`patch 12: the real shift row must claim its value past an info line (saw ${JSON.stringify(r.filled)})`);
+    if (!r.unplaced.includes(360))
+      throw new Error('patch 12: the info line time must be reported unplaced, never filled');
+  }
+
+  // (m) the two-pass merge: a clock fills when either reader pass read it
+  //     cleanly, fills with the agreed value when both did, and does NOT fill
+  //     when the passes name different minutes — the disagreement is reported
+  //     with both values, because a doubt is not a tie to break but a read to
+  //     refuse.
+  {
+    const ex = (filled, unplaced = [], rejected = 0) => ({ filled, unplaced, rejected, disagreed: {} });
+    const both = oc.mergeExtractions(
+      ex({ driveLeft: { minutes: 435, confidence: 88 } }),
+      ex({ driveLeft: { minutes: 435, confidence: 96 }, windowLeft: { minutes: 580, confidence: 90 } }));
+    if (both.filled.driveLeft?.minutes !== 435 || both.filled.driveLeft?.confidence !== 96)
+      throw new Error('patch 12: agreed reads must merge to the agreed value at the stronger confidence');
+    if (both.filled.windowLeft?.minutes !== 580)
+      throw new Error('patch 12: a clock read by only one pass must still fill');
+    const clash = oc.mergeExtractions(
+      ex({ cycleLeft: { minutes: 3720, confidence: 95 } }),
+      ex({ cycleLeft: { minutes: 3780, confidence: 95 } }));
+    if (clash.filled.cycleLeft)
+      throw new Error('patch 12: disagreeing passes must not fill the clock');
+    if (clash.disagreed.cycleLeft?.join(',') !== '3720,3780')
+      throw new Error(`patch 12: a disagreement must be reported with both values (saw ${JSON.stringify(clash.disagreed)})`);
+    const un = oc.mergeExtractions(ex({}, [205, 360]), ex({}, [360, 522]));
+    if (un.unplaced.join(',') !== '205,360,522')
+      throw new Error('patch 12: merged unplaced lists must union without duplicates');
+  }
+
+  // (n) checkpoint-1 fix (D1): a limit printed inside the label — "Cycle (70h)
+  //     Left 28:51" — is itself clock-shaped and claims the label by nearness,
+  //     while the row's real value stands unclaimed beside it (the token blocks
+  //     its clear path). The box must NOT fill with the limit: the clock stays
+  //     blank, both numbers are reported as a disagreement, and the same holds
+  //     for the drive/shift/break shapes of the same layout.
+  {
+    const cases = [
+      { key: 'cycleLeft', pair: '4200,1731', words: [
+        W('Cycle', 40, 400, 140, 430), W('(70h)', 155, 400, 235, 430), W('Left', 250, 400, 320, 430),
+        W('28:51', 600, 395, 710, 445)] },
+      { key: 'driveLeft', pair: '660,262', words: [
+        W('Drive', 40, 100, 140, 130), W('(11h)', 155, 100, 235, 130), W('Left', 250, 100, 320, 130),
+        W('4:22', 600, 95, 690, 145)] },
+      { key: 'windowLeft', pair: '840,363', words: [
+        W('Shift', 40, 100, 140, 130), W('14h', 155, 100, 215, 130), W('window', 230, 100, 330, 130),
+        W('6:03', 600, 95, 690, 145)] },
+      { key: 'breakDueIn', pair: '480,137', words: [
+        W('Break', 40, 100, 150, 130), W('8h', 165, 100, 215, 130), W('rule', 230, 100, 300, 130),
+        W('2:17', 600, 95, 690, 145)] },
+    ];
+    for (const c of cases) {
+      const r = oc.extractEldClocks(c.words, FIELDS12);
+      if (r.filled[c.key])
+        throw new Error(`patch 12: a limit token in the label must not fill ${c.key} (saw ${JSON.stringify(r.filled)})`);
+      if (r.disagreed[c.key]?.join(',') !== c.pair)
+        throw new Error(`patch 12: the limit contest on ${c.key} must be reported with both values (saw ${JSON.stringify(r.disagreed)})`);
+      for (const m of c.pair.split(',').map(Number))
+        if (!r.unplaced.includes(m)) throw new Error(`patch 12: the contested ${c.key} value ${m} must be reported unplaced`);
+    }
+  }
+
+  // (o) checkpoint-1 fix (D2): a second label token naming the same clock from
+  //     another line — a header's "Last break 06:00" above the real "Break Due
+  //     In" row — is a rival claim whatever the score gap: the break clock
+  //     stays blank with both values reported, and the untouched rows around
+  //     it still read normally.
+  {
+    const words = [
+      W('Last', 40, 40, 100, 64), W('break', 115, 40, 200, 64), W('06:00', 215, 36, 320, 72),
+      ...row('Break Due In', '2:17', 143), ...row('Drive Time Left', '4:22', 268),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.breakDueIn)
+      throw new Error(`patch 12: a header naming the break clock must contest the real row, not lose to it or win (saw ${JSON.stringify(r.filled)})`);
+    if (r.disagreed.breakDueIn?.join(',') !== '360,137')
+      throw new Error(`patch 12: the header contest must be reported with both values (saw ${JSON.stringify(r.disagreed)})`);
+    if (!r.unplaced.includes(360) || !r.unplaced.includes(137))
+      throw new Error('patch 12: both contested break values must be reported unplaced');
+    if (r.filled.driveLeft?.minutes !== 262)
+      throw new Error('patch 12: a contested neighbour must not disturb the clean rows');
+  }
+
+  // (p) the shadow rule's other side: a clock read at exactly its maximum on a
+  //     line of its own still fills — the maximum alone is not a doubt.
+  {
+    const r = oc.extractEldClocks(row('Cycle Time Left', '70:00', 518), FIELDS12);
+    if (r.filled.cycleLeft?.minutes !== 4200)
+      throw new Error(`patch 12: a lone maximum read must still fill (saw ${JSON.stringify(r.filled)})`);
+  }
+
+  // (q) the merge keeps a within-pass contest: a pass that found the clock
+  //     contested blanks it for the merge even when the other pass read one of
+  //     the values cleanly — the subset read does not override the ambiguity.
+  {
+    const contested = { filled: {}, unplaced: [4200, 1731], rejected: 0, disagreed: { cycleLeft: [4200, 1731] } };
+    const oneSided = { filled: { cycleLeft: { minutes: 1731, confidence: 95 } }, unplaced: [], rejected: 0, disagreed: {} };
+    const m = oc.mergeExtractions(contested, oneSided);
+    if (m.filled.cycleLeft)
+      throw new Error('patch 12: a within-pass contest must survive the merge');
+    if (m.disagreed.cycleLeft?.join(',') !== '4200,1731')
+      throw new Error(`patch 12: the merged contest must keep both values (saw ${JSON.stringify(m.disagreed)})`);
+  }
+
+  // (r) checkpoint-2 fix (D4): pin (n)'s rows with the value column cropped
+  //     out of the screenshot — the label and its limit token are all that is
+  //     left of each row, and with no readable value to contest, the token
+  //     was the clock's only claimant and filled the box with the limit
+  //     (ck2's clip screens). A label's limit token may be reported, never
+  //     landed — parenthesised, or (the shift row) a bare "14h" set inside
+  //     the label's own phrase. (Checkpoint 3's D6b policy has since made
+  //     EVERY unpaired bare-hours token report-only, wherever it stands —
+  //     pin (y); this pin's assertions are unchanged.)
+  {
+    const words = [
+      W('Drive', 40, 100, 140, 130), W('(11h)', 155, 100, 235, 130), W('Left', 250, 100, 320, 130),
+      W('Shift', 40, 250, 140, 280), W('14h', 155, 250, 215, 280), W('Left', 230, 250, 300, 280),
+      W('Cycle', 40, 400, 140, 430), W('(70h)', 155, 400, 235, 430), W('Left', 250, 400, 320, 430),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (Object.keys(r.filled).length !== 0)
+      throw new Error(`patch 12: a cropped row must not fill any clock with its label limit (saw ${JSON.stringify(r.filled)})`);
+    for (const m of [660, 840, 4200])
+      if (!r.unplaced.includes(m)) throw new Error(`patch 12: the cropped row's limit ${m} must be reported unplaced`);
+    if (Object.keys(r.disagreed).length !== 0)
+      throw new Error('patch 12: no second number was read on a cropped row, so no pair may be named');
+  }
+
+  // (s) the limit token's size is irrelevant (Opus's N7): "Cycle (60h) Left"
+  //     is a limit annotation exactly as "(70h)" is — with the value unread
+  //     the box stays blank, and with the value read the contest is reported
+  //     with both numbers, as pin (n) requires of the statutory shape.
+  {
+    const bare = [
+      W('Cycle', 40, 400, 140, 430), W('(60h)', 155, 400, 235, 430), W('Left', 250, 400, 320, 430),
+    ];
+    const r = oc.extractEldClocks(bare, FIELDS12);
+    if (r.filled.cycleLeft)
+      throw new Error(`patch 12: a non-statutory (60h) label limit must not fill the cycle box (saw ${JSON.stringify(r.filled)})`);
+    if (!r.unplaced.includes(3600)) throw new Error('patch 12: the 60h limit must be reported unplaced');
+    const withValue = oc.extractEldClocks([...bare, W('28:51', 600, 395, 710, 445)], FIELDS12);
+    if (withValue.filled.cycleLeft)
+      throw new Error('patch 12: a (60h) limit beside its read value must not fill the cycle box');
+    if (withValue.disagreed.cycleLeft?.join(',') !== '3600,1731')
+      throw new Error(`patch 12: the (60h) contest must be reported with both values (saw ${JSON.stringify(withValue.disagreed)})`);
+  }
+
+  // (t) the value is on screen but too faint to trust (ck2/ocr-extra's
+  //     confidence-70/79 reads): refused at the floor — and the label limit
+  //     must not step into the vacancy it leaves.
+  {
+    const words = [
+      W('Drive', 40, 100, 140, 130), W('(11h)', 155, 100, 235, 130), W('Left', 250, 100, 320, 130),
+      W('4:22', 600, 95, 690, 145, 79),
+      W('Cycle', 40, 400, 140, 430), W('(70h)', 155, 400, 235, 430), W('Left', 250, 400, 320, 430),
+      W('28:51', 600, 395, 710, 445, 70),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.driveLeft || r.filled.cycleLeft)
+      throw new Error(`patch 12: a value refused at the floor must leave the box blank, not filled with the limit (saw ${JSON.stringify(r.filled)})`);
+    if (r.rejected !== 2) throw new Error(`patch 12: both faint values must be counted as rejected (saw ${r.rejected})`);
+    if (!r.unplaced.includes(660) || !r.unplaced.includes(4200))
+      throw new Error('patch 12: the limits beside refused values must be reported unplaced');
+    if (Object.keys(r.disagreed).length !== 0)
+      throw new Error('patch 12: a refused value names no pair');
+  }
+
+  // (u) the stacked tile with its value read (pin (n)'s family, the value
+  //     directly under the limit token): two different values claim the
+  //     window clock — the token over it and the value under it — so the box
+  //     stays blank with the pair reported, never filled with the 14:00.
+  {
+    const words = [
+      W('Shift', 40, 100, 140, 130), W('(14h)', 155, 100, 235, 130),
+      W('6:03', 155, 140, 245, 190),
+    ];
+    const r = oc.extractEldClocks(words, FIELDS12);
+    if (r.filled.windowLeft)
+      throw new Error(`patch 12: a limit token over its value must not fill the window box (saw ${JSON.stringify(r.filled)})`);
+    if (r.disagreed.windowLeft?.join(',') !== '840,363')
+      throw new Error(`patch 12: the tile contest must be reported with both values (saw ${JSON.stringify(r.disagreed)})`);
+    if (!r.unplaced.includes(840) || !r.unplaced.includes(363))
+      throw new Error('patch 12: both tile values must be reported unplaced');
+  }
+
+  // (v) checkpoint-2 fix (D5): pin (o)'s header with NO real row beneath it.
+  //     Round 1 blanked "Last break 06:00" only when a "Break Due In" row
+  //     contested it; alone on the screen, its time of day filled the break
+  //     box (ck2's lone-last-break). An info-line label may contest a clock
+  //     but never fill it — and the same holds for its "since" sibling. The
+  //     "taken"/"at" phrasings put their marker between the label and the
+  //     value, where the clear-path rule already refuses the claim; pinned
+  //     so the whole family stays covered.
+  {
+    const cases = [
+      { name: 'Last break', words: [W('Last', 40, 40, 100, 64), W('break', 115, 40, 200, 64), W('06:00', 215, 36, 320, 72)] },
+      { name: 'Since break', words: [W('Since', 40, 40, 115, 64), W('break', 130, 40, 215, 64), W('06:00', 230, 36, 335, 72)] },
+      { name: 'Break taken', words: [W('Break', 40, 100, 150, 130), W('taken', 165, 100, 260, 130), W('06:00', 275, 95, 380, 145)] },
+      { name: 'Break at', words: [W('Break', 40, 100, 150, 130), W('at', 165, 100, 205, 130), W('06:00', 220, 95, 325, 145)] },
+    ];
+    for (const c of cases) {
+      const r = oc.extractEldClocks(c.words, FIELDS12);
+      if (r.filled.breakDueIn)
+        throw new Error(`patch 12: a lone "${c.name} 06:00" info line must not fill the break box (saw ${JSON.stringify(r.filled)})`);
+      if (!r.unplaced.includes(360))
+        throw new Error(`patch 12: the "${c.name}" time of day must be reported unplaced`);
+    }
+  }
+
+  // (w) checkpoint-3 fix (D7) + checkpoint-4 fix (D8): the info marker need
+  //     not stand immediately before the label word — a walk left finds
+  //     it, so the natural phrasings are info lines too. "Last 30-min
+  //     break" is how a US ELD actually words the §395.3(a)(3)(ii) break.
+  //     Checkpoint 3 bounded the walk at three words, stopping at a
+  //     value-shaped word or a wide gap; checkpoint 4 found the bound
+  //     itself was the defect — the regulation's own phrase, "Last 30
+  //     minute rest break", puts the marker four words out, and "Since
+  //     last 10h break" hides it behind a unit token — so the walk is now
+  //     bounded by the text run: it stops at a colon-shaped word (a
+  //     neighbouring column's read) or at a gap wider than two
+  //     word-heights (a column break), and at nothing else. Lone, each
+  //     fills nothing; over a real "Break Due In" row, the contest is
+  //     reported with both values, exactly as pin (o). The run's edges
+  //     are still pinned: on a crowded two-column line the colon stop and
+  //     the gap stop keep the marker hunt from stealing a genuine row in
+  //     the next column.
+  {
+    const headers = [
+      { name: 'Last 30-min break', words: [W('Last', 40, 40, 100, 64), W('30-min', 115, 40, 215, 64), W('break', 230, 40, 315, 64), W('06:00', 330, 36, 435, 72)] },
+      { name: 'Last 30 min break', words: [W('Last', 40, 40, 100, 64), W('30', 115, 40, 160, 64), W('min', 175, 40, 225, 64), W('break', 240, 40, 325, 64), W('06:00', 340, 36, 445, 72)] },
+      { name: 'Last rest break', words: [W('Last', 40, 40, 100, 64), W('rest', 115, 40, 185, 64), W('break', 200, 40, 285, 64), W('06:00', 300, 36, 405, 72)] },
+      { name: 'Previous break', words: [W('Previous', 40, 40, 160, 64), W('break', 175, 40, 260, 64), W('06:00', 275, 36, 380, 72)] },
+      { name: 'Prev. break', words: [W('Prev.', 40, 40, 110, 64), W('break', 125, 40, 210, 64), W('06:00', 225, 36, 330, 72)] },
+      { name: 'Last 30 minute rest break', words: [W('Last', 40, 40, 100, 64), W('30', 115, 40, 160, 64), W('minute', 175, 40, 285, 64), W('rest', 300, 40, 360, 64), W('break', 375, 40, 460, 64), W('06:00', 475, 36, 580, 72)] },
+      { name: 'Last 30 min rest break', words: [W('Last', 40, 40, 100, 64), W('30', 115, 40, 160, 64), W('min', 175, 40, 225, 64), W('rest', 240, 40, 300, 64), W('break', 315, 40, 400, 64), W('06:00', 415, 36, 520, 72)] },
+      { name: 'Since last 10h break', words: [W('Since', 40, 40, 150, 64), W('last', 165, 40, 230, 64), W('10h', 245, 40, 305, 64), W('break', 320, 40, 430, 64), W('06:00', 445, 36, 550, 72)] },
+    ];
+    for (const c of headers) {
+      const lone = oc.extractEldClocks(c.words, FIELDS12);
+      if (lone.filled.breakDueIn)
+        throw new Error(`patch 12: a lone "${c.name} 06:00" header must not fill the break box (saw ${JSON.stringify(lone.filled)})`);
+      if (!lone.unplaced.includes(360))
+        throw new Error(`patch 12: the "${c.name}" time of day must be reported unplaced`);
+      const withRow = oc.extractEldClocks([...c.words, ...row('Break Due In', '2:17', 143)], FIELDS12);
+      if (withRow.filled.breakDueIn)
+        throw new Error(`patch 12: a "${c.name}" header over a real row must not fill the break box (saw ${JSON.stringify(withRow.filled)})`);
+      if (withRow.disagreed.breakDueIn?.join(',') !== '360,137')
+        throw new Error(`patch 12: the "${c.name}" contest must be reported with both values (saw ${JSON.stringify(withRow.disagreed)})`);
+    }
+    // The four-word case, re-pinned by checkpoint 4 (D8): "Last" stands
+    // four words from this label, inside one unbroken text run, so the
+    // line is an info line and the read is refused. (Before this round
+    // this pin expected 360 to fill — the three-word bound made the
+    // marker "outside the walk"; the expectation changed with the rule,
+    // deliberately — Lorico approved this one expectation change, as he
+    // approved pin (g)'s in round 3.)
+    const far = oc.extractEldClocks([
+      W('Last', 40, 40, 100, 64), W('updated', 115, 40, 225, 64), W('on', 240, 40, 280, 64),
+      W('Monday', 295, 40, 395, 64), W('break', 410, 40, 495, 64), W('06:00', 510, 36, 615, 72),
+    ], FIELDS12);
+    if (far.filled.breakDueIn || !far.unplaced.includes(360))
+      throw new Error('patch 12: a marker anywhere in the label\'s text run marks the line info — the read must be refused');
+    const twoCol = oc.extractEldClocks([
+      W('Last', 40, 40, 100, 64), W('break', 115, 40, 200, 64), W('06:00', 215, 36, 320, 72),
+      W('Drive', 560, 40, 665, 64), W('Left', 680, 40, 750, 64), W('4:22', 765, 36, 870, 84),
+    ], FIELDS12);
+    if (twoCol.filled.driveLeft?.minutes !== 262 || twoCol.filled.breakDueIn)
+      throw new Error(`patch 12: a neighbouring column's row must still fill past an info header (saw ${JSON.stringify(twoCol.filled)})`);
+    const gapCol = oc.extractEldClocks([
+      W('Last', 40, 40, 100, 64), W('sync', 115, 40, 190, 64),
+      W('Drive', 560, 40, 665, 64), W('Left', 680, 40, 750, 64), W('4:22', 765, 36, 870, 84),
+    ], FIELDS12);
+    if (gapCol.filled.driveLeft?.minutes !== 262)
+      throw new Error(`patch 12: a marker across a column gap must not mark the next column's row info (saw ${JSON.stringify(gapCol.filled)})`);
+  }
+
+  // (x) checkpoint-3 fix (D6a): the parenthesis arm covers a candidate of
+  //     ANY shape inside a label phrase — "(70:00)" and "(70h 0m)" are
+  //     annotations exactly as "(70h)" is, so with the row's value cropped
+  //     they leave the box blank, and beside the read value they contest
+  //     it. Parentheses alone do not convict a colon value, though: the
+  //     same "(28:51)" standing in the value column, far from the label's
+  //     phrase, is a value and fills — the annotation needs the phrase,
+  //     not just the brackets. (A lone unparenthesised maximum still
+  //     fills: pin (p).)
+  {
+    const colonCrop = oc.extractEldClocks([
+      W('Cycle', 40, 400, 140, 430), W('(70:00)', 155, 400, 260, 430), W('Left', 275, 400, 345, 430),
+    ], FIELDS12);
+    if (colonCrop.filled.cycleLeft || !colonCrop.unplaced.includes(4200))
+      throw new Error(`patch 12: a parenthesised colon limit in the label must not fill the cycle box (saw ${JSON.stringify(colonCrop)})`);
+    const pairWords = [
+      W('Cycle', 40, 400, 140, 430), W('(70h', 155, 400, 220, 430), W('0m)', 230, 400, 290, 430), W('Left', 305, 400, 375, 430),
+    ];
+    const pairCrop = oc.extractEldClocks(pairWords, FIELDS12);
+    if (pairCrop.filled.cycleLeft || !pairCrop.unplaced.includes(4200))
+      throw new Error(`patch 12: a parenthesised pair limit in the label must not fill the cycle box (saw ${JSON.stringify(pairCrop)})`);
+    const pairFull = oc.extractEldClocks([...pairWords, W('28:51', 600, 395, 710, 445)], FIELDS12);
+    if (pairFull.filled.cycleLeft || pairFull.disagreed.cycleLeft?.join(',') !== '4200,1731')
+      throw new Error(`patch 12: a parenthesised pair limit beside its read value must contest it, not fill (saw ${JSON.stringify(pairFull)})`);
+    const valueColumn = oc.extractEldClocks([
+      W('Cycle', 40, 400, 140, 430), W('Time', 155, 400, 250, 430), W('Left', 265, 400, 335, 430),
+      W('(28:51)', 624, 395, 760, 445),
+    ], FIELDS12);
+    if (valueColumn.filled.cycleLeft?.minutes !== 1731)
+      throw new Error(`patch 12: a parenthesised value in the value column must still fill (saw ${JSON.stringify(valueColumn.filled)})`);
+  }
+
+  // (y) checkpoint-3 policy (D6b): an unpaired bare-hours token can never
+  //     fill a box, wherever it sits — in a limit column at value-column
+  //     distance from its label, in a small chip beside a big label, or
+  //     standing in the value column itself as the row's only read. The
+  //     class is closed by shape, not by distance, so no spacing probe
+  //     reopens it. The tokens still contest (beside a readable value the
+  //     pair is reported) and are still reported unplaced. Pairs and
+  //     minutes-only tokens are untouched: pin (g).
+  {
+    const column = oc.extractEldClocks([
+      W('Cycle', 40, 400, 140, 430), W('Left', 155, 400, 225, 430), W('70h', 624, 395, 720, 445),
+    ], FIELDS12);
+    if (column.filled.cycleLeft || !column.unplaced.includes(4200))
+      throw new Error(`patch 12: a bare-hours token at limit-column distance must not fill the cycle box (saw ${JSON.stringify(column)})`);
+    const chip = oc.extractEldClocks([
+      W('Drive', 40, 100, 200, 148), W('11h', 240, 115, 290, 133),
+    ], FIELDS12);
+    if (chip.filled.driveLeft || !chip.unplaced.includes(660))
+      throw new Error(`patch 12: a bare-hours limit chip must not fill the drive box (saw ${JSON.stringify(chip)})`);
+    const rowOfBare = oc.extractEldClocks([
+      ...['Drive', 'Shift', 'Break', 'Cycle'].flatMap((lab, i) => {
+        const y = 100 + i * 125;
+        return [W(lab, 40, y + 9, 145, y + 39), W(['11h', '14h', '8h', '70h'][i], 624, y, 720, y + 48)];
+      }),
+    ], FIELDS12);
+    if (Object.keys(rowOfBare.filled).length !== 0)
+      throw new Error(`patch 12: a screen of bare-hours values must fill nothing (saw ${JSON.stringify(rowOfBare.filled)})`);
+    for (const m of [660, 840, 480, 4200])
+      if (!rowOfBare.unplaced.includes(m)) throw new Error(`patch 12: the refused bare-hours value ${m} must be reported unplaced`);
+    const contest = oc.extractEldClocks([
+      W('Cycle', 40, 400, 140, 430), W('Left', 155, 400, 225, 430),
+      W('70h', 460, 395, 556, 445), W('28:51', 624, 395, 760, 445),
+    ], FIELDS12);
+    if (contest.filled.cycleLeft || contest.disagreed.cycleLeft?.join(',') !== '4200,1731')
+      throw new Error(`patch 12: a bare-hours limit beside its read value must contest it, not fill (saw ${JSON.stringify(contest)})`);
+  }
+
+  // (z) checkpoint-4 fix (D9): a tile title that wraps puts the marker on
+  //     the line above the label — "PREVIOUS" / "BREAK" / "06:00" — and the
+  //     walk continues onto that line when it reads as the top half of
+  //     this label's title: at wrap distance, carrying no value of its
+  //     own, its fragment over the label's column left-aligned with the
+  //     label. Both wrapped shapes fill nothing and report the time
+  //     unplaced. The controls hold the other side: a real tile under an
+  //     unrelated distant line still fills; a VALUE row above the label
+  //     is not a title fragment (its read claims on its own line, and the
+  //     label below still claims its own value — no leak across tiles);
+  //     a header line above genuine rows leaks nothing into them.
+  {
+    const wrapped = (top) => [
+      W(top[0], 57, 355, top[1], 380), ...(top[2] ? [W(top[2], top[3], 355, top[4], 380)] : []),
+      W('BREAK', 57, 399, 183, 424), W('06:00', 58, 477, 330, 543),
+    ];
+    for (const [shape, words] of [
+      ['PREVIOUS', wrapped(['PREVIOUS', 246])],
+      ['LAST REST', wrapped(['LAST', 149, 'REST', 157, 246])],
+      ['LAST 30-MIN', wrapped(['LAST', 149, '30-MIN', 164, 294])],
+    ]) {
+      const r = oc.extractEldClocks(words, FIELDS12);
+      if (r.filled.breakDueIn || !r.unplaced.includes(360))
+        throw new Error(`patch 12: a wrapped "${shape}" tile title must mark the break info (saw ${JSON.stringify(r)})`);
+    }
+    const realTile = oc.extractEldClocks([
+      W('SUMMARY', 57, 60, 300, 85), W('BREAK', 57, 399, 183, 424), W('2:17', 58, 477, 200, 520),
+      W('DRIVE', 546, 60, 660, 85), W('4:22', 551, 118, 700, 161),
+    ], FIELDS12);
+    if (realTile.filled.breakDueIn?.minutes !== 137 || realTile.filled.driveLeft?.minutes !== 262)
+      throw new Error(`patch 12: a real tile under an unrelated distant line must still fill (saw ${JSON.stringify(realTile.filled)})`);
+    const valueAbove = oc.extractEldClocks([
+      W('DRIVE', 57, 300, 160, 330), W('4:22', 57, 345, 200, 388),
+      W('BREAK', 57, 430, 183, 460), W('2:17', 57, 475, 200, 518),
+    ], FIELDS12);
+    if (valueAbove.filled.driveLeft?.minutes !== 262 || valueAbove.filled.breakDueIn?.minutes !== 137)
+      throw new Error(`patch 12: a value row above a label must not leak into the tile below (saw ${JSON.stringify(valueAbove.filled)})`);
+    const narrowAbove = oc.extractEldClocks([
+      W('2:17', 57, 300, 140, 340),
+      W('BREAK', 57, 370, 330, 400), W('5:30', 57, 430, 200, 470),
+    ], FIELDS12);
+    if (narrowAbove.filled.breakDueIn?.minutes !== 330)
+      throw new Error(`patch 12: a narrow value above a wide label must not mark it info (saw ${JSON.stringify(narrowAbove)})`);
+    const headerRows = oc.extractEldClocks([
+      W('Last', 40, 40, 100, 64), W('break', 115, 40, 200, 64), W('06:00', 215, 36, 320, 72),
+      ...row('Drive Time Left', '4:22', 143), ...row('Break Due In', '2:17', 268),
+    ], FIELDS12);
+    if (headerRows.filled.driveLeft?.minutes !== 262 || headerRows.filled.breakDueIn
+      || headerRows.disagreed.breakDueIn?.join(',') !== '360,137')
+      throw new Error(`patch 12: a header line above real rows must not leak info into them (saw ${JSON.stringify(headerRows)})`);
+  }
+
+  // (aa) checkpoint-4 partial (D10): a "Limit" / "Max" column header
+  //      annotates the clean value column beneath it, so a colon-format
+  //      limit column cropped through its Remaining column fills nothing
+  //      — the one signal a full-clock limit carries. Both sides are
+  //      pinned: the full table still reports its pairs (the limits
+  //      contest, nothing fills); values under a "Remaining" header fill;
+  //      a header over a DIFFERENT column changes nothing; a label word
+  //      standing in the column breaks the header's reach; and pin (p)
+  //      stands — a headerless colon limit still fills, the documented
+  //      residual this partial deliberately does not touch.
+  {
+    const colRow = (lab, lim, val, y) => [
+      W(lab, 40, y + 8, 40 + (lab.length * 17 + 30), y + 38),
+      ...(lim ? [W(lim, 420, y, 420 + (lim.length * 17 + 30), y + 36)] : []),
+      ...(val ? [W(val, 700, y, 700 + (val.length * 17 + 30), y + 36)] : []),
+    ];
+    const header = (word) => [W('Clock', 40, 40, 130, 66), W(word, 420, 40, 420 + (word.length * 17 + 30), 66), W('Remaining', 700, 40, 860, 66)];
+    const cropRows = [colRow('Drive', '11:00', null, 110), colRow('Shift', '14:00', null, 220), colRow('Break', '8:00', null, 330), colRow('Cycle', '70:00', null, 440)];
+    for (const word of ['Limit', 'Maximum']) {
+      const r = oc.extractEldClocks([...header(word), ...cropRows.flat()], FIELDS12);
+      if (Object.keys(r.filled).length !== 0)
+        throw new Error(`patch 12: a colon-limit column under a "${word}" header must fill nothing (saw ${JSON.stringify(r.filled)})`);
+      for (const m of [660, 840, 480, 4200])
+        if (!r.unplaced.includes(m)) throw new Error(`patch 12: the refused ${m} limit must be reported unplaced`);
+    }
+    const full = oc.extractEldClocks([...header('Limit'),
+      colRow('Drive', '11:00', '4:22', 110), colRow('Shift', '14:00', '6:03', 220),
+      colRow('Break', '8:00', '2:17', 330), colRow('Cycle', '70:00', '28:51', 440)].flat(), FIELDS12);
+    if (Object.keys(full.filled).length !== 0
+      || full.disagreed.driveLeft?.join(',') !== '660,262' || full.disagreed.windowLeft?.join(',') !== '840,363'
+      || full.disagreed.breakDueIn?.join(',') !== '480,137' || full.disagreed.cycleLeft?.join(',') !== '4200,1731')
+      throw new Error(`patch 12: the headed limit table must report its pairs and fill nothing (saw ${JSON.stringify(full)})`);
+    const remaining = oc.extractEldClocks([...header('Limit'),
+      colRow('Drive', null, '4:22', 110), colRow('Shift', null, '6:03', 220),
+      colRow('Break', null, '2:17', 330), colRow('Cycle', null, '28:51', 440)].flat(), FIELDS12);
+    if (remaining.filled.driveLeft?.minutes !== 262 || remaining.filled.windowLeft?.minutes !== 363
+      || remaining.filled.breakDueIn?.minutes !== 137 || remaining.filled.cycleLeft?.minutes !== 1731)
+      throw new Error(`patch 12: values under a "Remaining" header must still fill (saw ${JSON.stringify(remaining.filled)})`);
+    const otherColumn = oc.extractEldClocks([
+      W('Limit', 40, 40, 130, 66), W('Cycle', 420, 110, 520, 140), W('Left', 535, 110, 605, 140), W('28:51', 700, 104, 880, 144),
+    ], FIELDS12);
+    if (otherColumn.filled.cycleLeft?.minutes !== 1731)
+      throw new Error(`patch 12: a "Limit" header over another column must change nothing (saw ${JSON.stringify(otherColumn.filled)})`);
+    const broken = oc.extractEldClocks([
+      W('Clock', 40, 40, 130, 66), W('Limit', 420, 40, 490, 66),
+      W('Cycle', 420, 110, 520, 140),
+      W('Cycle', 40, 448, 140, 478), W('Left', 155, 448, 225, 478), W('70:00', 420, 440, 560, 484),
+    ], FIELDS12);
+    if (broken.filled.cycleLeft?.minutes !== 4200)
+      throw new Error(`patch 12: a label word in the column must break the header's reach (saw ${JSON.stringify(broken.filled)})`);
+    const headerless = oc.extractEldClocks([W('Cycle', 40, 400, 140, 430), W('Time', 155, 400, 240, 430), W('Left', 255, 400, 330, 430), W('70:00', 624, 395, 760, 445)], FIELDS12);
+    if (headerless.filled.cycleLeft?.minutes !== 4200)
+      throw new Error('patch 12: pin (p) stands — a headerless full clock must still fill (the documented D10 residual)');
+  }
+
+  // (ab) checkpoint-5 fix (D11): the wrapped-title continuation is
+  //      run-local, not line-global — it anchors on the first word of
+  //      the label's own text run, so a marker still reaches the label
+  //      when the title's second line carries a word before it ("LAST
+  //      30-MIN" / "REST BREAK", "PREVIOUS" / "REST BREAK"), when the
+  //      label's tile shares a screen line with a neighbouring tile,
+  //      and when the fragment above carries a unit token ("LAST 30M" /
+  //      "BREAK" — the line-above guard now stops only on colon-shaped
+  //      words, as runWalk does). Each shape fills nothing and reports
+  //      the time unplaced. The control holds the other side: a real
+  //      right-column tile beside a wrapped left title still fills.
+  //      (Opus's own prototype fix, applied verbatim; Opus §5 pins.)
+  {
+    const blank360 = (words, what) => {
+      const r = oc.extractEldClocks(words, FIELDS12);
+      if (r.filled.breakDueIn || !r.unplaced.includes(360))
+        throw new Error(`patch 12: ${what} must not fill the break box (saw ${JSON.stringify(r)})`);
+      return r;
+    };
+    blank360([
+      W('LAST', 57, 355, 149, 380), W('30-MIN', 164, 355, 294, 380),
+      W('REST', 57, 399, 140, 424), W('BREAK', 155, 399, 281, 424),
+      W('06:00', 58, 477, 330, 543),
+    ], 'a "LAST 30-MIN" / "REST BREAK" wrap');
+    blank360([
+      W('PREVIOUS', 57, 355, 246, 380),
+      W('REST', 57, 399, 140, 424), W('BREAK', 155, 399, 281, 424),
+      W('06:00', 58, 477, 330, 543),
+    ], 'a "PREVIOUS" / "REST BREAK" wrap');
+    const beside = blank360([
+      W('SHIFT', 57, 355, 190, 380), W('REMAINING', 57, 399, 271, 424), W('6:03', 58, 477, 330, 543),
+      W('LAST', 547, 355, 639, 380), W('REST', 654, 355, 741, 380), W('BREAK', 547, 399, 673, 424), W('06:00', 548, 477, 820, 543),
+    ], 'a right-column "LAST REST" / "BREAK" tile beside a wrapped left tile');
+    if (beside.filled.windowLeft?.minutes !== 363)
+      throw new Error(`patch 12: the left tile beside the D11 wrap must still read its shift (saw ${JSON.stringify(beside.filled)})`);
+    blank360([
+      W('LAST', 57, 355, 149, 380), W('30M', 164, 355, 254, 380),
+      W('BREAK', 57, 399, 183, 424),
+      W('06:00', 58, 477, 330, 543),
+    ], 'a "LAST 30M" / "BREAK" wrap');
+    const control = oc.extractEldClocks([
+      W('DRIVE', 57, 355, 160, 380), W('TIME', 57, 399, 140, 424), W('4:22', 58, 477, 330, 543),
+      W('BREAK', 547, 355, 673, 380), W('DUE', 547, 399, 610, 424), W('IN', 625, 399, 665, 424), W('2:17', 548, 477, 690, 543),
+    ], FIELDS12);
+    if (control.filled.breakDueIn?.minutes !== 137 || control.filled.driveLeft?.minutes !== 262)
+      throw new Error(`patch 12: a real right-column tile beside a wrapped left title must still fill (saw ${JSON.stringify(control.filled)})`);
+  }
+
+  // (ac) the line-above guard, pinned: a line above carrying a
+  //      colon-shaped time is another row, not a title fragment — the
+  //      real tile under it still fills its own value. (This is the
+  //      guard's real effect, per checkpoint 5: without it the walk
+  //      over-blanks a row standing under a valued header line. The
+  //      noguard mutation must turn this pin red.)
+  {
+    const r = oc.extractEldClocks([
+      W('LAST', 57, 355, 149, 380), W('10:30', 164, 355, 264, 380),
+      W('REST', 57, 399, 140, 424), W('BREAK', 155, 399, 281, 424),
+      W('06:00', 58, 477, 330, 543),
+    ], FIELDS12);
+    if (r.filled.breakDueIn?.minutes !== 360)
+      throw new Error(`patch 12: a tile under a valued line above must still fill (saw ${JSON.stringify(r.filled)})`);
+  }
+
+  // (ad) the runWalk colon stop, pinned: on one tight single-run line,
+  //      a colon-shaped word ends the marker hunt, so the "Last break"
+  //      info phrase on the left cannot reach across its own read and
+  //      mark the drive row info. (The nocolonstop mutation must turn
+  //      this pin red; the stop is kept deliberately — removing it
+  //      over-blanks two-column lines.)
+  {
+    const r = oc.extractEldClocks([
+      W('Last', 40, 40, 100, 64), W('break', 115, 40, 200, 64), W('06:00', 215, 36, 320, 72),
+      W('Drive', 335, 40, 440, 64), W('Left', 455, 40, 525, 64), W('4:22', 540, 36, 645, 84),
+    ], FIELDS12);
+    if (r.filled.driveLeft?.minutes !== 262 || r.filled.breakDueIn)
+      throw new Error(`patch 12: the drive row past a colon word must still fill, and the info break header must not (saw ${JSON.stringify(r.filled)})`);
+  }
+
+  // (ae) checkpoint-5 header synonyms (Lorico-approved): "Limits",
+  //      "Cap" and "Allowed" join "Limit" / "Max" / "Maximum" in the
+  //      header set, so a cropped colon-limit table under any of them
+  //      fills nothing. The control holds: values under a "Remaining"
+  //      header still fill even when a synonym heads the limit column.
+  {
+    const colRow = (lab, lim, val, y) => [
+      W(lab, 40, y + 8, 40 + (lab.length * 17 + 30), y + 38),
+      ...(lim ? [W(lim, 420, y, 420 + (lim.length * 17 + 30), y + 36)] : []),
+      ...(val ? [W(val, 700, y, 700 + (val.length * 17 + 30), y + 36)] : []),
+    ];
+    const header = (word) => [W('Clock', 40, 40, 130, 66), W(word, 420, 40, 420 + (word.length * 17 + 30), 66), W('Remaining', 700, 40, 860, 66)];
+    const cropRows = [colRow('Drive', '11:00', null, 110), colRow('Shift', '14:00', null, 220), colRow('Break', '8:00', null, 330), colRow('Cycle', '70:00', null, 440)];
+    for (const word of ['Limits', 'Cap', 'Allowed']) {
+      const r = oc.extractEldClocks([...header(word), ...cropRows.flat()], FIELDS12);
+      if (Object.keys(r.filled).length !== 0)
+        throw new Error(`patch 12: a colon-limit column under a "${word}" header must fill nothing (saw ${JSON.stringify(r.filled)})`);
+      for (const m of [660, 840, 480, 4200])
+        if (!r.unplaced.includes(m)) throw new Error(`patch 12: the refused ${m} limit under "${word}" must be reported unplaced`);
+    }
+    const remaining = oc.extractEldClocks([...header('Cap'),
+      colRow('Drive', null, '4:22', 110), colRow('Shift', null, '6:03', 220),
+      colRow('Break', null, '2:17', 330), colRow('Cycle', null, '28:51', 440)].flat(), FIELDS12);
+    if (remaining.filled.driveLeft?.minutes !== 262 || remaining.filled.windowLeft?.minutes !== 363
+      || remaining.filled.breakDueIn?.minutes !== 137 || remaining.filled.cycleLeft?.minutes !== 1731)
+      throw new Error(`patch 12: values under a "Remaining" header must still fill beside a synonym header (saw ${JSON.stringify(remaining.filled)})`);
+  }
+
+  // (i) the panel path stays whole-number end to end: an imported value becomes
+  //     box text exactly as the panel writes it (plain integers), the panel's
+  //     own reader returns the same minutes, and a fraction typed into a box
+  //     afterwards is still refused at the confirm.
+  {
+    const r = oc.extractEldClocks(clean, FIELDS12);
+    for (const f of FIELDS12) {
+      const got = r.filled[f.key];
+      if (!got) throw new Error('patch 12: the clean screen must fill every clock for the panel-path pin');
+      const boxes = [String(Math.floor(got.minutes / 60)), String(got.minutes % 60)];
+      if (!/^\d+$/.test(boxes[0]) || !/^\d+$/.test(boxes[1]))
+        throw new Error('patch 12: imported values must reach the boxes as whole numbers only');
+      const back = readEldEntry(boxes[0], boxes[1]);
+      if (!back.ok || back.minutes !== got.minutes)
+        throw new Error('patch 12: the panel reader must return the imported minutes unchanged');
+    }
+    const frac = readEldEntry('7.5', '0');
+    if (frac.ok || frac.problem !== 'fraction')
+      throw new Error('patch 12: a fraction in a box must still be refused at the confirm');
+  }
+
+  // (j) the wiring: the panel offers import behind nothing but a file pick, the
+  //     reader loads lazily (a dynamic import, never a static one), the reader
+  //     persists nothing (its engine cache is off), and extraction is pure — it
+  //     writes nothing to storage while it reads.
+  {
+    const sheetBody = app.slice(app.indexOf('function QuickStartSheet'), app.indexOf('function DriftSheet'));
+    if (!/Import from a screenshot/.test(sheetBody))
+      throw new Error('patch 12: the quick-start panel must offer screenshot import');
+    if (!/import\('\.\/eldocr-run\.ts'\)/.test(sheetBody))
+      throw new Error('patch 12: the OCR reader must load lazily, on the import tap only');
+    if (/from '\.\/eldocr-run\.ts'/.test(app))
+      throw new Error('patch 12: the OCR reader must not be statically imported');
+    if ((sheetBody.match(/applyEldSeed/g) || []).length !== 1)
+      throw new Error('patch 12: the quick-start panel must keep exactly one seeding call — its confirm');
+    if (!/cacheMethod: 'none'/.test(run))
+      throw new Error('patch 12: the reader must run with its cache off — nothing about a screenshot may persist');
+    if (/localStorage\s*[.\[]|indexedDB\s*[.\[]/.test(run) || /localStorage\s*[.\[]/.test(sheetBody))
+      throw new Error('patch 12: neither the reader nor the panel may write storage for a screenshot');
+    const before = mem.size;
+    oc.extractEldClocks(clean, FIELDS12);
+    if (mem.size !== before) throw new Error('patch 12: extraction must write nothing to storage');
+  }
+
+  // (k) the panel render: the import control is simply there — file picking
+  //     needs no special API, so there is no environment where it must hide.
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', config: { ...CFG12 } });
+  openSheet({ kind: 'quickstart' });
+  const h = out('patch 12/quickstart panel, screenshot import offered');
+  if (!/Import from a screenshot/.test(h)) throw new Error('patch 12: the import button must render on the quick-start panel');
+  if (!/read on this phone and thrown away/.test(h)) throw new Error('patch 12: the panel must say the screenshot stays on the phone');
+  openSheet(null);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', planReturn: 'plan', config: { ...CFG12 } });
+  setLaunchNotice(true);
+  console.log('patch 12 (screenshot import — on-device read, confident label-matched values only, confirm by hand): OK');
+}
 console.log('OK');

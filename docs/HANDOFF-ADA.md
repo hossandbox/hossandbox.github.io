@@ -93,3 +93,9 @@ The bot verifies each item before applying:
 Send patches to this thread — the bot and I both watch it.
 
 — Claudia
+
+## CI deploy lane (added 2026-11-08)
+
+Deploys now build in GitHub Actions from main (`.github/workflows/deploy.yml`) and publish
+gh-pages automatically; connector pushes remain text-only. The OCR corpus PNG fixtures are
+generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`).

@@ -22,11 +22,16 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type RestPeriod,
+  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
 } from './store.ts';
+import {
+  speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
+  beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
+} from './voiceclocks.ts';
+import { extractEldClocks, mergeExtractions } from './eldocr.ts';
 
 /* ============================================================ shared bits */
 
@@ -915,6 +920,19 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
  * of asking a mid-shift driver to rebuild a day the ELD already knows. Manual entry only; the
  * numbers are read the strict way where they disagree, and the adjustments are named on the
  * result step rather than applied in silence.
+ *
+ * Patch 11 adds a second way into the same boxes: where the browser offers speech
+ * recognition, "Say my clocks" walks the four clocks one at a time, each spoken value
+ * lands in the boxes, and after the fourth the panel reads all four back (on screen,
+ * and aloud where speech synthesis exists) — seeding still takes the driver's tap on
+ * "Set my clocks", and cancelling restores the boxes untouched (voiceclocks.ts).
+ *
+ * Patch 12 adds a third: "Import from a screenshot" reads a screenshot of the ELD's
+ * clocks screen on this device (eldocr-run.ts, lazy-loaded on first use) and
+ * eldocr.ts (eldocr.ts) decides which of the words found may land in the boxes —
+ * confident, label-matched, in-range values only; anything doubtful stays out and
+ * is named. The image is never stored or sent anywhere, and seeding still takes
+ * the same tap on "Set my clocks".
  */
 function QuickStartSheet({ s, now }: { s: State; now: number }) {
   const cyc = cycleParamsOf(s.config);
@@ -931,6 +949,126 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
     Object.fromEntries(fields.map((f) => [f.key, [String(Math.floor(f.max / 60)), String(f.max % 60)]])));
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ notes: string[]; clocks: EldClocks } | null>(null);
+  // Voice entry (patch 11): the same four clocks, spoken one at a time into the same
+  // boxes. The session itself is pure state (voiceclocks.ts) — this component owns only
+  // the microphone and the spoken read-back. Nothing here seeds: accepted values land
+  // in the boxes, the driver checks the read-back, and "Set my clocks" below does the
+  // seeding, exactly as it does for typed numbers. The button exists only where the
+  // browser offers speech recognition — where it does not, there is no dead control.
+  const SR = speechRecognitionCtor();
+  const [voice, setVoice] = useState<VoiceFlow | null>(null);
+  const [listening, setListening] = useState(false);
+  const [voiceMsg, setVoiceMsg] = useState<string | null>(null);
+  const recogRef = useRef<SpeechRecognitionLike | null>(null);
+  const stopListening = () => {
+    try { recogRef.current?.abort(); } catch { /* already stopped */ }
+    recogRef.current = null;
+    setListening(false);
+  };
+  const startVoice = () => { setErr(null); setVoiceMsg(null); setVoice(beginVoice(txt)); };
+  const cancelVoice = () => {
+    if (voice) setTxt(voiceDiscard(voice));
+    stopListening();
+    setVoice(null);
+    setVoiceMsg(null);
+  };
+  const heard = (transcript: string) => {
+    if (!voice || voice.done) return;
+    const f = fields[voice.idx];
+    const r = parseClockUtterance(transcript, f.max);
+    if (r.ok) {
+      const a = voiceAccept(voice, txt, f.key, r, fields.length);
+      setTxt(a.boxes);
+      setVoice(a.flow);
+      setVoiceMsg(null);
+      if (a.flow.done && speechSynthesisAvailable()) {
+        speakAloud(composeReadBack(fields.map((x) => ({
+          label: x.label,
+          minutes: Number(a.boxes[x.key][0]) * 60 + Number(a.boxes[x.key][1]),
+        }))));
+      }
+      return;
+    }
+    const v = voiceFailure(voice, txt);
+    setTxt(v.boxes);
+    setVoice(v.flow);
+    if (v.exited) {
+      stopListening();
+      setVoiceMsg(null);
+      setErr('Voice entry stopped — that clock didn’t read twice. The boxes are back as they were; type the clocks, or tap “Say my clocks” to try again.');
+    } else {
+      setVoiceMsg(r.reason === 'fraction'
+        ? `Heard “${transcript}” — that has a fraction in it, and these clocks are whole hours and minutes. Say it like “seven fifteen”.`
+        : r.reason === 'range'
+          ? `Heard “${transcript}” — that’s more than this clock can hold (${dur(f.max)} at most). Say it again.`
+          : `Heard “${transcript}” — that didn’t read as a clock. Say it like “seven fifteen”.`);
+    }
+  };
+  const listen = () => {
+    if (!SR || !voice || voice.done) return;
+    let rec: SpeechRecognitionLike;
+    try { rec = new SR(); } catch { return; }
+    recogRef.current = rec;
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      const t = e.results?.[0]?.[0]?.transcript ?? '';
+      setListening(false);
+      if (t) heard(t);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    setListening(true);
+    try { rec.start(); } catch { setListening(false); }
+  };
+  // Screenshot import (patch 12): a third way into the same boxes. The driver picks
+  // a screenshot of the ELD's clocks screen; it is read on this device (the reader
+  // in eldocr-run.ts loads only on this tap) and eldocr.ts decides what may land:
+  // confident, label-matched, in-range values only, written as whole hours and
+  // minutes like a typed value. The panel then says, per clock, what was read and
+  // what was not. The image is never stored or sent anywhere, nothing here seeds,
+  // and a failed read leaves the boxes exactly as they were.
+  const [shotBusy, setShotBusy] = useState(false);
+  const [shotNote, setShotNote] = useState<string[] | null>(null);
+  const [shotErr, setShotErr] = useState<string | null>(null);
+  const shotRef = useRef<HTMLInputElement | null>(null);
+  const importShot = async (file: File) => {
+    setShotBusy(true);
+    setShotErr(null);
+    setShotNote(null);
+    setErr(null);
+    try {
+      const { recognizeEldScreenshot } = await import('./eldocr-run.ts');
+      const reads = await recognizeEldScreenshot(file);
+      const specs = fields.map((f) => ({ key: f.key, max: f.max }));
+      const r = mergeExtractions(extractEldClocks(reads.auto, specs), extractEldClocks(reads.sparse, specs));
+      setTxt((p) => {
+        const next = { ...p };
+        for (const f of fields) {
+          const got = r.filled[f.key];
+          if (got) next[f.key] = [String(Math.floor(got.minutes / 60)), String(got.minutes % 60)];
+        }
+        return next;
+      });
+      const notes = fields.map((f) => {
+        const got = r.filled[f.key];
+        if (got) return `${f.label}: read ${dur(got.minutes)} from the screenshot — check it against your ELD.`;
+        const clash = r.disagreed[f.key];
+        if (clash) return `${f.label}: the screenshot read two different ways (${dur(clash[0])} and ${dur(clash[1])}) — not used; type it as usual.`;
+        return `${f.label}: couldn't read it from the screenshot — the box is as it was; type it as usual.`;
+      });
+      if (r.unplaced.length > 0) {
+        notes.push(`Also found ${r.unplaced.map((m) => dur(m)).join(', ')} but couldn't tell which clock ${r.unplaced.length === 1 ? 'it belongs' : 'they belong'} to — not used.`);
+      }
+      if (r.rejected > 0) notes.push('Some numbers on the screenshot were too unclear to use.');
+      setShotNote(notes);
+    } catch {
+      setShotErr('That screenshot couldn’t be read. Type the clocks, or try a clearer screenshot of the clocks screen.');
+    } finally {
+      setShotBusy(false);
+    }
+  };
   const confirm = () => {
     const clocks = {} as EldClocks;
     for (const f of fields) {
@@ -985,6 +1123,43 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
         </div>
       ))}
       {s.config.shortHaul && <p class="muted small">You're set as break-exempt (short-haul), so the break clock won't bind — type it anyway if your ELD shows one.</p>}
+      {SR && !voice && (
+        <div class="row"><button class="ghost" onClick={startVoice}>Say my clocks</button></div>
+      )}
+      {SR && voice && !voice.done && (
+        <div>
+          <p class="muted small">Your phone turns speech into text.</p>
+          <p style="font-size:1.35rem;font-weight:700">{fields[voice.idx].label}</p>
+          <p class="small">Tap “Say it”, then say the clock — like “seven fifteen” for 7 hours 15.</p>
+          {voiceMsg && <p class="warnbox small">{voiceMsg}</p>}
+          <div class="row">
+            <button class="primary" disabled={listening} onClick={listen}>{listening ? 'Listening…' : 'Say it'}</button>
+            <button class="ghost" onClick={cancelVoice}>Cancel voice entry</button>
+          </div>
+        </div>
+      )}
+      {SR && voice && voice.done && (
+        <div>
+          <p><b>Here’s what I heard — check it before you set anything:</b></p>
+          <ul class="small">{fields.map((f) => <li key={f.key}>{f.label}: <b>{dur(Number(txt[f.key][0]) * 60 + Number(txt[f.key][1]))}</b></li>)}</ul>
+          <p class="small">A wrong number? Fix its box by hand — nothing is set until you tap “Set my clocks”.</p>
+          <div class="row"><button class="ghost" onClick={cancelVoice}>Start over</button></div>
+        </div>
+      )}
+      {!voice && (
+        <div>
+          <div class="row">
+            <button class="ghost" disabled={shotBusy} onClick={() => shotRef.current?.click()}>{shotBusy ? 'Reading screenshot…' : 'Import from a screenshot'}</button>
+          </div>
+          <input type="file" accept="image/*" style="display:none" ref={shotRef}
+            onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importShot(f); }} />
+          <p class="muted small">Pick a screenshot of your ELD's clocks screen. It is read on this phone and thrown away — never sent or saved anywhere.</p>
+        </div>
+      )}
+      {shotNote && (
+        <ul class="small">{shotNote.map((n, i) => <li key={i}>{n}</li>)}</ul>
+      )}
+      {shotErr && <p class="warnbox small">{shotErr}</p>}
       {err && <p class="warnbox small">{err}</p>}
       <div class="row"><button class="primary" data-first onClick={confirm}>Set my clocks</button></div>
     </Sheet>
@@ -1149,7 +1324,7 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
 }
 
 /** Each rule's own stop time, if he drove from now without stopping; the earliest one is the answer. */
-function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
+function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const sh = ev.shift;
   const split = sh.chain.length >= 2;
   const pair = activePair(ev);
@@ -1176,6 +1351,10 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
   // after midnight read as today's time when the rows showed weekday + time only. The
   // 'Not today' branch stays: a rule more than a day out does not need a date here.
   const when = (left: number) => (left <= 0 ? 'Now' : left > 1440 ? 'Not today' : clockFull(now + left));
+  // Patch 10: the counterfactual — the one change that moves the headline time, computed by the
+  // store from the logged record. With what-if rows in play the sheet is explaining a
+  // hypothetical, and a lever computed on the real record could mislead — the line is omitted.
+  const lever = s.tentative.length === 0 ? whyLever(allSegments(s, now), s.config, now, ev) : null;
   return (
     <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
@@ -1188,6 +1367,8 @@ function WhySheet({ now, ev }: { now: number; ev: FullEvaluation }) {
           {ev.binding === r.key && <div class="why-tag">Earliest — this sets your stop time</div>}
         </li>
       ))}</ul>
+      {lever?.kind === 'rest' && <p class="small"><b>What changes it:</b> +{dur(lever.minutes)} {lever.status === 'SB' ? 'in the sleeper' : 'off duty'} → you can drive until {clockFull(lever.stopBy)}.</p>}
+      {lever?.kind === 'recap' && <p class="small"><b>What changes it:</b> your next cycle hours come back {clockFull(lever.at)} — +{dur(lever.dropsOff)} drops off, {dur(lever.available)} available.</p>}
       <p class="muted small">Rules: 49 CFR 395.3. Your ELD is your official record.</p>
       <button class="primary wide" data-first onClick={() => openSheet(null)}>Got it</button>
     </Sheet>
@@ -2264,14 +2445,32 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   useEffect(() => { window.scrollTo(0, 0); }, [step]);
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const departure = now + lc.leaveIn;
-  const both = useMemo(() => planTripAll(allSegments(s, now).filter((x) => !x.tentative), {
+  const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
+  const loadInput: TripInput = {
     departure, distanceMiles: lc.miles, mph: s.mph,
     stops: lc.dwell ? [{ atMile: lc.miles, minutes: lc.dwell, status: lc.dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [],
     config: s.config,
     // Waiting to leave is not rest unless he says so: shown as an assumed row, never an unlogged gap.
     ...(lc.leaveIn > 0 ? { untilDeparture: { from: now, status: lc.waitOff ? 'OFF' as DutyStatus : 'ON' as DutyStatus, label: `${lc.waitOff ? 'Off duty' : 'On duty'} until departure` } } : {}),
-  }), [s, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
+  };
+  const both = useMemo(() => planTripAll(loadSegs, loadInput), [s, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
   const best = both[earliestStrategy(both)];
+  // Patch 10: the verdict's two follow-up answers, computed with the same simulation on shifted
+  // inputs (later departures / added pre-departure rest) — display only, nothing is written.
+  // Only the answer screen pays for the searches; the question screens return null at once.
+  const advice = useMemo(() => {
+    if (step !== 4) return null;
+    // When the planner itself gave up (its iteration limit), its plan is not a basis for advice:
+    // neither search runs, and the no-fix line stays off — the plan's own warning already shows.
+    if (best.warnings.some((w) => w.includes('iteration limit'))) return { latest: null, fix: null, fixSearched: false };
+    if (best.feasible) {
+      // The wait before a later departure is the wait the driver described; for a leave-now
+      // check it is the status he is in (on duty if he is driving — the careful side).
+      const waitStatus: DutyStatus = lc.leaveIn > 0 ? (lc.waitOff ? 'OFF' : 'ON') : (s.current && s.current.status !== 'D' ? s.current.status : 'ON');
+      return { latest: latestLegalDeparture(loadSegs, loadInput, earliestStrategy(both), waitStatus), fix: null, fixSearched: false };
+    }
+    return { latest: null, fix: smallestRestFix(loadSegs, loadInput), fixSearched: true };
+  }, [step, both]);
   // The verdict treats unlogged gaps as off duty. When a hole is big enough to change the answer,
   // say so rather than printing a confident LEGAL on an assumption nobody made (stress-test 2.5).
   const openGaps = meaningfulGaps(ev.gaps);
@@ -2348,6 +2547,9 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <div class="verdict-label">{provisional ? 'Verdict (provisional)' : 'Verdict'}</div>
         <div class="verdict-big">{best.feasible ? 'Yes, it’s legal' : 'No — not legal as planned'}</div>
         <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clock(best.arrival)}` : `There by ${clock(best.driveEnd)}`}</div>
+        {best.feasible && advice?.latest != null && <div class="verdict-sub">Leave by {clockFull(advice.latest)} at the latest.</div>}
+        {!best.feasible && advice?.fix && <div class="verdict-sub">+{dur(advice.fix.minutes)} off duty before you leave → legal, {advice.fix.plan.arrival > advice.fix.plan.driveEnd ? `unloaded by ${clockFull(advice.fix.plan.arrival)}` : `there by ${clockFull(advice.fix.plan.driveEnd)}`}.</div>}
+        {!best.feasible && advice?.fixSearched && !advice.fix && <div class="verdict-sub">No amount of extra rest before leaving makes this one legal — the load itself has to change.</div>}
       </section>
       {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
       {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm that the record starts here.</p>}
@@ -2792,7 +2994,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
-      {!disclaimer && sheet?.kind === 'why' && <WhySheet now={now} ev={ev} />}
+      {!disclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
     </div>
