@@ -121,3 +121,29 @@ generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`)
   undo-equivalence, stated precisely: after such a delete the log is byte-identical to the moment
   of closing, so the label reads the log as it stands. (This corrects the earlier local handoff
   wording, which implied the equivalence covered more than undo.)
+
+## Patch 14 — deployed 2026-11-08 (Split Lab: pinned now-vs-after line + example split)
+
+- **Item A — pinned line:** a strip at the top of the Split Lab, sticky while the driver
+  scrolls or drags sliders, reading `Your 14 ends <T1> now → <T2> with this pair` — or
+  `with this plan (no split credit)` when the engine does not confirm a pair. "Try an
+  example split" (**Item B**) loads the worked `DEFAULT_SPLIT` into the draft only; the
+  log and tentative rows are untouched. Item B passed verification unchanged.
+- **Verification arc:** Opus Verify-14 returned **FAIL** on Item A. The first build
+  computed each window end as `anchor + window`, which understates the end whenever a
+  paired rest lies *after* the anchor — paired rests are excluded from the 14, so they
+  push the real end later by their length. Every error was early (the safe direction),
+  but the line contradicted the pair-status card directly below it by up to 7 hours,
+  and in the FAQ 22 reset-as-first-leg shape it claimed a pair while showing no
+  movement at all. **Fix round:** both derivations are now `asOf + limits.window −
+  windowUsed` (identically `anchor + window + excluded`); the headline pin was
+  re-seeded 540 → 960; new pins cover the merged-reset no-credit shape, an active pair
+  with an empty draft, and the FAQ 22 reset-as-first-leg shape; wording-guard
+  mutations M1/M4/M7, which previously passed every pin, are now caught.
+  **Delta-14 PASS** — Opus's 13-scenario probe table renders the engine figure on
+  14/14 rows; engine 99/99, smoke/contrast/typecheck/build green.
+- **Design follow-ups (cosmetic, not blockers):** at 320 px width or ~110% text zoom
+  the header grows and can cover the strip's first line; while driving with ≤60 min
+  of drive time left, the alert banner can park the strip entirely under the header.
+  Only the strip itself is ever hidden. Suggested remedy for the design patch: set a
+  measured `--top-h` from a ResizeObserver on the header.

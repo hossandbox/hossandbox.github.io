@@ -4748,4 +4748,179 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(true);
   console.log('patch 13 (End my day — a deliberate day-close bookmark for the history view; the Now quick row retired): OK');
 }
+// --- patch 14: the Split Lab keeps its answer in view, and offers its worked example.
+// Item A: ONE result line is pinned directly under Split's back control — "Your 14 ends
+// <window end> now → <window end after the plan> with this pair" — computed from the same
+// two evaluations the screen already makes (the real `ev` and the what-if `after`). The
+// window end is asOf + limits.window − windowUsed on each evaluation (fix round: paired
+// rests after the anchor are excluded from the 14, so anchor + window alone understates
+// the end by the excluded later leg — Opus Verify-14 §3): the 14 specifically, never
+// mustStopBy, which mixes in the drive and break limits. The tail may say "with this pair"
+// only when the engine confirms the pair; otherwise it must own the no-credit truth.
+// Item B: "Try an example split" loads DEFAULT_SPLIT — the canonical 7/3 worked example
+// that has always been the draft's default — through the screen's own setSplit path, and
+// touches nothing but the draft.
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const { DEFAULT_SPLIT: DS } = await import('../src/store.ts');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const app = rf('src/app.tsx', 'utf8');
+  const css = rf('public/styles.css', 'utf8');
+  const splitBody = app.slice(app.indexOf('function SplitTab'), app.indexOf('/* ============================================================ Recap tab */'));
+
+  // the wiring is in the source: a sticky strip, and the example button calling setSplit
+  // with exactly the default draft
+  if (!/class="split-now-after"/.test(splitBody)) throw new Error('patch 14: the Split screen must render its now-vs-after line in the split strip');
+  if (!/\.split-now-after\s*\{[^}]*position:\s*sticky;/.test(css)) throw new Error('patch 14: the now-vs-after line must be sticky');
+  if (!splitBody.includes('onClick={() => setSplit({ ...DEFAULT_SPLIT })}>Try an example split</button>'))
+    throw new Error('patch 14: the example button must load DEFAULT_SPLIT through setSplit');
+  if (!/onChange=\{\(v\) => setSplit\(\{ b2: v \}\)\}/.test(splitBody)) throw new Error('patch 14: the Break 2 slider must still write through setSplit');
+  const whatIf = splitBody.slice(splitBody.indexOf('<Card title="What if…'));
+  if (!(whatIf.indexOf('Try an example split') >= 0 && whatIf.indexOf('Try an example split') < whatIf.indexOf('Break 1: Off duty')))
+    throw new Error('patch 14: the example button must sit in the What-if card, above the Break 1 toggle');
+
+  // a deterministic day: 10h rest, then 6h driving, evaluated at noon Chicago time
+  const T = Math.floor(Date.UTC(2026, 8, 22, 17, 0) / 60000); // 2026-09-22 12:00 America/Chicago
+  const base = [
+    { status: 'OFF', start: T - 960, end: T - 360 },
+    { status: 'D', start: T - 360, end: T },
+  ];
+  const CFG = { ...getState().config, cycle: '70/8', timeZone: 'America/Chicago', dayStartHour: 0 };
+  const planFor = (sd) => {
+    let t = T; const plan = [];
+    const push = (status, m, note) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
+    push(sd.b1s, sd.b1, 'Break 1'); push('ON', sd.dwell, 'On duty'); push('D', sd.drive, 'Drive'); push(sd.b2s, sd.b2, 'Break 2');
+    return { plan, end: t };
+  };
+  const evalAfter = (sd) => { const { plan, end } = planFor(sd); return { ev: evaluate([...base, ...plan], { asOf: end, config: CFG }), end }; };
+  const windowEnd = (e) => e.asOf + e.shift.limits.window - e.shift.windowUsed;
+  const pairedFor = (sd) => { const a = evalAfter(sd); return a.ev.shift.chain.length >= 2 && a.ev.shift.chain[a.ev.shift.chain.length - 1].end === a.end; };
+  const strip = (html) => {
+    const m = html.match(/<div class="split-now-after"[^>]*>([\s\S]*?)<\/div>/);
+    if (!m) throw new Error('patch 14: the Split screen must render the pinned now-vs-after line');
+    return m[1].replace(/<[^>]+>/g, '');
+  };
+  const seed = (split) => setState({ tab: 'split', planReturn: 'plan', nowOverride: T, current: null, segments: base, tentative: [], config: { ...CFG }, split: { ...split } });
+
+  const evNow = evaluate(base, { asOf: T, config: CFG });
+  const t1 = windowEnd(evNow);
+
+  // (a) the pairing default: T1 is the real window end, T2 is the after window end, the
+  //     pair moves it later by the expected 16h, and the line sits above the pair-status card
+  seed(DS);
+  let h = out('patch 14/split pinned pair line');
+  if (!(h.indexOf('split-now-after') >= 0 && h.indexOf('split-now-after') < h.indexOf('Current pair status')))
+    throw new Error('patch 14: the pinned line must render above the Current pair status card');
+  if (!pairedFor(DS)) throw new Error('patch 14: the seeded default plan must pair for this pin');
+  const pairAfter = evalAfter(DS);
+  const t2 = windowEnd(pairAfter.ev);
+  if (t2 - t1 !== 960) throw new Error(`patch 14: the paired plan must move the 14 by 16h in this scenario (saw ${t2 - t1}m)`);
+  const pairLine = `Your 14 ends ${clock(t1)} now → ${clock(t2)} with this pair`;
+  if (strip(h) !== pairLine) throw new Error(`patch 14: the pinned line must read "${pairLine}" (saw "${strip(h)}")`);
+
+  // (b) the line is LIVE, and an unpaired plan cannot claim a pair: shorten Break 2 so the
+  //     two breaks total under 10h — the Break 2 slider's own setSplit write — and the line
+  //     must fall back to the engine's no-credit window end with the honest wording
+  const noPairDraft = { ...DS, b2: 405 };
+  if (pairedFor(noPairDraft)) throw new Error('patch 14: the shortened Break 2 plan must not pair for this pin');
+  if (windowEnd(evalAfter(noPairDraft).ev) !== t1) throw new Error('patch 14: the no-credit window end must equal the current one in this scenario');
+  setState({ split: { ...noPairDraft } });
+  h = out('patch 14/split line follows Break 2 change');
+  const noPairLine = `Your 14 ends ${clock(t1)} now → ${clock(t1)} with this plan (no split credit)`;
+  if (strip(h) !== noPairLine) throw new Error(`patch 14: an unpaired plan must read "${noPairLine}" (saw "${strip(h)}")`);
+
+  // (c) the example button loads the canonical draft and nothing else. Render-to-string
+  //     cannot dispatch a click, so the source pin above ties the button to this exact
+  //     setSplit write; here the write itself is pinned: draft field-for-field, log and
+  //     tentative rows byte-identical, and the pinned line back on the example's figure.
+  seed({ b1: 15, b1s: 'SB', dwell: 45, drive: 60, b2: 75, b2s: 'OFF' });
+  setState({ tentative: [{ status: 'ON', start: T + 60, end: T + 90, tentative: true, note: 'Existing what-if' }] });
+  const logBefore = JSON.stringify({ segments: getState().segments, tentative: getState().tentative });
+  setState({ split: { ...DS } }); // the example button's own store write, via setSplit
+  if (JSON.stringify(getState().split) !== JSON.stringify(DS)) throw new Error('patch 14: the example must load DEFAULT_SPLIT field-for-field');
+  if (JSON.stringify({ segments: getState().segments, tentative: getState().tentative }) !== logBefore)
+    throw new Error('patch 14: the example must not touch the log or the tentative rows');
+  h = out('patch 14/example split loaded');
+  if (strip(h) !== pairLine) throw new Error('patch 14: after loading the example, the pinned line must show the example plan');
+
+  // The wording-guard pins (d)–(g) were added in the fix round (Opus Verify-14 §6): pins
+  // (a)–(c) only ever fail every pairing precondition together, so three plausible guard
+  // regressions — keying the tail to totalOk (M1), to the checklist conjunction (M4), or
+  // to the chain alone without the endB2 check (M7) — claimed pairs the engine never
+  // confirmed and passed every pin. These scenarios separate the preconditions.
+  const at14 = (iso) => Math.floor(new Date(iso).getTime() / 60000);
+  const splitScenario = ({ nowM, segments, current = null, split }) => {
+    setState({ tab: 'split', planReturn: 'plan', nowOverride: nowM, current, segments, tentative: [], config: { ...CFG }, split: { ...split } });
+    const baseAll = [...segments, ...(current && nowM > current.since ? [{ status: current.status, start: current.since, end: nowM }] : [])];
+    let t = Math.max(nowM, ...baseAll.map((x) => x.end)); const plan = [];
+    const push = (status, m, note) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
+    push(split.b1s, split.b1, 'Break 1'); push('ON', split.dwell, 'On duty'); push('D', split.drive, 'Drive'); push(split.b2s, split.b2, 'Break 2');
+    const afterEv = evaluate([...baseAll, ...plan], { asOf: t, config: CFG });
+    return { nowEv: evaluate(baseAll, { asOf: nowM, config: CFG }), afterEv, paired: afterEv.shift.chain.length >= 2 && afterEv.shift.chain[afterEv.shift.chain.length - 1].end === t };
+  };
+
+  // (d) the merged-reset plan (Opus scenario c): 10h OFF, 6h D, and the driver is 7h into
+  //     an OFF rest right now, so the default draft's Break 1 runs straight into that rest
+  //     and merges it into a full reset — no pair, even though the draft's own numbers pass
+  //     every checklist line (both breaks ≥2h, a ≥7h sleeper, total ≥10h). The line must
+  //     own the no-credit wording over the engine's figures. Catches M1 and M4, whose
+  //     guards both say "pair" here.
+  const nowD = at14('2026-09-23T12:00:00-05:00');
+  const scD = splitScenario({
+    nowM: nowD,
+    segments: [
+      { status: 'OFF', start: nowD - 1380, end: nowD - 780 },
+      { status: 'D', start: nowD - 780, end: nowD - 420 },
+    ],
+    current: { status: 'OFF', since: nowD - 420 },
+    split: DS,
+  });
+  if (scD.paired) throw new Error('patch 14: the merged-reset plan must not pair for this pin');
+  const lineD = `Your 14 ends ${clock(windowEnd(scD.nowEv))} now → ${clock(windowEnd(scD.afterEv))} with this plan (no split credit)`;
+  h = out('patch 14/merged reset plan');
+  if (strip(h) !== lineD) throw new Error(`patch 14: a merged-reset plan must read "${lineD}" (saw "${strip(h)}")`);
+
+  // (e) an active pair already in use plus an EMPTY draft (Opus scenario a2): the log's
+  //     own chain has two legs, but the plan adds nothing, so the line must still say
+  //     no-credit with T2 == T1 — the endB2 half of the guard is what says so. Catches M7.
+  //     It also locks the fix round's T1 arithmetic: the pair's later leg (2h OFF) sits
+  //     after the anchor and is excluded, so T1 sits exactly 2h past the anchor-only
+  //     figure the pre-fix line printed.
+  const nowE = at14('2026-09-23T12:00:00-05:00');
+  const segsE = []; let te = nowE - (600 + 300 + 480 + 180 + 120 + 60);
+  for (const [st, m] of [['OFF', 600], ['D', 300], ['SB', 480], ['D', 180], ['OFF', 120], ['ON', 60]]) { segsE.push({ status: st, start: te, end: te + m }); te += m; }
+  const scE = splitScenario({ nowM: nowE, segments: segsE, split: { ...DS, b1: 0, dwell: 0, drive: 0, b2: 0 } });
+  if (scE.paired) throw new Error('patch 14: an empty draft must not pair for this pin');
+  const t1e = windowEnd(scE.nowEv);
+  if (windowEnd(scE.afterEv) !== t1e) throw new Error('patch 14: an empty draft must leave the window end where it is');
+  if (t1e - (scE.nowEv.shift.anchor + scE.nowEv.shift.limits.window) !== 120)
+    throw new Error('patch 14: the active-pair T1 must sit exactly 2h past the anchor-only figure — the excluded later leg');
+  const lineE = `Your 14 ends ${clock(t1e)} now → ${clock(t1e)} with this plan (no split credit)`;
+  h = out('patch 14/active pair, empty draft');
+  if (strip(h) !== lineE) throw new Error(`patch 14: an empty draft over an active pair must read "${lineE}" (saw "${strip(h)}")`);
+
+  // (g) FAQ 22, the reset as the FIRST leg (Opus scenario g): an 11h sleeper reset pairs
+  //     with a later 2h OFF Break 2. The pair is real, and what it buys is exactly Break
+  //     2's excluded length — T2 − T1 == 120 — where the pre-fix line showed no movement
+  //     at all next to the words "with this pair".
+  const nowG = at14('2026-09-23T06:00:00-05:00');
+  const scG = splitScenario({
+    nowM: nowG,
+    segments: [
+      { status: 'D', start: nowG - 1200, end: nowG - 660 },
+      { status: 'SB', start: nowG - 660, end: nowG },
+    ],
+    split: { b1: 0, b1s: 'OFF', dwell: 60, drive: 300, b2: 120, b2s: 'OFF' },
+  });
+  if (!scG.paired) throw new Error('patch 14: the FAQ 22 reset-as-first-leg plan must pair for this pin');
+  const t1g = windowEnd(scG.nowEv), t2g = windowEnd(scG.afterEv);
+  if (t2g - t1g !== 120) throw new Error(`patch 14: the FAQ 22 pair must move the 14 by exactly Break 2's 2h (saw ${t2g - t1g}m)`);
+  const lineG = `Your 14 ends ${clock(t1g)} now → ${clock(t2g)} with this pair`;
+  h = out('patch 14/FAQ 22 reset as first leg');
+  if (strip(h) !== lineG) throw new Error(`patch 14: the FAQ 22 pair line must read "${lineG}" (saw "${strip(h)}")`);
+
+  // leave the store as the other sections expect to find it
+  setState({ segments: [], tentative: [], current: null, nowOverride: null, tab: 'now', planReturn: 'plan', split: { ...DS } });
+  console.log('patch 14 (Split Lab — pinned now-vs-after line; Try an example split): OK');
+}
 console.log('OK');

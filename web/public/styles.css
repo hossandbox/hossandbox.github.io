@@ -229,6 +229,14 @@ button.dock-more { width: 100%; justify-content: center; min-height: 44px; color
 .plan-icon { width: 52px; height: 52px; border-radius: 14px; background: var(--panel2); display: flex; align-items: center; justify-content: center; }
 .plan-text { display: flex; flex-direction: column; gap: 2px; font-size: 17px; }
 
+/* Split Lab (patch #14): the now-vs-after answer rides at the top of the screen while the
+   driver drags the break sliders, so the consequence never scrolls away from the control.
+   The offset clears the sticky app header on a planning screen (status row, compact drive
+   line and disclaimer, plus the header's own padding); the strip's own colours are the
+   card's — existing tokens only, no new palette. */
+.split-now-after { position: sticky; top: calc(114px + env(safe-area-inset-top)); z-index: 3; background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop); font-size: 15px; font-weight: 600; }
+.split-now-after b { font-weight: 800; font-variant-numeric: tabular-nums; }
+
 /* Slide-up panels (Sheet in app.tsx). */
 .sheet-wrap { position: fixed; inset: 0; z-index: 40; }
 button.sheet-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: rgba(0,0,0,.55); padding: 0; min-height: 0; }

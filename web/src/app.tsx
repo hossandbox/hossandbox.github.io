@@ -2204,6 +2204,14 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const after = evaluate([...base, ...plan], { asOf: endB2, config: s.config });
   const atDriveEnd = evaluate([...base, ...plan.slice(0, 3)], { asOf: endDrive, config: s.config });
   const paired = after.shift.chain.length >= 2 && after.shift.chain[after.shift.chain.length - 1].end === endB2;
+  // The pinned now-vs-after line (patch #14): the END of the 14-hour window itself, from the
+  // same two evaluations this screen already makes. Paired rests after the anchor are
+  // excluded from the 14, so the true window end is anchor + window + excluded — which is
+  // asOf + window − windowUsed on each evaluation (windowUsed already nets the exclusions
+  // out). Unclamped on purpose: an expired window shows its true past end, not "now". Never
+  // mustStopBy: that folds in the drive and break limits, which are not what the line claims.
+  const windowEndNow = ev.asOf + ev.shift.limits.window - ev.shift.windowUsed;
+  const windowEndAfter = after.asOf + after.shift.limits.window - after.shift.windowUsed;
   const longOk = (b1s === 'SB' && b1 >= LIMITS.SPLIT_MIN_SB) || (b2s === 'SB' && b2 >= LIMITS.SPLIT_MIN_SB);
   const totalOk = b1 + b2 >= LIMITS.SPLIT_TOTAL;
   const planViol = after.violations.filter((v) => v.start >= t0);
@@ -2225,6 +2233,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   return (
     <>
       <BackToPlan s={s} />
+      <div class="split-now-after" aria-live="polite">Your 14 ends <b>{clock(windowEndNow)}</b> now → <b>{clock(windowEndAfter)}</b> {paired ? 'with this pair' : 'with this plan (no split credit)'}</div>
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
         {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
@@ -2241,6 +2250,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
       <Card title="What if… (starts at the end of your log)">
         <p class="muted small">Plan begins {clock(t0)}.</p>
+        <button class="wide-btn" onClick={() => setSplit({ ...DEFAULT_SPLIT })}>Try an example split</button>
         <Toggle options={[['OFF', 'Break 1: Off duty'], ['SB', 'Break 1: Sleeper']]} value={b1s} onChange={(v) => setSplit({ b1s: v })} />
         <Slider label="Break 1 length" value={b1} min={0} max={600} step={15} onChange={(v) => setSplit({ b1: v })} fmt={dur} unit="min" />
         <Slider label="Then on-duty (dock, fuel)" value={dwell} min={0} max={240} step={15} onChange={(v) => setSplit({ dwell: v })} fmt={dur} unit="min" />
