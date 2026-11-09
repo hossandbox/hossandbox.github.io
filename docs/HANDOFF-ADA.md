@@ -189,3 +189,60 @@ generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`)
   PASS** → tidy 15.2 → **Delta-15B PASS** ("ready to deploy, no remaining
   defects"). Engine suite is now **105 tests** (99 + 6 new); smoke/contrast/
   typecheck/build green at every step.
+
+## Patch 16 — deployed 2026-11-09 ("Night & Glance" design polish)
+
+- **Source:** Opus's design brainstorm for the tired-trucker-at-3-a.m. lens
+  (`DESIGN-BRAINSTORM-16.md`); Lorico approved Opus's recommendations across the
+  board (decisions D1–D11, all the recommended options) plus sanctions **S1**
+  (dark-safe shell), **S2** (collapsed two-zones line) and **S3** (status-tap undo
+  owns the single undo slot). Engine untouched — byte-identical to the Patch 15
+  tree; the contrast gate stays 44/44 in both themes.
+- **The 14 steps, in build order:** one duration format everywhere (`dur()`);
+  type roles with a 12 px floor and the trust list moved to a 15 px / 600 /
+  full-colour `.trust` role; "The rules pair these two breaks" wording + press
+  states on everything tappable; the load verdict rebuilt as a **sign** (border +
+  left bar + ✓/✕, no full-panel tint flood — night luminance measured down from
+  157×/87× background to ~2–3×/~6×); the Yes verdict names its rest plan;
+  **hero-first Now** (notices collapse into a trust strip under the hero; the
+  two-zones warnbox becomes a one-line chip that re-opens if either zone
+  changes); the **trust ring** — the dial's arc carries the record basis (solid =
+  from your log, dashed = estimate, hollow = demo), which is what makes the
+  collapsed notices honest; End my day as a plain key below the grid with undo on
+  Now; the Split Lab strip offset is now a **measured `--top-h`** (ResizeObserver
+  on the header — the Patch 14 follow-up, closed); warnings gain shape (⚠ glyph +
+  left bar; On duty stays amber per D3-A); **hazard stripes** frame the
+  out-of-time state in both themes, with a new automated `web/test/nightlight.mjs`
+  check (light budget + Machado 2009 colour-vision separation) wired into the
+  smoke script; **status-tap undo** — an 8-second "On Duty since … · Undo" chip
+  above the dock (S3: newest change owns the slot); a **dark driving screen at
+  night** device setting (default on, 19:00–07:00 phone time, driving view only);
+  and the **dark-safe shell** — a synchronous boot script in `index.html` decides
+  the theme exactly as `effectiveTheme()` does before first paint, so a cold
+  launch never flashes light at night.
+- **Extra A — voice-privacy honesty (Patch 11 follow-up):** the shipped speech
+  recognition never requested on-device processing, and Chrome's default
+  `webkitSpeechRecognition` sends audio to Google's servers. The panel copy now
+  says so plainly: "Your voice is turned into text by your browser's speech
+  service — in Chrome the audio goes to Google. Only this does that; your log
+  never leaves this phone."
+- **Verification arc:** Opus **Verify-16 returned FAIL** with six small defects,
+  each prescribed: the estimate ring rendered solid (round line caps filled the
+  dashes) with the word "estimate" missing; the two-zones re-open pin was
+  timezone-fragile (green under UTC, red under America/Chicago — the suite is
+  now always run under Chicago time); `--top-h` was measured once on the
+  mount-time header and went stale after the driving view; nightlight's CVD step
+  used non-Machado gamma-space matrices and left the verdict icon unguarded; the
+  boot script ignored the dark-driving rule, so a cold launch while Driving at
+  night painted a light first frame; and the hero number had 0.3 px of slack
+  with no `nowrap`. **Fix round** lifted Opus's own proven fixes plus the
+  endorsed **N2 re-wording** (the "a stale undo must change nothing" guard now
+  protects the status tap's own undo, per S3) and one Trip trust-class line.
+  **Delta-16 PASS** — delta audit exact, probes green (boot-vs-app 27/27 under
+  both timezones), all prescribed mutations red at their pins, suites green
+  under Chicago and UTC, engine byte-identical.
+- **Still open (Pixel-only):** dark-room / colourblind-simulator pass, a filmed
+  cold launch (dark, light, and Driving-at-night), the Split strip at 320 px /
+  Large font / driving banner, the estimate ring at arm's length, and the
+  360×640 two-notice dock clearance. Next in the locked queue: spoken driving
+  alerts (M3) as their own patch, then the final Opus UI audit capstone.

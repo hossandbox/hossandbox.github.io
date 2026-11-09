@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -338,15 +338,22 @@ function Sheet({ title, children, onBack, focusKey }: { title: string; children:
 export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
   // A tap is the browser's permission to play sound later, so a driving alert can be heard (alerts.ts).
   unlockAudio();
-  setState((cur) => {
-    // Read the clock at the tap, not the last render's minute: a stale `now` backdated the change and
-    // could drop the status being closed (bug report C5/L3).
-    const now = cur.nowOverride ?? nowMin();
-    const at = now - Math.max(0, minutesAgo);
-    if (minutesAgo > 0 && cur.current && at <= cur.current.since) return {};
-    // Tapping the status you are already in changes nothing (statusTap returns null): re-stamping the
-    // row reset the header pill to 0m mid-rest, while every clock stayed identical (driver report).
-    return statusTap(cur, st, note, at) ?? {};
+  // A tap changes the driver's record, so it goes through the undo slot like every other change
+  // (patch 16, P10 — decision D8-A, sanction S3): a status tap was the one edit in the app with
+  // no way back, and a mis-tap at 3 a.m. is exactly when there is no spare attention for repair
+  // work. The change is probed first with the same pure store function the tap always used,
+  // read at the tap rather than the last render's minute (bug report C5/L3): when the tap
+  // would change nothing it records nothing and offers no undo, exactly as before — tapping
+  // the status you are already in (statusTap returns null), or a "minutes ago" that would
+  // reach back past the start of the status being left, which would erase it: that is an
+  // edit, not a tap.
+  const cur = getState();
+  const now = cur.nowOverride ?? nowMin();
+  const at = now - Math.max(0, minutesAgo);
+  if (minutesAgo > 0 && cur.current && at <= cur.current.since) return;
+  if (!statusTap(cur, st, note, at)) return;
+  undoable(`${segLabel(st, note)} since ${clock(at, false)}`, () => {
+    setState((c) => statusTap(c, st, note, at) ?? {});
   });
 }
 
@@ -518,6 +525,10 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
     <>
       <div class="hero-label">{label}</div>
       <div class="hero-value">{clock(off)}</div>
+      {/* The big time stays time-only (a full date will not fit at this size); the date stacks
+          quietly under it (patch 16, P6) — under, not over, so the sentence the label and the
+          time make together ("…can drive again at Sat 09:00") still reads as one statement. */}
+      <div class="hero-stop-date">{clockFull(off).split(', ')[0]}</div>
       <div class="hero-stop">{dur(off - now)} from now{resting && ev.binding !== 'BREAK_30' ? `, if you stay ${status === 'SB' ? 'in the sleeper' : 'off duty'}.` : ''}</div>
     </>
   );
@@ -630,8 +641,20 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
   // The switch flips what is on screen — the effective theme — and the tap records the choice, so
   // from then on the phone's setting no longer moves it (patch 7).
   const next = effectiveTheme(s, devicePrefersDark()) === 'day' ? 'night' : 'day';
+  // P3: the header measures ITSELF into --top-h for as long as it is on screen (the driving view
+  // unmounts it, and a new header element comes back after Details).
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      document.documentElement.style.setProperty('--top-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <header class="top" inert={inert}>
+    <header class="top" inert={inert} ref={headerRef}>
       <div class="top-row">
         <span class="pill" style={`--led: ${STATUS_COLOR[status]}`}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
         <span class="top-right">
@@ -654,8 +677,97 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
  * pinning it, and they follow the driver to the planning screens, because every answer there rests on
  * the same record.
  */
-function Notices({ ev, now, s }: { ev: FullEvaluation; now: number; s: State }) {
+/**
+ * One notice as a collapsible line (patch 16, P2): the summary is the whole surface until the
+ * driver opens it — a 48px row at 15px semibold carrying the warning glyph — and the body
+ * keeps the full wording and any control the box always had.
+ */
+function NoticeLine({ summary, open, children }: { summary: string; open?: boolean; children: ComponentChildren }) {
+  return (
+    <details class="notice" open={open ? true : undefined}>
+      <summary>{summary}</summary>
+      <div class="notice-body">{children}</div>
+    </details>
+  );
+}
+
+function Notices({ ev, now, s, strip }: { ev: FullEvaluation; now: number; s: State; strip?: boolean }) {
   const hist = historyBasis(s, now);
+  const gaps = meaningfulGaps(ev.gaps);
+  if (strip) {
+    // On Now the notices ride UNDER the answer as one-line chips (patch 16, P2): nothing about
+    // the record may push the one number off the first screenful, so each notice is one 48px
+    // line naming its subject, with the full wording — and its controls — one tap down,
+    // unchanged. The DEMO chip stands open: it carries the quick-start button, the way into a
+    // real day. The two-zones chip (decision D5-A) stands open until the driver acknowledges
+    // THIS pair of zones; it re-opens on its own when either zone changes, because the pair is
+    // what the acknowledgement stores.
+    const gapsBody = (
+      <>
+        <b>Unlogged time is being counted as off duty.</b>{' '}
+        {gaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} — {dur(gaps.reduce((a, g) => a + (g.end - g.start), 0))} in total.
+        A hole in the record can look like a rest you never took, so a reset or a split may be resting on it. Fill it in on the <b>Log</b> tab to be sure.
+      </>
+    );
+    return (
+      <>
+        {hist === 'fresh' && (
+          <NoticeLine summary="DEMO — assumed full clocks, not your day" open>
+            <b class="demo-word">DEMO — not your day.</b> <b>Assumed fresh clock.</b> Nothing is logged, so these numbers assume a full {ev.shift.limits.drive / 60}-hour driving / {ev.shift.limits.window / 60}-hour window and an empty {ev.cycle.limit / 60}-hour cycle — not your actual day.
+            Tap your current status or add today's duty on the <b>Log</b> tab before you trust them.
+            <span class="qs-cta">
+              <button class="primary" onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button>
+              <span class="small">Already mid-shift? Type the four clocks your ELD shows — about 20 seconds — and start from your real day instead.</span>
+            </span>
+          </NoticeLine>
+        )}
+        {hist === 'incomplete' && (
+          <NoticeLine summary="Estimates — nothing logged before your current status">
+            <b>History incomplete — estimates only.</b> You have a current status but nothing behind it, so these numbers still assume you started from zero. Duty you haven't entered cannot be counted.{' '}
+            <button class="mini" onClick={() => setState({ historyAcknowledged: true })}>It really does start here</button>
+          </NoticeLine>
+        )}
+        {splitEstimateActive(s, now) && (
+          <NoticeLine summary="Estimate — built from the ELD clocks you typed">
+            <b>Estimate — from the clocks you entered; firms up as your own entries replace them.</b>{' '}
+            Split answers rest on those typed-in clocks until a stretch you logged yourself covers the ground they stand on.
+          </NoticeLine>
+        )}
+        {gaps.length === 1 && (
+          <NoticeLine summary={`Unlogged ${clock(gaps[0].start, false)}–${clock(gaps[0].end, false)} counted as off duty`}>{gapsBody}</NoticeLine>
+        )}
+        {gaps.length > 1 && (
+          <NoticeLine summary={`Unlogged time counted as off duty (${gaps.length} stretches)`}>{gapsBody}</NoticeLine>
+        )}
+        {ev.invalid.length > 0 && (
+          <NoticeLine summary={`${ev.invalid.length} ${ev.invalid.length === 1 ? 'entry' : 'entries'} ignored — fix ${ev.invalid.length === 1 ? 'it' : 'them'} on the Log`}>
+            <b>{ev.invalid.length} entr{ev.invalid.length === 1 ? 'y' : 'ies'} could not be read and {ev.invalid.length === 1 ? 'is' : 'are'} being ignored.</b>{' '}
+            A row needs a real start and end time. Re-enter {ev.invalid.length === 1 ? 'it' : 'them'} on the <b>Log</b> tab.
+          </NoticeLine>
+        )}
+        {ev.futureLogged.length > 0 && (
+          <NoticeLine summary={`${ev.futureLogged.length} ${ev.futureLogged.length === 1 ? 'entry' : 'entries'} dated in the future — ignored`}>
+            <b>{ev.futureLogged.length} entr{ev.futureLogged.length === 1 ? 'y is' : 'ies are'} dated in the future and {ev.futureLogged.length === 1 ? 'is' : 'are'} being ignored.</b>{' '}
+            You cannot have already logged time that has not happened, so it is left out of every clock. Fix the date on the <b>Log</b> tab, or make it a what-if if you meant to plan it.
+          </NoticeLine>
+        )}
+        {ev.clippedFuture.length > 0 && (
+          <NoticeLine summary={`${ev.clippedFuture.length} ${ev.clippedFuture.length === 1 ? 'entry runs' : 'entries run'} past now — only part counted`}>
+            <b>{ev.clippedFuture.length} entr{ev.clippedFuture.length === 1 ? 'y runs' : 'ies run'} past now.</b>{' '}
+            {ev.clippedFuture.map((x) => `${segLabel(x.status, x.note)} ${clock(x.start)} → ${clock(x.end)}`).join(', ')}. Only the part up to now is counted — the rest hasn't happened. Shorten {ev.clippedFuture.length === 1 ? 'it' : 'them'} on the <b>Log</b> tab, or tap your status when it changes.
+          </NoticeLine>
+        )}
+        {s.config.timeZone !== deviceTz && (
+          <NoticeLine summary={`Clock times: ${zoneShort(deviceTz)} (phone) · carrier day: ${zoneShort(s.config.timeZone)}`} open={s.zoneAck !== zonePair(s)}>
+            <div class="warnbox">
+              <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
+            </div>
+            <button class="mini" onClick={() => setState({ zoneAck: zonePair(s) })}>Got it</button>
+          </NoticeLine>
+        )}
+      </>
+    );
+  }
   return (
     <>
       {hist !== 'known' && (
@@ -754,10 +866,10 @@ export function dialGeometry(share: number, hours: number, size: number) {
 }
 
 /** A gauge for the limit that binds; children go in the middle. tone: calm (accent), warn, bad. */
-function Dial({ share, hours, tone, size, children }: { share: number; hours: number; tone: 'calm' | 'warn' | 'bad'; size: number; children?: ComponentChildren }) {
+function Dial({ share, hours, tone, size, basis, children }: { share: number; hours: number; tone: 'calm' | 'warn' | 'bad'; size: number; basis?: 'log' | 'estimate' | 'demo'; children?: ComponentChildren }) {
   const g = dialGeometry(share, hours, size);
   return (
-    <div class={`dial ${tone}`}>
+    <div class={`dial ${tone}${basis && basis !== 'log' ? ` basis-${basis}` : ''}`}>
       <svg viewBox={`0 0 ${size} ${size * 0.9}`} aria-hidden="true">
         <path class="dial-track" d={g.track} stroke-width={g.sw * 1.3} />
         <g class="dial-ticks">{g.ticks.map((t, i) => <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke-width={t.major ? 2.5 : 1.5} />)}</g>
@@ -802,15 +914,30 @@ function SplitPairLine({ ev }: { ev: FullEvaluation }) {
   if (!pair) return null;
   const leg = ev.shift.pendingSplitLeg;
   return (
-    <p class="muted small split-pair">
+    <p class="trust split-pair">
       <b>Split in use:</b> {pairWords(pair)}. Your {ev.shift.limits.drive / 60}-hour driving limit and {ev.shift.limits.window / 60}-hour window count from {clock(ev.shift.anchor)}, the end of the first rest. The second rest does not count against your {ev.shift.limits.window / 60}-hour window.
       {leg && leg.start === pair[1].start && leg.end === pair[1].end ? ` Your ${clock(leg.start)}–${clock(leg.end)} rest can also be the first half of your next pair.` : ''}
     </p>
   );
 }
 
+/**
+ * What the hero ring may claim (patch 16, M11): the ring is the app's loudest statement, so its
+ * substance says what the number stands on — solid from the driver's own log, dotted while any
+ * part of the answer is estimated (a quick-start seed still in force, unlogged stretches being
+ * counted as rest, or a history with nothing behind the current status), and a hollow outline
+ * on the demo clock, which stands on nothing the driver did. The words beside the number have
+ * always said this; now the picture does too.
+ */
+function ringBasis(s: State, now: number, ev: FullEvaluation): 'log' | 'estimate' | 'demo' {
+  const basis = historyBasis(s, now);
+  if (basis === 'fresh') return 'demo';
+  if (basis === 'incomplete' || splitEstimateActive(s, now) || meaningfulGaps(ev.gaps).length > 0) return 'estimate';
+  return 'log';
+}
+
 /** The one number a driver needs, in the size he needs it: driving left, the stop time, and why. */
-function HeroDrive({ ev }: { ev: FullEvaluation }) {
+function HeroDrive({ ev, basis }: { ev: FullEvaluation; basis?: 'log' | 'estimate' | 'demo' }) {
   const share = useShareButton(shareText(ev, null));
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const left = dur(ev.driveNow);
@@ -821,17 +948,18 @@ function HeroDrive({ ev }: { ev: FullEvaluation }) {
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
     <section class="hero">
-      <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270}>
+      <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270} basis={basis}>
         <div class="hero-label">You can drive</div>
-        <div class={`hero-value ${tone}${left.length > 6 ? ' long' : ''}`}>{left}</div>
+        <div class={`hero-value ${tone}`}>{left}</div>
         <div class="hero-stop"><span class="hero-stop-date">Stop by {stopDate}</span>{' '}<span class="hero-stop-time">{stopTime}</span></div>
+        {basis === 'estimate' && <div class="hero-basis">estimate</div>}
       </Dial>
       <div class="hero-foot">
         <span class="limit-plate">limited by {bindingLabel(ev)}</span>
         <span class="hero-actions">{share}<button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button></span>
       </div>
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
-        <div class="muted small">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
+        <div class="trust">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
       )}
     </section>
   );
@@ -874,15 +1002,48 @@ function StatusDock({ s }: { s: State }) {
   );
 }
 
+/**
+ * The status tap's own undo (patch 16, P10 — decision D8-A, sanction S3): for eight seconds
+ * after a tap, the change it made sits directly above the dock with its Undo — one glance
+ * down from where the thumb just was. The undo SLOT is the app's single slot and the newest
+ * change owns it, so the chip shows only while the pending undo is a status tap's; anything
+ * newer takes the slot and the chip is gone. The chip is only a view of the slot: when the
+ * slot retires — undone, or replaced — so does the chip, and the change itself is never on
+ * a timer.
+ */
+function StatusUndoChip() {
+  const undo = useUndo();
+  const [visible, setVisible] = useState(false);
+  const isTap = !!undo && /^.+ since \d{2}:\d{2}$/.test(undo.label);
+  useEffect(() => {
+    if (!isTap) { setVisible(false); return; }
+    setVisible(true);
+    const t = setTimeout(() => setVisible(false), 8000);
+    return () => clearTimeout(t);
+  }, [undo, isTap]);
+  if (!isTap || !visible || !undo) return null;
+  return (
+    <div class="row undo">
+      <span>{undo.label}.</span>
+      <button class="mini" onClick={undoLast}>Undo</button>
+    </div>
+  );
+}
+
 function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onExitPeek: () => void }) {
   const warn = ev.shift.notes.filter((n) => n.startsWith('⚠'));
   const active = [ev.shift.exceptionKeys.adverse !== null ? 'Adverse conditions' : '', ev.shift.exceptionKeys.sixteen !== null ? '16-hour day' : ''].filter(Boolean);
   /** Today's day-close bookmark, when the day stands closed (patch 13; the store's one rule). */
   const closedToday = dayCloseToday(s, now);
+  const undo = useUndo();
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
-      {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
+      {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={ringBasis(s, now, ev)} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
+      {/* The record's notices ride under the answer as one-line chips (patch 16, P2): the hero
+          leads the screen now — in the cab and in the 3 a.m. review alike, the wrap-up business
+          (splitting, ending the day) waits below the number it wraps up. */}
+      <Notices ev={ev} now={now} s={s} strip />
       <SplitPairLine ev={ev} />
       {/* The load question is the hook of the whole app, and it sat two taps away behind Plan
           (3 a.m. review, patch 7). It now rides Now itself, in the same dress the Plan hub and
@@ -892,6 +1053,8 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
       </button>
+      <Meters ev={ev} />
+      <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
           Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
           notice already offers the quick start that creates one. */}
@@ -902,26 +1065,37 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           <Icon d={I.next} />
         </button>
       )}
-      {/* End my day (patch 13): the deliberate day-close. Same gate as the drift check — the
-          demo clock has no real day to close, so on it the control simply does not appear.
-          While today stands closed it shows the closing time and a Reopen that clears the
-          bookmark only; new activity after the close reopens the day on its own (the
-          dayCloseFor rule in the store) and the button comes back. */}
+      {/* End my day (patch 13; moved below the grid as a plain wide key by patch 16, P9 —
+          decision D6-A): the day's last act belongs at the end of the wrap-up, under the
+          picture of the day it closes, not floating above the clocks in the pre-trip zone.
+          Same gate as the drift check — the demo clock has no real day to close. While the
+          close's own undo stands, the slot shows it above the closed line ("Closed the day
+          at … · Undo", P9); the closed line and its Reopen — which clears the bookmark
+          only — stay either way. New activity after the close reopens the day on its own
+          (the dayCloseFor rule in the store) and the button comes back. */}
       {historyBasis(s, now) !== 'fresh' && (closedToday ? (
-        <div class="row undo">
-          <span>Day closed · {clock(closedToday.at, false)}</span>
-          <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
-        </div>
+        <>
+          {undo?.label === 'Closed the day' && (
+            <div class="row undo">
+              <span>Closed the day at {clock(closedToday.at, false)}</span>
+              <button class="mini" onClick={undoLast}>Undo</button>
+            </div>
+          )}
+          <div class="row undo">
+            <span>Day closed · {clock(closedToday.at, false)}</span>
+            <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
+          </div>
+        </>
       ) : (
-        <button class="primary wide" onClick={() => endDay(now)}>End my day</button>
+        <button class="wide" onClick={() => endDay(now)}>End my day</button>
       ))}
-      <Meters ev={ev} />
-      <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
         <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
         <Icon d={I.next} />
       </button>
-      {warn.map((n, i) => <p key={i} class="warnbox small">{n}</p>)}
+      {/* The engine's shift notes carry their own ⚠; the warnbox shape now supplies it (patch 16, P5), so the baked-in one is dropped here to keep it single. */}
+      {warn.map((n, i) => <p key={i} class="warnbox small">{n.replace(/^⚠\s*/, '')}</p>)}
+      <StatusUndoChip />
       <StatusDock s={s} />
     </>
   );
@@ -988,7 +1162,7 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
         </span>
       </div>
       <div class="drive-body">
-        <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={level} size={320}>
+        <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={level} size={320} basis={ringBasis(s, now, ev)}>
           <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
           <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
         </Dial>
@@ -1192,7 +1366,7 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
             <ul class="small">{done.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
           </>
         ) : <p class="small">Nothing had to be adjusted.</p>}
-        <p class="small">You're set to <b>Off Duty</b> for now — tap your real status when it changes. The rows this built are marked “ELD clocks” on the Log, and split answers carry an <b>Estimate</b> label until your own entries replace them.</p>
+        <p class="trust">You're set to <b>Off Duty</b> for now — tap your real status when it changes. The rows this built are marked “ELD clocks” on the Log, and split answers carry an <b>Estimate</b> label until your own entries replace them.</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
       </Sheet>
     );
@@ -1220,7 +1394,7 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
       )}
       {SR && voice && !voice.done && (
         <div>
-          <p class="muted small">Your phone turns speech into text.</p>
+          <p class="muted small">Your voice is turned into text by your browser's speech service — in Chrome the audio goes to Google. Only this does that; your log never leaves this phone.</p>
           <p style="font-size:1.35rem;font-weight:700">{fields[voice.idx].label}</p>
           <p class="small">Tap “Say it”, then say the clock — like “seven fifteen” for 7 hours 15.</p>
           {voiceMsg && <p class="warnbox small">{voiceMsg}</p>}
@@ -1459,8 +1633,8 @@ function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           {ev.binding === r.key && <div class="why-tag">Earliest — this sets your stop time</div>}
         </li>
       ))}</ul>
-      {lever?.kind === 'rest' && <p class="small"><b>What changes it:</b> +{dur(lever.minutes)} {lever.status === 'SB' ? 'in the sleeper' : 'off duty'} → you can drive until {clockFull(lever.stopBy)}.</p>}
-      {lever?.kind === 'recap' && <p class="small"><b>What changes it:</b> your next cycle hours come back {clockFull(lever.at)} — +{dur(lever.dropsOff)} drops off, {dur(lever.available)} available.</p>}
+      {lever?.kind === 'rest' && <p class="trust"><b>What changes it:</b> +{dur(lever.minutes)} {lever.status === 'SB' ? 'in the sleeper' : 'off duty'} → you can drive until {clockFull(lever.stopBy)}.</p>}
+      {lever?.kind === 'recap' && <p class="trust"><b>What changes it:</b> your next cycle hours come back {clockFull(lever.at)} — +{dur(lever.dropsOff)} drops off, {dur(lever.available)} available.</p>}
       <p class="muted small">Rules: 49 CFR 395.3. Your ELD is your official record.</p>
       <button class="primary wide" data-first onClick={() => openSheet(null)}>Got it</button>
     </Sheet>
@@ -2355,9 +2529,9 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <li class={b1 >= 120 && b2 >= 120 ? 'ok' : 'no'}>Both breaks ≥ 2h</li>
           <li class={longOk ? 'ok' : 'no'}>One break ≥ 7h in the sleeper berth</li>
           <li class={totalOk ? 'ok' : 'no'}>Total ≥ 10h ({dur(b1 + b2)})</li>
-          <li class={paired ? 'ok' : 'no'}>Engine confirms pairing</li>
+          <li class={paired ? 'ok' : 'no'}>The rules pair these two breaks</li>
         </ul>
-        {(b1 >= 600 || b2 >= 600) && <p class="muted small">A break of 10h+ is a full reset on its own. If it includes 7+ consecutive hours in the sleeper it can <i>also</i> pair with a later 2h+ break — whichever helps you more (FMCSA FAQ 22, July 2026).</p>}
+        {(b1 >= 600 || b2 >= 600) && <p class="trust">A break of 10h+ is a full reset on its own. If it includes 7+ consecutive hours in the sleeper it can <i>also</i> pair with a later 2h+ break — whichever helps you more (FMCSA FAQ 22, July 2026).</p>}
         {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && timeline.length > 0 && (timeline[timeline.length - 1].status === 'OFF' || timeline[timeline.length - 1].status === 'SB') && (() => {
           const lastWork = [...timeline].reverse().find((x) => x.status !== 'OFF' && x.status !== 'SB');
           const merged = b1 + (t0 - (lastWork ? lastWork.end : timeline[0].start));
@@ -2372,7 +2546,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <Stat label="Drive now" value={dur(after.driveNow)} sub={bindingLabel(after)} />
           <Stat label={`Range @${s.mph}`} value={`${sh.miles} mi`} sub={`stop by ${clockFull(after.mustStopBy)}`} />
         </div>
-        <p class="muted small">Clocks count from: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
+        <p class="trust">Clocks count from: {clock(after.shift.anchor)}{paired ? ' — end of Break 1; the clock is measured from here. Nothing is erased from your log.' : ' — no split credit.'}</p>
         <h3>Plan violations (if you complete both breaks)</h3><ViolationList items={planViol} />
         {strictViol.length > 0 && <div class="warnbox"><b>If you skip Break 2:</b> the {dur(drive)} drive ends {clock(endDrive)} with {strictViol.map((v) => `${violationLabel[v.kind]} ${dur(v.minutes)}`).join(', ')} — Break 1 only pays off once Break 2 is done.</div>}
       </Card>
@@ -2464,8 +2638,8 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
       <ol class="itin">{plan.steps.map((st, i) => <li key={i}><span class="dot" style={{ background: STATUS_COLOR[st.segment.status] }} /><span><b>{at(st.segment.start)}</b> {st.reason}</span><span class="muted">{dur(st.segment.end - st.segment.start)}{st.segment.status === 'D' ? ` · mi ${Math.round(st.fromMile)}→${Math.round(st.toMile)}` : ''}</span></li>)}</ol>
       {plan.warnings.map((w, i) => <p key={i} class="warnbox">{w}</p>)}
       <ViolationList items={plan.evaluation.violations} from={from} />
-      {chosen === 'split' && <p class="muted small">The split plan only works if you actually log the rests exactly as shown — the shorter one must be ≥2h off duty or sleeper, and the sleeper must be ≥7h *consecutive*. Anything less and the plan collapses to the 10-hour version.</p>}
-      {chosen === 'restart34' && <p class="muted small">A 34-hour restart resets the 60/70-hour cycle (§395.3(c)) and, being far more than 10 consecutive hours off duty, <b>also satisfies the daily reset</b> (§395.3(a)(1)). This option takes it where the <b>cycle</b> is what limits your trip; compare its arrival time against waiting for recap hours, which can take days.</p>}
+      {chosen === 'split' && <p class="trust">The split plan only works if you actually log the rests exactly as shown — the shorter one must be ≥2h off duty or sleeper, and the sleeper must be ≥7h *consecutive*. Anything less and the plan collapses to the 10-hour version.</p>}
+      {chosen === 'restart34' && <p class="trust">A 34-hour restart resets the 60/70-hour cycle (§395.3(c)) and, being far more than 10 consecutive hours off duty, <b>also satisfies the daily reset</b> (§395.3(a)(1)). This option takes it where the <b>cycle</b> is what limits your trip; compare its arrival time against waiting for recap hours, which can take days.</p>}
     </>
   );
 }
@@ -2491,22 +2665,22 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
             // a replace, and the driver must confirm it as one (break-test #1).
             const hasData = s.segments.some((x) => x.start < d.end && x.end > d.start)
               || (s.current !== null && s.current.since < d.end && now > d.start);
-            return <tr key={d.label} class={isToday ? 'today' : ''}><td>{isToday ? 'Today' : `D-${days.length - 1 - i}`}<br /><small class="muted">{d.label}</small></td><td><b>{hrs(d.onDuty)}</b> h</td>
-              <td>{!isToday && firstLogged !== null && d.end <= firstLogged && <><small class="muted" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small><br /></>}
+            return <tr key={d.label} class={isToday ? 'today' : ''}><td>{isToday ? 'Today' : `D-${days.length - 1 - i}`}<br /><small class="muted">{d.label}</small></td><td><b>{dur(d.onDuty)}</b></td>
+              <td>{!isToday && firstLogged !== null && d.end <= firstLogged && <><small class="trust" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small><br /></>}
                 {/* The badge says the day counts as zero; the editor is how you fix that (stress-test round 2, §2.3). */}
                 {!isToday && <DayEditor day={d} hasData={hasData} onApply={applyDay(d.start, d.end)} />}</td></tr>;
           })}
         </tbody></table>
         <div class="clocks">
-          <Stat label="Used" value={`${hrs(ev.cycle.used)} h`} />
-          <Stat label="Available" value={`${hrs(ev.cycle.remaining)} h`} tone={ev.cycle.remaining < 120 ? 'bad' : ''} />
+          <Stat label="Used" value={dur(ev.cycle.used)} />
+          <Stat label="Available" value={dur(ev.cycle.remaining)} tone={ev.cycle.remaining < 120 ? 'bad' : ''} />
           {ev.cycle.restartEnd !== null && <Stat label="Last 34h restart" value={clock(ev.cycle.restartEnd)} />}
         </div>
         {hist !== 'known' && <p class="warnbox small">This recap rests on an incomplete basis: your record does not cover the whole {ev.cycle.windowDays}-day period, so the days before it count as zero. Use <b>set</b> on those days, or confirm that your record really starts here.</p>}
         <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)}</b> — the times in this table use your device zone.</>}</p>
       </Card>
       <Card title="Hours coming back">
-        <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{hrs(f.dropsOff)} h drops</span><b>{hrs(f.availableAtStart)} h available</b></li>)}</ul>
+        <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{dur(f.dropsOff)} drops</span><b>{dur(f.availableAtStart)} available</b></li>)}</ul>
       </Card>
       <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'recap' })}>
         <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
@@ -2599,7 +2773,8 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     ...(lc.leaveIn > 0 ? { untilDeparture: { from: now, status: lc.waitOff ? 'OFF' as DutyStatus : 'ON' as DutyStatus, label: `${lc.waitOff ? 'Off duty' : 'On duty'} until departure` } } : {}),
   };
   const both = useMemo(() => planTripAll(loadSegs, loadInput), [s, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
-  const best = both[earliestStrategy(both)];
+  const strategyKey = earliestStrategy(both);
+  const best = both[strategyKey];
   // Patch 10: the verdict's two follow-up answers, computed with the same simulation on shifted
   // inputs (later departures / added pre-departure rest) — display only, nothing is written.
   // Only the answer screen pays for the searches; the question screens return null at once.
@@ -2690,8 +2865,15 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       </div>
       <section class={`verdict ${best.feasible ? 'yes' : 'no'}`}>
         <div class="verdict-label">{provisional ? 'Verdict (provisional)' : 'Verdict'}</div>
-        <div class="verdict-big">{best.feasible ? 'Yes, it’s legal' : 'No — not legal as planned'}</div>
-        <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clock(best.arrival)}` : `There by ${clock(best.driveEnd)}`}</div>
+        {/* A sign, not a slab (patch 16, P1c): the word rides on the card surface with an icon and
+            an edge in the verdict colour, so the answer reads in grayscale and colour-blindness
+            and stops flooding the cab with light at night — the solid fills measured 157×/87×
+            the night background. The words themselves are unchanged. */}
+        <div class="verdict-big"><Icon d={best.feasible ? I.check : I.x} size={32} /> {best.feasible ? 'Yes, it’s legal' : 'No — not legal as planned'}</div>
+        {/* The Yes names the rest plan it stands on (patch 16, P12): display only — the strategy
+            and its plan are the ones already computed above, nothing new is worked out. */}
+        {best.feasible && <div class="verdict-plan">{strategyKey === 'split' ? 'using a sleeper split — log the rests exactly as shown' : strategyKey === 'restart34' ? 'using a 34-hour restart' : 'using 10-hour breaks'}</div>}
+        <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clockFull(best.arrival)}` : `There by ${clockFull(best.driveEnd)}`}</div>
         {best.feasible && advice?.latest != null && <div class="verdict-sub">Leave by {clockFull(advice.latest)} at the latest.</div>}
         {!best.feasible && advice?.fix && <div class="verdict-sub">+{dur(advice.fix.minutes)} off duty before you leave → legal, {advice.fix.plan.arrival > advice.fix.plan.driveEnd ? `unloaded by ${clockFull(advice.fix.plan.arrival)}` : `there by ${clockFull(advice.fix.plan.driveEnd)}`}.</div>}
         {!best.feasible && advice?.fixSearched && !advice.fix && <div class="verdict-sub">No amount of extra rest before leaving makes this one legal — the load itself has to change.</div>}
@@ -2699,9 +2881,9 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
       {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm that the record starts here.</p>}
       <div class="clocks">
-        <Stat label="Arrive — wheels stop" value={clock(best.driveEnd)} />
-        {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clock(best.arrival)} />}
-        <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={`${hrs(best.cycleRemainingAtArrival)} h`} />
+        <Stat label="Arrive — wheels stop" value={clockFull(best.driveEnd)} />
+        {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clockFull(best.arrival)} />}
+        <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={dur(best.cycleRemainingAtArrival)} />
       </div>
       <ul class="answers">
         <li><span>Load distance</span><b>{lc.miles} mi</b><button class="link" onClick={() => setStep(1)}>Change</button></li>
@@ -2709,7 +2891,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <li><span>At the receiver</span><b>{lc.dwell ? `${dur(lc.dwell)} ${lc.dwellOff ? 'off duty' : 'on duty'}` : 'none'}</b><button class="link" onClick={() => setStep(3)}>Change</button></li>
       </ul>
       <Card title="How it goes"><PlanCompare both={both} from={now} /></Card>
-      <p class="muted small">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
+      <p class="trust">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
       <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
       <button class="wide" onClick={() => { setState({ loadCheck: { ...DEFAULT_LOADCHECK } }); setStep(1); }}>Check another load</button>
     </>
@@ -2775,9 +2957,9 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         )}
         {waiting && (
           <>
-            <p class="muted small">That's <b>{dur(departure - now)}</b> from now. Unlogged time is not a rest — say what you'll be doing, and the itinerary will show it as an assumed row rather than quietly counting it as off duty:</p>
+            <p class="trust">That's <b>{dur(departure - now)}</b> from now. Unlogged time is not a rest — say what you'll be doing, and the itinerary will show it as an assumed row rather than quietly counting it as off duty:</p>
             <Toggle options={untilOptions} value={untilPick} onChange={(v) => setTrip({ until: v })} />
-            <p class="muted small">Planning the wait as <b>{STATUS_LABEL[untilStatus]}</b>.{untilStatus === 'OFF' || untilStatus === 'SB' ? ' Only claim this if you really will be off duty — it can become a split leg.' : ' It earns no rest credit, so no split leg can be built out of it.'}</p>
+            <p class="trust">Planning the wait as <b>{STATUS_LABEL[untilStatus]}</b>.{untilStatus === 'OFF' || untilStatus === 'SB' ? ' Only claim this if you really will be off duty — it can become a split leg.' : ' It earns no rest credit, so no split leg can be built out of it.'}</p>
             {!cur && <p class="warnbox small">You haven't set a current status yet, so this defaults to <b>On duty</b> until you choose — that credits no rest. Pick <b>Off duty</b> if you really will be off.</p>}
           </>
         )}
@@ -2820,6 +3002,8 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <label class="check"><input type="checkbox" checked={s.alertsOn} onChange={(e) => setState({ alertsOn: (e.target as HTMLInputElement).checked })} /> Sound and vibration at 60, 30 and 15 minutes of driving left, and every 15 minutes once you are out of time</label>
       <label class="check"><input type="checkbox" checked={s.keepAwake} onChange={(e) => setState({ keepAwake: (e.target as HTMLInputElement).checked })} /> Keep the screen on while your status is Driving</label>
       <label class="check"><input type="checkbox" checked={s.drivingView} onChange={(e) => setState({ drivingView: (e.target as HTMLInputElement).checked })} /> Big driving screen while your status is Driving</label>
+      <label class="check"><input type="checkbox" checked={s.darkDriveAtNight} onChange={(e) => setState({ darkDriveAtNight: (e.target as HTMLInputElement).checked })} /> Dark driving screen at night</label>
+      <p class="muted small">Between 7 PM and 7 AM on this phone's clock, the driving screen wears the dark theme even when the app is set to Day — a lit screen in a dark cab is glare. The rest of the app keeps your theme.</p>
       {!awakeOk && <p class="small">This browser cannot keep the screen on. Set your phone's auto-lock to "Never" while you drive, or the alerts will stop when it locks.</p>}
       <div class="row">
         <button onClick={test}>Test alert</button>
@@ -3015,16 +3199,27 @@ export function App() {
   const [, redraw] = useState(0);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
-  // The screen wears the EFFECTIVE theme (patch 7): an un-chosen default follows the phone, so a
-  // phone that flips to dark at sunset takes an un-chosen app with it; a chosen theme never moves.
+  // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
+  // 16's dark-driving rule on top — decision D1-A): an un-chosen default follows the phone, so
+  // a phone that flips to dark at sunset takes an un-chosen app with it; a chosen theme never
+  // moves; and while the driving view is up inside the night window (19:00–07:00 on the
+  // phone's own clock, setting on) the screen wears night whatever the rest of the app is
+  // wearing. `now` is a dependency so the rule re-decides as the clock crosses the window's
+  // edges, and the phone-flip listener stays attached for the same reason.
+  const driveUp = showsDrivingView(s);
   useEffect(() => {
-    applyTheme(effectiveTheme(s, devicePrefersDark()));
-    if (s.themeChosen || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    applyTheme(screenTheme(s, devicePrefersDark(), driveUp, now));
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onFlip = () => applyTheme(effectiveTheme(getState(), devicePrefersDark()));
+    const onFlip = () => { const st = getState(); applyTheme(screenTheme(st, devicePrefersDark(), showsDrivingView(st), st.nowOverride ?? nowMin())); };
     mq.addEventListener?.('change', onFlip);
     return () => mq.removeEventListener?.('change', onFlip);
-  }, [s.theme, s.themeChosen]);
+  }, [s.theme, s.themeChosen, s.darkDriveAtNight, driveUp, now]);
+  // The pinned strips and anchored scrolling sit below the header by its MEASURED height
+  // (patch 16, P3): the header grows — a two-line status pill, the out-of-hours banner — and
+  // a guessed constant quietly covered the top of whatever was pinned under it. The
+  // stylesheet keeps the old constant as the fallback for first paint and for runtimes
+  // without the observer.
   // evaluate() runs outside every tab's error boundary, so a throw here used to blank the whole app on
   // every launch (bug report C2). Catch it and offer a way out instead.
   const result = useMemo(() => {
@@ -3119,7 +3314,7 @@ export function App() {
             </div>
           </div>
         )}
-        <Notices ev={ev} now={now} s={s} />
+        {s.tab !== 'now' && <Notices ev={ev} now={now} s={s} />}
         <TabBoundary key={s.tab} tab={s.tab}>
           {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />}
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}

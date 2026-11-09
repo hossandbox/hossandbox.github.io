@@ -536,7 +536,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
       if (attrs.theme !== 'day') throw new Error(`day must set data-theme=day, got ${attrs.theme}`);
       if (attrs.meta !== dayBg) throw new Error(`day must set the light chrome colour ${dayBg}, got ${attrs.meta}`);
       const html = rf('public/index.html', 'utf8'), mf = rf('public/manifest.webmanifest', 'utf8');
-      if (!html.includes(`content="${dayBg}"`) || !mf.includes(`"theme_color": "${dayBg}"`)) throw new Error('index.html and the manifest must start on the day page colour');
+      if (!html.includes(`content="${nightBg}"`) || !mf.includes(`"theme_color": "${nightBg}"`)) throw new Error('index.html and the manifest must start on the night page colour (patch 16, dark-safe shell)');
+      if (!/<script>[\s\S]*?localStorage\.getItem\('hos-sandbox-v1'\)/.test(html)) throw new Error('index.html must carry the pre-paint boot script (patch 16)');
     } finally {
       delete globalThis.document;
     }
@@ -1503,11 +1504,27 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!currentUndo()) throw new Error('an edit must be undo-able');
   if (addEntry('SB', T - 1100, T - 1000, T) !== null) throw new Error('the add should save');
   if (!/^Added Sleeper/.test(currentUndo()?.label ?? '')) throw new Error('an add must be undo-able, and replace the edit\'s undo');
+  // Sanction S3 (patch 16, approved by Lorico 2026-11-09): a status tap now OWNS the single undo
+  // slot. The property this section guards is unchanged — an undo must never throw away changes
+  // made after it: undoing the tap removes ONLY the tap (the edit and the add before it survive),
+  // the add's undo is replaced, never queued behind the tap's, and an undo the record has moved
+  // past changes nothing.
+  const preTap = rows(), preCur = JSON.stringify(gs().current);
   tapStatus('OFF');
   const kept = rows();
-  if (currentUndo() !== null) throw new Error('a status tap changes the record, so the pending undo must be retired');
-  if (undoLast() !== false || rows() !== kept) throw new Error('a stale undo must change nothing');
+  if (currentUndo()?.label !== `Off Duty since ${clock(T, false)}`) throw new Error(`a status tap owns the undo slot (S3): the pending undo must be the tap's, "Off Duty since ${clock(T, false)}" (got ${currentUndo()?.label ?? 'none'})`);
   if (!gs().segments.some((x) => x.status === 'SB') || !gs().segments.some((x) => x.status === 'ON' && x.end === T)) throw new Error('the added entry and the closed On Duty row must survive');
+  if (!undoLast() || rows() !== preTap || JSON.stringify(gs().current) !== preCur) throw new Error('undoing the tap must restore exactly the pre-tap record: the edit and the add before it intact, the On Duty status back');
+  if (!gs().segments.some((x) => x.status === 'SB') || !gs().segments.some((x) => x.status === 'D' && x.start === T - 475)) throw new Error('undoing the tap must not take the earlier edit or add with it');
+  if (undoLast() !== false || rows() !== preTap) throw new Error('a second undo must change nothing: the add\'s undo was replaced by the tap\'s, not queued behind it');
+  tapStatus('OFF');
+  if (rows() !== kept) throw new Error('the same tap again must give the same record');
+  setState((c) => ({ segments: [...c.segments, { status: 'OFF', start: T - 1300, end: T - 1250, createdAt: 9 }] }));
+  const moved = rows();
+  if (currentUndo() !== null) throw new Error('a change the slot did not make must retire the tap\'s undo');
+  if (undoLast() !== false || rows() !== moved) throw new Error('a stale undo must change nothing');
+  setState((c) => ({ segments: c.segments.filter((x) => x.createdAt !== 9) }));
+  if (rows() !== kept) throw new Error('re-check N2 fixture: removing the probe row must give back the tapped record');
   // an undo that is still current works, including for an add
   if (addEntry('OFF', T - 30, T - 20, T) !== null || !undoLast() || rows() !== kept) throw new Error('undoing an add must remove exactly that add');
   // a delete then another delete: only the last can be undone, and the undo restores only that one
@@ -5280,5 +5297,215 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, tzChosen: false, nowOverride: null, dayCloses: [], tab: 'now' });
   mem.delete('hos-sandbox-v1-sim');
   console.log('patch 15.2 (sim snapshot completeness; within-episode re-set pin): OK');
+}
+// --- patch 16 "Night & Glance": hero-first Now with the notices as chips, the verdict as a
+// sign, warning shapes, the trust ring, the status tap's undo, the dark driving screen, and
+// the dark-safe shell. New pins only — nothing above this section was edited except the one
+// shell assertion the dark-safe shell itself moves (see HANDOFF-16, sanction S1's family).
+{
+  const { readFileSync: rf16 } = await import('node:fs');
+  const { tapStatus: tap16, currentUndo: undoNow16, undoLast: undoLast16, endDay: endDay16, setLaunchNotice: notice16 } = await import('../src/app.tsx');
+  const { deviceTz: dtz16, zoneShort: zs16, zonePair: zp16, screenTheme: screen16, darkDriveAtNightApplies: ddna16, exportState: exp16 } = await import('../src/store.ts');
+  const css16 = rf16('public/styles.css', 'utf8');
+  const html16 = rf16('public/index.html', 'utf8');
+  const mf16 = JSON.parse(rf16('public/manifest.webmanifest', 'utf8'));
+  const app16 = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  const txt16 = (x) => x.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const rule16 = (sel) => { const i = css16.indexOf(sel); return i < 0 ? '' : css16.slice(css16.indexOf('{', i) + 1, css16.indexOf('}', i)); };
+  const L16 = (d, h, m = 0) => Math.floor(Date.UTC(2026, 9, d, h, m) / 60000);
+
+  // P6: one duration format — no decimal-hours call sites left in the app source.
+  if (/\bhrs\(/.test(app16)) throw new Error('patch 16: app.tsx must not call hrs() anywhere — durations read in dur() form');
+  // P4: the type floor — nothing under 12px in the stylesheet; the grid's SVG labels at 14 units; the trust role exists.
+  for (const m of css16.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)) if (parseFloat(m[1]) < 12) throw new Error(`patch 16: a font-size under the 12px floor survives: ${m[0]}`);
+  if (!/\.grid-label \{[^}]*font-size: 14px/.test(css16)) throw new Error('patch 16: the grid labels must be 14 units');
+  if (!/\.trust \{[^}]*font-size: 15px; font-weight: 600/.test(css16)) throw new Error('patch 16: the .trust role must exist at 15px semibold');
+  // P1c: the verdict is a sign — an edge and an icon in the verdict colour, never a solid fill.
+  if (!/border-left: 8px solid var\(--good\)/.test(rule16('.verdict.yes'))) throw new Error('patch 16: the Yes verdict needs its 8px --good edge');
+  if (!/border-left: 8px solid var\(--bad\)/.test(rule16('.verdict.no'))) throw new Error('patch 16: the No verdict needs its 8px --bad edge');
+  if (/background:\s*var\(--good\)/.test(rule16('.verdict.yes')) || /background:\s*var\(--bad\)/.test(rule16('.verdict.no'))) throw new Error('patch 16: the verdict must not fill with the solid verdict colour');
+  // P5: warnings carry a shape, not just a colour.
+  if (!/\.warnbox::before \{[^}]*content: "⚠/.test(css16)) throw new Error('patch 16: warnboxes must carry the ⚠ shape');
+  if (!/\.warnbox \{[^}]*border-left: 4px/.test(css16)) throw new Error('patch 16: the warnbox edge must be 4px');
+  // P8: the hazard frame on the out-of-time driving view.
+  if (!/main\.drive\.bad::after \{[^}]*repeating-linear-gradient\(45deg/.test(css16)) throw new Error('patch 16: the out-of-time driving view must wear the hazard stripes');
+  // P3: the measured header height drives the sticky offsets and anchored scrolling.
+  if (!/\.split-now-after \{[^}]*top: var\(--top-h,/.test(css16)) throw new Error('patch 16: the Split strip must sit at the measured --top-h');
+  if (!/scroll-padding-top: var\(--top-h,/.test(css16)) throw new Error('patch 16: anchored scrolling must clear the measured header');
+  if (!/ResizeObserver/.test(app16) || !/--top-h/.test(app16)) throw new Error('patch 16: the app must measure the header into --top-h');
+  // Opus verify-16: the observer must live with the header it measures (the driving view unmounts it; Details mounts a new one).
+  { const tb = app16.slice(app16.indexOf('function TopBar('), app16.indexOf('\n}\n', app16.indexOf('function TopBar(')));
+    if (!/<header class="top"[^>]*ref=\{headerRef\}/.test(tb) || !/new ResizeObserver/.test(tb) || /querySelector\('header\.top'\)/.test(app16)) throw new Error('patch 16: --top-h must be measured by TopBar on its own header element (a once-on-mount query watches a stale header after the driving view)'); }
+  // P2: the hero — dial room, the container-sized number, no glow, no shrink class.
+  if (!/\.hero \.dial \{ max-width: 300px/.test(css16)) throw new Error('patch 16: the hero dial must have its 300px');
+  if (!/\.hero \.hero-value \{[^}]*font-size: clamp\(42px, 23cqi, 56px\)/.test(css16)) throw new Error('patch 16: the hero number must size off its container');
+  // Opus verify-16: a runtime without container units drops the clamp — it must land on 42px, not the 64px base rule — and the number never wraps.
+  if (!/\.hero \.hero-value \{ font-size: 42px; font-size: clamp\(/.test(css16) || !/\.hero \.hero-value \{[^}]*white-space: nowrap/.test(css16)) throw new Error('patch 16: the hero number needs its 42px fallback before the clamp and white-space: nowrap');
+  if (/hero-value\.long/.test(css16) || /text-shadow: 0 0 18px/.test(css16)) throw new Error('patch 16: the hero glow and the shrink class are gone');
+  if (!/\.dial-center \{ container-type: inline-size/.test(css16)) throw new Error('patch 16: the dial centre must be the size container');
+  // M11: the ring's substance — dotted while estimated, hollow on the demo clock.
+  if (!/\.dial\.basis-estimate \.dial-fill \{[^}]*stroke-dasharray/.test(css16)) throw new Error('patch 16: an estimated answer must dot the ring');
+  // Opus verify-16: the dashes must be VISIBLE — a round cap adds a full stroke width to every dash.
+  {
+    const est = rule16('.dial.basis-estimate .dial-fill');
+    const [dash, gap] = (est.match(/stroke-dasharray:\s*([\d.]+)\s+([\d.]+)/) || []).slice(1).map(Number);
+    const round = !/stroke-linecap:\s*butt/.test(est) && /\.dial-fill \{[^}]*stroke-linecap: round/.test(css16);
+    for (const size of [270, 320]) { const sw = size * 0.05; const visible = gap - (round ? sw : 0);
+      if (!(dash > 0) || !(visible >= 0.4 * sw)) throw new Error(`patch 16: the estimate ring's gaps are not visible at size ${size} (dash ${dash}, gap ${gap}, ${round ? 'round' : 'butt'} caps, stroke ${sw}: visible gap ${visible})`); }
+  }
+  if (!/\.dial\.basis-demo \.dial-fill/.test(css16)) throw new Error('patch 16: the demo clock must hollow the ring');
+  // P13: a press answers under the finger; reduced motion stills it.
+  if (!/button:active \{ transform: translateY\(1px\)/.test(css16)) throw new Error('patch 16: a press must answer under the finger');
+  if (!/prefers-reduced-motion: reduce\) \{ button:active \{ transform: none/.test(css16)) throw new Error('patch 16: reduced motion must still the press feedback');
+  // P10: the dock keys get their room.
+  if (!/\.status-buttons \{[^}]*gap: 12px/.test(css16)) throw new Error('patch 16: the dock keys need their 12px');
+  // Extra A (§6.4): the voice panel says where the audio goes; the old line must not come back.
+  if (!/in Chrome the audio goes to Google/.test(app16)) throw new Error('patch 16: the voice panel must say plainly that Chrome sends the audio to Google');
+  if (/Your phone turns speech into text/.test(app16)) throw new Error('patch 16: the old voice line claimed the phone does the listening');
+
+  // P1a: the shell starts dark and the boot script corrects it pre-paint — all eight cases
+  // of (chosen day / chosen night / unchosen / no usable save) × (phone dark / light) must
+  // land where the app's own effective-theme rule lands.
+  if (!html16.includes('content="#090c10"')) throw new Error('patch 16: the static theme-color must be the night page colour');
+  if (mf16.background_color !== '#090c10' || mf16.theme_color !== '#090c10') throw new Error('patch 16: the manifest must splash dark, never light');
+  const boot16 = html16.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  if (!boot16) throw new Error('patch 16: index.html must carry the inline boot script');
+  const runBoot16 = (save, prefersDark) => {
+    const attrs = { theme: 'day', meta: '#090c10' };
+    const doc = {
+      documentElement: { setAttribute: (k, v) => { if (k === 'data-theme') attrs.theme = v; }, removeAttribute: (k) => { if (k === 'data-theme') attrs.theme = null; } },
+      querySelector: (sel) => (sel === 'meta[name="theme-color"]' ? { setAttribute: (k, v) => { if (k === 'content') attrs.meta = v; } } : null),
+    };
+    const win = { matchMedia: () => ({ matches: prefersDark }) };
+    const ls = { getItem: (k) => (k === 'hos-sandbox-v1' ? save : null) };
+    new Function('window', 'document', 'localStorage', boot16)(win, doc, ls);
+    return attrs;
+  };
+  const saveDay16 = JSON.stringify({ theme: 'day', themeChosen: true });
+  const saveNight16 = JSON.stringify({ theme: 'night', themeChosen: true });
+  const saveUnchosen16 = JSON.stringify({ theme: 'day', themeChosen: false });
+  for (const [save, dark, theme, meta] of [
+    [saveDay16, true, 'day', '#e4e9ee'], [saveDay16, false, 'day', '#e4e9ee'],
+    [saveNight16, true, null, '#090c10'], [saveNight16, false, null, '#090c10'],
+    [saveUnchosen16, true, null, '#090c10'], [saveUnchosen16, false, 'day', '#e4e9ee'],
+    [null, true, null, '#090c10'], ['{corrupt', false, 'day', '#e4e9ee'],
+  ]) {
+    const got = runBoot16(save, dark);
+    if (got.theme !== theme || got.meta !== meta) throw new Error(`patch 16: boot script case save=${String(save).slice(0, 24)} phoneDark=${dark} gave theme=${got.theme} meta=${got.meta}, expected theme=${theme} meta=${meta}`);
+  }
+
+  // Opus verify-16: the boot script against the app's OWN launch path (loadSaved → screenTheme at
+  // launch: tab Now, no peek), not hand-written expectations — so the two can never drift.
+  {
+    const { loadSaved: ls16, screenTheme: st16b } = await import('../src/store.ts');
+    const hourMin = (h) => { const d = new Date(2026, 10, 10, h, 0); return Math.floor(d.getTime() / 60000); };
+    const drv = (h, chosen) => JSON.stringify({ theme: 'day', themeChosen: chosen, nowOverride: hourMin(h), drivingView: true, darkDriveAtNight: true, segments: [{ status: 'OFF', start: hourMin(h) - 700, end: hourMin(h) - 30 }], current: { status: 'D', since: hourMin(h) - 30 } });
+    const savesB = [JSON.stringify({ theme: 'day', themeChosen: true }), JSON.stringify({ theme: 'night', themeChosen: true }), JSON.stringify({ theme: 'day', themeChosen: false }), JSON.stringify({ theme: 'night' }), null, '{corrupt', drv(2, true), drv(2, false), drv(13, true), drv(23, false)];
+    const keep = new Map(mem);
+    for (const save of savesB) for (const dark of [true, false]) {
+      mem.clear(); if (save !== null) mem.set('hos-sandbox-v1', save);
+      const st = ls16(); const up = st.tab === 'now' && st.drivingView && st.current?.status === 'D';
+      const want = st16b(st, dark, up, st.nowOverride ?? nowMin());
+      const got = runBoot16(save, dark).theme === 'day' ? 'day' : 'night';
+      if (got !== want) { mem.clear(); for (const [k, v] of keep) mem.set(k, v); throw new Error(`patch 16: boot script and the app disagree at launch: save=${String(save).slice(0, 40)} phoneDark=${dark} boot=${got} app=${want}`); }
+    }
+    mem.clear(); for (const [k, v] of keep) mem.set(k, v);
+  }
+
+  // P1b: the screen rule — the driving view wears night inside 19:00–07:00 on the phone's
+  // own clock while the setting is on, and only then.
+  const atHour16 = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return Math.floor(d.getTime() / 60000); };
+  const dayChosen16 = { theme: 'day', themeChosen: true, darkDriveAtNight: true };
+  if (screen16(dayChosen16, false, true, atHour16(2)) !== 'night') throw new Error('patch 16: at 2 AM the driving screen must wear night over a Day choice');
+  if (screen16(dayChosen16, false, true, atHour16(13)) !== 'day') throw new Error('patch 16: at 1 PM the driving screen keeps the chosen Day');
+  if (screen16({ ...dayChosen16, darkDriveAtNight: false }, false, true, atHour16(2)) !== 'day') throw new Error('patch 16: with the setting off, the driving screen keeps the chosen theme at night');
+  if (screen16(dayChosen16, false, false, atHour16(2)) !== 'day') throw new Error('patch 16: off the driving view, the night rule must not reach the rest of the app');
+  if (!ddna16({ darkDriveAtNight: true }, atHour16(19)) || ddna16({ darkDriveAtNight: true }, atHour16(7)) || ddna16({ darkDriveAtNight: true }, atHour16(18)) || !ddna16({ darkDriveAtNight: true }, atHour16(6))) throw new Error('patch 16: the night window is 19:00–07:00 on the phone clock');
+
+  // The two new state fields stay home: the export must not carry device settings.
+  setState({ darkDriveAtNight: false, zoneAck: 'a|b' });
+  const expOut16 = exp16(getState());
+  if (/darkDriveAtNight|zoneAck/.test(expOut16)) throw new Error('patch 16: device settings (darkDriveAtNight, zoneAck) must not ride the export');
+  setState({ darkDriveAtNight: true, zoneAck: null });
+
+  notice16(false);
+  // P2 order: on a fresh clock the hero leads and the DEMO chip stands open under it.
+  setState({ tab: 'now', nowOverride: L16(12, 12), segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null });
+  let h16 = out('16/now fresh');
+  if (!(h16.indexOf('<section class="hero"') >= 0 && h16.indexOf('<section class="hero"') < h16.indexOf('DEMO — assumed full clocks'))) throw new Error('patch 16: the hero must lead Now, ahead of the notices');
+  if (!/<details class="notice" open>/.test(h16) || !/DEMO — assumed full clocks, not your day/.test(h16)) throw new Error('patch 16: the DEMO chip must stand open under the hero');
+  if (!/basis-demo/.test(h16)) throw new Error('patch 16: on the demo clock the ring must be the hollow outline');
+
+  // Opus verify-16: an estimated answer wears the estimate ring AND the word; a full own log wears neither.
+  setState({ tab: 'now', nowOverride: L16(12, 12), historyAcknowledged: false, segments: [], tentative: [], current: { status: 'ON', since: L16(12, 11), createdAt: 1 }, seededAt: null });
+  h16 = out('16/now estimate ring');
+  if (!/class="dial [a-z]+ basis-estimate"/.test(h16) || !/class="hero-basis">estimate</.test(h16)) throw new Error('patch 16: an estimated answer must carry the estimate ring and the word');
+  setState({ historyAcknowledged: true, segments: [{ status: 'OFF', start: L16(11, 8), end: L16(12, 11), createdAt: 1 }] });
+  h16 = out('16/now own log ring');
+  if (/basis-(estimate|demo)/.test(h16) || /class="hero-basis"/.test(h16)) throw new Error('patch 16: an answer from the driver\'s own log wears the solid ring, no qualifier');
+
+  // D5-A: the two-zones chip — one line once acknowledged, open again when a zone changes.
+  const other16 = dtz16 === 'America/New_York' ? 'America/Chicago' : 'America/New_York';
+  const third16 = ['America/Denver', 'America/Chicago', 'America/New_York', 'America/Los_Angeles'].find((z) => z !== dtz16 && z !== other16);
+  setState({
+    tab: 'now', nowOverride: L16(12, 12), historyAcknowledged: true, zoneAck: null,
+    segments: [{ status: 'OFF', start: L16(11, 20), end: L16(12, 6), createdAt: 1 }],
+    current: { status: 'ON', since: L16(12, 6), createdAt: 2 },
+    config: { ...getState().config, timeZone: other16 },
+  });
+  h16 = out('16/now two zones unacknowledged');
+  const chip16 = `Clock times: ${zs16(dtz16)} (phone) · carrier day: ${zs16(other16)}`;
+  if (!h16.includes(chip16)) throw new Error('patch 16: the two-zones chip must read as one line naming both zones');
+  if (!/<details class="notice" open>/.test(h16)) throw new Error('patch 16: an unacknowledged zone pair must stand open');
+  if (!/class="warnbox">\s*<b>Two time zones in play\.<\/b>/.test(h16)) throw new Error('patch 16: the full two-zones wording must survive inside the chip');
+  setState({ zoneAck: zp16(getState()) });
+  h16 = out('16/now two zones acknowledged');
+  if (!h16.includes(chip16) || /<details class="notice" open>/.test(h16)) throw new Error('patch 16: once acknowledged, the chip must collapse to its one line');
+  setState({ config: { ...getState().config, timeZone: third16 } });
+  h16 = out('16/now zone changed');
+  if (!/<details class="notice" open>/.test(h16)) throw new Error('patch 16: when either zone changes, the chip must stand open again');
+
+  // P9: End my day sits below the grid as a plain wide key; right after a close, its slot
+  // carries the undo.
+  setState({ tab: 'now', nowOverride: L16(12, 18, 42), zoneAck: null, config: { ...getState().config, timeZone: dtz16 } });
+  h16 = out('16/now end-of-day offered');
+  if (!/<button class="wide">End my day<\/button>/.test(h16)) throw new Error('patch 16: End my day must be a plain wide key on Now');
+  if (!(h16.indexOf('Last 24 hours') >= 0 && h16.indexOf('Last 24 hours') < h16.indexOf('End my day'))) throw new Error('patch 16: End my day must sit below the grid');
+  endDay16(L16(12, 18, 42));
+  h16 = out('16/now just closed');
+  if (!h16.includes(`Closed the day at ${clock(L16(12, 18, 42), false)}`) || !/>Undo</.test(h16)) throw new Error('patch 16: right after a close, the slot must offer the undo');
+  if (!undoLast16()) throw new Error('patch 16: the close undo must work from the slot');
+  h16 = out('16/now close undone');
+  if (!/<button class="wide">End my day<\/button>/.test(h16)) throw new Error('patch 16: undoing the close must bring the button back');
+
+  // P10: a status tap takes the undo slot with a named label; a no-op tap takes nothing.
+  setState({ tab: 'now', nowOverride: L16(12, 20), segments: [], tentative: [], current: { status: 'ON', since: L16(12, 19), createdAt: 3 }, historyAcknowledged: true });
+  if (undoNow16() !== null) throw new Error('patch 16: the undo slot must start empty here');
+  tap16('ON');
+  if (undoNow16() !== null) throw new Error('patch 16: tapping the status you are already in must record no undo');
+  tap16('OFF');
+  if (undoNow16()?.label !== `Off Duty since ${clock(L16(12, 20), false)}`) throw new Error(`patch 16: a status tap must own the undo slot with its name and time, got ${undoNow16()?.label}`);
+  if (!undoLast16() || getState().current?.status !== 'ON') throw new Error('patch 16: undoing a status tap must restore the status it replaced');
+  if (undoNow16() !== null) throw new Error('patch 16: the slot must be empty after the tap is undone');
+
+  // P12: a Yes names the plan it stands on.
+  setState({
+    tab: 'load', nowOverride: L16(12, 10), historyAcknowledged: true, seededAt: null, mph: 55,
+    segments: [{ status: 'OFF', start: L16(11, 20), end: L16(12, 9), createdAt: 1 }],
+    current: { status: 'ON', since: L16(12, 9), createdAt: 2 }, tentative: [],
+    loadCheck: { miles: 300, dwell: 60, dwellOff: false, leaveIn: 0, waitOff: false, answered: true },
+  });
+  const t16 = txt16(out('16/load verdict names its plan'));
+  if (!/Yes, it’s legal/.test(t16) || !/using 10-hour breaks/.test(t16)) throw new Error('patch 16: a Yes must name the rest plan it stands on');
+  if (!/<div class="verdict-big"><svg[^>]*width="32"/.test(out('16/load verdict icon'))) throw new Error('patch 16: the verdict word must lead with its 32px ✓/✕ icon — the shape cue the colour-blind check relies on');
+
+  // P1b's setting is on the Driving alerts card, in words.
+  setState({ tab: 'settings', nowOverride: null });
+  h16 = out('16/settings driving alerts');
+  if (!/Dark driving screen at night/.test(h16)) throw new Error('patch 16: the dark-driving-screen setting must be offered in More → Driving alerts');
+
+  notice16(true);
+  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
+  console.log('patch 16 (hero-first Now, verdict sign, warning shapes, trust ring, status undo, dark driving screen, dark-safe shell): OK');
 }
 console.log('OK');

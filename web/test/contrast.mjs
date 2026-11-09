@@ -111,23 +111,30 @@ const night = vars(':root {');
 const day = vars(':root[data-theme="day"]');
 const failures = [...audit('day (default)', day), ...audit('night', night)];
 
-// The shell has to carry the default theme itself. Left to JS, a fresh install paints the :root
-// (night) palette for the first frames and then flips to day — a visible flash of the wrong theme.
-// The browser chrome must start on the default background too; applyTheme keeps it in step at runtime.
+// The shell has to be DARK-SAFE before any script runs (patch 16, P1a — sanction S1): the static
+// colours are the night palette's, so a cold start can splash dark but never light — a white splash
+// in a dark cab at 3 a.m. is the failure being designed out. The pre-paint boot script in index.html
+// reads the save and corrects the shell for a driver whose effective theme is day before the first
+// frame; the hard-coded data-theme="day" stays as the no-JavaScript fallback, and applyTheme keeps
+// the chrome colour in step at runtime. The 44 colour pairs above are untouched by this.
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const htmlTheme = html.match(/<html[^>]*\bdata-theme="([^"]+)"/)?.[1];
 if (htmlTheme !== 'day') {
   failures.push(`  index.html must set data-theme="day" on <html> (got ${htmlTheme ?? 'nothing'}) — a fresh install would flash the night palette`);
 }
 const metaColor = html.match(/<meta name="theme-color" content="([^"]+)"/)?.[1];
-if (metaColor !== day['--bg']) {
-  failures.push(`  index.html theme-color ${metaColor} must match the day --bg ${day['--bg']}`);
+if (metaColor !== night['--bg']) {
+  failures.push(`  index.html theme-color ${metaColor} must match the night --bg ${night['--bg']} — the static shell colour is the dark-safe one`);
 }
-// Third place the default lives: the PWA manifest drives the install splash and the standalone chrome.
+if (!/<script>[\s\S]*?localStorage\.getItem\('hos-sandbox-v1'\)/.test(html)) {
+  failures.push('  index.html must carry the pre-paint boot script that reads the save and applies the effective theme before first paint');
+}
+// Third place the shell colour lives: the PWA manifest drives the install splash and the standalone
+// chrome. It carries the night page colour too — the splash is the first thing a cold start shows.
 const manifest = JSON.parse(readFileSync(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
 for (const key of ['background_color', 'theme_color']) {
-  if (manifest[key] !== day['--bg']) {
-    failures.push(`  manifest ${key} ${manifest[key]} must match the day --bg ${day['--bg']} — otherwise the installed app splashes dark onto a light UI`);
+  if (manifest[key] !== night['--bg']) {
+    failures.push(`  manifest ${key} ${manifest[key]} must match the night --bg ${night['--bg']} — the installed app must never splash light`);
   }
 }
 // Android crops an installed app's icon to whatever shape the launcher uses. With no maskable icon it

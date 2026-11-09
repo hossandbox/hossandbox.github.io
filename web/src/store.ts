@@ -90,6 +90,13 @@ export interface State {
    * moves day boundaries and corrupts the recap. So it is asked for rather than assumed (round-3 item 3).
    */
   tzChosen: boolean;
+  /**
+   * The zone pair the driver has acknowledged on the collapsed two-zones line (patch 16,
+   * decision D5-A): "device zone|terminal zone". While it differs from the pair in play the
+   * line stands open; once it matches, the line stays one line. It re-opens on its own when
+   * either zone changes, because it is the pair that is stored, not a bare yes.
+   */
+  zoneAck: string | null;
   /** simulated "now" for testing; null = wall clock */
   nowOverride: number | null;
   /**
@@ -115,6 +122,12 @@ export interface State {
   keepAwake: boolean;
   /** Show the full-screen driving view on Now while the status is Driving (redesign). Device setting. */
   drivingView: boolean;
+  /**
+   * "Dark driving screen at night" (patch 16, decision D1-A): between 19:00 and 07:00 on the
+   * phone's own clock the driving view wears the night palette, whatever theme the rest of
+   * the app is using. Device setting: not exported, like the other driving-view settings.
+   */
+  darkDriveAtNight: boolean;
   /**
    * The driver's break buttons for the Log's add panel (driver report 2026-10-13: "I can't find a way to
    * add break"). A break is not a duty status: each button is a name, a length and the status the driver
@@ -187,7 +200,7 @@ export const INITIAL_STATE: State = {
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   disclaimerAcked: false, seededAt: null, dayCloses: [],
-  tzChosen: false, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true,
+  tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
 
@@ -359,6 +372,13 @@ export function parseSaved(raw: string | null): State {
     // literal true: a save from before patch 7 (missing) and a damaged one (anything else) both
     // read as not acknowledged, and the full box shows once more.
     if (s.disclaimerAcked !== true) merged.disclaimerAcked = false;
+    // The dark-driving-screen switch (patch 16) counts only as a literal boolean: a save from
+    // before the field existed (missing) and a damaged one (anything else) both read as the
+    // default, on.
+    if (typeof s.darkDriveAtNight !== 'boolean') merged.darkDriveAtNight = true;
+    // The two-zones acknowledgement (patch 16) is the zone pair it was given for; anything
+    // that is not that string reads as never given, so the line stands open and asks again.
+    if (typeof s.zoneAck !== 'string') merged.zoneAck = null;
     // The ELD seed stamp counts only as a real minute: a save from before patch 8 (missing) and
     // a damaged one (anything else) both read as never seeded.
     if (typeof s.seededAt !== 'number' || !Number.isFinite(s.seededAt)) merged.seededAt = null;
@@ -656,6 +676,8 @@ export const ZONE_LABELS: Record<string, string> = {
   'UTC': 'UTC',
 };
 export const zoneLabel = (z: string): string | undefined => ZONE_LABELS[z];
+/** A zone's short name for one-line use ("Central", "Eastern"): the friendly label's head, or the IANA name when the zone is unlisted. */
+export const zoneShort = (z: string): string => (zoneLabel(z) ?? z).split(' — ')[0];
 
 /**
  * An invalid zone makes `Intl.DateTimeFormat` throw inside the engine, which would blank every tab.
@@ -1615,6 +1637,31 @@ export function applyTheme(t: Theme) {
   // The page colour of each palette (--bg in styles.css; the smoke test holds the two together).
   if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : '#090c10');
 }
+
+/** The hour (0–23) an epoch minute falls in on the DEVICE's own clock — what "at night" means for a screen rule. */
+export function deviceHour(min: number): number {
+  try {
+    return Number(new Intl.DateTimeFormat('en-US', { timeZone: deviceTz, hour: 'numeric', hourCycle: 'h23' }).format(new Date(min * 60000))) % 24;
+  } catch { return new Date(min * 60000).getHours(); }
+}
+/**
+ * The night window of decision D1-A (patch 16): 19:00–07:00 on the phone's own clock. While the
+ * driving view is up inside that window and the setting is on, the screen wears the night palette —
+ * a light-mode phone otherwise drives all night under a lit panel (brainstorm P1b: the calm day
+ * driving view measures L ≥ 0.81, lit for hours).
+ */
+export function darkDriveAtNightApplies(s: Pick<State, 'darkDriveAtNight'>, nowMinutes: number): boolean {
+  if (!s.darkDriveAtNight) return false;
+  const h = deviceHour(nowMinutes);
+  return h >= 19 || h < 7;
+}
+/** The theme the screen actually wears: the driving view's night rule sits on top of the effective theme, and only while that view is up. */
+export function screenTheme(s: State, prefersDark: boolean, drivingViewUp: boolean, nowMinutes: number): Theme {
+  if (drivingViewUp && darkDriveAtNightApplies(s, nowMinutes)) return 'night';
+  return effectiveTheme(s, prefersDark);
+}
+/** The zone pair the two-zones line names, device zone first: the acknowledgement stores this string (patch 16). */
+export const zonePair = (s: Pick<State, 'config'>): string => `${deviceTz}|${s.config.timeZone}`;
 /** Sub-statuses drivers think in. For HOS math PC is plain OFF and YM is plain ON (§395.2 / FMCSA guidance). */
 export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', YM: 'Yard move' };
 /**
