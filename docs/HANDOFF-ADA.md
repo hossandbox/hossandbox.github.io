@@ -297,3 +297,29 @@ generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`)
   open until the first tap (the screen still shows it). The Patch 16
   Pixel-only list also remains open. Next in the locked queue: the final
   Opus UI audit capstone.
+
+## Capstone Item 0 — deployed 2026-11-09 (yesback DOM lane + CSS token aliasing)
+
+- **What:** the first step of the capstone Refine path (audit §4, decisions
+  C0-A/C10-A, sanction **S12**). Two parts, **no app behaviour change**:
+  (0a) Opus's DOM `yesback` case — the behavioural proof for Patch 17's
+  spoken-alert consent Yes-path, until now living only in the verifier's
+  scratch harness (residual **R1**) — is adopted into the suite as
+  `web/test/dom/` (`domshim.mjs` + `yesback.mjs`, yesback phase only) and
+  runs as part of `npm run smoke` via the new `dom` script, so CI exercises
+  it on every deploy; (0b) `styles.css` spacing/radius values are aliased
+  to `--s-*`/`--r-*` custom properties (one `html { }` token rule after the
+  `@font-face` block; values inside test-pinned rules left literal), plus
+  the two stale theme comments (audit S-2) rewritten — comments only.
+- **Proof of invisibility:** the before/after stylesheets are
+  **computed-equivalent** — identical (selector, property, value) multiset
+  after token substitution, verified independently by the builder and by
+  Opus. No source file under `web/src/` or `engine/` changed; the served
+  app bundle is Patch 17's, modulo the build stamp.
+- **Verification:** Opus **Verify-I0 OVERALL PASS, no defects** — assembly
+  matches the audit spec exactly, the DOM lane is green under Chicago and
+  UTC and across repeat runs, mutation M8b now goes red in the DOM lane
+  with the predicted symptom (closing R1's guard gap), M8/RF1 still red at
+  their pins, contrast 44/44 both themes, engine 105/0.
+- **Next:** capstone C1 "Timeline" (TimeAxis lanes + STOP wall + lever
+  chips), its own build → verify → deploy cycle.
