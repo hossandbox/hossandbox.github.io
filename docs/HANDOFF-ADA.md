@@ -147,3 +147,45 @@ generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`)
   of drive time left, the alert banner can park the strip entirely under the header.
   Only the strip itself is ever hidden. Suggested remedy for the design patch: set a
   measured `--top-h` from a ResizeObserver on the header.
+
+## Patch 15 — deployed 2026-11-08 (break-test safety bundle)
+
+- **Source:** Opus's adversarial break-test of the shipped Patch-8 tree (12 confirmed
+  breaks + 7 leads; the engine's rule math itself held under fuzz — every break lived
+  in the record-keeping around it). Ten breaks plus Lead 4 (unvalidated stored undo)
+  were still live on the Patch-14 tree and are fixed here; breaks #2 and #3 were
+  already fixed by Patches 9.2 and 9.3 and were independently re-confirmed. Leads
+  1, 2, 3, 5, 6, 7 are deliberately left out (interpretation/product questions, not
+  defects).
+- **Break #1 (Recap "set" overwrote live driving):** generated Recap rows are now
+  stamped below the live status's stamp, so filler can never outrank the live span.
+  Opus independently re-derived the disputed figure: the declared work honestly
+  joins the live shift (600 min used, **60 left**) — the report's 180 was the
+  optimistic reading. A later fix round pinned the RecapTab wiring itself (the one
+  mutation that had survived with all suites green).
+- **Break #5 (simulated-clock writes persisted into the real record):** the Testing
+  clock now quarantines the record. **Verify-15 FAILED the first build** — the
+  snapshot guarded only four write paths, and the Split Lab commit, the quick-start
+  seed, Log edits, drift fill, Recap set and import all slipped past it (one repro
+  left drive-left at 360 instead of 60 after "Use real clock"). **Fix round 15.1**
+  moved the snapshot to the clock-set edge in `setState` itself, covering every
+  write path by construction; **round 15.2** completed the snapshot (`seededAt`,
+  `tzChosen`) and pinned the within-episode re-set property (Opus's F3b mutation
+  previously survived the whole suite; it now fails first at the new pin).
+- **Break #12 (engine, under the fence):** a future what-if row no longer absorbs a
+  trailing unlogged gap into a fresh reset — `restPeriods` flushes the running rest
+  when a tentative row closes the gap. Test written first and shown red; a
+  3,000-record differential fuzz found no clock optimistic against the no-plan
+  reference and log-only records unchanged.
+- **Also fixed:** status taps before the open status are refused (strict `<`
+  boundary; the same-minute tap still lands, per Patch 13); load/import validation
+  now runs the sanitizers on every path, drops non-string notes, and rejects
+  timestamps the engine cannot date — `dateable` keeps a **400-day margin** inside
+  the JS Date limit (Verify-15 found values within ~8 days of the raw limit still
+  froze the app); a wrong-shaped save with no usable backup starts clean instead
+  of loading the rejected save; fractional minutes render rounded once ("3h 60m"
+  is gone); a seeded record's Load verdict no longer claims a from-zero basis.
+- **Verification chain:** Verify-15 (PASS with #5 failed) → fix 15.1 → **Delta-15
+  PASS** → tidy 15.2 → **Delta-15B PASS** ("ready to deploy, no remaining
+  defects"). Engine suite is now **105 tests** (99 + 6 new); smoke/contrast/
+  typecheck/build green at every step.

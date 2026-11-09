@@ -543,6 +543,10 @@ export function evaluateShift(
 
 export function fmt(min: number): string {
   if (!isFinite(min)) return '∞';
-  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  // Round the total once: rounding the remainder on its own printed "1h 60m" for
+  // fractional minutes (119.7), which reach here in violation amounts computed from
+  // imported rows whose minutes need not be integers (break-test #11).
+  const total = Math.round(min);
+  const h = Math.floor(total / 60), m = total % 60;
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 }

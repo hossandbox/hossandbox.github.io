@@ -4923,4 +4923,362 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ segments: [], tentative: [], current: null, nowOverride: null, tab: 'now', planReturn: 'plan', split: { ...DS } });
   console.log('patch 14 (Split Lab — pinned now-vs-after line; Try an example split): OK');
 }
+// --- patch 15: the break-test safety bundle. Opus's adversarial break-test of the patch 8
+//     tree confirmed twelve breaks; two were already closed by later patches (9.2's
+//     whole-number ELD entry closed #2, 9.3's seed synthesis closed #3 — both re-verified
+//     against this tree in the patch 15 probes, so they are not re-pinned here). The rest
+//     are pinned below, one per break, against the behaviour the report names as expected.
+{
+  const { loadSaved, setState: ss, getState: gs, applyDayPatch, statusTap, allSegments, cycleBasis, applyEldSeed, applyImportedState, importProblem, sanitizeCurrent, segLabel, noteFits, INITIAL_STATE } = await import('../src/store.ts');
+  const { tapStatus, endDay, useRealClock, restoreUndo, currentUndo } = await import('../src/app.tsx');
+  const { evaluate: evFn, localToMinute, carrierDayStart, DEFAULT_CONFIG } = await import('../../engine/src/index.ts');
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup';
+  const cfg = { ...DEFAULT_CONFIG, timeZone: 'America/Chicago' };
+  // An earlier section's simulated episode may have left its quarantine snapshot behind in
+  // the shared mock storage; this section's episodes start clean, like a fresh launch.
+  mem.delete('hos-sandbox-v1-sim');
+
+  // #1: a Recap "set" on a past day must never erase or outrank the live status's span —
+  //     its off-duty filler carried a newer stamp than the live row and overwrote 6h of
+  //     live driving, handing back a fresh shift (drive left 3h → 9h).
+  const today0 = localToMinute(2026, 11, 7, 0, 'America/Chicago');
+  const now1 = today0 + 120;
+  const yStart = carrierDayStart(today0 - 1, cfg), yEnd = today0;
+  const segs1 = [{ status: 'OFF', start: yStart + 480, end: yStart + 1080, createdAt: 1000 }];
+  const cur1 = { status: 'D', since: yStart + 1080, createdAt: 1001 };
+  const driveLeft1 = (segments, current) => evFn(allSegments({ segments, tentative: [], current }, now1), { asOf: now1, config: cfg }).shift.driveRemaining;
+  if (driveLeft1(segs1, cur1) !== 180) throw new Error('patch 15 #1: the scenario must start with 3h of driving left');
+  const patched1 = applyDayPatch(segs1, yStart, yEnd, 2, 1, 6, 2000, cur1.createdAt);
+  //     The invariant the report names: the live span is never erased or outranked, and the
+  //     answer never goes optimistic (the bug handed back 540). The exact figure here is 60,
+  //     not the pre-patch 180 — deliberately: the entries the driver just declared for Friday
+  //     (work 06:00–09:00) end the 10-hour rest at 09:00, nine hours before the live start, so
+  //     the declared 2h honestly joins the live shift (480 live + 120 declared = 600 used).
+  //     What the fix guarantees is that every live minute still counts and the filler never
+  //     wins; what the record says after the driver's own declaration is the driver's.
+  if (driveLeft1(patched1, cur1) !== 60) throw new Error(`patch 15 #1: a past-day "set" must count every live minute and never go optimistic (drive left became ${driveLeft1(patched1, cur1)}, expected 60 — the bug gave 540)`);
+  //     …and the day must count as having data when the live status runs through it, so
+  //     the driver gets the replace-confirm and the "edit" wording, not a silent "set".
+  ss({ segments: [], tentative: [], current: { status: 'D', since: yStart + 1080, createdAt: 5 }, nowOverride: now1, config: cfg, historyAcknowledged: true, tab: 'recap' });
+  const recapHtml = out('patch 15/recap day held by the live status');
+  if ((recapHtml.match(/>edit</g) || []).length !== 1) throw new Error('patch 15 #1: the day the live status runs through must offer "edit" (the live status counts as data on that day)');
+
+  // #4: a status tap at or before the open status's start must be refused — it used to
+  //     replace the open status outright and the logged driving vanished.
+  const real4 = Math.floor(Date.UTC(2026, 10, 7, 18, 0) / 60000);
+  const st4 = { segments: [{ status: 'OFF', start: real4 - 900, end: real4 - 120, createdAt: 1 }], tentative: [], current: { status: 'D', since: real4 - 120, createdAt: 2 } };
+  if (statusTap(st4, 'OFF', undefined, real4 - 240) !== null) throw new Error('patch 15 #4: a tap before the open status began must be refused, not discard it');
+  //     …but a tap in the very minute the open status began still lands: nothing has elapsed,
+  //     nothing is lost, and patch 13's day-close rule is built on it (a mis-tap corrected at
+  //     once). It must land WITHOUT writing a row or touching the logged record.
+  const same4 = statusTap(st4, 'OFF', undefined, real4 - 120);
+  if (!same4 || same4.current?.status !== 'OFF' || same4.current?.since !== real4 - 120 || same4.segments.length !== st4.segments.length) throw new Error('patch 15 #4: a tap in the very minute the open status began must land without discarding anything');
+  const fwd4 = statusTap(st4, 'OFF', undefined, real4 - 60);
+  if (!fwd4 || fwd4.current?.status !== 'OFF' || !fwd4.segments.some((x) => x.status === 'D' && x.start === real4 - 120 && x.end === real4 - 60)) throw new Error('patch 15 #4: a forward tap must still close the driving row and open the new status');
+
+  // #5: writes under a simulated clock are quarantined — the tap still works while
+  //     simulating, but going back to the real clock restores the record exactly as it
+  //     was before the simulated clock was set. (Refusing the taps instead would make
+  //     the Testing clock display-only and break this suite's own way of driving the
+  //     app at a fixed time; the quarantine keeps the rehearsal and loses the writes.)
+  const real5 = Math.floor(Date.UTC(2026, 10, 7, 18, 0) / 60000);
+  const rec5 = { segments: [{ status: 'OFF', start: real5 - 4320, end: real5 - 3000, createdAt: 1 }], tentative: [], current: { status: 'OFF', since: real5 - 3000, createdAt: 2 }, dayCloses: [] };
+  ss({ ...rec5, nowOverride: null, config: cfg, historyAcknowledged: true });
+  const snap5 = () => JSON.stringify({ segments: gs().segments, tentative: gs().tentative, current: gs().current, dayCloses: gs().dayCloses });
+  const before5 = snap5();
+  ss({ nowOverride: real5 - 2880 });
+  tapStatus('D');
+  if (gs().current?.status !== 'D' || gs().current?.since !== real5 - 2880) throw new Error('patch 15 #5: a tap under the simulated clock must still work while simulating');
+  endDay(real5 - 2820);
+  if (gs().dayCloses.length !== 1) throw new Error('patch 15 #5: a day close under the simulated clock must still land while simulating');
+  useRealClock();
+  if (gs().nowOverride !== null) throw new Error('patch 15 #5: going back to the real clock must clear the simulated one');
+  if (snap5() !== before5) throw new Error('patch 15 #5: writes made under the simulated clock must be thrown away, restoring the record exactly');
+  ss({ nowOverride: real5 - 1440 });
+  tapStatus('ON');
+  useRealClock();
+  if (snap5() !== before5) throw new Error('patch 15 #5: a second simulated session must snapshot the real record afresh, not resurrect the first session’s writes');
+  ss({ nowOverride: real5 - 60 });
+  useRealClock();
+  if (snap5() !== before5 || gs().nowOverride !== null) throw new Error('patch 15 #5: clearing an untouched simulated clock must leave the record alone');
+
+  // #6: the load path runs the same draft/speed/clock sanitizers as the import path —
+  //     a damaged save used to hang the Split tab, print "Range NaN mi" and blank every
+  //     clock with an un-clearable simulated "now".
+  const baseSave = { segments: [], tentative: [], current: null, config: cfg };
+  const loadWith = (extra) => { mem.set(KEY, JSON.stringify({ ...baseSave, ...extra })); mem.delete(BAK); return loadSaved(); };
+  const sp6 = loadWith({ split: { b1: 1e9, drive: 1e9, b2: 'z', b1s: 'XX', dwell: -500 } }).split;
+  if (sp6.drive !== 660 || sp6.b1 !== 600 || sp6.dwell !== 0 || sp6.b1s !== 'OFF' || sp6.b2 !== 420 || sp6.b2s !== 'SB') throw new Error(`patch 15 #6: a damaged Split Lab draft in a save must be sanitised on load (got ${JSON.stringify(sp6)})`);
+  if (loadWith({ mph: 'fast' }).mph !== 55) throw new Error('patch 15 #6: a non-numeric saved mph must fall back to the default');
+  if (loadWith({ mph: 0.0001 }).mph !== 5) throw new Error('patch 15 #6: a saved mph outside the import range must be clamped on load');
+  if (loadWith({ mph: 62 }).mph !== 62) throw new Error('patch 15 #6: a valid saved mph must load untouched');
+  if (loadWith({ nowOverride: '2026-11-07' }).nowOverride !== null) throw new Error('patch 15 #6: a non-numeric simulated "now" in a save must be dropped');
+  if (loadWith({ nowOverride: 1e12 }).nowOverride !== null) throw new Error('patch 15 #6: a simulated "now" outside the Date range must be dropped');
+  if (loadWith({ nowOverride: real5 }).nowOverride !== real5) throw new Error('patch 15 #6: a real simulated-clock value must survive a load');
+  const tr6 = loadWith({ trip: { miles: -5, pre: 'x', dep: 'garbage' } }).trip;
+  if (tr6.miles !== 1 || tr6.pre !== 30 || tr6.dep !== null) throw new Error(`patch 15 #6: a damaged trip draft in a save must be sanitised on load, exactly as on import (got ${JSON.stringify(tr6)})`);
+  if (loadWith({ loadCheck: { miles: 1e7, dwell: 1e9, leaveIn: 1e9, answered: true } }).loadCheck.miles !== 3000) throw new Error('patch 15 #6: a damaged load-check draft in a save must be clamped on load');
+
+  // #7: a non-string note must never reach a renderer — on `current` it blanked the
+  //     whole app on every launch. Dropped on load and on import; the label helpers
+  //     tolerate one regardless.
+  if (segLabel('ON', { x: 1 }) !== 'On Duty') throw new Error('patch 15 #7: segLabel must tolerate a non-string note');
+  if (noteFits(123, 'OFF') !== true) throw new Error('patch 15 #7: noteFits must tolerate a non-string note');
+  mem.set(KEY, JSON.stringify({ segments: [{ status: 'OFF', start: 0, end: 60, note: 123 }], tentative: [], current: { status: 'ON', since: 30, note: { x: 1 } }, config: cfg }));
+  mem.delete(BAK);
+  const ln7 = loadSaved();
+  if (ln7.segments[0].note !== undefined || ln7.current?.note !== undefined) throw new Error('patch 15 #7: a non-string note must be dropped on load, on rows and on the live status alike');
+  const imp7 = applyImportedState(gs(), { segments: [{ status: 'OFF', start: 0, end: 60, note: 123 }], tentative: [{ status: 'SB', start: 60, end: 120, note: { x: 1 }, tentative: true }] });
+  if (imp7.segments[0].note !== undefined || imp7.tentative[0].note !== undefined) throw new Error('patch 15 #7: a non-string note must be dropped on import too');
+
+  // #8: timestamps outside the JavaScript Date range are refused like non-finite ones,
+  //     on both paths — they froze every clock and poisoned both save slots.
+  const farRow = { status: 'D', start: 1e12, end: 1e12 + 60, tentative: true };
+  if (importProblem({ segments: [farRow] }) === null) throw new Error('patch 15 #8: import must refuse a row outside the Date range');
+  if (importProblem({ segments: [], current: { status: 'ON', since: 1e12 } }) === null) throw new Error('patch 15 #8: import must refuse a live status outside the Date range');
+  if (importProblem({ segments: [{ status: 'OFF', start: -44640, end: -44580 }] }) !== null) throw new Error('patch 15 #8: a 1970 row is inside the range and must still import');
+  if (sanitizeCurrent({ status: 'ON', since: 1e12 }) !== null) throw new Error('patch 15 #8: an imported live status outside the Date range must be dropped');
+  const rowsA8 = [{ status: 'OFF', start: 1000, end: 1600, createdAt: 1 }];
+  mem.set(BAK, JSON.stringify({ segments: rowsA8, tentative: [], current: null }));
+  mem.set(KEY, JSON.stringify({ segments: [farRow], tentative: [], current: null }));
+  if (JSON.stringify(loadSaved().segments) !== JSON.stringify(rowsA8)) throw new Error('patch 15 #8: a save holding an out-of-range row must fall back to the backup');
+  mem.set(KEY, JSON.stringify({ segments: rowsA8, tentative: [], current: { status: 'ON', since: 1e12 } }));
+  if (loadSaved().current !== null) throw new Error('patch 15 #8: a save whose live status is out of range must fall back to the backup');
+
+  // #9: a wrong-shaped save with no usable backup starts clean — the fallthrough used
+  //     to parse the very save usableSave had just rejected, onto an unrecoverable card.
+  mem.set(KEY, JSON.stringify({ segments: { 0: { status: 'OFF', start: 0, end: 60 } }, tentative: [], current: null }));
+  mem.delete(BAK);
+  const clean9 = loadSaved();
+  if (!Array.isArray(clean9.segments) || clean9.segments.length !== 0 || clean9.current !== null) throw new Error('patch 15 #9: a wrong-shaped save with no usable backup must start clean, not load the rejected save');
+  mem.set(KEY, '{"segments": "junk"');
+  const clean9b = loadSaved();
+  if (!Array.isArray(clean9b.segments) || clean9b.segments.length !== 0) throw new Error('patch 15 #9: an unparseable save with no usable backup must start clean');
+
+  // #10: after an ELD seed, the cycle basis is the ELD's own statement — the Load
+  //      verdict must not say the record "assumes you started from zero".
+  const now10 = Math.floor(Date.UTC(2026, 10, 7, 18, 0) / 60000);
+  const fresh10 = { ...INITIAL_STATE, config: cfg };
+  const seeded10 = { ...fresh10, ...applyEldSeed(fresh10, { driveLeft: 300, windowLeft: 420, breakDueIn: 300, cycleLeft: 1800 }, now10).patch };
+  if (cycleBasis(seeded10, now10, 8) !== 'known') throw new Error('patch 15 #10: after an ELD seed the cycle basis must read as known, not "started from zero"');
+  const partial10 = { ...fresh10, segments: [{ status: 'D', start: now10 - 120, end: now10 }] };
+  if (cycleBasis(partial10, now10, 8) !== 'incomplete') throw new Error('patch 15 #10: an unseeded fragment of a record must still read as an incomplete cycle basis');
+
+  // Lead #4: a stored undo is validated like a stored save before it is offered — its
+  //      snapshot used to put unvalidated rows and bookmarks straight back into state.
+  ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: false });
+  const snapL4 = (before) => JSON.stringify({ label: 'Deleted something', before, after: { segments: [], tentative: [], current: null, historyAcknowledged: false, dayCloses: [] } });
+  const emptySnap = { segments: [], tentative: [], current: null, historyAcknowledged: false, dayCloses: [] };
+  restoreUndo(snapL4({ ...emptySnap, segments: [{ status: 'OFF', start: 0, end: 60, note: 123 }] }));
+  if (currentUndo() !== null) throw new Error('patch 15 lead 4: a stored undo whose snapshot holds a malformed note must be dropped, not offered');
+  restoreUndo(snapL4({ ...emptySnap, segments: [{ status: 'D', start: 1e12, end: 1e12 + 60 }] }));
+  if (currentUndo() !== null) throw new Error('patch 15 lead 4: a stored undo whose snapshot holds an out-of-range row must be dropped');
+  restoreUndo(snapL4({ ...emptySnap, dayCloses: [null] }));
+  if (currentUndo() !== null) throw new Error('patch 15 lead 4: a stored undo whose snapshot holds a malformed day-close must be dropped');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, dayCloses: [], tab: 'now' });
+  mem.delete('hos-sandbox-v1-sim');
+  console.log('patch 15 (break-test safety bundle): OK');
+}
+
+// --- patch 15.1: the fix round Opus's verification of patch 15 prescribed
+//     (OPUS-VERIFY-15 §6, §9, §10). Three things. (1) The simulated clock's quarantine
+//     snapshot is taken when the clock is SET — the nowOverride null → value edge in
+//     setState — not at the first of four specific writes, so every later write path
+//     (Split Lab commit, ELD seed, Log add/edit/delete, drift fill, Recap set, import)
+//     is quarantined by construction; the snapshot also carries historyAcknowledged
+//     and config. (2) dateable keeps a 400-day margin inside the raw Date limit:
+//     values at the limit itself still froze every tab, because the engine needs days
+//     of headroom past any timestamp it is handed. (3) The Recap "set" wiring —
+//     RecapTab handing the live status's stamp to applyDayPatch — gets a behavioural
+//     pin; that mutation survived every patch 15 pin.
+{
+  const { loadSaved, setState: ss, getState: gs, applyEldSeed, allSegments, MAX_DATE_MIN, dateable, DEFAULT_SPLIT, sanitizeConfig } = await import('../src/store.ts');
+  const { tapStatus, useRealClock, restoreUndo, currentUndo } = await import('../src/app.tsx');
+  const { evaluate: evFn, localToMinute, carrierDayStart, DEFAULT_CONFIG } = await import('../../engine/src/index.ts');
+  const { options } = await import('preact');
+  const KEY = 'hos-sandbox-v1', BAK = 'hos-sandbox-v1-backup';
+  // The config as the app itself holds it: every load/import passes sanitizeConfig,
+  // which is also what the sim restore runs it through — so the exception lists are
+  // present (empty) here, exactly as a real record's config has them.
+  const cfg = sanitizeConfig({ ...DEFAULT_CONFIG, timeZone: 'America/Chicago' });
+  mem.delete('hos-sandbox-v1-sim');
+  // The whole record the quarantine promises to restore. Config is compared by
+  // content: a restored config is a rebuilt object, and its key order is not part
+  // of the promise.
+  const canonCfg = (c) => JSON.stringify(Object.keys(c).sort().map((k) => [k, c[k]]));
+  const recordOf = () => JSON.stringify({ segments: gs().segments, tentative: gs().tentative, current: gs().current, dayCloses: gs().dayCloses, historyAcknowledged: gs().historyAcknowledged, config: canonCfg(gs().config) });
+  const real = Math.floor(Date.UTC(2026, 10, 7, 18, 0) / 60000);
+  // Render once with a vnode hook watching for a handler (the Preact options.vnode
+  // capture Opus's probes used), then hand the hook back exactly as it was found.
+  const renderCapturing = (label, want) => {
+    const found = [];
+    const prev = options.vnode;
+    options.vnode = (v) => { const hit = want(v); if (hit) found.push(hit); if (prev) prev(v); };
+    try { return { html: out(label), found }; } finally { options.vnode = prev; }
+  };
+
+  // #5 H1: a Split Lab commit under a past simulated clock writes its what-if rows
+  //     over the live span — at the simulated "now" the live status has not started
+  //     yet, so there is nothing on the log for the plan to pad around. It is still
+  //     an episode write: going back to the real clock restores the record exactly,
+  //     clocks included (the break test saw drive left 60 → 360 here).
+  const recH1 = { segments: [{ status: 'OFF', start: real - 2000, end: real - 600, createdAt: 1 }], tentative: [], current: { status: 'D', since: real - 600, createdAt: 2 }, dayCloses: [] };
+  ss({ ...recH1, nowOverride: null, config: cfg, historyAcknowledged: true, tab: 'split', split: { ...DEFAULT_SPLIT } });
+  const driveLeftAt = (asOf) => evFn(allSegments({ segments: gs().segments, tentative: gs().tentative, current: gs().current }, asOf), { asOf, config: cfg }).shift.driveRemaining;
+  if (driveLeftAt(real) !== 60) throw new Error('patch 15.1 #5 H1: the scenario must start with 1h of driving left');
+  const beforeH1 = recordOf();
+  ss({ nowOverride: real - 720 });
+  const capH1 = renderCapturing('patch 15.1/H1 split lab under a past sim', (v) => (v && v.type === 'button' && v.props && v.props.children === 'Put plan on log as what-if' && typeof v.props.onClick === 'function') ? v.props.onClick : null);
+  if (capH1.found.length !== 1) throw new Error('patch 15.1 #5 H1: the Split Lab commit button must render under the simulated clock');
+  capH1.found[0]();
+  if (gs().tentative.length === 0) throw new Error('patch 15.1 #5 H1: the commit under the simulated clock must land while simulating (the quarantine discards it at the real clock, not sooner)');
+  useRealClock();
+  if (gs().nowOverride !== null) throw new Error('patch 15.1 #5 H1: going back to the real clock must clear the simulated one');
+  if (recordOf() !== beforeH1) throw new Error('patch 15.1 #5 H1: a Split Lab commit under a simulated clock must be thrown away with the episode, restoring the record exactly');
+  if (driveLeftAt(real) !== 60) throw new Error('patch 15.1 #5 H1: the clocks after the episode must be the pre-sim clocks (drive left 60)');
+
+  // #5 H4: a quick-start seed under a simulated clock — driven down QuickStartSheet
+  //     confirm's own write path, applyEldSeed + setState — built a whole record on
+  //     the fresh DEMO state and left it there. The real clock brings DEMO back,
+  //     with no seeded rows.
+  ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: false, nowOverride: null, config: cfg, tab: 'now' });
+  const beforeH4 = recordOf();
+  ss({ nowOverride: real - 2880 });
+  ss(applyEldSeed(gs(), { driveLeft: 60, windowLeft: 120, breakDueIn: 60, cycleLeft: 600 }, real - 2880).patch);
+  if (gs().segments.length === 0) throw new Error('patch 15.1 #5 H4: the seed under the simulated clock must land while simulating');
+  useRealClock();
+  if (recordOf() !== beforeH4 || gs().segments.length !== 0) throw new Error('patch 15.1 #5 H4: a seed written under a simulated clock must be thrown away, restoring the fresh DEMO state with no seeded rows');
+
+  // #5, the second episode: a snapshot belongs to its episode, not to the app.
+  //     After the record changes on the real clock, a new episode snapshots THAT
+  //     record — and what it restores now includes historyAcknowledged and config,
+  //     so an acknowledgement or a settings change made under the simulated clock
+  //     is thrown away with the rest of the episode's writes.
+  const recE = { segments: [{ status: 'OFF', start: real - 3000, end: real - 2400, createdAt: 1 }], tentative: [], current: { status: 'OFF', since: real - 2400, createdAt: 2 }, dayCloses: [] };
+  ss({ ...recE, nowOverride: null, config: cfg, historyAcknowledged: false });
+  const beforeE1 = recordOf();
+  ss({ nowOverride: real - 120 });
+  tapStatus('D');
+  useRealClock();
+  if (recordOf() !== beforeE1) throw new Error('patch 15.1 #5: the first episode must still restore the record it started from');
+  ss({ segments: [...gs().segments, { status: 'OFF', start: real - 5000, end: real - 4400, createdAt: 3 }] });
+  const beforeE2 = recordOf();
+  ss({ nowOverride: real - 30 });
+  ss({ historyAcknowledged: true, config: { ...cfg, adverseShifts: [12345] } });
+  useRealClock();
+  if (recordOf() !== beforeE2) throw new Error('patch 15.1 #5: a second episode must snapshot the then-current record (not a stale one), and history/config writes under the simulated clock must be thrown away with it');
+
+  // #8: the margin itself, then both paths the boundary value used to freeze.
+  const M = MAX_DATE_MIN;
+  if (dateable(M) !== false) throw new Error('patch 15.1 #8: a timestamp at the raw Date limit must be refused');
+  if (dateable(M - 400 * 1440) !== true) throw new Error('patch 15.1 #8: the 400-day margin bound itself must stay dateable');
+  if (dateable(M - 399 * 1440) !== false) throw new Error('patch 15.1 #8: the margin must be the full 400 days, no less');
+  const loadWith8 = (extra) => { mem.set(KEY, JSON.stringify({ segments: [], tentative: [], current: null, config: cfg, ...extra })); mem.delete(BAK); return loadSaved(); };
+  if (loadWith8({ nowOverride: M }).nowOverride !== null) throw new Error('patch 15.1 #8: a simulated "now" at the Date limit must be dropped on load, not left stuck on every tab');
+  const rowM = { status: 'D', start: M - 60, end: M, tentative: true };
+  const loadedM = loadWith8({ tentative: [rowM] });
+  if (loadedM.tentative.length !== 0 || loadedM.segments.length !== 0) throw new Error('patch 15.1 #8: a save holding a what-if row ending at the Date limit must start clean, not load the row');
+  ss({ segments: loadedM.segments, tentative: loadedM.tentative, current: loadedM.current, nowOverride: loadedM.nowOverride, config: cfg, tab: 'now' });
+  const htmlM = out('patch 15.1/#8 boundary save renders');
+  if (htmlM.includes('could not calculate')) throw new Error('patch 15.1 #8: the boundary save must render clocks, not the error card');
+  ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: false });
+  const undoM = (before) => JSON.stringify({ label: 'Deleted something', before, after: { segments: [], tentative: [], current: null, historyAcknowledged: false, dayCloses: [] } });
+  restoreUndo(undoM({ segments: [], tentative: [rowM], current: null, historyAcknowledged: false, dayCloses: [] }));
+  if (currentUndo() !== null) throw new Error('patch 15.1 #8: a stored undo holding a what-if row ending at the Date limit must be dropped, not offered');
+
+  // #1 wiring: the patch 15 pins call applyDayPatch directly, but the line that
+  //     delivers the fix to the real screen is RecapTab's onApply, which hands
+  //     applyDayPatch the live status's stamp so the day's off-duty filler can
+  //     never outrank the live span. Drive THAT closure — captured from the
+  //     rendered Recap tab — with the break test's scenario: the post-set drive
+  //     left must be 60. (Dropping the stamp from the call hands back 540; that
+  //     mutation passed every patch 15 pin.)
+  const today0w = localToMinute(2026, 11, 7, 0, 'America/Chicago');
+  const nowW = today0w + 120;
+  const yStartW = carrierDayStart(today0w - 1, cfg);
+  const segsW = [{ status: 'OFF', start: yStartW + 480, end: yStartW + 1080, createdAt: 1000 }];
+  const curW = { status: 'D', since: yStartW + 1080, createdAt: 1001 };
+  const driveLeftW = () => evFn(allSegments({ segments: gs().segments, tentative: gs().tentative, current: gs().current }, nowW), { asOf: nowW, config: cfg }).shift.driveRemaining;
+  ss({ segments: segsW, tentative: [], current: curW, nowOverride: nowW, config: cfg, historyAcknowledged: true, tab: 'recap' });
+  if (driveLeftW() !== 180) throw new Error('patch 15.1 #1 wiring: the scenario must start with 3h of driving left');
+  const capW = renderCapturing('patch 15.1/#1 wiring recap', (v) => (v && v.props && typeof v.props.onApply === 'function' && v.props.day && v.props.day.start === yStartW) ? v.props.onApply : null);
+  if (capW.found.length !== 1) throw new Error('patch 15.1 #1 wiring: the Recap tab must render a day editor for the day the live status runs through');
+  capW.found[0](2, 1, 6);
+  if (driveLeftW() !== 60) throw new Error(`patch 15.1 #1 wiring: a Recap "set" driven through RecapTab's own wiring must count every live minute (drive left became ${driveLeftW()}, expected 60 — dropping the live stamp hands back 540)`);
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, dayCloses: [], tab: 'now' });
+  mem.delete('hos-sandbox-v1-sim');
+  console.log('patch 15.1 (sim snapshot at set; dateable margin; recap wiring pin): OK');
+}
+// --- patch 15.2: the final tidy Opus's delta check of 15.1 left as non-blocking
+//     follow-ups (OPUS-DELTA-15 §C residuals, §F). Two things. (1) The sim snapshot
+//     gains the last two record fields that could survive an episode: seededAt —
+//     an import-then-seed episode flipped the cycle basis from incomplete to known
+//     after the episode was "thrown away" — and tzChosen — a zone picked under
+//     the simulated clock left "zone confirmed" set after the restore. (2) A pin
+//     for the within-episode re-set: stepping the simulated clock mid-episode
+//     must keep the FIRST snapshot. The property already held in the code (Opus's
+//     C(iii) probe passed) but no suite fenced it — Opus's F3b mutation (snapshot
+//     on every clock set) deleted it with every suite green.
+{
+  const { setState: ss, getState: gs, applyEldSeed, cycleBasis, chooseTimeZone, sanitizeConfig, ELD_SEED_NOTE } = await import('../src/store.ts');
+  const { tapStatus, useRealClock } = await import('../src/app.tsx');
+  const { DEFAULT_CONFIG } = await import('../../engine/src/index.ts');
+  const cfg = sanitizeConfig({ ...DEFAULT_CONFIG, timeZone: 'America/Chicago' });
+  mem.delete('hos-sandbox-v1-sim');
+  const canonCfg = (c) => JSON.stringify(Object.keys(c).sort().map((k) => [k, c[k]]));
+  const recordOf = () => JSON.stringify({ segments: gs().segments, tentative: gs().tentative, current: gs().current, dayCloses: gs().dayCloses, historyAcknowledged: gs().historyAcknowledged, config: canonCfg(gs().config) });
+  const real = Math.floor(Date.UTC(2026, 10, 7, 18, 0) / 60000);
+
+  // #5 seededAt: a record imported from a seeded export holds rows noted
+  //     "ELD clocks" but no seededAt (the export carries none), so its cycle
+  //     basis honestly reads incomplete. Seeding under a simulated clock sets
+  //     seededAt; the episode is thrown away, so seededAt must go too — left
+  //     standing, it flips the basis to known and the incomplete-basis
+  //     disclosure disappears over a record the driver never confirmed.
+  const importedSeedRows = [{ status: 'OFF', start: real - 1500, end: real - 900, note: ELD_SEED_NOTE, createdAt: 1 }, { status: 'D', start: real - 900, end: real - 600, note: ELD_SEED_NOTE, createdAt: 1 }];
+  ss({ segments: importedSeedRows, tentative: [], current: null, dayCloses: [], historyAcknowledged: false, seededAt: null, tzChosen: false, nowOverride: null, config: cfg, tab: 'now' });
+  if (cycleBasis(gs(), real, 8) !== 'incomplete') throw new Error('patch 15.2 #5 seededAt: the scenario must start on an incomplete cycle basis (seeded rows standing, seededAt null)');
+  ss({ nowOverride: real - 2880 });
+  ss(applyEldSeed(gs(), { driveLeft: 60, windowLeft: 120, breakDueIn: 60, cycleLeft: 600 }, real - 2880).patch);
+  if (gs().seededAt === null) throw new Error('patch 15.2 #5 seededAt: the seed under the simulated clock must land while simulating');
+  useRealClock();
+  if (gs().seededAt !== null) throw new Error('patch 15.2 #5 seededAt: a seededAt written under a simulated clock must be thrown away with the episode, restoring the pre-episode null');
+  if (cycleBasis(gs(), real, 8) !== 'incomplete') throw new Error('patch 15.2 #5 seededAt: after the episode the cycle basis must read incomplete again — a surviving seededAt flips it to known and hides the disclosure');
+
+  // #5 tzChosen: choosing a zone under the simulated clock confirms it
+  //     (tzChosen). The restore already brings the zone itself back; the
+  //     confirmation flag must come back too, or a driver who never confirmed
+  //     a zone is never asked again.
+  ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: false, seededAt: null, tzChosen: false, nowOverride: null, config: cfg, tab: 'now' });
+  ss({ nowOverride: real - 120 });
+  chooseTimeZone('America/New_York');
+  if (gs().tzChosen !== true || gs().config.timeZone !== 'America/New_York') throw new Error('patch 15.2 #5 tzChosen: choosing a zone under the simulated clock must land while simulating');
+  useRealClock();
+  if (gs().config.timeZone !== 'America/Chicago') throw new Error('patch 15.2 #5 tzChosen: the zone itself must come back with the episode, as before');
+  if (gs().tzChosen !== false) throw new Error('patch 15.2 #5 tzChosen: a zone confirmation made under a simulated clock must be thrown away with the episode — the driver who never confirmed a zone must be asked again');
+
+  // #5 re-set: set the clock, write, STEP the clock to a second simulated
+  //     "now", write again, then go back to the real clock. The snapshot taken
+  //     at the first set is the episode's only snapshot: the restore must be
+  //     the pre-episode record, including throwing away the writes made BEFORE
+  //     the step. (A snapshot retaken at the step would keep exactly those.)
+  const recR = { segments: [{ status: 'OFF', start: real - 3000, end: real - 2400, createdAt: 1 }], tentative: [], current: { status: 'OFF', since: real - 2400, createdAt: 2 }, dayCloses: [] };
+  ss({ ...recR, nowOverride: null, config: cfg, historyAcknowledged: false, seededAt: null, tzChosen: false });
+  const beforeR = recordOf();
+  ss({ nowOverride: real - 120 });
+  tapStatus('D');
+  ss({ nowOverride: real - 60 });
+  tapStatus('OFF');
+  useRealClock();
+  if (recordOf() !== beforeR) throw new Error('patch 15.2 #5 re-set: stepping the simulated clock mid-episode must keep the first snapshot — every write of the episode is thrown away, including the ones made before the step');
+
+  // leave the store as the other sections expect to find it
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, tzChosen: false, nowOverride: null, dayCloses: [], tab: 'now' });
+  mem.delete('hos-sandbox-v1-sim');
+  console.log('patch 15.2 (sim snapshot completeness; within-episode re-set pin): OK');
+}
 console.log('OK');

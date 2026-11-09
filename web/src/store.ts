@@ -126,6 +126,8 @@ export interface State {
 const KEY = 'hos-sandbox-v1';
 /** The save the current one replaced, kept by setState as the last-known-good copy (see loadSaved). */
 const BACKUP_KEY = 'hos-sandbox-v1-backup';
+/** The simulated clock's quarantine snapshot: the record as it stood when the simulated clock was set (patch 15; written by setState below, restored by useRealClock in app.tsx). */
+export const SIM_KEY = 'hos-sandbox-v1-sim';
 /** The browser's zone — what every `clock()` on screen renders in, which may differ from the terminal. */
 export const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
 
@@ -207,6 +209,51 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
 }
 
 /**
+ * The farthest a timestamp may sit from the epoch and still be a date. The engine turns
+ * minutes into Dates, and a finite-but-undateable value (1e12 minutes is the year 1.9M)
+ * throws "Invalid time value" from deep inside it — so on every path that reads stored or
+ * imported data, a timestamp outside the Date range is rejected like a non-finite one
+ * (break-test #8). The JavaScript Date range is ±8.64e15 ms = ±1.44e11 minutes. Spelled
+ * out as a plain function here because usableSave runs at module load, before the helpers
+ * further down exist.
+ */
+export const MAX_DATE_MIN = 144_000_000_000;
+/**
+ * The bound dateable actually accepts: the raw Date limit minus a 400-day margin. The
+ * engine needs headroom PAST every timestamp it is handed — carrier-day and window
+ * arithmetic reach days beyond the value — and a timestamp at the limit itself, though
+ * a perfectly good Date, still froze every tab (break-test #8, the boundary probed
+ * after the first fix round). 400 days is far beyond the ~8 days that arithmetic can
+ * reach, and far inside any timestamp a real record can hold.
+ */
+const DATEABLE_MAX = MAX_DATE_MIN - 400 * 1440;
+export function dateable(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= DATEABLE_MAX;
+}
+
+/** A row with its note dropped when the note is not a string (see parseSaved, break-test #7). */
+function fixNoteRow(r: Segment): Segment {
+  return r && r.note !== undefined && typeof r.note !== 'string' ? { ...r, note: undefined } : r;
+}
+
+/*
+ * The draft sanitizers' small helpers, defined up here rather than beside them (patch 15):
+ * parseSaved now runs the same sanitizers the import path applies, and parseSaved runs at
+ * module load — long before the sanitizers' own home further down — so everything they
+ * touch has to exist this early. They are pure and depend on nothing else in the module.
+ */
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+const numIn = (v: unknown, lo: number, hi: number, fallback: number): number =>
+  (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+const boolAt = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+  (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
+
+export const SPLIT_MS = ['OFF', 'SB'] as const;
+export const TRIP_UNTILS = ['OFF', 'SB', 'D', 'ON', 'CURRENT'] as const;
+export const TRIP_VIEWS = ['reset10', 'split', 'restart34'] as const;
+
+/**
  * Could this string be a save at all? parseSaved merges whatever JSON it is given, so a save that
  * parses but whose record lists are the wrong shape (a string where the segments belong) would flow
  * straight into the state and blank the app on every render, not just on load. Only a plain object
@@ -234,7 +281,7 @@ function usableSave(raw: string | null): raw is string {
       if (!x || typeof x !== 'object') return false;
       const r = x as Record<string, unknown>;
       if (r.status !== 'OFF' && r.status !== 'SB' && r.status !== 'D' && r.status !== 'ON') return false;
-      if (!Number.isFinite(r.start) || !Number.isFinite(r.end)) return false;
+      if (!dateable(r.start) || !dateable(r.end)) return false;
       if ((r.end as number) <= (r.start as number)) return false;
       return true;
     };
@@ -250,7 +297,7 @@ function usableSave(raw: string | null): raw is string {
       const c = o.current as Record<string, unknown>;
       if (typeof c !== 'object' || Array.isArray(c)) return false;
       if (c.status !== 'OFF' && c.status !== 'SB' && c.status !== 'D' && c.status !== 'ON') return false;
-      if (!Number.isFinite(c.since)) return false;
+      if (!dateable(c.since)) return false;
     }
     return true;
   } catch { return false; }
@@ -267,7 +314,11 @@ export function loadSaved(): State {
     if (usableSave(raw)) return parseSaved(raw);
     const bak = localStorage.getItem(BACKUP_KEY);
     if (usableSave(bak)) return parseSaved(bak);
-    return parseSaved(raw);
+    // Neither slot is usable: start clean rather than parse a save usableSave has just
+    // rejected — the merge would flow its wrong-shaped fields (a tally-shaped "segments",
+    // say) straight into the state, and no path ever re-checks the shape, so the driver
+    // lands on a recovery card no offered fix can clear (break-test #9).
+    return INITIAL_STATE;
   } catch { return INITIAL_STATE; }
 }
 
@@ -278,9 +329,12 @@ export function parseSaved(raw: string | null): State {
     const s = JSON.parse(raw);
     const merged: State = { ...INITIAL_STATE, ...s,
       config: sanitizeConfig(s.config),
-      trip: { ...DEFAULT_TRIP, ...(s.trip ?? {}) },
-      split: { ...DEFAULT_SPLIT, ...(s.split ?? {}) },
-      loadCheck: { ...DEFAULT_LOADCHECK, ...(s.loadCheck ?? {}) },
+      // The drafts go through the same sanitizers the import path applies (applyImportedState):
+      // this merge used to spread them raw, so a damaged save could hang the Split tab on a
+      // 1e9-minute draft or print "Range NaN mi" from a string mph (break-test #6).
+      trip: sanitizeTrip(s.trip, INITIAL_STATE.trip),
+      split: sanitizeSplit(s.split, INITIAL_STATE.split),
+      loadCheck: sanitizeLoadCheck(s.loadCheck, INITIAL_STATE.loadCheck),
       // a save from before break buttons has none: it gets the default; a damaged list is cleaned, not trusted
       breakPresets: s.breakPresets === undefined ? DEFAULT_BREAKS.map((b) => ({ ...b })) : sanitizeBreaks(s.breakPresets) };
     // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
@@ -313,6 +367,18 @@ export function parseSaved(raw: string | null): State {
     // the other self-sanitising fields get above; usableSave never has to reject a whole save
     // over a bookmark, because this field can be fully repaired here.
     merged.dayCloses = sanitizeDayCloses(s.dayCloses);
+    // mph counts only inside the range the import path clamps to; anything else is the default
+    // (break-test #6 — a string mph made every range read "Range NaN mi").
+    merged.mph = typeof s.mph === 'number' && Number.isFinite(s.mph) ? Math.min(100, Math.max(5, s.mph)) : INITIAL_STATE.mph;
+    // A simulated "now" counts only as a real, dateable minute: a string or an out-of-range
+    // number would blank every clock behind a "now" no reset could clear (break-test #6/#8).
+    merged.nowOverride = dateable(s.nowOverride) ? s.nowOverride : null;
+    // Notes are deliberately unvalidated at rest, so a damaged save can carry a non-string one —
+    // and segLabel calls startsWith on it, blanking the app on every launch when it sits on the
+    // live status. Drop any note that is not a string (break-test #7).
+    if (Array.isArray(merged.segments)) merged.segments = merged.segments.map(fixNoteRow);
+    if (Array.isArray(merged.tentative)) merged.tentative = merged.tentative.map(fixNoteRow);
+    if (merged.current && merged.current.note !== undefined && typeof merged.current.note !== 'string') merged.current = { ...merged.current, note: undefined };
     return merged;
   } catch { return INITIAL_STATE; }
 }
@@ -321,8 +387,38 @@ let state: State = loadSaved();
 const subs = new Set<() => void>();
 
 export function getState() { return state; }
+
+/**
+ * Snapshot the record exactly as it stands before a simulated-clock episode, so that
+ * "Use real clock" can throw away everything the episode wrote (break-test #5). The
+ * snapshot carries the whole editable record — rows, the live status, day closes, the
+ * history acknowledgement and the config — because an episode can write any of them,
+ * and the restore in useRealClock puts each back. Patch 15.2 completed the set with
+ * seededAt and tzChosen, the last two fields an episode could leave behind: a seed
+ * under the simulated clock set seededAt (flipping the cycle basis to "known" over
+ * a record the driver never confirmed), and picking a zone set tzChosen (so a
+ * driver who had never confirmed a zone was never asked again). Storage failing
+ * leaves the episode unquarantined; it never blocks the write itself.
+ */
+function snapshotSimRecord(s: State) {
+  try {
+    const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, tzChosen: s.tzChosen };
+    localStorage.setItem(SIM_KEY, JSON.stringify({ record }));
+  } catch { /* storage failing leaves the session's writes unquarantined, never blocks the write */ }
+}
+
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)) {
   const p = typeof patch === 'function' ? patch(state) : patch;
+  // The simulated clock's quarantine snapshot is taken HERE, at the moment the clock
+  // is set — the nowOverride null → value edge (patch 15.1). Patch 15 took it at the
+  // first of four specific writes (a tap, End my day, Reopen, Start over), and every
+  // other write path — a Split Lab commit, the ELD seed, a Log edit, a drift fill, a
+  // Recap set, an import — wrote straight into the real record (break-test #5, holes
+  // H1–H4). On the edge, ANY way the clock gets set snapshots the pre-sim record, so
+  // every later write is quarantined by construction. Within an episode there is no
+  // second edge — the value changing, or any other write, keeps the first snapshot,
+  // which is the real record.
+  if (state.nowOverride === null && p.nowOverride != null) snapshotSimRecord(state);
   state = { ...state, ...p };
   // Autosave, with the save being replaced kept as the last-known-good copy: if the new write is
   // ever found damaged, loadSaved falls back to it instead of a fresh, empty record. Only a usable
@@ -359,6 +455,13 @@ export function chooseTimeZone(tz: string) { setState({ tzChosen: true, config: 
  */
 export function statusTap(cur: State, status: DutyStatus, note: string | undefined, now: number): Partial<State> | null {
   if (cur.current && cur.current.status === status && (cur.current.note ?? undefined) === (note ?? undefined)) return null;
+  // A tap BEFORE the open status's start would close nothing and replace the open status
+  // outright — the time already spent in it silently vanished (a clock set backwards, or a
+  // simulated "now" moved behind it; break-test #4). Refuse instead: a tap never discards
+  // logged duty time. A tap in the very minute the status began is different — nothing has
+  // elapsed yet, nothing is lost, and patch 13's day-close rule depends on it landing (a
+  // mis-tap corrected at once, work begun in the close minute reopening the day).
+  if (cur.current && now < cur.current.since) return null;
   const segments = [...cur.segments];
   // The closed row keeps the stamp from when it was tapped, so a correction typed while it was live
   // still wins over it after it closes.
@@ -613,6 +716,12 @@ export function historyBasis(s: State, now: number): HistoryBasis {
  */
 export function cycleBasis(s: State, now: number, windowDays: number): HistoryBasis {
   if (s.historyAcknowledged) return 'known';
+  // A record seeded from the ELD clocks (patch 8) states the whole cycle in the driver's own
+  // numbers — the seed's rows ARE that statement, synthesized across the window — so the basis
+  // is known while any seeded row stands, even though the rows span less than the window on
+  // the clock. Without this the seeded Load verdict claimed it "assumes you started from
+  // zero", the opposite of what the driver just told it (break-test #10).
+  if (s.seededAt !== null && s.segments.some((x) => x.note === ELD_SEED_NOTE)) return 'known';
   if (s.segments.length === 0 && s.tentative.length === 0 && !s.current) return 'fresh';
   if (s.segments.length > 0 && now - Math.min(...s.segments.map((x) => x.start)) >= windowDays * 1440) return 'known';
   return 'incomplete';
@@ -662,7 +771,15 @@ export function dayPatchOverflow(dayStart: number, dayEnd: number, drive: number
 export function applyDayPatch(
   segments: Segment[], dayStart: number, dayEnd: number,
   drive: number, on: number, startHour: number, createdAt: number,
+  liveCreatedAt?: number,
 ): Segment[] {
+  // The generated rows are stamped BELOW the live status's own stamp whenever the caller
+  // passes it: the filler that pads the rest of the day out to its end is unlogged time the
+  // engine merges with the live span, and overlap resolution drops the OLDER-stamped row
+  // where they collide — stamped "now", the filler won and erased live driving the driver
+  // was still doing (break-test #1). An unstamped live status needs no help: allSegments
+  // already treats it as the newest entry there is.
+  const genStamp = liveCreatedAt !== undefined && Number.isFinite(liveCreatedAt) ? Math.min(createdAt, liveCreatedAt - 1) : createdAt;
   const kept: Segment[] = [];
   for (const x of segments) {
     if (x.end <= dayStart || x.start >= dayEnd) { kept.push(x); continue; } // outside the day
@@ -675,7 +792,7 @@ export function applyDayPatch(
     if (minutes <= 0) return;
     const start = t;
     const end = Math.min(t + minutes, dayEnd); // a 13h day entered at 23:00 must not spill out of it
-    if (end > start) segs.push({ status, start, end, note: 'recap entry', createdAt });
+    if (end > start) segs.push({ status, start, end, note: 'recap entry', createdAt: genStamp });
     t += minutes;
   };
   // pre-trip on-duty, then driving split around a 30-min break if needed, then post-trip on-duty
@@ -691,7 +808,7 @@ export function applyDayPatch(
   add('ON', Math.round((on - onPre) * 60));
   // The rest of the day is off duty: "set" replaces the whole day, and leaving it unlogged raised the
   // "unlogged time" warning and a provisional verdict for a day the driver had just filled in (L1).
-  const off = (start: number, end: number) => { if (end > start) segs.push({ status: 'OFF', start, end, note: 'recap entry', createdAt }); };
+  const off = (start: number, end: number) => { if (end > start) segs.push({ status: 'OFF', start, end, note: 'recap entry', createdAt: genStamp }); };
   const workEnd = Math.min(t, dayEnd);
   if (segs.length) { off(dayStart, segs[0].start); off(workEnd, dayEnd); } else off(dayStart, dayEnd);
   return [...kept, ...segs].sort((a, b) => a.start - b.start);
@@ -714,26 +831,16 @@ export function applySegmentEdit(s: State, orig: Segment, next: Partial<Segment>
  * import dropped, so a backup/restore silently lost it. `nowOverride` is deliberately NOT restored:
  * a simulated clock must never come back on its own and quietly make the app lie about the time.
  */
-const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
-
 /*
  * An imported file's DRAFTS used to be merged with no checks at all: a Split Lab draft of
  * {drive: 1e9} made the screen unresponsive for minutes and a 10,000,000-mile load produced nonsense
  * (a tester, re-check 2, R2). They are UI state, but they are consumed by real math, so each field is
  * checked the way an imported config already was: a value the controls could not have produced falls
  * back to the default (or to what is on screen), and finite numbers are clamped to the allowed range.
- * `mph`, `current` and the trip draft had the same gap.
+ * `mph`, `current` and the trip draft had the same gap. (The helpers themselves — isObj, numIn,
+ * boolAt, oneOf and the allowed-value lists — live near the top of the file: since patch 15 the
+ * load path runs these same sanitizers, and the load path runs at module load.)
  */
-const numIn = (v: unknown, lo: number, hi: number, fallback: number): number =>
-  (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
-const boolAt = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
-const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
-  (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
-
-export const SPLIT_MS = ['OFF', 'SB'] as const;
-export const TRIP_UNTILS = ['OFF', 'SB', 'D', 'ON', 'CURRENT'] as const;
-export const TRIP_VIEWS = ['reset10', 'split', 'restart34'] as const;
-
 export function sanitizeSplit(d: unknown, fallback: SplitDraft): SplitDraft {
   if (!isObj(d)) return fallback;
   return {
@@ -779,7 +886,7 @@ const DUTY = ['OFF', 'SB', 'D', 'ON'] as const;
 export function sanitizeCurrent(d: unknown): State['current'] {
   if (!isObj(d)) return null;
   const status = oneOf(d.status, DUTY, 'OFF' as const);
-  if (!Number.isFinite(d.since)) return null;
+  if (!dateable(d.since)) return null;
   const out: NonNullable<State['current']> = { status, since: d.since as number };
   if (typeof d.note === 'string') out.note = d.note;
   if (Number.isFinite(d.createdAt)) out.createdAt = d.createdAt as number;
@@ -788,8 +895,11 @@ export function sanitizeCurrent(d: unknown): State['current'] {
 
 export function applyImportedState(cur: State, d: Partial<State>): Partial<State> {
   return {
-    segments: d.segments ?? [],
-    tentative: d.tentative ?? [],
+    // Rows come back raw from an import, and the renderers trust their notes to be strings —
+    // a non-string note in the file is dropped here, the same repair the load path makes
+    // (break-test #7). (The imported `current` is already note-safe via sanitizeCurrent.)
+    segments: (d.segments ?? []).map(fixNoteRow),
+    tentative: (d.tentative ?? []).map(fixNoteRow),
     current: 'current' in d ? sanitizeCurrent(d.current) : cur.current,
     config: sanitizeConfig(d.config, cur.config),
     mph: numIn(d.mph, 5, 100, cur.mph),
@@ -826,6 +936,7 @@ const rowProblem = (x: unknown): string | null => {
   const r = x as Record<string, unknown>;
   if (typeof r.status !== 'string' || !STATUSES.has(r.status)) return 'has no valid duty status';
   if (!Number.isFinite(r.start) || !Number.isFinite(r.end)) return 'has no valid start/end time';
+  if (!dateable(r.start) || !dateable(r.end)) return 'has a start/end time outside the range a date can hold';
   if ((r.end as number) <= (r.start as number)) return 'ends before it starts';
   return null;
 };
@@ -848,7 +959,7 @@ export function importProblem(d: unknown): string | null {
   }
   if (o.current !== undefined && o.current !== null) {
     const c = o.current as Record<string, unknown>;
-    if (typeof c !== 'object' || typeof c.status !== 'string' || !STATUSES.has(c.status) || !Number.isFinite(c.since)) return 'The current status in this file is not valid. Nothing was imported.';
+    if (typeof c !== 'object' || typeof c.status !== 'string' || !STATUSES.has(c.status) || !dateable(c.since)) return 'The current status in this file is not valid. Nothing was imported.';
   }
   if (o.config !== undefined && (o.config === null || typeof o.config !== 'object')) return 'The settings in this file are not valid. Nothing was imported.';
   return null;
@@ -1513,15 +1624,18 @@ export const SUB_STATUS: Record<string, string> = { PC: 'Personal conveyance', Y
  * personal-conveyance row edited to Driving would read "Personal conveyance (D)". Other notes always fit.
  */
 export function noteFits(note: string | undefined, status: DutyStatus): boolean {
-  if (!note) return true;
+  if (!note || typeof note !== 'string') return true;
   if (note === 'PC') return status === 'OFF';
   if (note === 'YM') return status === 'ON';
   if (note.startsWith(BREAK_NOTE)) return status === 'OFF' || status === 'ON';
   return true;
 }
 export function segLabel(status: DutyStatus, note?: string): string {
-  if (note && note.startsWith(BREAK_NOTE) && note.length > BREAK_NOTE.length) return `${note.slice(BREAK_NOTE.length)} (${status})`;
-  return note && SUB_STATUS[note] ? `${SUB_STATUS[note]} (${status})` : STATUS_LABEL[status];
+  // Notes are deliberately unvalidated at rest; a non-string one that slipped a path reads
+  // as no note rather than throwing out of a renderer (break-test #7).
+  const n = typeof note === 'string' ? note : undefined;
+  if (n && n.startsWith(BREAK_NOTE) && n.length > BREAK_NOTE.length) return `${n.slice(BREAK_NOTE.length)} (${status})`;
+  return n && SUB_STATUS[n] ? `${SUB_STATUS[n]} (${status})` : STATUS_LABEL[status];
 }
 
 /** Everything a bug report needs. Kept small enough to paste into an email. */

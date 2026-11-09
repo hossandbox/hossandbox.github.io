@@ -138,9 +138,14 @@ export function restPeriods(segments: Segment[]): RestPeriod[] {
 
   let prevEnd: number | null = null;
   for (const s of segments) {
-    // gap → OFF
+    // gap → OFF — but only when the row closing the gap belongs to the record. A what-if
+    // row is a plan, not something that happened: letting it close the trailing unlogged
+    // hole turned that hole into a rest (and often a reset) that the same record without
+    // the plan does not earn (break-test #12). In front of a what-if row the hole simply
+    // ends whatever rest was running, and the plan row's own rest stands alone.
     if (prevEnd !== null && s.start > prevEnd) {
-      if (!cur) cur = { start: prevEnd, end: s.start, longestSB: 0, sbRun: 0 };
+      if (s.tentative) flush();
+      else if (!cur) cur = { start: prevEnd, end: s.start, longestSB: 0, sbRun: 0 };
       else { cur.longestSB = Math.max(cur.longestSB, cur.sbRun); cur.sbRun = 0; cur.end = s.start; }
     }
     if (REST.has(s.status)) {

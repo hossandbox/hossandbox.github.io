@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -347,6 +347,86 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
     // Tapping the status you are already in changes nothing (statusTap returns null): re-stamping the
     // row reset the header pill to 0m mid-rest, while every clock stayed identical (driver report).
     return statusTap(cur, st, note, at) ?? {};
+  });
+}
+
+/* ---------- the simulated clock's quarantine (patch 15, break-test #5) ---------- */
+/* The snapshot itself is written by setState (store.ts) at the moment the simulated
+ * clock is set; this section holds the reading side: the shape checks a stored
+ * snapshot must pass, and useRealClock, which restores it. */
+
+type SimSnap = Pick<State, 'segments' | 'tentative' | 'current' | 'dayCloses' | 'historyAcknowledged' | 'config' | 'seededAt' | 'tzChosen'>;
+const SIM_STATUSES = new Set(['OFF', 'SB', 'D', 'ON']);
+/**
+ * A row read back from storage (a sim snapshot, a stored undo) is only trusted when it is
+ * shaped like a row the app itself writes: a known status, dateable start/end in order,
+ * and a note that is a string or absent — the fields the renderers and the engine trust.
+ */
+const storedRowOk = (r: unknown): boolean => {
+  if (!r || typeof r !== 'object') return false;
+  const x = r as Segment;
+  return SIM_STATUSES.has(x.status) && dateable(x.start) && dateable(x.end) && x.end > x.start
+    && (x.note === undefined || typeof x.note === 'string');
+};
+const storedSnapOk = (v: unknown): v is SimSnap => {
+  if (!v || typeof v !== 'object') return false;
+  const s = v as SimSnap;
+  if (!Array.isArray(s.segments) || !s.segments.every(storedRowOk)) return false;
+  if (!Array.isArray(s.tentative) || !s.tentative.every(storedRowOk)) return false;
+  if (s.current !== null && s.current !== undefined) {
+    const c = s.current as { status?: unknown; since?: unknown; note?: unknown };
+    if (typeof c !== 'object' || !SIM_STATUSES.has(c.status as string) || !dateable(c.since) || (c.note !== undefined && typeof c.note !== 'string')) return false;
+  }
+  // The acknowledgement rides in the sim snapshot (patch 15.1) and in every undo
+  // snapshot; when it is present it must be the boolean the app writes. (The config
+  // is deliberately not shape-checked here — undo snapshots carry none. useRealClock
+  // runs a sim snapshot's config through sanitizeConfig before restoring it.)
+  if (s.historyAcknowledged !== undefined && typeof s.historyAcknowledged !== 'boolean') return false;
+  // Patch 15.2's two fields, same discipline: when present, seededAt must be the
+  // null or the dateable minute the app writes, and tzChosen the boolean. Absence
+  // is fine — a snapshot written before 15.2 (or an undo snapshot, which carries
+  // neither) is still trusted on the fields it does carry; sim snapshots are
+  // per-episode and dropped at episode end, so nothing older outlives its episode.
+  if (s.seededAt !== undefined && s.seededAt !== null && !dateable(s.seededAt)) return false;
+  if (s.tzChosen !== undefined && typeof s.tzChosen !== 'boolean') return false;
+  return true;
+};
+/**
+ * "Use real clock": leave the simulated clock AND throw away everything written while it
+ * was up. Taps made under a simulated "now" used to be written into the real record and
+ * stay there — 48 hours of invented driving in the break test's repro (break-test #5).
+ * Refusing the taps instead would make the Testing clock display-only (and this app's own
+ * checks drive it with taps), so the writes are quarantined instead: setting the clock
+ * snapshots the record (setState, on the null → value edge — patch 15.1; patch 15
+ * snapshotted at the first of four writes and let every other write path through), and
+ * coming back restores that snapshot. The simulated-now banner says so on every screen
+ * while the clock is up.
+ */
+export function useRealClock() {
+  setState((cur) => {
+    let restore: Partial<State> = {};
+    try {
+      const raw = localStorage.getItem(SIM_KEY);
+      localStorage.removeItem(SIM_KEY);
+      if (raw && cur.nowOverride !== null) {
+        const snap = JSON.parse(raw) as { record?: unknown };
+        if (snap && storedSnapOk(snap.record)) {
+          restore = { segments: snap.record.segments, tentative: snap.record.tentative, current: snap.record.current ?? null, dayCloses: sanitizeDayCloses(snap.record.dayCloses) };
+          // The episode's quieter writes go too (patch 15.1): an acknowledgement or a
+          // settings change made under the simulated clock must not survive it. The
+          // config comes back through the same sanitizer an import passes through.
+          if (typeof snap.record.historyAcknowledged === 'boolean') restore.historyAcknowledged = snap.record.historyAcknowledged;
+          if (snap.record.config && typeof snap.record.config === 'object') restore.config = sanitizeConfig(snap.record.config, cur.config);
+          // The episode's last two quiet writes go too (patch 15.2): a seed's
+          // seededAt and a zone pick's tzChosen are part of the record the
+          // snapshot took, so they come back with it — storedSnapOk has already
+          // vouched for their shapes.
+          if (snap.record.seededAt !== undefined) restore.seededAt = snap.record.seededAt;
+          if (typeof snap.record.tzChosen === 'boolean') restore.tzChosen = snap.record.tzChosen;
+        }
+      }
+    } catch { /* a damaged snapshot is dropped, never fatal */ }
+    return { ...restore, nowOverride: null };
   });
 }
 /** How far back "started earlier" may reach: only while the status being left is still running. */
@@ -1467,17 +1547,28 @@ function setUndo(u: Undo | null) {
  * What a launch does with the stored undo (exported so tests can exercise it without a reload).
  * A damaged stored undo is dropped, never fatal.
  */
+/** A stored undo snapshot is trusted only when both halves would survive the record's own checks. */
+const storedClosesOk = (v: unknown): boolean => v === undefined
+  || (Array.isArray(v) && v.every((c) => !!c && typeof c === 'object' && Number.isFinite((c as { dayStart?: unknown }).dayStart) && Number.isFinite((c as { at?: unknown }).at)));
+const savedSnapOk = (v: unknown): boolean => storedSnapOk(v) && storedClosesOk((v as SimSnap).dayCloses);
 export function restoreUndo(raw: string | null) {
   undoNow = null; undoRestored = false;
   if (!raw) return;
   try {
     const u = JSON.parse(raw) as Undo;
-    if (u && typeof u.label === 'string' && u.before && u.after
-      && Array.isArray(u.before.segments) && Array.isArray(u.before.tentative)
-      && Array.isArray(u.after.segments) && Array.isArray(u.after.tentative)) { undoNow = u; undoRestored = true; }
+    // Shape alone is not enough (break-test lead #4): the snapshots were restored unchecked,
+    // so a stored undo carrying a non-string note or an undateable row put the crash class
+    // #7/#8 fixed for saves straight back into the live record through Undo. Both snapshots
+    // now have to pass the same row checks a sim snapshot does, or the offer is dropped.
+    if (u && typeof u.label === 'string' && savedSnapOk(u.before) && savedSnapOk(u.after)) { undoNow = u; undoRestored = true; }
   } catch { /* dropped */ }
 }
 try { restoreUndo(localStorage.getItem(UNDO_KEY)); } catch { /* no storage at launch: nothing to restore */ }
+// A sim snapshot (patch 15) only means anything while its simulated clock is up: a launch on
+// the real clock means that episode ended without the restore path (an erase, a damaged save
+// falling back to a clean record), the record on disk is the real one, and the leftover
+// snapshot is stale by definition — drop it rather than let a later episode restore it.
+try { if (getState().nowOverride === null) localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
 const pick = (s: State): Saved => ({ segments: s.segments, tentative: s.tentative, current: s.current, historyAcknowledged: s.historyAcknowledged, dayCloses: s.dayCloses });
 /** A record and a snapshot reading the same, field by field — the restored undo's only possible check. */
 const sameSaved = (s: State, a: Saved): boolean =>
@@ -1566,7 +1657,7 @@ export function addDriftFill(eldLeftMin: number, now: number): { row: Segment; p
 }
 /** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
 export function startOver(now: number) {
-  undoable('Started over with a fresh 10-hour rest', () => setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true, dayCloses: [] }));
+  undoable('Started over with a fresh 10-hour rest', () => setState(() => ({ segments: [{ status: 'OFF', start: now - 600, end: now }], tentative: [], current: { status: 'ON', since: now, createdAt: stamp() }, historyAcknowledged: true, dayCloses: [] })));
 }
 /**
  * "End my day" (patch 13): one undoable close of the day — the open status ends at the tap,
@@ -2385,7 +2476,9 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const days = ev.cycle.days;
   // The patch is a pure store function so the clipping rule is unit-testable (stress-test 2.4).
   const applyDay = (dayStart: number, dayEnd: number) => (drive: number, on: number, startHour: number) => {
-    setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp()) }));
+    // The live status's stamp rides along so the patch's filler can never outrank the live
+    // span it pads around (break-test #1).
+    setState((cur) => ({ segments: applyDayPatch(cur.segments, dayStart, dayEnd, drive, on, startHour, stamp(), cur.current?.createdAt) }));
   };
 
   return (
@@ -2394,7 +2487,10 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <table class="recap"><thead><tr><th>Day</th><th>On duty</th><th></th></tr></thead><tbody>
           {days.map((d, i) => {
             const isToday = i === days.length - 1;
-            const hasData = s.segments.some((x) => x.start < d.end && x.end > d.start);
+            // The live status is data on the days it runs through too: "set" on such a day is
+            // a replace, and the driver must confirm it as one (break-test #1).
+            const hasData = s.segments.some((x) => x.start < d.end && x.end > d.start)
+              || (s.current !== null && s.current.since < d.end && now > d.start);
             return <tr key={d.label} class={isToday ? 'today' : ''}><td>{isToday ? 'Today' : `D-${days.length - 1 - i}`}<br /><small class="muted">{d.label}</small></td><td><b>{hrs(d.onDuty)}</b> h</td>
               <td>{!isToday && firstLogged !== null && d.end <= firstLogged && <><small class="muted" title="Nothing in your record covers this day, so it counts as zero on-duty hours.">not logged — counted as 0h</small><br /></>}
                 {/* The badge says the day counts as zero; the editor is how you fix that (stress-test round 2, §2.3). */}
@@ -2834,7 +2930,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         {ioNote && <p class="muted small">{ioNote}</p>}
         <button class="danger" onClick={() => { if (confirm('Start over? Your log is replaced with a fresh 10-hour rest ending now. You can undo this from the Log.')) { startOver(now); setState({ tab: 'log' }); } }}>Start over: fresh 10-hour rest ending now</button>
         <p class="muted small">Moved here from the Log's add panel, where it sat one tap from Add. It can be undone from the Log.</p>
-        <button class="danger" onClick={() => { if (confirm('Erase everything?')) setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, dayCloses: [], config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); }}>Erase all data</button>
+        <button class="danger" onClick={() => { if (confirm('Erase everything?')) { try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ } setState({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, dayCloses: [], config: { ...c, adverseShifts: [], sixteenHourShifts: [] } }); } }}>Erase all data</button>
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">
@@ -2846,9 +2942,9 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
           card, one stray tap from the settings a driver actually uses, and every clock in the app
           then quietly lied. While it is set, a banner rides every screen — see App. */}
       <Card title="Testing">
-        <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => setState({ nowOverride: fromInput((e.target as HTMLInputElement).value) })} /></label>
-        <button onClick={() => setState({ nowOverride: null })} disabled={!s.nowOverride}>Use real clock</button>
-        <p class="muted small">For trying the app against a made-up time. Nothing is logged against it, and alerts never sound while it is set.</p>
+        <label>Simulated "now" (testing)<input type="datetime-local" value={s.nowOverride ? toInput(s.nowOverride) : ''} onChange={(e) => { const v = fromInput((e.target as HTMLInputElement).value); if (v === null) useRealClock(); else setState({ nowOverride: v }); }} /></label>
+        <button onClick={() => useRealClock()} disabled={!s.nowOverride}>Use real clock</button>
+        <p class="muted small">For trying the app against a made-up time. Anything you change while it is set is thrown away when you go back to the real clock, and alerts never sound while it is set.</p>
       </Card>
     </>
   );
@@ -3013,7 +3109,7 @@ export function App() {
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>
         {s.nowOverride !== null && (
-          <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. <button class="mini" onClick={() => setState({ nowOverride: null })}>Use real clock</button></p>
+          <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. Anything you change while it is up is thrown away when you go back to the real clock. <button class="mini" onClick={() => useRealClock()}>Use real clock</button></p>
         )}
         {s.themeNotice && (
           <div class="card warn">
