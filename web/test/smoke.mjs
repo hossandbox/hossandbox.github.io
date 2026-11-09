@@ -5508,4 +5508,214 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null });
   console.log('patch 16 (hero-first Now, verdict sign, warning shapes, trust ring, status undo, dark driving screen, dark-safe shell): OK');
 }
+
+// --- patch 17 "Read It To Me" (M3): spoken driving alerts behind the D7-A ask-once gate.
+// New pins only. The wording composers are pinned as exact strings (the brainstorm's own
+// example sentences among them); the wiring is pinned through tapStatus with a stubbed
+// speechSynthesis, the way patch 11 pinned its recognition detect. The alert effect is a
+// React effect (not run by this harness), so its speech line is pinned at the source, the
+// same treatment patch 16 gave the header observer.
+{
+  const { numWords: nw17, clockWords: cw17, durationWords: dw17, alertSpeech: as17, statusSpeech: ss17, speechReady: sr17, shouldAskSpeech: ask17 } = await import('../src/alerts.ts');
+  const { tapStatus: tap17, useRealClock: realClock17 } = await import('../src/app.tsx');
+  const { INITIAL_STATE: init17, parseSaved: parse17, exportState: exp17, SIM_KEY: simKey17, allSegments: allSeg17 } = await import('../src/store.ts');
+  const app17 = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  // A wall-clock time built from LOCAL parts, so the spoken reading is the same under any TZ.
+  const LT17 = (h, m = 0) => Math.floor(new Date(2026, 10, 9, h, m).getTime() / 60000);
+
+  // The number/clock/duration words — the whole table, edges included.
+  const nums17 = [[0, 'zero'], [7, 'seven'], [13, 'thirteen'], [20, 'twenty'], [21, 'twenty-one'], [47, 'forty-seven'], [99, 'ninety-nine']];
+  for (const [n, w] of nums17) if (nw17(n) !== w) throw new Error(`patch 17: numWords(${n}) must be "${w}", got "${nw17(n)}"`);
+  const clocks17 = [[LT17(0, 0), "twelve o'clock"], [LT17(12, 0), "twelve o'clock"], [LT17(0, 5), 'twelve oh five'], [LT17(12, 5), 'twelve oh five'],
+    [LT17(5, 40), 'five forty'], [LT17(17, 40), 'five forty'], [LT17(9, 30), 'nine thirty'], [LT17(13, 9), 'one oh nine'],
+    [LT17(23, 59), 'eleven fifty-nine'], [LT17(1, 15), 'one fifteen'], [LT17(10, 10), 'ten ten'], [LT17(6, 0), "six o'clock"]];
+  for (const [t, w] of clocks17) if (cw17(t) !== w) throw new Error(`patch 17: clockWords must read "${w}", got "${cw17(t)}"`);
+  const durs17 = [[0, 'no time'], [1, 'one minute'], [2, 'two minutes'], [15, 'fifteen minutes'], [30, 'thirty minutes'], [45, 'forty-five minutes'],
+    [59, 'fifty-nine minutes'], [60, 'one hour'], [61, 'one hour one'], [90, 'one hour thirty'], [119, 'one hour fifty-nine'],
+    [120, 'two hours'], [156, 'two hours thirty-six'], [660, 'eleven hours'], [840, 'fourteen hours'], [4200, 'seventy hours']];
+  for (const [n, w] of durs17) if (dw17(n) !== w) throw new Error(`patch 17: durationWords(${n}) must be "${w}", got "${dw17(n)}"`);
+
+  // The spoken sentences, word for word. The Driving confirmation and the 60-minute alert
+  // are the brainstorm's own example sentences (M3), with its standard seed's numbers.
+  if (ss17('D', LT17(2, 4), 156, LT17(5, 40)) !== 'Driving. You can drive two hours thirty-six. Stop by five forty.') throw new Error(`patch 17: the Driving confirmation must be the brainstorm's sentence, got "${ss17('D', LT17(2, 4), 156, LT17(5, 40))}"`);
+  if (ss17('D', LT17(2, 4), 0, LT17(5, 40)) !== 'Driving. No driving time left.') throw new Error('patch 17: a Driving tap with no time left must say so');
+  if (ss17('D', LT17(2, 4)) !== 'Driving.') throw new Error('patch 17: a Driving confirmation without an evaluation is the word alone');
+  if (ss17('OFF', LT17(5, 40)) !== 'Off duty since five forty.') throw new Error(`patch 17: Off duty confirmation wrong: "${ss17('OFF', LT17(5, 40))}"`);
+  if (ss17('SB', LT17(22, 5)) !== 'Sleeper berth since ten oh five.') throw new Error(`patch 17: Sleeper confirmation wrong: "${ss17('SB', LT17(22, 5))}"`);
+  if (ss17('ON', LT17(9, 0)) !== "On duty since nine o'clock.") throw new Error(`patch 17: On duty confirmation wrong: "${ss17('ON', LT17(9, 0))}"`);
+  if (as17(60, 60, LT17(5, 40), '14-hour duty window') !== 'One hour of driving left. Stop by five forty. Limited by the 14-hour duty window.') throw new Error(`patch 17: the 60-minute alert sentence wrong: "${as17(60, 60, LT17(5, 40), '14-hour duty window')}"`);
+  if (as17(30, 30, LT17(5, 40), '11-hour driving limit') !== 'Thirty minutes of driving left. Stop by five forty. Limited by the 11-hour driving limit.') throw new Error('patch 17: the 30-minute alert sentence wrong');
+  if (as17(15, 15, LT17(5, 40), '8-hour driving limit before a 30-minute break') !== 'Fifteen minutes of driving left. Stop by five forty. Limited by the 8-hour driving limit before a 30-minute break.') throw new Error('patch 17: the 15-minute alert sentence wrong');
+  if (as17(30, 47, LT17(5, 40), '14-hour duty window') !== 'Forty-seven minutes of driving left. Stop by five forty. Limited by the 14-hour duty window.') throw new Error('patch 17: an alert that slept past its mark must speak the time actually left, not the mark');
+  if (as17(0, 0, LT17(5, 40), '11-hour driving limit') !== 'Out of driving time. Park as soon as it is safe. You are over the 11-hour driving limit.') throw new Error('patch 17: the zero alert sentence wrong');
+
+  // The gate: asked AND on AND a real clock — and the question only where speech exists.
+  if (init17.speakAlerts !== false || init17.speechAsked !== false || init17.speakAskOpen !== false) throw new Error('patch 17: a fresh install starts un-asked and silent (D7-A)');
+  if (sr17({ speakAlerts: true, speechAsked: true }, false) !== true) throw new Error('patch 17: an asked yes on a real clock must be ready to speak');
+  if (sr17({ speakAlerts: true, speechAsked: false }, false) !== false) throw new Error('patch 17: nothing speaks before the driver answers (D7-A)');
+  if (sr17({ speakAlerts: false, speechAsked: true }, false) !== false) throw new Error('patch 17: a no stays silent');
+  if (sr17({ speakAlerts: true, speechAsked: true }, true) !== false) throw new Error('patch 17: a simulated clock never speaks');
+
+  // Consent-safe repairs: a damaged or older save can never turn speech on by itself.
+  const dmg17 = parse17(JSON.stringify({ speakAlerts: 'yes', speechAsked: 1, speakAskOpen: true }));
+  if (dmg17.speakAlerts !== false || dmg17.speechAsked !== false || dmg17.speakAskOpen !== false) throw new Error('patch 17: damaged speech fields must repair to un-asked and off, and the question never reopens on launch');
+  const good17 = parse17(JSON.stringify({ speakAlerts: true, speechAsked: true }));
+  if (good17.speakAlerts !== true || good17.speechAsked !== true) throw new Error('patch 17: a genuine yes must survive a save/load round trip');
+  // Device settings stay home: the export whitelist never carries them.
+  if (/speakAlerts|speechAsked/.test(exp17(getState()))) throw new Error('patch 17: the speech settings must stay out of export');
+
+  // Wiring through the real tap path, with a stubbed speechSynthesis recording utterances.
+  const spoken17 = [];
+  globalThis.speechSynthesis = { cancel: () => spoken17.push('«cancel»'), speak: (u) => spoken17.push(u.text) };
+  globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+  const said17 = () => spoken17.filter((x) => x !== '«cancel»');
+  if (ask17({ speakAlerts: false, speechAsked: false }, false) !== true) throw new Error('patch 17: with speech available and no answer yet, the question is due');
+  if (ask17({ speakAlerts: false, speechAsked: false }, true) !== false) throw new Error('patch 17: a simulated clock never raises the question');
+  if (ask17({ speakAlerts: false, speechAsked: true }, false) !== false) throw new Error('patch 17: an answered question is never asked again');
+
+  const now17 = nowMin();
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: { status: 'ON', since: now17 - 30, createdAt: 1 }, historyAcknowledged: true, speakAlerts: false, speechAsked: false, speakAskOpen: false });
+  tap17('D');
+  if (getState().current?.status !== 'D') throw new Error('patch 17: the Driving tap itself must still land');
+  if (getState().speakAskOpen !== true) throw new Error('patch 17: the first real Driving tap must raise the D7-A question');
+  if (said17().length !== 0) throw new Error('patch 17: the tap that raises the question must not itself speak');
+  // "No thanks": remembered, never re-asked, and the taps stay silent.
+  setState({ speakAlerts: false, speechAsked: true, speakAskOpen: false });
+  tap17('ON'); tap17('D');
+  if (getState().speakAskOpen !== false) throw new Error('patch 17: after a no, the question must not come back');
+  if (said17().length !== 0) throw new Error('patch 17: after a no, status taps stay silent');
+  // "Yes, say them": the taps answer back. The wording is pinned above; here the exact
+  // composer output for the live record proves the wiring speaks the screen's own numbers.
+  setState({ speakAlerts: true, speechAsked: true });
+  tap17('OFF');
+  const offSince17 = getState().current?.since;
+  if (said17().length !== 1 || said17()[0] !== ss17('OFF', offSince17)) throw new Error(`patch 17: an Off duty tap must speak its confirmation, got ${JSON.stringify(said17())}`);
+  tap17('D');
+  const dSince17 = getState().current?.since;
+  const ev17 = evNow(allSeg17(getState(), dSince17), { asOf: dSince17, config: getState().config });
+  if (said17().length !== 2 || said17()[1] !== ss17('D', dSince17, ev17.driveNow, ev17.mustStopBy)) throw new Error(`patch 17: a Driving tap must speak the evaluated confirmation, got ${JSON.stringify(said17())}`);
+  // A newer utterance supersedes: every spoken line is preceded by a cancel.
+  if (spoken17.filter((x) => x === '«cancel»').length !== 2) throw new Error('patch 17: each utterance must cancel the one before it (no stale queue)');
+
+  // The sim guard, behaviourally: opted in, under a simulated clock, taps neither speak
+  // nor ask — and the speech settings are not part of the quarantine snapshot.
+  setState({ nowOverride: now17 + 120, current: { status: 'ON', since: now17 - 30, createdAt: 1 } });
+  const simSnap17 = mem.get(simKey17) ?? '';
+  if (/speakAlerts|speechAsked/.test(simSnap17)) throw new Error('patch 17: the speech settings must stay out of the sim snapshot (device settings)');
+  tap17('D');
+  if (said17().length !== 2) throw new Error('patch 17: a status tap under a simulated clock must not speak');
+  setState({ speechAsked: false, speakAlerts: false });
+  tap17('ON'); tap17('D');
+  if (getState().speakAskOpen !== false) throw new Error('patch 17: a Driving tap under a simulated clock must not raise the question');
+  realClock17();
+  // Without speechSynthesis the feature is absent: no question, no crash, taps still land.
+  delete globalThis.speechSynthesis; delete globalThis.SpeechSynthesisUtterance;
+  if (ask17({ speakAlerts: false, speechAsked: false }, false) !== false) throw new Error('patch 17: without speechSynthesis the question is never due');
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: { status: 'ON', since: nowMin() - 30, createdAt: 1 }, speakAlerts: false, speechAsked: false, speakAskOpen: false });
+  tap17('D');
+  if (getState().speakAskOpen !== false || getState().current?.status !== 'D') throw new Error('patch 17: without speechSynthesis a Driving tap just lands, no question');
+
+  // Source pins for the two effect/harness-blind spots: the alert effect's speech line
+  // (gated, after the sound) and the Settings switch (rendered only where speech exists,
+  // so this harness — which cannot run the card's effect — pins its binding here).
+  const fx17 = app17.slice(app17.indexOf('function useDrivingAlerts'), app17.indexOf('function useWakeLock'));
+  if (!/speechReady\(s, false\) && s\.alertsOn/.test(fx17) || !/speakAloud\(alertSpeech\(r\.fire/.test(fx17)) throw new Error('patch 17: a fired alert must be spoken after the sound, gated on the D7-A yes and the master alert switch');
+  if (fx17.indexOf('speakAloud(alertSpeech') < fx17.indexOf('sound(r.fire')) throw new Error('patch 17: the spoken alert comes after the chime, not before it');
+  if (!/Read driving alerts out loud/.test(app17) || !/speakAlerts: \(e\.target as HTMLInputElement\)\.checked, speechAsked: true/.test(app17)) throw new Error('patch 17: the Driving alerts card must offer the speech switch, and using it records the D7-A answer');
+  if (!/Want the alerts read out loud\?/.test(app17) || !/Yes, say them/.test(app17) || !/No thanks/.test(app17)) throw new Error('patch 17: the D7-A question must render with the decision\'s own wording');
+
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, speakAlerts: false, speechAsked: false, speakAskOpen: false });
+  console.log('patch 17 (spoken driving alerts, D7-A ask-once, time-to-words): OK');
+}
+
+// --- patch 17 FIX ROUND (Verify-17: F1 back-dated tap speech, F2 consent-pair repair,
+// F3 ask-trigger pin, N1 cold-start zero). New pins only, appended after the patch-17
+// block; each is shown red on the unfixed candidate where it guards changed behaviour.
+{
+  const { statusSpeech: ssF, alertSpeech: asF, clockWords: cwF, nextAlert: naF, NO_ALERTS: noF } = await import('../src/alerts.ts');
+  const { tapStatus: tapF } = await import('../src/app.tsx');
+  const { parseSaved: parseF, allSegments: allSegF } = await import('../src/store.ts');
+  const appF = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+
+  // The speech stub is installed afresh for this block (the patch-17 block deleted it).
+  const spokenF = [];
+  globalThis.speechSynthesis = { cancel: () => spokenF.push('«cancel»'), speak: (u) => spokenF.push(u.text) };
+  globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+  const saidF = () => spokenF.filter((x) => x !== '«cancel»');
+
+  // F3 (Verify-17 §9, mutation M6): the question is due on a Driving tap ONLY. On a
+  // fresh record the first Off Duty, Sleeper and On Duty taps never open it and never
+  // speak; the next Driving tap does.
+  const tF = nowMin();
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: { status: 'ON', since: tF - 30, createdAt: 1 }, historyAcknowledged: true, speakAlerts: false, speechAsked: false, speakAskOpen: false });
+  tapF('OFF'); tapF('SB'); tapF('ON');
+  if (getState().speakAskOpen !== false || getState().speechAsked !== false) throw new Error('patch 17 fix: a non-Driving first tap must never open the D7-A question');
+  if (saidF().length !== 0) throw new Error('patch 17 fix: non-Driving first taps must not speak');
+  tapF('D');
+  if (getState().speakAskOpen !== true) throw new Error('patch 17 fix: the next Driving tap must open the D7-A question');
+  if (saidF().length !== 0) throw new Error('patch 17 fix: the asking tap itself must not speak');
+
+  // F1 (Verify-17 §3): a back-dated Driving tap speaks the SCREEN's numbers — the
+  // post-tap record evaluated at NOW, never at the back-dated start. Scenario: a 10h
+  // rest ending 60 minutes ago and nothing since; the tap starts Driving 30 minutes
+  // back. The screen (the record closed at now, evaluated at now) reads 450 — the
+  // 30-minute break clock binds — while the tap-instant composition reads 480, so the
+  // two disagree by exactly the back-date and the pin can tell them apart.
+  const rEndF = nowMin() - 60;
+  setState({ tab: 'now', nowOverride: null, segments: [{ status: 'OFF', start: rEndF - 600, end: rEndF, createdAt: 1 }], tentative: [], current: null, historyAcknowledged: true, speakAlerts: true, speechAsked: true, speakAskOpen: false });
+  tapF('D', undefined, 30);
+  const atF = getState().current?.since;
+  const postF = getState();
+  const nowF = nowMin();
+  const evScrF = evNow(allSegF(postF, nowF), { asOf: nowF, config: postF.config });
+  if (evScrF.driveNow !== 450) throw new Error(`patch 17 fix: F1 scenario sanity — the screen must show 450 drive minutes, got ${evScrF.driveNow}`);
+  if (saidF().length !== 1 || saidF()[0] !== ssF('D', atF, evScrF.driveNow, evScrF.mustStopBy)) throw new Error(`patch 17 fix: a status-sheet Driving tap with minutesAgo = 30 must speak durationWords(screen driveNow), got ${JSON.stringify(saidF())}`);
+  if (saidF()[0] !== 'Driving. You can drive seven hours thirty. Stop by ' + cwF(evScrF.mustStopBy) + '.') throw new Error(`patch 17 fix: the back-dated tap must speak the hand-checked sentence, got "${saidF()[0]}"`);
+
+  // F1, the exhausted case (Verify-17 §3, its F2b shape): the window is already gone
+  // (10h rest, 470 minutes of driving, then On Duty) and the driver taps Driving 30
+  // minutes back. The screen reads 0, so the tap speaks "No driving time left" and
+  // never a positive "You can drive" — the tap-instant composition would read 20.
+  const rEnd0F = nowMin() - 850;
+  setState({ tab: 'now', nowOverride: null, segments: [{ status: 'OFF', start: rEnd0F - 600, end: rEnd0F, createdAt: 1 }, { status: 'D', start: rEnd0F, end: rEnd0F + 470, createdAt: 1 }], tentative: [], current: { status: 'ON', since: nowMin() - 40, createdAt: 1 }, historyAcknowledged: true, speakAlerts: true, speechAsked: true, speakAskOpen: false });
+  const beforeF = saidF().length;
+  tapF('D', undefined, 30);
+  const post0F = getState();
+  if (post0F.current?.status !== 'D' || post0F.current?.since !== nowMin() - 30) throw new Error('patch 17 fix: the exhausted-case tap must land as Driving starting 30 minutes back');
+  const now0F = nowMin();
+  const ev0F = evNow(allSegF(post0F, now0F), { asOf: now0F, config: post0F.config });
+  if (!(ev0F.driveNow <= 0)) throw new Error(`patch 17 fix: exhausted-case sanity — the screen driveNow must be <= 0, got ${ev0F.driveNow}`);
+  if (saidF().length !== beforeF + 1 || saidF()[beforeF] !== 'Driving. No driving time left.') throw new Error(`patch 17 fix: an exhausted back-dated tap must speak "Driving. No driving time left.", got ${JSON.stringify(saidF().slice(beforeF))}`);
+
+  // F1 on the consent-Yes path (Verify-17 §9, mutation M8): Yes answered after a
+  // back-dated first Driving tap speaks the screen's drive-left. The handler is a
+  // component closure this harness cannot click, so it is pinned at the source — the
+  // treatment patch 16/17 give harness-blind wirings — and its composition is checked
+  // against this block's exhausted record, where the screen reads none left.
+  const yesSrcF = appF.slice(appF.indexOf('function SpeakAskDialog'), appF.indexOf('declare const __BUILD__'));
+  if (!/const at = nowMin\(\);/.test(yesSrcF) || !/asOf: at, config: cur\.config/.test(yesSrcF) || !/statusSpeech\('D', cur\.current\.since/.test(yesSrcF)) throw new Error('patch 17 fix: the consent-Yes confirmation must be composed from an evaluation at nowMin(), never at the back-dated tap instant');
+  if (ssF('D', post0F.current.since, ev0F.driveNow, ev0F.mustStopBy) !== 'Driving. No driving time left.') throw new Error('patch 17 fix: the Yes confirmation for the back-dated tap must carry the screen numbers (no time left)');
+
+  // N1 (Verify-17 §8): a cold start speaks nothing EXCEPT the existing zero-on-open
+  // alert for a driver who said yes. nextAlert with a fresh memory (a cold start) fires
+  // 0 at once when driving time is already gone, and nothing while time remains; the
+  // alert effect speaks exactly that fire for an opted-in driver, from the same numbers.
+  if (naF(noF, true, 0, tF).fire !== 0) throw new Error('patch 17 fix: a cold start already out of driving time must fire the zero alert (zero-on-open)');
+  for (const left of [61, 45, 20]) if (naF(noF, true, left, tF).fire !== null) throw new Error(`patch 17 fix: a cold start with ${left} minutes left must stay silent until a mark is crossed`);
+  if (asF(0, 0, ev0F.mustStopBy, '11-hour driving limit') !== 'Out of driving time. Park as soon as it is safe. You are over the 11-hour driving limit.') throw new Error('patch 17 fix: the cold-start zero sentence must name the screen limit');
+
+  // F2 (Verify-17 §4): consent is the PAIR. speakAlerts:true with a speechAsked that is
+  // not literal true — false, or damaged ("yes") — must repair to off, or the Settings
+  // switch shows ON on a device that stays silent and asks again.
+  for (const asked of [false, 'yes']) {
+    const mF = parseF(JSON.stringify({ speakAlerts: true, speechAsked: asked }));
+    if (mF.speakAlerts !== false || mF.speechAsked !== false) throw new Error(`patch 17 fix: speakAlerts:true with speechAsked ${JSON.stringify(asked)} must repair to un-asked and OFF (consent is the pair)`);
+  }
+  const yesF = parseF(JSON.stringify({ speakAlerts: true, speechAsked: true }));
+  if (yesF.speakAlerts !== true || yesF.speechAsked !== true) throw new Error('patch 17 fix: a genuine yes must still survive the pair repair');
+
+  delete globalThis.speechSynthesis; delete globalThis.SpeechSynthesisUtterance;
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, speakAlerts: false, speechAsked: false, speakAskOpen: false });
+  console.log('patch 17 fix round (F1 back-date, F2 consent pair, F3 ask trigger, N1 cold start): OK');
+}
 console.log('OK');

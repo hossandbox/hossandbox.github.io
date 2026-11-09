@@ -246,3 +246,54 @@ generated artifacts kept locally (regenerate via `web/tools/make-ocr-corpus.py`)
   Large font / driving banner, the estimate ring at arm's length, and the
   360×640 two-notice dock clearance. Next in the locked queue: spoken driving
   alerts (M3) as their own patch, then the final Opus UI audit capstone.
+
+## Patch 17 — deployed 2026-11-09 ("Read It To Me" — spoken driving alerts, M3)
+
+- **What it is:** the M3 item from the design brainstorm (§3), governed by
+  decision **D7-A** (Lorico, 2026-11-09): the app asks **once** before it ever
+  speaks — "Want the alerts read out loud?" / [Yes, say them] / [No thanks] —
+  raised on the first real Driving tap, and that tap itself speaks nothing.
+  Either answer is remembered; a settings switch, **"Read driving alerts out
+  loud"** (shown only where `speechSynthesis` exists), also records the answer.
+- **What speaks:** the driving alerts at the existing 60/30/15/0 marks are read
+  aloud through the already-shipped `speakAloud` path (cancel-before-speak, so
+  a newer alert supersedes a stale one), composed from the **same evaluation
+  the screen shows** — no limit is ever recomputed for the voice. A Driving
+  status tap speaks its confirmation from the post-tap record. A new
+  time-to-words helper (`numWords`/`clockWords`/`durationWords` in
+  `alerts.ts`) renders times and durations as spoken ("five forty", "twelve
+  oh five", "one hour one"). No speech recognition anywhere in this patch;
+  nothing speaks on load except the pre-existing zero-on-open alert for an
+  already-opted-in driver at 0 left (see N1); sim-clock time never speaks and
+  never asks.
+- **Consent safety:** `speakAlerts`/`speechAsked` live in the existing state
+  object (no new storage keys; out of export, import, and the sim snapshot)
+  and count only as literal booleans in `parseSaved` — a damaged or older
+  save repairs to **off and un-asked**, never to a phantom yes.
+- **Verification arc:** Opus **Verify-17 returned FAIL** on **F1**: a
+  back-dated Driving tap ("15 min ago") spoke a drive-left evaluated at the
+  back-dated instant instead of now — optimistic by exactly the back-date
+  (the Patch 14 failure class, in the voice a driver trusts without looking).
+  The fix evaluates the post-tap record at **now**. **F2:** `parseSaved`
+  could leave `speakAlerts: true` beside a non-true `speechAsked`, showing
+  the switch ON while the app stayed silent and re-asked — repaired with
+  `if (speechAsked !== true) speakAlerts = false`. **F3:** a pin now fences
+  that OFF/SB/ON first taps never open the D7-A question (mutation M6 red).
+  **N1:** the build handoff's "nothing speaks on load" claim was corrected —
+  a cold open speaks only the zero alert, and only for an opted-in driver at
+  0 left; pinned. Everything else passed hard: consent held in every
+  corrupted state probed, alert-mark numbers matched Opus's independent
+  oracle across 90 fuzzed days, the words table passed, and the two
+  effect-gated wirings were exercised in a real DOM. **Delta-17 PASS** —
+  delta audit exact (3 source files + smoke), F1's three repros speak
+  exactly the screen's figures in the DOM under both timezones, suites green
+  under Chicago and UTC, engine byte-identical.
+- **Residual R1 (non-gating):** the consent-Yes suite pin is source-level;
+  the behavioural proof lives in Opus's DOM `yesback` case. Adopting that
+  case into the suite is the recommended **first item of a later patch**.
+- **Still open (phone-only):** voice intelligibility over road noise, chime
+  timing/clipping, Bluetooth/car-audio routing, the ask dialog's feel — and
+  Chrome's user-activation rule may hold the spoken zero alert on a cold
+  open until the first tap (the screen still shows it). The Patch 16
+  Pixel-only list also remains open. Next in the locked queue: the final
+  Opus UI audit capstone.

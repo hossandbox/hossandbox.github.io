@@ -129,6 +129,21 @@ export interface State {
    */
   darkDriveAtNight: boolean;
   /**
+   * "Speak driving alerts" (patch 17, M3 — decision D7-A): the driving alerts and the
+   * status-tap confirmation are read aloud. Device setting: not exported. Unlike the other
+   * device settings this one defaults OFF and may only ever be turned on by the driver's own
+   * answer (the one-time question, or the Settings switch): D7-A is a consent gate, so a
+   * save that predates the field, or a damaged one, never turns speech on by itself.
+   */
+  speakAlerts: boolean;
+  /** The D7-A question has been asked and answered (either way). Asked once, never again. */
+  speechAsked: boolean;
+  /**
+   * The D7-A question is on screen. Transient UI in the style of `tab`: parseSaved always
+   * reads it back as closed, so a launch never reopens a question the driver walked away from.
+   */
+  speakAskOpen: boolean;
+  /**
    * The driver's break buttons for the Log's add panel (driver report 2026-10-13: "I can't find a way to
    * add break"). A break is not a duty status: each button is a name, a length and the status the driver
    * actually logs it as. Device setting, like the alerts: not exported.
@@ -200,7 +215,7 @@ export const INITIAL_STATE: State = {
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   disclaimerAcked: false, seededAt: null, dayCloses: [],
-  tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true,
+  tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true, speakAlerts: false, speechAsked: false, speakAskOpen: false,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
 
@@ -376,6 +391,18 @@ export function parseSaved(raw: string | null): State {
     // before the field existed (missing) and a damaged one (anything else) both read as the
     // default, on.
     if (typeof s.darkDriveAtNight !== 'boolean') merged.darkDriveAtNight = true;
+    // Spoken alerts (patch 17, D7-A) invert that rule on purpose: speech counts only as a
+    // literal boolean the driver's own answer wrote, and anything else — a save from before
+    // the field existed, or a damaged one — reads as NOT asked and NOT on. A default-on
+    // repair here would put words in the driver's cab that he never agreed to.
+    if (typeof s.speakAlerts !== 'boolean') merged.speakAlerts = false;
+    if (typeof s.speechAsked !== 'boolean') merged.speechAsked = false;
+    // Consent is the pair (Verify-17 F2): an un-asked device is never "on", however the
+    // toggle field was damaged — otherwise Settings would show the switch ON for a device
+    // that stays silent and asks again.
+    if (merged.speechAsked !== true) merged.speakAlerts = false;
+    // The spoken-alerts question is a moment, not a state: a launch never reopens it.
+    merged.speakAskOpen = false;
     // The two-zones acknowledgement (patch 16) is the zone pair it was given for; anything
     // that is not that string reads as never given, so the line stands open and asks again.
     if (typeof s.zoneAck !== 'string') merged.zoneAck = null;

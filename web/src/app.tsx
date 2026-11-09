@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
-import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState } from './alerts.ts';
+import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -355,6 +355,26 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
   undoable(`${segLabel(st, note)} since ${clock(at, false)}`, () => {
     setState((c) => statusTap(c, st, note, at) ?? {});
   });
+  // Patch 17 (M3, decision D7-A): the tap answers back out loud, and the first real Driving
+  // tap asks the once-only question. A simulated clock is planning (patch 15): it never
+  // speaks and never asks — the speech settings are device settings outside the sim
+  // snapshot, so an answer given under one would outlive the "thrown away" record it was
+  // made over. Nothing speaks before the driver's yes: the tap that triggers the question
+  // is confirmed on screen only, exactly as before this patch.
+  const sim = cur.nowOverride !== null;
+  if (st === 'D' && shouldAskSpeech(cur, sim)) {
+    setState({ speakAskOpen: true });
+  } else if (speechReady(cur, sim)) {
+    if (st === 'D') {
+      try {
+        const post = getState();
+        const ev2 = evaluate(allSegments(post, now), { asOf: now, config: post.config });
+        speakAloud(statusSpeech('D', at, ev2.driveNow, ev2.mustStopBy));
+      } catch { speakAloud(statusSpeech('D', at)); }
+    } else {
+      speakAloud(statusSpeech(st, at));
+    }
+  }
 }
 
 /* ---------- the simulated clock's quarantine (patch 15, break-test #5) ---------- */
@@ -600,7 +620,12 @@ function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
     if (r.fire === null || !ev || !s.alertsOn || s.nowOverride !== null) return;
     const m = alertMessage(r.fire, alertReason(ev));
     sound(r.fire <= 15); void notify(m.title, m.body);
-  }, [now, driveNow, driving, s.alertsOn, s.nowOverride]);
+    // Patch 17 (M3): the same alert, read aloud — after the chime, from the same numbers.
+    // Two gates on top of this effect's own: speechReady (the D7-A yes, and a real clock —
+    // already guaranteed here) and alertsOn, the master alert switch: a driver who silenced
+    // the alerts does not get a voice instead.
+    if (speechReady(s, false) && s.alertsOn) speakAloud(alertSpeech(r.fire, driveNow, ev.mustStopBy, alertReason(ev)));
+  }, [now, driveNow, driving, s.alertsOn, s.nowOverride, s.speakAlerts, s.speechAsked]);
 }
 
 /** Hold a screen wake lock while `active` (alerts.ts holdWakeLock: re-taken on return and after a drop). */
@@ -2995,7 +3020,8 @@ function DrivingAlertsCard({ s }: { s: State }) {
   // Browser features are only known at run time; the pre-rendered page assumes none.
   const [notif, setNotif] = useState<NotifyState>('unsupported');
   const [awakeOk, setAwakeOk] = useState(true);
-  useEffect(() => { setNotif(notifyState()); setAwakeOk(canKeepAwake()); }, []);
+  const [speechOk, setSpeechOk] = useState(false);
+  useEffect(() => { setNotif(notifyState()); setAwakeOk(canKeepAwake()); setSpeechOk(speechSynthesisAvailable()); }, []);
   const test = () => { unlockAudio(); chime(true); buzz(true); };
   return (
     <Card title="Driving alerts">
@@ -3003,6 +3029,8 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <label class="check"><input type="checkbox" checked={s.keepAwake} onChange={(e) => setState({ keepAwake: (e.target as HTMLInputElement).checked })} /> Keep the screen on while your status is Driving</label>
       <label class="check"><input type="checkbox" checked={s.drivingView} onChange={(e) => setState({ drivingView: (e.target as HTMLInputElement).checked })} /> Big driving screen while your status is Driving</label>
       <label class="check"><input type="checkbox" checked={s.darkDriveAtNight} onChange={(e) => setState({ darkDriveAtNight: (e.target as HTMLInputElement).checked })} /> Dark driving screen at night</label>
+      {speechOk && <label class="check"><input type="checkbox" checked={s.speakAlerts} onChange={(e) => setState({ speakAlerts: (e.target as HTMLInputElement).checked, speechAsked: true })} /> Read driving alerts out loud</label>}
+      {speechOk && <p class="muted small">At 60, 30 and 15 minutes of driving left — and when time runs out — the app says the numbers out loud after the alert sound, and confirms out loud when you tap a status, so you never have to read while you roll. Changing this switch is your answer to the one-time question the app asks on your first Driving tap. It uses this browser's voice; nothing is recorded or sent anywhere.</p>}
       <p class="muted small">Between 7 PM and 7 AM on this phone's clock, the driving screen wears the dark theme even when the app is set to Day — a lit screen in a dark cab is glare. The rest of the app keeps your theme.</p>
       {!awakeOk && <p class="small">This browser cannot keep the screen on. Set your phone's auto-lock to "Never" while you drive, or the alerts will stop when it locks.</p>}
       <div class="row">
@@ -3181,6 +3209,42 @@ function Disclaimer({ onClose, tz, needsTz, compact }: { onClose: (tz?: string) 
   );
 }
 
+/**
+ * The spoken-alerts question (patch 17, decision D7-A): asked once, on the first real
+ * Driving tap, and never again — either answer is remembered, and Settings can change it
+ * later. Modelled on the Disclaimer modal: it is answered by its two buttons, not dismissed
+ * by a backdrop tap, because both answers are decisions the app must record. A "Yes" speaks
+ * the confirmation for the tap that raised the question, if the driver is still driving —
+ * the one confirmation the question itself had to hold back.
+ */
+function SpeakAskDialog() {
+  const yes = () => {
+    setState({ speakAlerts: true, speechAsked: true, speakAskOpen: false });
+    const cur = getState();
+    if (cur.current?.status === 'D' && cur.nowOverride === null) {
+      try {
+        const at = nowMin();
+        const ev2 = evaluate(allSegments(cur, at), { asOf: at, config: cur.config });
+        speakAloud(statusSpeech('D', cur.current.since, ev2.driveNow, ev2.mustStopBy));
+      } catch { /* the setting is on either way; the next alert will speak */ }
+    }
+  };
+  const no = () => setState({ speakAlerts: false, speechAsked: true, speakAskOpen: false });
+  return (
+    <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="speakask-title">
+      <div class="modal">
+        <h2 id="speakask-title">Want the alerts read out loud?</h2>
+        <p class="small">While you drive, Split Decision can say the numbers out loud — how much driving is left at 60, 30 and 15 minutes, when time runs out, and a spoken confirmation when you tap a status — so you never have to read the screen. It uses this browser's voice. Nothing is recorded, and nothing leaves your phone.</p>
+        <div class="row">
+          <button class="primary" onClick={yes}>Yes, say them</button>
+          <button onClick={no}>No thanks</button>
+        </div>
+        <p class="muted small">You can change this later under More → Driving alerts.</p>
+      </div>
+    </div>
+  );
+}
+
 declare const __BUILD__: string;
 
 /**
@@ -3295,6 +3359,7 @@ export function App() {
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
         {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+        {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
       </div>
     );
   }
@@ -3337,6 +3402,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
+      {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
     </div>
   );
 }

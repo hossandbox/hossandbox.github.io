@@ -20,6 +20,8 @@
  * guarded so they do nothing outside a browser.
  */
 
+import { speechSynthesisAvailable } from './voiceclocks.ts';
+
 /** Minutes of driving time left at which an alert fires as the count crosses them. */
 export const ALERT_MARKS = [60, 30, 15, 0] as const;
 /** While driving with no time left, repeat the zero alert this often (minutes). */
@@ -118,6 +120,116 @@ export function alertMessage(mark: number, reason: string): { title: string; bod
 /** Keep the screen on: only while driving, and only if the driver wants it (default on). */
 export function wantsWakeLock(keepAwake: boolean, status: string | undefined): boolean {
   return keepAwake && status === 'D';
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * Spoken alerts (patch 17, M3 "Read it to me"; decision D7-A).
+ *
+ * 49 CFR 392.80 bars reading while driving, and even the driving view's one number is reading.
+ * So the alert this module already decided on (`nextAlert`'s mark) and the status tap itself can
+ * be SPOKEN. Everything here is a pure function of the same numbers the screen shows — the mark,
+ * `driveNow`, `mustStopBy`, and the app's own `alertReason` string — so a spoken sentence can
+ * never quote a different limit or a different stop-by than the banner beside it.
+ *
+ * D7-A (Lorico, 2026-11-09): the app ASKS ONCE before ever speaking, and nothing speaks until
+ * the driver says yes. `speechReady` is that gate plus the simulated-clock guard (a simulated
+ * clock is planning, patch 15: it never sounds, so it never speaks); `shouldAskSpeech` is the
+ * question's trigger. The utterance itself is patch 11's `speakAloud` (voiceclocks.ts), which
+ * cancels before it speaks — a newer sentence supersedes a stale queued one, across both
+ * features. Speech OUTPUT only: no recognition is added anywhere by this patch, and where the
+ * browser has no speechSynthesis the whole feature is simply absent (the detect in
+ * `shouldAskSpeech` and in `speakAloud` itself), never a dead control.
+ */
+
+export interface SpeechPrefs { speakAlerts: boolean; speechAsked: boolean }
+
+/**
+ * May the app speak right now? Only when the driver has answered the D7-A question with yes
+ * (asked AND on) and the clock is real. The alert path additionally requires `alertsOn` — the
+ * master alert switch — at its call site in app.tsx; the status confirmation does not (it is
+ * not an alert, it is the tap answering back).
+ */
+export function speechReady(p: SpeechPrefs, simulated: boolean): boolean {
+  return p.speechAsked && p.speakAlerts && !simulated;
+}
+
+/** The one-time question is due: never asked, real clock, and a browser that can speak at all. */
+export function shouldAskSpeech(p: SpeechPrefs, simulated: boolean): boolean {
+  return !p.speechAsked && !simulated && speechSynthesisAvailable();
+}
+
+const NUM_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS_WORDS: Record<number, string> = { 20: 'twenty', 30: 'thirty', 40: 'forty', 50: 'fifty', 60: 'sixty', 70: 'seventy', 80: 'eighty', 90: 'ninety' };
+
+/** A whole number 0–99 in words ("forty-seven"). Beyond 99 the digits themselves are returned —
+ *  a speech engine reads digits correctly, and no value this app speaks can reach them. */
+export function numWords(n: number): string {
+  if (!Number.isFinite(n)) return '';
+  const t = Math.round(n);
+  if (t < 0) return String(t);
+  if (t < 20) return NUM_WORDS[t];
+  if (t < 100) { const r = t % 10; return r === 0 ? TENS_WORDS[t] : `${TENS_WORDS[t - r]}-${NUM_WORDS[r]}`; }
+  return String(t);
+}
+
+/**
+ * A clock time in words, from the same device-local reading `clock()` prints: "five forty",
+ * "twelve oh five", "five o'clock". A speech engine given "05:40" reads the digits; a driver
+ * hears a time the way a person says it.
+ */
+export function clockWords(min: number): string {
+  if (!Number.isFinite(min)) return '';
+  const d = new Date(min * 60000);
+  const h24 = d.getHours(), m = d.getMinutes();
+  const hw = numWords(h24 % 12 === 0 ? 12 : h24 % 12);
+  if (m === 0) return `${hw} o'clock`;
+  if (m < 10) return `${hw} oh ${numWords(m)}`;
+  return `${hw} ${numWords(m)}`;
+}
+
+/**
+ * A length of time in words: "one minute", "thirty minutes", "one hour", "two hours
+ * thirty-six". With hours present the remainder drops its "minutes" — the brainstorm's own
+ * sentence ("You can drive two hours thirty-six") — and one rule covers every value.
+ */
+export function durationWords(min: number): string {
+  if (!Number.isFinite(min)) return '';
+  const t = Math.max(0, Math.round(min));
+  if (t === 0) return 'no time';
+  if (t < 60) return t === 1 ? 'one minute' : `${numWords(t)} minutes`;
+  const head = t < 120 ? 'one hour' : `${numWords(Math.floor(t / 60))} hours`;
+  const r = t % 60;
+  return r === 0 ? head : `${head} ${numWords(r)}`;
+}
+
+/**
+ * The spoken form of a fired alert mark. `driveNow` and `stopBy` are the evaluation's own
+ * numbers and `reason` is the app's alert wording for the binding limit, so the sentence is
+ * the banner read aloud, not a second opinion. At zero there is no stop-by to quote: the
+ * time to stop was the number, and it has passed.
+ */
+export function alertSpeech(mark: number, driveNow: number, stopBy: number, reason: string): string {
+  if (mark <= 0) return `Out of driving time. Park as soon as it is safe. You are over the ${reason}.`;
+  const left = durationWords(driveNow);
+  return `${left.charAt(0).toUpperCase() + left.slice(1)} of driving left. Stop by ${clockWords(stopBy)}. Limited by the ${reason}.`;
+}
+
+const SPOKEN_STATUS: Record<string, string> = { OFF: 'Off duty', SB: 'Sleeper berth', ON: 'On duty', D: 'Driving' };
+
+/**
+ * The spoken confirmation of a status tap: the tap answers back, so the driver never has to
+ * look to know it landed. Driving quotes the clocks (the brainstorm's sentence); every other
+ * status names itself and the time it began. `driveNow`/`stopBy` come from an evaluation of
+ * the post-tap record; without them the Driving line is the status word alone.
+ */
+export function statusSpeech(status: 'OFF' | 'SB' | 'D' | 'ON', at: number, driveNow?: number, stopBy?: number): string {
+  if (status === 'D') {
+    if (driveNow === undefined || stopBy === undefined) return 'Driving.';
+    if (driveNow <= 0) return 'Driving. No driving time left.';
+    return `Driving. You can drive ${durationWords(driveNow)}. Stop by ${clockWords(stopBy)}.`;
+  }
+  return `${SPOKEN_STATUS[status]} since ${clockWords(at)}.`;
 }
 
 // ---------------------------------------------------------------------------------------------------
