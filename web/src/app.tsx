@@ -32,6 +32,7 @@ import {
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
 import { extractEldClocks, mergeExtractions } from './eldocr.ts';
+import { computeLevers, pickChips, leverTitle, leverSub, leverRule, leverAfter, leverSplitPrefill, type Lever } from './levers.ts';
 
 /* ============================================================ shared bits */
 
@@ -284,6 +285,9 @@ export type SheetKind =
   | { kind: 'drift' }
   | { kind: 'why' }
   | { kind: 'exceptions' }
+  // A lever chip's sheet (capstone C1): the chip's sentence, its ghost axis, the rule and
+  // the caveat. The lever travels in the descriptor, computed when the chip was tapped.
+  | { kind: 'lever'; lever: Lever }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
   | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft }
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
@@ -523,7 +527,7 @@ function useDriveAgain(s: State, now: number, ev: FullEvaluation | null): DriveA
  * again, and tapping On duty after 6 hours off reset the only rest number on screen without saying the
  * rest had ended — or that on-duty work was allowed all along.
  */
-function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain }) {
+function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain; tail?: ComponentChildren }) {
   const status = s.current?.status ?? 'OFF';
   const resting = status === 'OFF' || status === 'SB';
   const { off, sb, before } = again;
@@ -538,6 +542,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         <div class="hero-label">Out of driving time</div>
         <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
+        {tail}
       </section>
     );
   }
@@ -559,6 +564,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         {time('30-min break needed — you can drive again at')}
         <p class="hero-text">Any 30 minutes in a row without driving counts — off duty, sleeper, or on-duty work like fueling.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
+        {tail}
       </section>
     );
   }
@@ -569,6 +575,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         {time(`Out of ${cycleWord} hours — ${resting ? 'if you stay off duty, you' : 'go off duty now and you'} can drive again at`)}
         <p class="hero-text">On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
+        {tail}
       </section>
     );
   }
@@ -578,6 +585,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
         {time('You can drive again at')}
         <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
+        {tail}
       </section>
     );
   }
@@ -589,6 +597,7 @@ function RestHero({ s, now, ev, again }: { s: State; now: number; ev: FullEvalua
       {sb !== null && sb < off && <p class="hero-text">In the sleeper berth instead: <b>{clock(sb)}</b> ({dur(sb - now)} from now) — that completes a split.</p>}
       {before >= 30 && before < 600 && <p class="hero-text">Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</p>}
       <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
+      {tail}
     </section>
   );
 }
@@ -933,8 +942,8 @@ function restWords(r: RestPeriod): string {
 export function pairWords([a, b]: [RestPeriod, RestPeriod]): string {
   return `${restWords(a)} + ${restWords(b)} — split pair (${a.isReset ? 'FMCSA FAQ 22' : '49 CFR 395.1(g)'})`;
 }
-/** Now's line under the hero: which rests the clocks paired, and where they count from. */
-function SplitPairLine({ ev }: { ev: FullEvaluation }) {
+/** The split-pair paragraph itself, shared by the dial mode's line and the timeline mode's chip (audit §2.6: the wording survives verbatim in both). */
+function SplitPairWords({ ev }: { ev: FullEvaluation }) {
   const pair = activePair(ev);
   if (!pair) return null;
   const leg = ev.shift.pendingSplitLeg;
@@ -944,6 +953,12 @@ function SplitPairLine({ ev }: { ev: FullEvaluation }) {
       {leg && leg.start === pair[1].start && leg.end === pair[1].end ? ` Your ${clock(leg.start)}–${clock(leg.end)} rest can also be the first half of your next pair.` : ''}
     </p>
   );
+}
+
+/** Now's line under the hero: which rests the clocks paired, and where they count from. */
+function SplitPairLine({ ev }: { ev: FullEvaluation }) {
+  if (!activePair(ev)) return null;
+  return <SplitPairWords ev={ev} />;
 }
 
 /**
@@ -1014,6 +1029,309 @@ function Meters({ ev }: { ev: FullEvaluation }) {
   );
 }
 
+/* ============================================================ the time axis (capstone C1) */
+
+/**
+ * One lane of the time axis (audit §2.1): a label, an 8px bar from `from` to `end`, an
+ * end-cap, and a value column that carries the clock time — the chart is also a readable
+ * table, which is what solves the tick-collision problem by construction. `ghostEnd` is a
+ * lever sheet's "before" end, drawn as an outline bar in the same row. Trust basis rides
+ * on the bars exactly as it rides on the dial's ring (M11): estimate → dashed, demo →
+ * hollow. `tone` is comeback mode's solid (the lane he is on) vs outline (the alternative).
+ */
+export interface AxisLane {
+  key: string;
+  label: string;
+  short: string;
+  end: number | null;
+  value: string;
+  ghostEnd?: number | null;
+  basis?: 'log' | 'estimate' | 'demo';
+  binding?: boolean;
+  tone?: 'solid' | 'outline';
+  onTap?: () => void;
+  bracket?: string;
+}
+
+/** A lane end as the value column prints it: the time alone on the headline's own day, day + time beyond it. */
+const dayKeyOf = (m: number) => new Intl.DateTimeFormat('en-US', { timeZone: deviceTz, year: 'numeric', month: 'numeric', day: 'numeric' }).format(new Date(m * 60000));
+export const laneValue = (end: number, now: number): string => (dayKeyOf(end) === dayKeyOf(now) ? clock(end, false) : clock(end));
+/** A length in plain words for the axis's text twin: "59 hours 6 minutes". */
+const twinDur = (m: number): string => {
+  const h = Math.floor(m / 60), r = m % 60;
+  return `${h} hour${h === 1 ? '' : 's'}${r ? ` ${r} minute${r === 1 ? '' : 's'}` : ''}`;
+};
+
+/**
+ * The one axis every future surface draws on (audit §2.0/§2.1): clock time left to right,
+ * "now" at the left edge, fixed lane order, a STOP wall at mustStopBy, the drivable
+ * stretch tinted left of the wall and lanes faded right of it. Geometry is percentages of
+ * one span, computed once and shared by every row, so the wall and the gridlines line up
+ * through all lanes by construction. The picture is aria-hidden; a text twin sentence
+ * carries the same facts in the lanes' end order.
+ */
+function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin }: {
+  from: number;
+  lanes: AxisLane[];
+  wall?: number | null;
+  ghostWall?: number | null;
+  hazard?: boolean;
+  twin: string;
+}) {
+  const ends = lanes.flatMap((l) => [l.end, l.ghostEnd]).filter((x): x is number => x != null && Number.isFinite(x));
+  const latest = Math.max(from, ...ends.filter((e) => e <= from + 960));
+  const to = Math.max(from + 180, Math.min(from + 960, Math.ceil(latest / 30) * 30));
+  const span = to - from;
+  const step = span <= 360 ? 60 : span <= 720 ? 120 : 180;
+  const grid: number[] = [];
+  for (let m = Math.ceil(from / step) * step; m <= to; m += step) grid.push(m);
+  const pct = (m: number) => Math.max(0, Math.min(100, ((m - from) / span) * 100));
+  const hourLabel = (m: number) => new Intl.DateTimeFormat('en-US', { hour: '2-digit', hourCycle: 'h23' }).format(new Date(m * 60000));
+  const wallPct = wall != null && wall > from ? pct(wall) : null;
+  const ghostWallPct = ghostWall != null && ghostWall > from ? pct(ghostWall) : null;
+  const track = (l?: AxisLane) => (
+    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`}>
+      {wallPct !== null && <span class="taxis-tint" style={{ width: `${wallPct}%` }} />}
+      {grid.map((g) => <span key={g} class="taxis-grid" style={{ left: `${pct(g)}%` }} />)}
+      {hazard && <span class="taxis-hazard" />}
+      {l?.ghostEnd != null && <span class="taxis-bar ghost" style={{ width: `${pct(l.ghostEnd)}%` }} />}
+      {l?.end != null && (
+        <>
+          {wallPct !== null && l.end > (wall as number)
+            ? <>
+                <span class={`taxis-bar ${l.basis === 'estimate' ? 'basis-estimate' : l.basis === 'demo' ? 'basis-demo' : ''} ${l.tone === 'outline' ? 'outline' : ''}`} style={{ width: `${wallPct}%` }} />
+                <span class={`taxis-bar faded ${l.basis === 'estimate' ? 'basis-estimate' : l.basis === 'demo' ? 'basis-demo' : ''} ${l.tone === 'outline' ? 'outline' : ''}`} style={{ left: `${wallPct}%`, width: `${pct(l.end) - wallPct}%` }} />
+              </>
+            : <span class={`taxis-bar ${l.basis === 'estimate' ? 'basis-estimate' : l.basis === 'demo' ? 'basis-demo' : ''} ${l.tone === 'outline' ? 'outline' : ''}`} style={{ width: `${pct(l.end)}%` }} />}
+          <span class="taxis-cap" style={{ left: `${pct(l.end)}%` }} />
+          {l.end > to && <span class="taxis-arrow">→</span>}
+        </>
+      )}
+      {ghostWallPct !== null && <span class="taxis-wall ghost" style={{ left: `${ghostWallPct}%` }} />}
+      {wallPct !== null && <span class="taxis-wall" style={{ left: `${wallPct}%` }} />}
+      {l?.bracket && <span class="taxis-bracket" title={l.bracket}>[</span>}
+    </span>
+  );
+  return (
+    <div class="taxis-wrap">
+      <p class="vh">{twin}</p>
+      <div class="taxis" aria-hidden="true">
+        <div class="taxis-row taxis-head">
+          <span class="taxis-label" />
+          <span class="taxis-track taxis-track-head">
+            {grid.map((g) => <span key={g} class="taxis-hour" style={{ left: `${pct(g)}%` }}>{hourLabel(g)}</span>)}
+            {wallPct !== null && <span class="taxis-tag" style={{ left: `${wallPct}%` }}>STOP {clock(wall as number, false)}</span>}
+            {ghostWallPct !== null && <span class="taxis-tag ghost" style={{ left: `${ghostWallPct}%` }}>STOP {clock(ghostWall as number, false)}</span>}
+          </span>
+          <span class="taxis-value" />
+        </div>
+        {lanes.map((l) => {
+          const inner = (
+            <>
+              <span class="taxis-label"><span class="tl-full">{l.label}</span><span class="tl-short">{l.short}</span></span>
+              {track(l)}
+              <span class="taxis-value mono">{l.value}</span>
+            </>
+          );
+          return l.onTap
+            ? <button key={l.key} class="taxis-row taxis-tap" onClick={l.onTap}>{inner}</button>
+            : <div key={l.key} class="taxis-row">{inner}</div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The four limits as lanes, in the meters' fixed order (audit §2.1): 11-hr driving,
+ * 14-hr window, 30-min break, cycle. Every end is asOf + what the evaluation says is
+ * left — the window lane's end is the #14 formula (asOf + window − windowUsed) in its
+ * remaining-minutes form, never a recomputation. The cycle shows its length left as a
+ * duration when its end is more than a day out, which on a normal day it always is.
+ */
+export function limitsLanes(ev: FullEvaluation, basis: 'log' | 'estimate' | 'demo'): AxisLane[] {
+  const sh = ev.shift, now = ev.asOf;
+  const pair = activePair(ev);
+  const lane = (key: string, label: string, short: string, left: number, bindingKey: FullEvaluation['binding'], cycle = false): AxisLane => {
+    const end = now + left;
+    return {
+      key, label, short, end, basis,
+      value: cycle && left > 1440 ? `${dur(left)} left` : laneValue(end, now),
+      binding: ev.binding === bindingKey,
+      ...(key === 'WINDOW_14' && pair ? { bracket: `Your clocks count from ${clock(sh.anchor)}, the end of the first rest in your split pair` } : {}),
+    };
+  };
+  return [
+    lane('DRIVE_11', `${sh.limits.drive / 60}-hr driving`, `${sh.limits.drive / 60}-hr`, sh.driveRemaining, 'DRIVE_11'),
+    lane('WINDOW_14', `${sh.limits.window / 60}-hr window`, `${sh.limits.window / 60}-hr`, sh.windowRemaining, 'WINDOW_14'),
+    ...(Number.isFinite(sh.breakRemaining) ? [lane('BREAK_30', '30-min break', '30-min', sh.breakRemaining, 'BREAK_30')] : []),
+    lane('CYCLE', `${ev.cycle.limit / 60}-hr cycle`, `${ev.cycle.limit / 60}-hr`, ev.cycle.remaining, 'CYCLE', true),
+  ];
+}
+
+/** The limits axis's text twin: the ends in the order they fall, the cycle as a length when it is a day or more out. */
+export function limitsTwin(ev: FullEvaluation): string {
+  const sh = ev.shift, now = ev.asOf;
+  const rows: { name: string; end: number; due?: boolean }[] = [
+    { name: `${sh.limits.drive / 60}-hour driving`, end: now + sh.driveRemaining },
+    { name: `${sh.limits.window / 60}-hour window`, end: now + sh.windowRemaining },
+    ...(Number.isFinite(sh.breakRemaining) ? [{ name: '30-min break', end: now + sh.breakRemaining, due: true }] : []),
+  ].sort((a, b) => a.end - b.end);
+  const parts = rows.map((r) => `${r.name}${r.due ? ' due' : ''} ${laneValue(r.end, now)}`);
+  const cycle = ev.cycle.remaining > 1440
+    ? ` Cycle: ${twinDur(ev.cycle.remaining)} left.`
+    : ` ${ev.cycle.limit / 60}-hour cycle ends ${laneValue(now + ev.cycle.remaining, now)}.`;
+  return `Limits end in this order: ${parts.join(', ')}.${cycle}`;
+}
+
+/**
+ * Comeback mode (audit §2.2, states B–D): when driving comes back, one lane per way back.
+ * The off-duty lane always shows; the sleeper lane shows when it differs (at equal times
+ * they are one lane, §2.2 state C on the seed). The lane for the status he is in is solid,
+ * the alternative outline — and the sleeper lane is a tap into the L3 sheet when the
+ * sleeper is sooner. State D adds the recap lane from the cycle forecast.
+ */
+export function comebackLanes(s: State, ev: FullEvaluation, again: DriveAgain, sleeperAt: number | null, onSleeper?: () => void): AxisLane[] {
+  const now = ev.asOf;
+  const status = s.current?.status ?? 'OFF';
+  const basis = ringBasis(s, now, ev);
+  const lanes: AxisLane[] = [];
+  if (again.off !== null) {
+    lanes.push({
+      key: 'OFF', label: status === 'SB' ? 'Sleeper' : 'Off duty', short: status === 'SB' ? 'Sleeper' : 'Off',
+      end: again.off, value: laneValue(again.off, now), basis, tone: 'solid',
+    });
+  }
+  const sb = status === 'SB' ? null : (again.sb ?? sleeperAt);
+  if (sb !== null && again.off !== null && sb !== again.off && sb < again.off) {
+    lanes.push({
+      key: 'SB', label: 'Sleeper', short: 'Sleeper', end: sb, value: laneValue(sb, now), basis,
+      tone: status === 'OFF' ? 'outline' : 'solid',
+      ...(onSleeper ? { onTap: onSleeper } : {}),
+    });
+  }
+  if (ev.binding === 'CYCLE') {
+    const f = ev.cycle.forecast.find((x) => x.dayStart > now && x.dropsOff > 0);
+    if (f) lanes.push({ key: 'RECAP', label: 'Recap', short: 'Recap', end: f.dayStart, value: `+${dur(f.dropsOff)}`, basis, tone: 'outline' });
+  }
+  return lanes;
+}
+
+/** The comeback axis's text twin. */
+export function comebackTwin(ev: FullEvaluation, again: DriveAgain, sleeperAt: number | null): string {
+  const now = ev.asOf;
+  const parts: string[] = [];
+  if (again.off !== null) parts.push(`off duty ${laneValue(again.off, now)}`);
+  const sb = again.sb ?? sleeperAt;
+  if (sb !== null && again.off !== null && sb !== again.off && sb < again.off) parts.push(`sleeper ${laneValue(sb, now)}`);
+  let out = `Driving comes back: ${parts.join(', ')}.`;
+  if (ev.binding === 'CYCLE') {
+    const f = ev.cycle.forecast.find((x) => x.dayStart > now && x.dropsOff > 0);
+    if (f) out += ` Recap: +${twinDur(f.dropsOff)} comes back at ${laneValue(f.dayStart, now)}.`;
+  }
+  return out;
+}
+
+/**
+ * Now's Timeline card, state A/F (audit §2.2): the dial's centre, unchanged — the same
+ * hero label, value and stacked stop-by, the same limit plate and Why link — with the
+ * ring become lanes. Only the picture under the number is new.
+ */
+function TimelineDrive({ s, now, ev, basis }: { s: State; now: number; ev: FullEvaluation; basis: 'log' | 'estimate' | 'demo' }) {
+  const share = useShareButton(shareText(ev, null));
+  const tone = ev.driveNow < 60 ? 'warn' : 'good';
+  const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
+  return (
+    <section class="hero">
+      <div class="tl-head">
+        <div class="tl-main">
+          <div class="hero-label">You can drive</div>
+          <div class={`hero-value ${tone}`}>{dur(ev.driveNow)}</div>
+          {basis === 'estimate' && <div class="hero-basis">estimate</div>}
+        </div>
+        <div class="hero-stop"><span class="hero-stop-date">Stop by {stopDate}</span>{' '}<span class="hero-stop-time">{stopTime}</span></div>
+      </div>
+      <TimeAxis from={now} lanes={limitsLanes(ev, basis)} wall={ev.mustStopBy} twin={limitsTwin(ev)} />
+      <div class="hero-foot">
+        <span class="limit-plate">limited by {bindingLabel(ev)}</span>
+        <span class="hero-actions">{share}<button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button></span>
+      </div>
+      {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
+        <div class="trust">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
+      )}
+    </section>
+  );
+}
+
+/** The lever chips under the Timeline card (audit §2.4, decision C3-A): at most two, 56px, never the words should/legal/safe/allowed. */
+function LeverChips({ chips }: { chips: Lever[] }) {
+  if (!chips.length) return null;
+  return (
+    <>
+      {chips.map((l) => (
+        <button key={l.id} class="lever" onClick={() => openSheet({ kind: 'lever', lever: l })}>
+          <span class="lever-text"><b>{leverTitle(l)}</b>{leverSub(l) && <span class="lever-sub">{leverSub(l)}</span>}</span>
+          <Icon d={I.next} />
+        </button>
+      ))}
+    </>
+  );
+}
+
+/**
+ * A lever chip's sheet (audit §2.4): the chip's sentence as the title, the ghost axis
+ * (before as outlines, after solid, the wall moved), one rule sentence with its
+ * citation, the log-it-exactly caveat, and — for L2/L3 — a Split Lab pre-fill that
+ * writes the DRAFT only, behind the Lab's one-level draft undo. Nothing here writes
+ * to the log.
+ */
+function LeverSheet({ s, now, ev, lever }: { s: State; now: number; ev: FullEvaluation; lever: Lever }) {
+  const { rule, cite, caveat } = leverRule(lever, ev);
+  const after = leverAfter(s, now, lever);
+  const prefill = leverSplitPrefill(s, now, lever);
+  let ghost: ComponentChildren = null;
+  if ((lever.id === 'L1' || lever.id === 'L2') && after) {
+    const before = limitsLanes(ev, 'log');
+    const lanes = limitsLanes(after, 'log').map((a) => ({ ...a, ghostEnd: before.find((b) => b.key === a.key)?.end ?? null }));
+    ghost = <TimeAxis from={now} lanes={lanes} wall={after.mustStopBy} ghostWall={ev.mustStopBy} twin={`After the rest: ${limitsTwin(after)}`} />;
+  } else if (lever.id === 'L3') {
+    ghost = <TimeAxis from={now} lanes={[{ key: 'AGAIN', label: 'Drive again', short: 'Again', end: lever.sbAt, ghostEnd: lever.offAt, value: laneValue(lever.sbAt, now) }]} twin={`In the sleeper, driving comes back at ${laneValue(lever.sbAt, now)}; off duty, ${laneValue(lever.offAt, now)}.`} />;
+  } else if (lever.id === 'L4') {
+    ghost = <TimeAxis from={now} lanes={[{ key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr cycle`, short: `${ev.cycle.limit / 60}-hr`, end: lever.at, ghostEnd: lever.at + lever.available, value: laneValue(lever.at, now) }]} twin={`At ${laneValue(lever.at, now)}, ${twinDur(lever.dropsOff)} of cycle time comes back.`} />;
+  }
+  return (
+    <Sheet title={leverTitle(lever)}>
+      {ghost}
+      <p class="small">{rule}</p>
+      <div class="why-cite">{cite}</div>
+      <p class="trust">{caveat}</p>
+      {/* The pre-fill jump lands in the Lab with Now recorded as the return, so the Lab's
+          back bar brings the driver home. This sheet action is the one Split jump the
+          capstone audit §2.4 specifies; under sanction S11 (Lorico, Nov 9 2026) the
+          Patch 13 pin guards NowTab's own body against a Split door, and this call —
+          the only one of its shape in the app — stands here in the open. */}
+      {prefill && (
+        <button class="wide" onClick={() => { replaceSplitDraft({ ...getState().split, ...prefill }); openSheet(null); setState({ tab: 'split', planReturn: 'now' }); }}>Try it in Split Lab</button>
+      )}
+      <button class="primary wide" data-first onClick={() => openSheet(null)}>Close</button>
+    </Sheet>
+  );
+}
+
+/**
+ * The split pair in timeline mode (audit §2.6, N-3): a trust-strip chip naming the
+ * anchor, with the dial mode's paragraph kept verbatim one tap down inside it.
+ */
+function SplitPairChip({ ev }: { ev: FullEvaluation }) {
+  const pair = activePair(ev);
+  if (!pair) return null;
+  return (
+    <NoticeLine summary={`Split in use — clocks count from ${clock(ev.shift.anchor)}`}>
+      <SplitPairWords ev={ev} />
+    </NoticeLine>
+  );
+}
+
 /** The four statuses, always at the bottom of Now, within thumb reach. */
 function StatusDock({ s }: { s: State }) {
   return (
@@ -1061,15 +1379,80 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
   /** Today's day-close bookmark, when the day stands closed (patch 13; the store's one rule). */
   const closedToday = dayCloseToday(s, now);
   const undo = useUndo();
+  const basis = ringBasis(s, now, ev);
+  /**
+   * Capstone C1 (decisions D2-A / C1-A): the Timeline is a second main card beside the
+   * dial, the driver's choice, kept in the state object. Dial mode renders the shipped
+   * Now exactly as before; timeline mode keeps the same headline and swaps the dial's
+   * ring for the lanes (the lanes ARE the meters there, §2.6 — Meters is not rendered),
+   * seats the lever chips under the card, and turns the split-pair paragraph into a
+   * trust-strip chip.
+   */
+  const timeline = s.nowCard === 'timeline';
+  const status = s.current?.status ?? 'OFF';
+  /**
+   * The levers (fix round, Verify-C1 defect D5): audit §2.4 specified them computed in
+   * an idle callback after paint, on the audit's key (segments, current, config,
+   * minute). The first build memoised them on the render path instead, and the true
+   * worst case costs ~27 evaluations synchronously on every render — so the
+   * computation now runs from this effect, scheduled with requestIdleCallback
+   * (setTimeout fallback), holds its result in state, and the chips render when it
+   * lands. The minute stays in the key for every status: the resting searches
+   * read it too (L3 asks about a sleeper rest starting now, L1 about a break
+   * starting now, L4 about the next roll-off after now), so a resting driver's
+   * levers recompute once a minute in the idle callback rather than freezing
+   * at the last entry (delta defect D6). The snapshot the effect closes over is
+   * the render its key describes, so it is never a minute stale. The previous
+   * result stays up until the new one lands rather than blinking out; the gap
+   * is one idle tick, and any tap that changes the record re-keys the effect
+   * at once.
+   */
+  const [levers, setLevers] = useState<Lever[]>([]);
+  useEffect(() => {
+    if (!timeline) { setLevers([]); return; }
+    let live = true;
+    const run = () => { if (live) setLevers(computeLevers(s, now, ev, basis, again)); };
+    const w = globalThis as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(run, { timeout: 1000 });
+      return () => { live = false; w.cancelIdleCallback?.(id); };
+    }
+    const t = setTimeout(run, 0);
+    return () => { live = false; clearTimeout(t); };
+  }, [timeline, s.segments, s.current, s.config, s.tentative, basis, now]);
+  const chips = pickChips(levers);
+  const l3 = levers.find((l): l is Extract<Lever, { id: 'L3' }> => l.id === 'L3');
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
-      {ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={ringBasis(s, now, ev)} /> : <RestHero s={s} now={now} ev={ev} again={again} />}
+      {timeline ? (
+        ev.driveNow > 0 || !again
+          ? <TimelineDrive s={s} now={now} ev={ev} basis={basis} />
+          : <RestHero s={s} now={now} ev={ev} again={again} tail={<TimeAxis from={now} lanes={comebackLanes(s, ev, again, l3?.sbAt ?? null, l3 ? () => openSheet({ kind: 'lever', lever: l3 }) : undefined)} hazard={status === 'ON' || status === 'D'} twin={comebackTwin(ev, again, l3?.sbAt ?? null)} />} />
+      ) : (
+        ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={basis} /> : <RestHero s={s} now={now} ev={ev} again={again} />
+      )}
+      {/* The one-time Timeline chip (decision C1-A): an existing install — a save holding
+          a record — that is still on the dial sees it once, under the hero. Either tap
+          answers it for good; the More → Planning switch is the standing way back. */}
+      {!timeline && !s.nowCardAsked && (s.segments.length > 0 || s.current !== null) && (
+        <div class="newcard">
+          <span><b>New:</b> your limits on a timeline</span>
+          <span class="newcard-btns">
+            <button class="mini primary" onClick={() => setState({ nowCard: 'timeline', nowCardAsked: true })}>Show me</button>
+            <button class="mini" onClick={() => setState({ nowCardAsked: true })}>Keep the dial</button>
+          </span>
+        </div>
+      )}
+      {timeline && <LeverChips chips={chips} />}
       {/* The record's notices ride under the answer as one-line chips (patch 16, P2): the hero
           leads the screen now — in the cab and in the 3 a.m. review alike, the wrap-up business
           (splitting, ending the day) waits below the number it wraps up. */}
       <Notices ev={ev} now={now} s={s} strip />
-      <SplitPairLine ev={ev} />
+      {timeline ? <SplitPairChip ev={ev} /> : <SplitPairLine ev={ev} />}
       {/* The load question is the hook of the whole app, and it sat two taps away behind Plan
           (3 a.m. review, patch 7). It now rides Now itself, in the same dress the Plan hub and
           Recap give it, one tap from the screen the app opens on. */}
@@ -1078,7 +1461,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
       </button>
-      <Meters ev={ev} />
+      {!timeline && <Meters ev={ev} />}
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
           Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
@@ -1649,6 +2032,10 @@ function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   return (
     <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
+      {/* The same lanes as the Timeline card, in both modes (audit §2.6): one detailed view.
+          Out of time, every end is at or behind now and the wall is gone — the lanes then
+          say when each rule ended, which is the sheet's question in that state. */}
+      <TimeAxis from={now} lanes={limitsLanes(ev, ringBasis(s, now, ev))} wall={ev.driveNow > 0 ? ev.mustStopBy : null} twin={limitsTwin(ev)} />
       {pair && <p class="small"><b>Split in use:</b> {pairWords(pair)}.</p>}
       <ul class="why">{rows.map((r) => (
         <li key={r.key} class={ev.binding === r.key ? 'on' : ''}>
@@ -2472,10 +2859,46 @@ function PlanTab() {
 
 /* ============================================================ Split Lab */
 
+/* ============================================================ Split Lab draft undo */
+
+/**
+ * One level of undo for the Split Lab DRAFT (capstone C1, audit §2.4): replacing the
+ * whole draft at once — "Try an example split", or a lever sheet's [Try it in Split Lab]
+ * pre-fill — keeps the draft it replaced behind one Undo. It is the DRAFT only: nothing
+ * here touches the log or the what-if rows. Any other draft change (a slider, a toggle)
+ * retires the offer, the Log undo's N2 rule: restoring a whole snapshot after the driver
+ * has since changed the draft would throw that later change away without a word.
+ * Module state, like the Log's undo; not persisted — a replaced draft is a moment's
+ * second thought, not part of the record.
+ */
+let splitDraftBefore: SplitDraft | null = null;
+/** Keep the current Split draft behind one undo (shared by both replace paths). */
+export function snapshotSplitDraft() { splitDraftBefore = { ...getState().split }; }
+/** Replace the whole Split draft, keeping the replaced one behind one undo. */
+export function replaceSplitDraft(next: SplitDraft) {
+  snapshotSplitDraft();
+  setState({ split: { ...next } });
+}
+export function undoSplitDraft(): boolean {
+  if (!splitDraftBefore) return false;
+  const b = splitDraftBefore;
+  splitDraftBefore = null;
+  setState({ split: b });
+  return true;
+}
+export function splitDraftUndoPending(): boolean { return splitDraftBefore !== null; }
+export function clearSplitDraftUndo() { splitDraftBefore = null; }
+
 function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   // The what-if lives in the store: a detour to the Log tab used to reset the plan being compared.
   const sd = s.split;
-  const setSplit = (p: Partial<SplitDraft>) => setState({ split: { ...sd, ...p } });
+  // A partial carrying every draft key is a whole-draft load ("Try an example split"):
+  // it keeps the draft it replaces behind the one-level undo (audit §2.4). Any partial
+  // edit — a slider, a toggle — retires the offer instead (the Log undo's N2 rule).
+  const setSplit = (p: Partial<SplitDraft>) => {
+    if (Object.keys(DEFAULT_SPLIT).every((k) => k in p)) snapshotSplitDraft(); else clearSplitDraftUndo();
+    setState({ split: { ...sd, ...p } });
+  };
   const { b1, b1s, dwell, drive, b2, b2s } = sd;
 
   const base = useMemo(() => allSegments(s, now).filter((x) => !x.tentative), [s, now]);
@@ -2524,6 +2947,12 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     <>
       <BackToPlan s={s} />
       <div class="split-now-after" aria-live="polite">Your 14 ends <b>{clock(windowEndNow)}</b> now → <b>{clock(windowEndAfter)}</b> {paired ? 'with this pair' : 'with this plan (no split credit)'}</div>
+      {splitDraftUndoPending() && (
+        <div class="row undo">
+          <span>Draft replaced.</span>
+          <button class="mini" onClick={() => undoSplitDraft()}>Undo</button>
+        </div>
+      )}
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
         {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
@@ -3127,6 +3556,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
+        <label>Main card on Now<Toggle options={[['timeline', 'Timeline'], ['dial', 'Dial']]} value={s.nowCard} onChange={(v) => setState({ nowCard: v as State['nowCard'], nowCardAsked: true })} /></label>
+        <p class="muted small">Timeline shows your limits as lanes ending at their clock times, so you can see which one ends first. Dial is the gauge the app has always had. The driving view keeps the dial either way.</p>
         <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
         <p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
       </Card>
@@ -3173,6 +3604,23 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
  * on every launch after that. It never disappears entirely, and the home-terminal question still
  * rides along in both sizes until the zone is confirmed.
  */
+/**
+ * The "I understand" tap (capstone C1, decision C1-A): always records the acknowledgement.
+ * On the FIRST acknowledgement from a device holding no record at all — no segments, no
+ * what-if rows, no live status, i.e. a fresh install — it also opens Now on the Timeline.
+ * Existing installs acknowledged the full disclaimer long ago (patch 7), so they never pass
+ * through here with the flag unset: they keep the dial, and meet the Timeline through the
+ * one-time chip (NowTab) or the More → Planning switch instead.
+ */
+export function acknowledgeDisclaimer() {
+  setState((cur) => (cur.disclaimerAcked
+    ? { disclaimerAcked: true }
+    : {
+        disclaimerAcked: true,
+        ...(cur.segments.length === 0 && cur.tentative.length === 0 && !cur.current ? { nowCard: 'timeline' as const } : {}),
+      }));
+}
+
 function Disclaimer({ onClose, tz, needsTz, compact }: { onClose: (tz?: string) => void; tz: string; needsTz: boolean; compact?: boolean }) {
   // Move focus into the dialog: keyboard and screen-reader users start on its only control.
   const btn = useRef<HTMLButtonElement>(null);
@@ -3354,7 +3802,7 @@ export function App() {
   if (showsDrivingView(s)) {
     return (
       <div class="app">
-        {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setState({ disclaimerAcked: true }); setDisclaimer(false); }} />}
+        {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); acknowledgeDisclaimer(); setDisclaimer(false); }} />}
         <div inert={blocked}>
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
@@ -3365,7 +3813,7 @@ export function App() {
   }
   return (
     <div class={fresh ? 'app is-demo' : 'app'}>
-      {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); setState({ disclaimerAcked: true }); setDisclaimer(false); }} />}
+      {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); acknowledgeDisclaimer(); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>
         {s.nowOverride !== null && (
@@ -3401,6 +3849,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
+      {!disclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
     </div>

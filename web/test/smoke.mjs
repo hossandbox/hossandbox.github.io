@@ -2729,11 +2729,21 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/setState\(\{ tab: 'load', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's load door must record Now as the return");
   if (!/setState\(\{ tab: 'load', planReturn: 'recap' \}\)/.test(app)) throw new Error("patch 7.1: Recap's load door must record Recap as the return");
   if (!/setState\(\{ tab, planReturn: 'plan' \}\)/.test(app)) throw new Error('patch 7.1: the Plan hub doors must record Plan as the return');
-  // patch 13 (Lorico, Nov 8 2026): Now's split door itself is gone with the quick row, so there
-  // is no door left to record a return — the pin that required it is inverted to require its
-  // absence. The recorded-return machinery and Split's back bar are untouched, and the flow
-  // pins below still drive Split with a Now return recorded, exactly as before.
-  if (/setState\(\{ tab: 'split', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 13: Now must not carry a split door — the quick row was removed");
+  // patch 13 (Lorico, Nov 8 2026), re-scoped by sanction S11 (Lorico, Nov 9 2026, capstone
+  // C1 fix round): the pin guards its stated intent — Now itself carries no split door —
+  // instead of one literal anywhere in the file. (a) NowTab's own body holds no
+  // `tab: 'split'` in any property order. (b) The one sanctioned jump — the LeverSheet's
+  // [Try it in Split Lab] handler, audit §2.4, which only shows when an L2/L3 lever
+  // fires — appears exactly once in app.tsx, inside LeverSheet. The recorded-return
+  // machinery and Split's back bar are untouched, and the flow pins below still drive
+  // Split with a Now return recorded, exactly as before.
+  {
+    const bodyOf = (name) => { const a = app.indexOf(`function ${name}(`); const b = app.indexOf('\nfunction ', a + 1); return app.slice(a, b < 0 ? undefined : b); };
+    if (/tab:\s*'split'/.test(bodyOf('NowTab'))) throw new Error('patch 13/S11: NowTab must not carry a split door in any property order');
+    const jump = "setState({ tab: 'split', planReturn: 'now' })";
+    if ((app.split(jump).length - 1) !== 1) throw new Error('patch 13/S11: the sanctioned LeverSheet split jump must appear exactly once in app.tsx');
+    if (!bodyOf('LeverSheet').includes(jump)) throw new Error('patch 13/S11: the one split jump must live inside LeverSheet');
+  }
   if ((app.match(/setState\(\{ tab: s\.planReturn \}\)/g) || []).length < 3) throw new Error("patch 7.1: the load flow's two backs and the planning back bar must all honour the recorded return");
   // from Now: question 1's back is labelled for Now and lands there
   ss({ segments: [], tentative: [], current: { status: 'ON', since: now - 60 }, tab: 'load', planReturn: 'now', loadCheck: { ...DL71 }, nowOverride: null });
@@ -5717,5 +5727,225 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   delete globalThis.speechSynthesis; delete globalThis.SpeechSynthesisUtterance;
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, speakAlerts: false, speechAsked: false, speakAskOpen: false });
   console.log('patch 17 fix round (F1 back-date, F2 consent pair, F3 ask trigger, N1 cold start): OK');
+}
+// --- capstone C1: the Timeline card, the lever chips L1–L4, and decision C1-A.
+// Every expectation below is derived from the engine (evaluate / driveAgainAt) and the
+// store's own formatters on the same state the app renders — a regression in the lever
+// MATH, not just in the wording, is what turns these red.
+{
+  const app = await import('../src/app.tsx');
+  const lev = await import('../src/levers.ts');
+  const { parseSaved, INITIAL_STATE: INIT, allSegments, dur } = await import('../src/store.ts');
+  const { evaluate, driveAgainAt, pruneHistory } = await import('../../engine/src/index.ts');
+  const CD = (day, h, m = 0) => Math.floor(new Date(2026, 10, day, h, m).getTime() / 60000);
+  const NY = { ...INIT.config, timeZone: 'America/New_York' };
+  const mk = (over) => ({ ...INIT, config: NY, disclaimerAcked: true, historyAcknowledged: true, ...over });
+  const evOf = (s, now) => evaluate(allSegments(s, now), { asOf: now, config: s.config });
+  app.setLaunchNotice(false);
+
+  // (a) parseSaved repairs nowCard / nowCardAsked (decision C1-A's consent-safe default)
+  if (parseSaved(JSON.stringify({ nowCard: 'timeline', nowCardAsked: true })).nowCard !== 'timeline') throw new Error('c1: a saved timeline choice must survive parseSaved');
+  if (parseSaved(JSON.stringify({ nowCard: 'timeline', nowCardAsked: true })).nowCardAsked !== true) throw new Error('c1: a saved nowCardAsked must survive parseSaved');
+  if (parseSaved(JSON.stringify({ nowCard: 'bogus' })).nowCard !== 'dial') throw new Error('c1: a damaged nowCard must repair to the dial');
+  if (parseSaved('{}').nowCard !== 'dial' || parseSaved('{}').nowCardAsked !== false) throw new Error('c1: an old save with no nowCard fields opens on the dial, unasked');
+  if (parseSaved(JSON.stringify({ nowCardAsked: 'yes' })).nowCardAsked !== false) throw new Error('c1: a non-true nowCardAsked must repair to false');
+
+  // (b) the first full-disclaimer tap on a FRESH device chooses the Timeline (C1-A);
+  // a device with a record keeps the dial; an already-acknowledged save never moves.
+  setState(mk({ disclaimerAcked: false, nowCard: 'dial', segments: [], tentative: [], current: null }));
+  app.acknowledgeDisclaimer();
+  if (getState().nowCard !== 'timeline' || getState().disclaimerAcked !== true) throw new Error('c1: a fresh device’s first I-understand must open on the Timeline');
+  setState(mk({ disclaimerAcked: false, nowCard: 'dial', segments: [{ status: 'OFF', start: CD(8, 0), end: CD(8, 10) }], current: null }));
+  app.acknowledgeDisclaimer();
+  if (getState().nowCard !== 'dial') throw new Error('c1: a device with a record keeps the dial at the disclaimer');
+  setState(mk({ disclaimerAcked: true, nowCard: 'dial', segments: [], tentative: [], current: null }));
+  app.acknowledgeDisclaimer();
+  if (getState().nowCard !== 'dial') throw new Error('c1: acknowledging again must never move an existing choice');
+
+  // The audit's standard seed (Appendix A) on the New York terminal clock.
+  const seedSegs = [
+    { status: 'OFF', start: CD(8, 5, 40), end: CD(8, 7, 40) }, { status: 'SB', start: CD(8, 7, 40), end: CD(8, 15, 40) },
+    { status: 'ON', start: CD(8, 15, 40), end: CD(8, 16, 25) }, { status: 'D', start: CD(8, 16, 25), end: CD(8, 19, 10) },
+    { status: 'OFF', start: CD(8, 19, 10), end: CD(8, 19, 40) }, { status: 'ON', start: CD(8, 19, 40), end: CD(8, 21, 55) }];
+  const seedNow = CD(9, 3, 4);
+  const seedState = mk({ segments: seedSegs, current: { status: 'D', since: CD(8, 21, 55) }, nowOverride: seedNow, tab: 'now', drivingView: false });
+  const seedEv = evOf(seedState, seedNow);
+  if (seedEv.driveNow !== 156 || seedEv.binding !== 'WINDOW_14') throw new Error('c1 setup: the standard seed must give 2h 36m with the window binding');
+
+  // (c) the one-time chip: an existing install on the dial sees it once, a fresh one never
+  setState({ ...seedState, nowCard: 'dial', nowCardAsked: false });
+  let h = out('c1/one-time chip');
+  if (!h.includes('your limits on a timeline') || !h.includes('>Show me<') || !h.includes('>Keep the dial<')) throw new Error('c1: an existing install on the dial must see the one-time Timeline chip');
+  setState({ nowCardAsked: true });
+  h = out('c1/chip answered');
+  if (h.includes('your limits on a timeline')) throw new Error('c1: once answered, the chip must not come back');
+  setState(mk({ segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, nowOverride: seedNow, tab: 'now' }));
+  h = out('c1/fresh, no chip');
+  if (h.includes('your limits on a timeline')) throw new Error('c1: a fresh device must not see the chip (it opens on the Timeline instead)');
+
+  // (f) the lever unit pins, expectations from the engine
+  const seedLevers = lev.computeLevers(seedState, seedNow, seedEv, 'log');
+  if (seedLevers.length !== 1 || seedLevers[0].id !== 'L2') throw new Error('c1: the seed must offer exactly the L2 free-rest lever');
+  const l2 = seedLevers[0];
+  if (l2.restMin !== 120 || l2.status !== 'either' || l2.driveAfter !== seedEv.driveNow) throw new Error('c1: seed L2 = 2h, off duty or sleeper, driving kept whole (FAQ 22)');
+  if (l2.pending?.isReset !== true || l2.pending?.longestSB !== 480) throw new Error('c1: seed L2 pairs with the 8h-sleeper reset leg');
+  const negState = mk({ segments: [
+    { status: 'OFF', start: CD(8, 5, 40), end: CD(8, 15, 40) },
+    { status: 'ON', start: CD(8, 15, 40), end: CD(8, 16, 25) }, { status: 'D', start: CD(8, 16, 25), end: CD(8, 19, 10) },
+    { status: 'OFF', start: CD(8, 19, 10), end: CD(8, 19, 40) }, { status: 'ON', start: CD(8, 19, 40), end: CD(8, 21, 55) }],
+    current: { status: 'D', since: CD(8, 21, 55) } });
+  if (lev.computeLevers(negState, seedNow, evOf(negState, seedNow), 'log').some((l) => l.id === 'L2')) throw new Error('c1: an all-off-duty reset leaves no sleeper leg to pair with — no L2');
+  if (lev.computeLevers(seedState, seedNow, seedEv, 'estimate').length !== 0) throw new Error('c1: no lever chips on an estimate record');
+  if (lev.computeLevers(seedState, seedNow, seedEv, 'demo').length !== 0) throw new Error('c1: no lever chips on the demo clock');
+  if (lev.computeLevers(mk({ ...seedState, tentative: [{ status: 'OFF', start: seedNow, end: seedNow + 60, tentative: true }] }), seedNow, seedEv, 'log').length !== 0) throw new Error('c1: no lever chips while what-if rows are on the log');
+  // (h) the seed's pre-fill: 2h in the Lab, status left to the driver ('either'), driving = what the pair keeps
+  const pf = lev.leverSplitPrefill(seedState, seedNow, l2);
+  if (!pf || pf.b1 !== 120 || pf.drive !== l2.driveAfter || 'b1s' in pf) throw new Error('c1: the seed L2 pre-fill must be b1 120, drive = driveAfter, no status forced');
+
+  // V1: the break binds — L1's numbers are the engine's own after a 30-minute rest
+  const v1State = mk({ segments: [{ status: 'OFF', start: CD(8, 20), end: CD(9, 6) }, { status: 'D', start: CD(9, 6), end: CD(9, 13, 30) }], current: { status: 'D', since: CD(9, 6) } });
+  const v1Now = CD(9, 13, 30), v1Ev = evOf(v1State, v1Now);
+  const v1Levers = lev.computeLevers(v1State, v1Now, v1Ev, 'log');
+  const v1After = evaluate([...pruneHistory(allSegments(v1State, v1Now), v1Now, NY), { status: 'OFF', start: v1Now, end: v1Now + 30 }], { asOf: v1Now + 30, config: NY });
+  if (v1Ev.binding !== 'BREAK_30' || v1Levers.length !== 1 || v1Levers[0].id !== 'L1') throw new Error('c1: V1 must offer exactly L1');
+  if (v1Levers[0].driveAfter !== v1After.driveNow || v1Levers[0].stopBy !== v1After.mustStopBy) throw new Error('c1: L1’s numbers must be the engine’s after the break');
+
+  // V2: resting off duty with no time — L3's numbers are driveAgainAt's own
+  const v2State = mk({ segments: [
+    { status: 'OFF', start: CD(8, 20), end: CD(9, 6) }, { status: 'D', start: CD(9, 6), end: CD(9, 10) },
+    { status: 'OFF', start: CD(9, 10), end: CD(9, 13) }, { status: 'D', start: CD(9, 13), end: CD(9, 17) },
+    { status: 'ON', start: CD(9, 17), end: CD(9, 20) }], current: { status: 'OFF', since: CD(9, 20) } });
+  const v2Now = CD(9, 21, 0), v2Ev = evOf(v2State, v2Now);
+  const v2Segs = pruneHistory(allSegments(v2State, v2Now), v2Now, NY);
+  const v2Off = driveAgainAt(v2Segs, { asOf: v2Now, config: NY }, 'OFF');
+  const v2Sb = driveAgainAt(v2Segs, { asOf: v2Now, config: NY }, 'SB');
+  const v2Levers = lev.computeLevers(v2State, v2Now, v2Ev, 'log');
+  if (!(v2Sb !== null && v2Off !== null && v2Sb < v2Off)) throw new Error('c1 setup: on V2 the sleeper must genuinely come back sooner');
+  if (v2Levers.length !== 1 || v2Levers[0].id !== 'L3' || v2Levers[0].sbAt !== v2Sb || v2Levers[0].offAt !== v2Off) throw new Error('c1: V2 must offer exactly L3 with driveAgainAt’s numbers');
+
+  // V3: the cycle binds — L4 reads the evaluation's own forecast
+  const v3Segs = [];
+  for (let d = 2; d <= 8; d++) v3Segs.push(
+    { status: 'ON', start: CD(d, 5), end: CD(d, 6) }, { status: 'D', start: CD(d, 6), end: CD(d, 14) }, { status: 'ON', start: CD(d, 14), end: CD(d, 15) },
+    { status: 'OFF', start: CD(d, 15), end: CD(d + 1, 5) });
+  const v3State = mk({ segments: v3Segs, current: { status: 'ON', since: CD(9, 5) } });
+  const v3Now = CD(9, 6, 0), v3Ev = evOf(v3State, v3Now);
+  const v3Levers = lev.computeLevers(v3State, v3Now, v3Ev, 'log');
+  const f3 = v3Ev.cycle.forecast.find((x) => x.dayStart > v3Now && x.dropsOff > 0);
+  if (v3Ev.binding !== 'CYCLE' || !f3) throw new Error('c1 setup: V3 must bind on the cycle with a forecast roll-off');
+  if (v3Levers.length !== 1 || v3Levers[0].id !== 'L4' || v3Levers[0].at !== f3.dayStart || v3Levers[0].dropsOff !== f3.dropsOff || v3Levers[0].available !== f3.availableAtStart) throw new Error('c1: V3 must offer exactly L4 with the forecast’s numbers');
+
+  // (g) the word list: no lever sentence, rule or caveat may say should / legal / safe / allowed
+  for (const [s2, n2, e2] of [[seedState, seedNow, seedEv], [v1State, v1Now, v1Ev], [v2State, v2Now, v2Ev], [v3State, v3Now, v3Ev]]) {
+    for (const l of lev.computeLevers(s2, n2, e2, 'log')) {
+      const r = lev.leverRule(l, e2);
+      const text = `${lev.leverTitle(l)} ${lev.leverSub(l) ?? ''} ${r.rule} ${r.caveat}`;
+      if (/\b(should|legal|safe|allowed)\b/i.test(text)) throw new Error(`c1: lever ${l.id} uses a forbidden word: ${text}`);
+    }
+  }
+  // C3-A: the chip cap is a plain slice of the priority-ordered list
+  const capped = lev.pickChips([v3Levers[0], v2Levers[0], l2]);
+  if (capped.length !== 2 || capped[0] !== v3Levers[0] || capped[1] !== v2Levers[0]) throw new Error('c1: pickChips must cap at two, in the order given');
+
+  // (d) the Timeline card, state A: lanes in the meters' order, values as clock times,
+  // the STOP wall tagged, the cycle as a duration, the twin in end order — and the L2 chip
+  setState({ ...seedState, nowCard: 'timeline', nowCardAsked: true });
+  h = out('c1/timeline state A');
+  if (!h.includes('class="taxis"')) throw new Error('c1: timeline mode must render the time axis');
+  if (!h.includes(`>STOP ${clock(seedEv.mustStopBy, false)}<`)) throw new Error('c1: the STOP wall must be tagged with the stop-by time');
+  for (const [end, val] of [
+    [seedNow + seedEv.shift.driveRemaining, app.laneValue(seedNow + seedEv.shift.driveRemaining, seedNow)],
+    [seedNow + seedEv.shift.windowRemaining, app.laneValue(seedNow + seedEv.shift.windowRemaining, seedNow)],
+    [seedNow + seedEv.shift.breakRemaining, app.laneValue(seedNow + seedEv.shift.breakRemaining, seedNow)],
+  ]) if (!h.includes(`taxis-value mono">${val}<`)) throw new Error(`c1: a limits lane value must read ${val}`);
+  if (!h.includes(`taxis-value mono">${dur(seedEv.cycle.remaining)} left<`)) throw new Error('c1: a cycle more than a day out reads as a duration left');
+  if (!h.includes(app.limitsTwin(seedEv))) throw new Error('c1: the axis must carry its text twin');
+  // D5 (fix round): the levers are computed off the render path, so the first,
+  // synchronous render of the Timeline card carries NO chips — they land after the
+  // idle-scheduled flush, pinned behaviourally in the DOM lane (test/dom/c1flush.mjs).
+  if (h.includes('class="lever"') || h.includes(lev.leverTitle(l2))) throw new Error('c1/D5: the first render must show the Timeline card without lever chips');
+  if (h.indexOf('taxis-label') > h.indexOf('STOP')) throw new Error('c1 setup: axis order sanity');
+  setState({ ...seedState, nowCard: 'dial' });
+  h = out('c1/dial has no axis');
+  if (h.includes('class="taxis"') || h.includes('class="lever"')) throw new Error('c1: dial mode must render neither the axis nor lever chips');
+
+  // (e) state C lanes (V2): off-duty and sleeper comeback times, the L3 chip under the card
+  setState({ ...v2State, nowOverride: v2Now, tab: 'now', drivingView: false, nowCard: 'timeline', nowCardAsked: true });
+  h = out('c1/timeline state C');
+  if (!h.includes(`taxis-value mono">${app.laneValue(v2Off, v2Now)}<`)) throw new Error('c1: state C must show the off-duty comeback lane at driveAgainAt’s time');
+  // The sleeper comeback lane hangs off the L3 lever (its sbAt), and the L3 chip is a
+  // lever too — since D5 both land only after the idle flush, so both are pinned in
+  // the DOM lane (test/dom/c1flush.mjs), not on this first render.
+  if (h.includes(lev.leverTitle(v2Levers[0]))) throw new Error('c1/D5: the first render must not carry the L3 chip');
+  // state D (V3): the recap lane carries the roll-off amount, and the L4 chip rides
+  // under the card — the fixture's days are fully logged, so the basis is a full log
+  // (a record with unlogged gaps is an estimate, and estimates get no chips)
+  setState({ ...v3State, nowOverride: v3Now, tab: 'now', drivingView: false, nowCard: 'timeline', nowCardAsked: true });
+  h = out('c1/timeline state D');
+  if (!h.includes(`taxis-value mono">+${dur(f3.dropsOff)}<`)) throw new Error('c1: state D’s recap lane must carry the hours coming back');
+  if (h.includes(lev.leverTitle(v3Levers[0]))) throw new Error('c1/D5: the first render must not carry the L4 chip (it lands after the idle flush; DOM lane)');
+
+  // (j) the Why sheet gains the same axis at its top, in dial mode too
+  setState({ ...seedState, nowCard: 'dial' });
+  app.openSheet({ kind: 'why' });
+  h = out('c1/why axis');
+  if (!h.includes('taxis-wrap')) throw new Error('c1: the Why sheet must carry the time axis');
+  if (!(h.indexOf('taxis-wrap') < h.indexOf('why-head'))) throw new Error('c1: the Why axis must sit above the sheet’s rule rows');
+  if (!h.includes(app.limitsTwin(seedEv))) throw new Error('c1: the Why axis must carry the same twin');
+  app.openSheet(null);
+
+  // (i) the Split draft undo: a whole-draft replace keeps what it replaced behind one Undo
+  const { DEFAULT_SPLIT } = await import('../src/store.ts');
+  setState(mk({ tab: 'split', nowOverride: seedNow, split: { ...DEFAULT_SPLIT, drive: 222 } }));
+  app.replaceSplitDraft({ ...DEFAULT_SPLIT, drive: 111 });
+  if (!app.splitDraftUndoPending() || getState().split.drive !== 111) throw new Error('c1: replaceSplitDraft must swap the draft and arm the undo');
+  h = out('c1/draft undo row');
+  if (!h.includes('Draft replaced.')) throw new Error('c1: the Split screen must offer the draft undo while it stands');
+  if (!app.undoSplitDraft() || getState().split.drive !== 222 || app.splitDraftUndoPending()) throw new Error('c1: the draft undo must restore the replaced draft exactly once');
+  app.clearSplitDraftUndo();
+
+  // (k) D1 (fix round): a driver who is already resting gets no L2 — more rest there
+  // completes a 395.3(a)(1) reset, and the sheet must not call it a split pair. The
+  // seed driven to 03:04 and parked off duty, read at 03:34: 126 left, window binding.
+  const parkedState = mk({ segments: [...seedSegs, { status: 'D', start: CD(8, 21, 55), end: seedNow }], current: { status: 'OFF', since: seedNow }, nowOverride: seedNow + 30 });
+  const parkedEv = evOf(parkedState, seedNow + 30);
+  if (parkedEv.driveNow !== 126 || parkedEv.binding !== 'WINDOW_14') throw new Error('c1/D1 setup: the parked seed must hold 126 with the window binding');
+  if (lev.computeLevers(parkedState, seedNow + 30, parkedEv, 'log').some((l) => l.id === 'L2')) throw new Error('c1/D1: no L2 while the driver is already resting');
+
+  // (l) D2 (fix round): the L2 sheet may say "It gives you window, not more driving"
+  // only when the pair hands back no driving. Fixture: a 2h rest pairs with the 8h
+  // sleeper leg and re-anchors the clocks — 480 back against 60 now.
+  const d2State = mk({ segments: [
+    { status: 'OFF', start: CD(8, 0), end: CD(8, 10) }, { status: 'D', start: CD(8, 10), end: CD(8, 14) },
+    { status: 'SB', start: CD(8, 14), end: CD(8, 22) }], current: { status: 'ON', since: CD(8, 22) } });
+  const d2Now = CD(8, 23), d2Ev = evOf(d2State, d2Now);
+  const d2Levers = lev.computeLevers(d2State, d2Now, d2Ev, 'log');
+  if (d2Ev.driveNow !== 60 || d2Levers.length !== 1 || d2Levers[0].id !== 'L2' || d2Levers[0].driveAfter !== 480) throw new Error('c1/D2 setup: the fixture must offer L2 handing back 480 against 60');
+  if (lev.leverRule(d2Levers[0], d2Ev).rule.includes('not more driving')) throw new Error('c1/D2: the sheet must not claim "not more driving" when the pair hands back driving');
+  if (!lev.leverRule(l2, seedEv).rule.includes('It gives you window, not more driving.')) throw new Error('c1/D2: the sentence stays when the pair hands back no driving (the seed)');
+
+  // (m) D3 (fix round): on an estimate record, the faded lane segments past the STOP
+  // wall keep the estimate styling — a solid bar there dresses a guess as a fact.
+  // The seed with the 19:10–21:55 stretch unlogged is that estimate record.
+  setState(mk({ segments: seedSegs.slice(0, 4), current: { status: 'D', since: CD(8, 21, 55) }, nowOverride: seedNow, tab: 'now', drivingView: false, nowCard: 'timeline', nowCardAsked: true }));
+  h = out('c1/D3 estimate axis');
+  const faded = [...h.matchAll(/<span class="taxis-bar faded([^"]*)"/g)].map((m) => m[1]);
+  if (faded.length === 0) throw new Error('c1/D3 setup: the estimate seed must draw faded segments past the wall');
+  if (!faded.every((c) => c.includes('basis-estimate'))) throw new Error('c1/D3: every faded segment must carry basis-estimate');
+
+  // (n) D5 (fix round), the structural pin: computeLevers is called nowhere in
+  // NowTab's render path — exactly one call site in app.tsx, inside the effect that
+  // schedules it on an idle callback. (The behavioural half — no chips on the first
+  // render, chips after the flush — is pinned at (d)/(e) above and in the DOM lane.)
+  const appSrcC1 = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  const ntStart = appSrcC1.indexOf('function NowTab(');
+  const nowTabBody = appSrcC1.slice(ntStart, appSrcC1.indexOf('\nfunction ', ntStart + 1));
+  if (/useMemo\([\s\S]{0,160}?computeLevers\(/.test(nowTabBody)) throw new Error('c1/D5: computeLevers must not be called inside a useMemo in NowTab');
+  if ((appSrcC1.match(/computeLevers\(/g) || []).length !== 1) throw new Error('c1/D5: computeLevers must have exactly one call site in app.tsx (the idle effect)');
+  const callAt = nowTabBody.indexOf('computeLevers(');
+  if (!(nowTabBody.indexOf('useEffect(') >= 0 && nowTabBody.indexOf('useEffect(') < callAt && nowTabBody.indexOf('requestIdleCallback') >= 0 && nowTabBody.indexOf('requestIdleCallback') < callAt)) throw new Error('c1/D5: the one computeLevers call must sit inside the idle-scheduled effect');
+
+  setState(mk({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false }));
+  console.log('capstone C1 (timeline card, levers L1–L4, C1-A install behaviour, draft undo): OK');
 }
 console.log('OK');

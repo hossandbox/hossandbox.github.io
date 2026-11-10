@@ -493,3 +493,50 @@ details.notice > summary::before { content: "⚠ "; color: var(--warn); font-siz
    day flood itself is unchanged underneath (its pin stands); the frame sits around it. */
 main.drive { position: relative; }
 main.drive.bad::after { content: ""; position: absolute; inset: 0; pointer-events: none; border: 8px solid transparent; border-image: repeating-linear-gradient(45deg, var(--bad) 0 10px, var(--chip-ink) 10px 20px) 8; }
+
+/* Capstone C1: the time axis (Timeline card, Why sheet, lever sheets), the lever chips
+   and the one-time Timeline chip. Existing tokens only — no new colour pair is created,
+   so the contrast gate's pairs and the nightlight budget are untouched. Lane bars are
+   8px tall, under the light budget's large-surface threshold (audit §2.1). */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tl-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s-12); flex-wrap: wrap; margin-bottom: var(--s-8); }
+.hero .tl-head .hero-stop { align-items: flex-end; text-align: right; }
+.taxis { display: flex; flex-direction: column; margin-top: var(--s-6); }
+.taxis-row { display: grid; grid-template-columns: 96px 1fr 64px; align-items: center; min-height: 28px; gap: var(--s-8); }
+button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; min-height: 48px; }
+.taxis-head { min-height: 20px; }
+.taxis-label { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; }
+.taxis-label .tl-short { display: none; }
+@media (max-width: 340px) {
+  .taxis-row { grid-template-columns: 64px 1fr 64px; }
+  .taxis-label .tl-full { display: none; }
+  .taxis-label .tl-short { display: inline; }
+}
+.taxis-value { font-size: 16px; font-weight: 700; text-align: right; white-space: nowrap; }
+.taxis-track { position: relative; height: 28px; display: block; }
+.taxis-track-head { height: 20px; }
+.taxis-tint { position: absolute; top: 0; bottom: 0; left: 0; background: var(--tint-accent); border-radius: var(--r-3); }
+.taxis-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); opacity: .6; }
+.taxis-hour { position: absolute; top: 2px; transform: translateX(2px); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 13px; color: var(--muted); }
+.taxis-tag { position: absolute; top: -2px; transform: translateX(-50%); font-size: 12px; font-weight: 800; letter-spacing: .04em; color: var(--text); white-space: nowrap; z-index: 3; }
+.taxis-tag.ghost { color: var(--muted); font-weight: 600; }
+.taxis-bar { position: absolute; top: 10px; height: 8px; left: 0; background: var(--accent); border-radius: var(--r-3); }
+.taxis-bar.faded { opacity: .4; border-radius: 0 var(--r-3) var(--r-3) 0; }
+.taxis-track.has-ghost .taxis-bar { top: 16px; }
+.taxis-bar.ghost { background: transparent; border: 1.5px solid var(--muted); top: 3px; }
+.taxis-bar.basis-estimate { background: transparent; border: 1.5px dashed var(--accent); }
+.taxis-bar.basis-demo { background: transparent; border: 1.5px solid var(--accent); }
+.taxis-bar.outline { background: transparent; border: 1.5px solid var(--accent); }
+.taxis-cap { position: absolute; top: 8px; width: 3px; height: 12px; background: var(--text); transform: translateX(-1.5px); }
+.taxis-track.has-ghost .taxis-cap { top: 14px; }
+.taxis-arrow { position: absolute; right: -2px; top: 6px; color: var(--muted); font-weight: 700; }
+.taxis-wall { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--text); transform: translateX(-1.5px); z-index: 2; }
+.taxis-wall.ghost { width: 2px; background: var(--muted); }
+.taxis-hazard { position: absolute; left: 0; top: 2px; bottom: 2px; width: 8px; background: repeating-linear-gradient(45deg, var(--bad) 0 6px, var(--chip-ink) 6px 12px); border-radius: var(--r-3); z-index: 1; }
+.taxis-bracket { position: absolute; left: 0; top: 15px; font-size: 12px; color: var(--muted); font-weight: 700; }
+.lever { display: flex; align-items: center; gap: var(--s-10); width: 100%; min-height: 56px; padding: var(--s-8) var(--s-12); background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r-12); color: var(--text); font-size: 16px; text-align: left; cursor: pointer; }
+.lever-text { display: flex; flex-direction: column; gap: var(--s-2); flex: 1; }
+.lever-text b { font-weight: 600; font-size: 16px; }
+.lever-sub { font-size: 14px; color: var(--muted); }
+.newcard { display: flex; align-items: center; justify-content: space-between; gap: var(--s-10); min-height: 48px; padding: var(--s-6) var(--s-12); background: var(--tint-accent); border: 1px solid var(--line); border-radius: var(--r-12); font-size: 15px; }
+.newcard-btns { display: inline-flex; gap: var(--s-6); flex-shrink: 0; }

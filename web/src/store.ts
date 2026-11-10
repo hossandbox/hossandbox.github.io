@@ -66,6 +66,25 @@ export interface State {
   /** True once, if a legacy save (night was then the default) was moved to the new day default. */
   themeNotice: boolean;
   /**
+   * Which main card Now shows (capstone C1, audit §2.6 — decision D2-A): the dial the app has
+   * always had, or the Timeline (the four limits as lanes ending at their clock times, on one
+   * axis). A display preference in the style of `theme`: it lives in the state object (no new
+   * storage key) and is NOT exported. INITIAL_STATE says 'dial'; the first full-disclaimer
+   * acknowledgement on a fresh device (no segments, no current status) flips it to 'timeline'
+   * (decision C1-A, in app.tsx's acknowledgeDisclaimer), so new installs open on the Timeline
+   * while existing installs keep the dial they learned. parseSaved guards it: anything that
+   * is not the literal 'timeline' reads as 'dial' — the familiar surface is the careful side.
+   */
+  nowCard: 'dial' | 'timeline';
+  /**
+   * The one-time Timeline chip has been answered (capstone C1-A): an existing install on the
+   * dial sees "New: your limits on a timeline — [Show me] [Keep the dial]" once, under the
+   * hero; either tap — and the More → Planning switch — sets this, and it never shows again.
+   * Counts only as a literal true, like disclaimerAcked: a save from before the field existed
+   * reads as not asked, which is what puts the chip in front of existing installs exactly once.
+   */
+  nowCardAsked: boolean;
+  /**
    * The driver has tapped "I understand" on the full startup disclaimer at least once (patch 7).
    * Later launches show the compact version instead; a save from before this flag existed has it
    * missing, which the merge reads as false — the full box shows once more, then compact.
@@ -214,6 +233,7 @@ export const INITIAL_STATE: State = {
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
   mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
+  nowCard: 'dial', nowCardAsked: false,
   disclaimerAcked: false, seededAt: null, dayCloses: [],
   tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true, speakAlerts: false, speechAsked: false, speakAskOpen: false,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
@@ -387,6 +407,14 @@ export function parseSaved(raw: string | null): State {
     // literal true: a save from before patch 7 (missing) and a damaged one (anything else) both
     // read as not acknowledged, and the full box shows once more.
     if (s.disclaimerAcked !== true) merged.disclaimerAcked = false;
+    // The Now main card (capstone C1-A): only the literal 'timeline' counts. A save from
+    // before the field existed (missing) and a damaged one (anything else) both read as
+    // 'dial' — the surface every existing driver already knows is the careful default. A
+    // save so damaged that it falls back to INITIAL_STATE is treated as a fresh device at
+    // the next acknowledgement (HANDOFF-C1 judgment call 10). The
+    // one-time chip's flag counts only as a literal true, like disclaimerAcked above.
+    if (s.nowCard !== 'timeline') merged.nowCard = 'dial';
+    if (s.nowCardAsked !== true) merged.nowCardAsked = false;
     // The dark-driving-screen switch (patch 16) counts only as a literal boolean: a save from
     // before the field existed (missing) and a damaged one (anything else) both read as the
     // default, on.
