@@ -35,7 +35,16 @@ export interface EldScreenshotReads {
 }
 
 export async function recognizeEldScreenshot(image: Blob): Promise<EldScreenshotReads> {
-  const { createWorker, OEM, PSM } = await import('tesseract.js');
+  // tesseract.js is a CommonJS package. In the built app esbuild splits it into
+  // a lazy chunk of its own whose ONLY export is `default` (the package's whole
+  // module.exports object) — so createWorker, OEM and PSM are read from
+  // `.default`. Destructuring them off the namespace itself (patch 12) left all
+  // three undefined in the shipped build, and OEM.LSTM_ONLY threw before any
+  // read began; Node's loaders and unsplit bundles also copy the names onto the
+  // namespace, which is how that passed its checks (patch 18). The `?? tess`
+  // fallback covers a loader that hands back a plain namespace with no default.
+  const tess = await import('tesseract.js');
+  const { createWorker, OEM, PSM } = tess.default ?? tess;
   // The OCR assets sit in an ocr/ folder beside the app itself (dist/ocr/).
   // document.baseURI is the page's own URL, so this stays correct wherever the
   // app is served from — and resolvePaths inside tesseract keeps absolute URLs.
