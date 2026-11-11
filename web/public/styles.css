@@ -571,3 +571,56 @@ button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: i
 .lever-sub { font-size: 14px; color: var(--muted); }
 .newcard { display: flex; align-items: center; justify-content: space-between; gap: var(--s-10); min-height: 48px; padding: var(--s-6) var(--s-12); background: var(--tint-accent); border: 1px solid var(--line); border-radius: var(--r-12); font-size: 15px; }
 .newcard-btns { display: inline-flex; gap: var(--s-6); flex-shrink: 0; }
+/* ===== Capstone C2 — future scrubber (M16, audit §2.3). Existing tokens only (contrast 44/44 unchanged). */
+.hero.preview { border: 2px dashed var(--accent); }
+.pv-band { display: flex; align-items: center; min-height: 48px; margin: calc(-1 * var(--s-6)) 0 var(--s-6); padding: 0 var(--s-12); background: var(--tint-accent); border-radius: var(--r-12); font-size: 15px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.pv-frame { margin: var(--s-8) 0 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.pv-over { color: var(--text); }
+.pv-steps { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: var(--s-6); margin-top: var(--s-10); }
+button.pv-step { min-height: 56px; padding: var(--s-8); font-size: 15px; font-weight: 700; }
+/* Everything else on Now while a preview is up: inert (the attribute) and at 40%. The wrapper
+   makes no box (display: contents keeps the dock's sticky slot), so the dimming rides its children. */
+.now-rest { display: contents; }
+.now-rest.pv-dim > * { opacity: .4; }
+/* The dock is sticky over scrolled content: it keeps its opaque floor, and its controls take the 40%. */
+.now-rest.pv-dim > .dock { opacity: 1; }
+.now-rest.pv-dim > .dock > * { opacity: .4; }
+/* The snap back to now: a 200ms slide, instant under reduced motion. */
+.pv-snapmark { display: none; }
+.pv-snapmark + .hero { animation: pv-slide 200ms ease-out; }
+@keyframes pv-slide { from { transform: translateX(-12px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pv-snapmark + .hero { animation: none; } }
+
+/* ===== Capstone C2 — the one-bar Split Lab (P7, audit §2.5). */
+.split-now-after[data-tone="bad"] { border-left: 4px solid var(--bad); }
+.sna-x { color: var(--bad); }
+.taxis-plan { margin-top: var(--s-8); font-weight: 600; }
+.plan-band { display: flex; justify-content: space-between; gap: var(--s-8); font-size: 13px; font-variant-numeric: tabular-nums; }
+.plan-key { color: var(--text); font-weight: 800; white-space: nowrap; }
+.plan-key.ghost { color: var(--muted); font-weight: 600; }
+.plan-bar { position: relative; height: 56px; margin-top: var(--s-4); }
+button.pblock { position: absolute; top: 0; height: 56px; min-height: 56px; padding: 0 var(--s-4); background: var(--panel2); border: 1px solid var(--line); border-top: 4px solid var(--led, var(--muted)); border-radius: var(--r-8); box-shadow: none; color: var(--text); font-size: 13px; font-weight: 700; overflow: visible; }
+button.pblock .pblock-in { display: inline-flex; align-items: center; gap: var(--s-4); white-space: nowrap; overflow: hidden; max-width: 100%; }
+button.pblock .pblock-t { overflow: hidden; text-overflow: ellipsis; }
+/* A mid-width block drops its icon and stacks its words ("B1 OFF" over "3h"); the status word carries the status. */
+button.pblock.compact .pblock-in { flex-direction: column; gap: 0; line-height: 1.15; }
+/* A short block keeps an invisible 48px hit area; its label moves under the bar on a leader line. */
+button.pblock.short::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 48px; transform: translateX(-50%); }
+button.pblock.zero { border-left-width: 0; border-right-width: 0; padding: 0; }
+.plan-hatch { position: absolute; bottom: calc(var(--row, 0) * 12px); height: 10px; background: repeating-linear-gradient(45deg, var(--bad) 0 6px, var(--chip-ink) 6px 12px); border-radius: 0 0 var(--r-3) var(--r-3); pointer-events: none; z-index: 2; }
+.plan-mark { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--text); transform: translateX(-1.5px); pointer-events: none; z-index: 3; }
+.plan-mark.ghost { width: 0; background: none; border-left: 2px dashed var(--muted); transform: translateX(-1px); }
+.plan-leads { position: relative; height: 20px; margin-top: var(--s-2); }
+.plan-lead { position: absolute; top: 0; font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; border-top: 1px solid var(--muted); padding-top: 2px; }
+.plan-bracket { margin-top: var(--s-4); border: 1px solid var(--muted); border-top: 0; border-radius: 0 0 var(--r-8) var(--r-8); height: 10px; position: relative; }
+.plan-bracket span { position: absolute; left: 50%; top: 2px; transform: translateX(-50%); padding: 0 var(--s-6); background: var(--panel); font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.plan-bracket.no { border-style: dashed; }
+.plan-bracket { margin-bottom: var(--s-8); }
+details.fine { margin-top: var(--s-8); }
+details.fine > summary { min-height: 48px; display: flex; align-items: center; font-size: 15px; font-weight: 700; color: var(--text); cursor: pointer; }
+.checks li button.fix { display: block; margin: var(--s-6) 0 0 var(--s-18); }
+.pb-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-6); margin-top: var(--s-10); }
+button.pb-step { min-height: 56px; padding: var(--s-8) var(--s-4); font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pb-exact { margin-top: var(--s-10); }
+.pb-result { margin: var(--s-10) 0 0; }
+button.wide.fix { margin-top: var(--s-8); }

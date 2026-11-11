@@ -290,6 +290,8 @@ export type SheetKind =
   // A lever chip's sheet (capstone C1): the chip's sentence, its ghost axis, the rule and
   // the caveat. The lever travels in the descriptor, computed when the chip was tapped.
   | { kind: 'lever'; lever: Lever }
+  // A Split Lab block's sheet (capstone C2, P7): steppers, the exact box, the block's fixes.
+  | { kind: 'splitblock'; block: 'b1' | 'dwell' | 'drive' | 'b2' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
   | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft }
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
@@ -1134,14 +1136,19 @@ const twinDur = (m: number): string => {
  * through all lanes by construction. The picture is aria-hidden; a text twin sentence
  * carries the same facts in the lanes' end order.
  */
-function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin }: {
+function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }: {
   from: number;
   lanes: AxisLane[];
   wall?: number | null;
   ghostWall?: number | null;
   hazard?: boolean;
   twin: string;
+  /** Capstone C2 (audit §2.3): a tap on a lane's track, as the clock time under the finger. Now's card alone passes it. */
+  onTrack?: (t: number) => void;
+  /** Capstone C2 (audit §2.5): plan mode — the Split Lab's one bar, on the same left-to-right scale. */
+  plan?: PlanAxis;
 }) {
+  if (plan) return <PlanBar from={from} plan={plan} twin={twin} />;
   const ends = lanes.flatMap((l) => [l.end, l.ghostEnd]).filter((x): x is number => x != null && Number.isFinite(x));
   const latest = Math.max(from, ...ends.filter((e) => e <= from + 960));
   const to = Math.max(from + 180, Math.min(from + 960, Math.ceil(latest / 30) * 30));
@@ -1153,8 +1160,15 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin }: {
   const hourLabel = (m: number) => new Intl.DateTimeFormat('en-US', { hour: '2-digit', hourCycle: 'h23' }).format(new Date(m * 60000));
   const wallPct = wall != null && wall > from ? pct(wall) : null;
   const ghostWallPct = ghostWall != null && ghostWall > from ? pct(ghostWall) : null;
+  // The scrubber's entry (§2.3): the tapped spot on a track is a clock time on this axis's
+  // one scale. A lane that is itself a button (comeback's sleeper lane) keeps its own tap.
+  const tapAt = onTrack ? (e: MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = Number.isFinite(e.clientX) && r.width > 0 ? (e.clientX - (r.left || 0)) / r.width : 0;
+    onTrack(from + Math.max(0, Math.min(1, x)) * span);
+  } : undefined;
   const track = (l?: AxisLane) => (
-    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`}>
+    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`} onClick={l?.onTap ? undefined : tapAt}>
       {wallPct !== null && <span class="taxis-tint" style={{ width: `${wallPct}%` }} />}
       {grid.map((g) => <span key={g} class="taxis-grid" style={{ left: `${pct(g)}%` }} />)}
       {hazard && <span class="taxis-hazard" />}
@@ -1182,7 +1196,7 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin }: {
       <div class="taxis" aria-hidden="true">
         <div class="taxis-row taxis-head">
           <span class="taxis-label" />
-          <span class="taxis-track taxis-track-head">
+          <span class="taxis-track taxis-track-head" onClick={tapAt}>
             {grid.map((g) => <span key={g} class="taxis-hour" style={{ left: `${pct(g)}%` }}>{hourLabel(g)}</span>)}
             {wallPct !== null && <span class="taxis-tag" style={{ left: `${wallPct}%` }}>STOP {clock(wall as number, false)}</span>}
             {ghostWallPct !== null && <span class="taxis-tag ghost" style={{ left: `${ghostWallPct}%` }}>STOP {clock(ghostWall as number, false)}</span>}
@@ -1301,7 +1315,7 @@ export function comebackTwin(ev: FullEvaluation, again: DriveAgain, sleeperAt: n
  * hero label, value and stacked stop-by, the same limit plate and Why link — with the
  * ring become lanes. Only the picture under the number is new.
  */
-function TimelineDrive({ s, now, ev, basis }: { s: State; now: number; ev: FullEvaluation; basis: 'log' | 'estimate' | 'demo' }) {
+function TimelineDrive({ s, now, ev, basis, onTrack }: { s: State; now: number; ev: FullEvaluation; basis: 'log' | 'estimate' | 'demo'; onTrack?: (t: number) => void }) {
   const share = useShareButton(shareText(ev, null));
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
@@ -1315,7 +1329,7 @@ function TimelineDrive({ s, now, ev, basis }: { s: State; now: number; ev: FullE
         </div>
         <div class="hero-stop"><span class="hero-stop-date">Stop by {stopDate}</span>{' '}<span class="hero-stop-time">{stopTime}</span></div>
       </div>
-      <TimeAxis from={now} lanes={limitsLanes(ev, basis)} wall={ev.mustStopBy} twin={limitsTwin(ev)} />
+      <TimeAxis from={now} lanes={limitsLanes(ev, basis)} wall={ev.mustStopBy} twin={limitsTwin(ev)} onTrack={onTrack} />
       <div class="hero-foot">
         <span class="limit-plate">limited by {bindingLabel(ev)}</span>
         <span class="hero-actions">{share}<button class="link" data-why onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button></span>
@@ -1323,6 +1337,157 @@ function TimelineDrive({ s, now, ev, basis }: { s: State; now: number; ev: FullE
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
         <div class="trust">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
       )}
+    </section>
+  );
+}
+
+/* ============================================================ future scrubber (capstone C2, M16) */
+
+/**
+ * The future scrubber (audit §2.3): "if I drive — or stay put — until T, where will I
+ * stand?", previewed on the Timeline card's own axis. Everything here is pure and local:
+ * the preview time lives in NowTab's component state and nowhere else (rail 4 — it is not
+ * in State, parseSaved, the export or the sim snapshot), the continuation row exists only
+ * inside the array handed to evaluate(), and nothing below reads or feeds the alerts or
+ * the voice (rail 5 — those read App's own evaluation).
+ */
+export const PREVIEW_STEP_MIN = 15;
+/** Rail 6: now < T <= now + 24h. The past belongs to Log and History. */
+export const PREVIEW_MAX_MIN = 1440;
+/** Rail 3: the preview snaps back this long after the last interaction. */
+export const PREVIEW_IDLE_MS = 10000;
+export type PreviewCont = 'drive' | 'stay';
+
+export function previewInBounds(t: number, now: number): boolean {
+  return Number.isFinite(t) && t > now && t <= now + PREVIEW_MAX_MIN;
+}
+/** A tapped time snapped to the clock's quarter hours and held inside the bounds. */
+export function previewSnap(t: number, now: number): number {
+  let q = Math.round(t / PREVIEW_STEP_MIN) * PREVIEW_STEP_MIN;
+  if (!(q > now)) q = Math.floor(now / PREVIEW_STEP_MIN) * PREVIEW_STEP_MIN + PREVIEW_STEP_MIN;
+  if (q > now + PREVIEW_MAX_MIN) q = Math.floor((now + PREVIEW_MAX_MIN) / PREVIEW_STEP_MIN) * PREVIEW_STEP_MIN;
+  return q;
+}
+/** [Driving] is the default while there is time to drive (state A); [Staying …] otherwise (states B–D). */
+export function previewDefaultCont(ev: FullEvaluation): PreviewCont {
+  return ev.driveNow > 0 ? 'drive' : 'stay';
+}
+/** Rail 1: a parked driver's tool — only on the Timeline card, never while the status is Driving. */
+export function previewOffered(s: State): boolean {
+  return s.nowCard === 'timeline' && s.current?.status !== 'D';
+}
+/** A limit by the name the strip and the preview use for an overrun: "14-hour window", "11-hour driving". */
+export function limitName(kind: Violation['kind'], ev: FullEvaluation): string {
+  switch (kind) {
+    case 'DRIVE_11': return `${ev.shift.limits.drive / 60}-hour driving`;
+    case 'WINDOW_14': return `${ev.shift.limits.window / 60}-hour window`;
+    case 'BREAK_30': return '30-minute break rule';
+    default: return `${ev.cycle.limit / 60}-hour cycle`;
+  }
+}
+/** Overruns as the strip lists them: "14-hour window by 2h 54m · 11-hour driving by 1h 54m". */
+export function overrunList(viol: Violation[], ev: FullEvaluation): string {
+  return viol.map((v) => `${limitName(v.kind, ev)} by ${dur(v.minutes)}`).join(' · ');
+}
+
+export interface PreviewResult {
+  at: number;
+  cont: PreviewCont;
+  /** The status the previewed stretch is spent in. */
+  status: DutyStatus;
+  ev: FullEvaluation;
+  /** Limits the previewed stretch itself runs over (violations beginning at or after now). */
+  violations: Violation[];
+  /** When driving comes back if he rests from T — only when the preview leaves no driving time. */
+  again: { off: number | null; sb: number | null } | null;
+}
+/**
+ * The preview's evaluation — the calls the app already makes, on the record extended by
+ * one continuation row from now to T (audit §2.3). The row is tentative inside evaluate(),
+ * exactly as specified; driveAgainAt, which by its own contract ignores tentative rows
+ * ("if I rest now", never a plan), is asked from T with the same row as part of the
+ * record — otherwise it would answer for a day in which the previewed stretch never
+ * happened. Pure: reads the state, writes nothing.
+ */
+export function previewEval(s: State, now: number, t: number, cont: PreviewCont): PreviewResult {
+  const cur = s.current;
+  const status: DutyStatus = cont === 'drive' ? 'D' : cur?.status ?? 'OFF';
+  const note = cont === 'stay' && cur?.note ? { note: cur.note } : {};
+  const record = allSegments(s, now);
+  const ev = evaluate([...record, { status, start: now, end: t, tentative: true, ...note }], { asOf: t, config: s.config });
+  let again: PreviewResult['again'] = null;
+  if (ev.driveNow <= 0) {
+    const segs = pruneHistory([...record, { status, start: now, end: t, ...note }], t, s.config), opts = { asOf: t, config: s.config };
+    again = { off: driveAgainAt(segs, opts, 'OFF'), sb: driveAgainAt(segs, opts, 'SB') };
+  }
+  return { at: t, cont, status, ev, violations: ev.violations.filter((v) => v.start >= now).sort((a, b) => a.start - b.start), again };
+}
+const STAY_WORDS: Record<DutyStatus, string> = { OFF: 'off duty', SB: 'in the sleeper', ON: 'on duty', D: 'driving' };
+/** The frame every preview number sits behind (rail 2): "At 12:00, if you stay off duty:". */
+export function previewFrame(r: PreviewResult, now: number): string {
+  return `At ${laneValue(r.at, now)}, if you ${r.cont === 'drive' ? 'drive until then' : `stay ${STAY_WORDS[r.status]}`}:`;
+}
+/** The band across the card top (rail 2), verbatim from the audit: "PREVIEW 12:00 — not now". */
+export function previewBand(t: number, now: number): string {
+  return `PREVIEW ${laneValue(t, now)} — not now`;
+}
+
+/**
+ * The Timeline card in preview (audit §2.2 state E, §2.3): the PREVIEW band and the
+ * dashed border on every frame, the frame sentence ahead of every number, the headline
+ * and the axis as of T, and the three 56px controls. A preview past the wall shows the
+ * hazard block and names the limit it is over — never a positive number.
+ */
+function PreviewCard({ s, now, basis, t, cont, onCont, onStep, onBack, onTrack }: {
+  s: State; now: number; basis: 'log' | 'estimate' | 'demo'; t: number; cont: PreviewCont;
+  onCont: (c: PreviewCont) => void; onStep: (delta: number) => void; onBack: () => void; onTrack: (t: number) => void;
+}) {
+  const r = useMemo(() => previewEval(s, now, t, cont), [s.segments, s.current, s.tentative, s.config, now, t, cont]);
+  const pev = r.ev;
+  const stayStatus = s.current?.status ?? 'OFF';
+  const frame = previewFrame(r, now);
+  const out = pev.driveNow <= 0;
+  const [stopDate, stopTime] = clockFull(pev.mustStopBy).split(', ');
+  const off = r.again?.off ?? null, sb = r.again?.sb ?? null;
+  const sbSooner = sb !== null && off !== null && sb < off;
+  const comeback: AxisLane[] = [
+    ...(off !== null ? [{ key: 'OFF', label: 'Off duty', short: 'Off', end: off, value: laneValue(off, t), basis, tone: 'solid' as const }] : []),
+    ...(sbSooner ? [{ key: 'SB', label: 'Sleeper', short: 'Sleeper', end: sb, value: laneValue(sb as number, t), basis, tone: 'outline' as const }] : []),
+  ];
+  return (
+    <section class="hero preview" data-preview={t}>
+      <div class="pv-band">{previewBand(t, now)}</div>
+      <Toggle options={[['drive', 'Driving'], ['stay', `Staying ${STAY_WORDS[stayStatus]}`]] as [PreviewCont, string][]} value={cont} onChange={onCont} />
+      <p class="pv-frame">{frame}</p>
+      {!out ? (
+        <>
+          <div class="tl-head">
+            <div class="tl-main">
+              <div class="hero-label">You can drive</div>
+              <div class={`hero-value ${pev.driveNow < 60 ? 'warn' : 'good'}`}>{dur(pev.driveNow)}</div>
+              {basis === 'estimate' && <div class="hero-basis">estimate</div>}
+            </div>
+            <div class="hero-stop"><span class="hero-stop-date">Stop by {stopDate}</span>{' '}<span class="hero-stop-time">{stopTime}</span></div>
+          </div>
+          <TimeAxis from={t} lanes={limitsLanes(pev, basis)} wall={pev.mustStopBy} twin={`${frame} ${limitsTwin(pev)}`} onTrack={onTrack} />
+          <div class="hero-foot"><span class="limit-plate">limited by {bindingLabel(pev)}</span></div>
+        </>
+      ) : (
+        <>
+          <div class="hero-label pv-over">{r.violations.length ? `Over the ${limitName(r.violations[0].kind, pev)}` : 'Out of driving time'}</div>
+          <div class="hero-value bad">{dur(0)}</div>
+          {r.violations.length > 0 && <p class="hero-text pv-viol">{r.violations.length} limit{r.violations.length === 1 ? '' : 's'} broken by then: {overrunList(r.violations, pev)}.</p>}
+          {off !== null
+            ? <p class="hero-text">Rest from then and driving comes back at <b>{laneValue(off, t)}</b> off duty{sbSooner ? <>, or <b>{laneValue(sb as number, t)}</b> in the sleeper</> : ''}.</p>
+            : <p class="hero-text">Driving does not come back within 36 hours of rest from then.</p>}
+          <TimeAxis from={t} lanes={comeback} hazard={r.status === 'D' || r.status === 'ON'} twin={`${frame} no driving time.${off !== null ? ` Driving comes back at ${laneValue(off, t)} off duty.` : ''}`} onTrack={onTrack} />
+        </>
+      )}
+      <div class="pv-steps">
+        <button class="pv-step" disabled={!previewInBounds(t - PREVIEW_STEP_MIN, now)} onClick={() => onStep(-PREVIEW_STEP_MIN)}>−15 min</button>
+        <button class="pv-step" disabled={!previewInBounds(t + PREVIEW_STEP_MIN, now)} onClick={() => onStep(PREVIEW_STEP_MIN)}>+15 min</button>
+        <button class="primary pv-step pv-back" data-first onClick={onBack}>Back to now</button>
+      </div>
     </section>
   );
 }
@@ -1489,16 +1654,74 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
   }, [timeline, s.segments, s.current, s.config, s.tentative, basis, now]);
   const chips = pickChips(levers);
   const l3 = levers.find((l): l is Extract<Lever, { id: 'L3' }> => l.id === 'L3');
+  /**
+   * Capstone C2 — the future scrubber (audit §2.3). The preview time and its
+   * continuation live HERE, in component state, and nowhere else (rail 4): not in the
+   * store, so not in parseSaved, the export or the sim snapshot; a tab change unmounts
+   * this component and the preview with it. `pv` is replaced on every interaction, so
+   * its identity is the "last interaction" the 10-second snap-back counts from.
+   */
+  const [pv, setPv] = useState<{ t: number; cont: PreviewCont } | null>(null);
+  const [snap, setSnap] = useState(false);
+  const pvRef = useRef(pv); pvRef.current = pv;
+  const sheetOpen = useSheet() !== null;
+  // Rail 1: never while the status is Driving. Rail 6: only inside now < T <= now + 24h.
+  const canPreview = previewOffered(s);
+  const preview = canPreview && pv && previewInBounds(pv.t, now) ? pv : null;
+  const backToNow = () => { if (pvRef.current) { setPv(null); setSnap(true); } };
+  const enterPreview = (t: number) => {
+    if (!previewOffered(getState())) return;
+    setPv({ t: previewSnap(t, now), cont: pvRef.current?.cont ?? previewDefaultCont(ev) });
+  };
+  // With the status Driving (the Details peek) the axis is not a scrubber: a tap opens Why.
+  const onTrack = !timeline ? undefined : status === 'D' ? () => openSheet({ kind: 'why' }) : enterPreview;
+  // Rail 3 — the snap-back triggers. Ten seconds after the last interaction:
+  useEffect(() => {
+    if (!pv) return;
+    const t = setTimeout(backToNow, PREVIEW_IDLE_MS);
+    return () => clearTimeout(t);
+  }, [pv]);
+  // …any store write (a status tap is one; so is the simulated clock moving):
+  useEffect(() => { backToNow(); }, [s]);
+  // …any sheet opening:
+  useEffect(() => { if (sheetOpen) backToNow(); }, [sheetOpen]);
+  // …the clock reaching the previewed time (the bound is now < T):
+  useEffect(() => { if (pvRef.current && !previewInBounds(pvRef.current.t, now)) backToNow(); }, [now]);
+  // …and the app going to the background.
+  useEffect(() => {
+    const f = () => { if (document.visibilityState === 'hidden') backToNow(); };
+    document.addEventListener('visibilitychange', f);
+    return () => document.removeEventListener('visibilitychange', f);
+  }, []);
+  // The snap is a 200ms slide (instant under prefers-reduced-motion, in the stylesheet).
+  useEffect(() => {
+    if (!snap) return;
+    const t = setTimeout(() => setSnap(false), 200);
+    return () => clearTimeout(t);
+  }, [snap]);
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
+      {snap && !preview && <span class="pv-snapmark" aria-hidden="true" />}
       {timeline ? (
-        ev.driveNow > 0 || !again
-          ? <TimelineDrive s={s} now={now} ev={ev} basis={basis} />
-          : <RestHero s={s} now={now} ev={ev} again={again} tail={<TimeAxis from={now} lanes={comebackLanes(s, ev, again, l3?.sbAt ?? null, l3 ? () => openSheet({ kind: 'lever', lever: l3 }) : undefined)} hazard={status === 'ON' || status === 'D'} twin={comebackTwin(ev, again, l3?.sbAt ?? null)} />} />
+        preview
+          ? <PreviewCard s={s} now={now} basis={basis} t={preview.t} cont={preview.cont}
+              onCont={(c) => setPv({ t: preview.t, cont: c })}
+              onStep={(d) => setPv({ t: previewInBounds(preview.t + d, now) ? preview.t + d : preview.t, cont: preview.cont })}
+              onBack={backToNow} onTrack={enterPreview} />
+          : ev.driveNow > 0 || !again
+          ? <TimelineDrive s={s} now={now} ev={ev} basis={basis} onTrack={onTrack} />
+          : <RestHero s={s} now={now} ev={ev} again={again} tail={<TimeAxis from={now} lanes={comebackLanes(s, ev, again, l3?.sbAt ?? null, l3 ? () => openSheet({ kind: 'lever', lever: l3 }) : undefined)} hazard={status === 'ON' || status === 'D'} twin={comebackTwin(ev, again, l3?.sbAt ?? null)} onTrack={onTrack} />} />
       ) : (
         ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={basis} /> : <RestHero s={s} now={now} ev={ev} again={again} />
       )}
+      {/* The scrubber's entry without the picture (the axis is aria-hidden): one plain
+          button for a screen reader or a keyboard, into the same preview. */}
+      {canPreview && !preview && <button class="vh" onClick={() => enterPreview(now + PREVIEW_STEP_MIN)}>Preview a later time</button>}
+      {/* Rail 2: while a preview is up, everything else on Now is inert and dimmed, so a
+          real-now number never sits beside a preview number unmarked. The wrapper makes
+          no box of its own (display: contents), so the dock's sticky slot is unchanged. */}
+      <div class={preview ? 'now-rest pv-dim' : 'now-rest'} inert={preview ? true : undefined}>
       {/* The one-time Timeline chip (decision C1-A): an existing install — a save holding
           a record — that is still on the dial sees it once, under the hero. Either tap
           answers it for good; the More → Planning switch is the standing way back. */}
@@ -1511,7 +1734,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           </span>
         </div>
       )}
-      {timeline && <LeverChips chips={chips} />}
+      {timeline && !preview && <LeverChips chips={chips} />}
       {/* The record's notices ride under the answer as one-line chips (patch 16, P2): the hero
           leads the screen now — in the cab and in the 3 a.m. review alike, the wrap-up business
           (splitting, ending the day) waits below the number it wraps up. */}
@@ -1578,6 +1801,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       {warn.map((n, i) => <p key={i} class="warnbox small">{n.replace(/^⚠\s*/, '')}</p>)}
       <StatusUndoChip />
       <StatusDock s={s} />
+      </div>
     </>
   );
 }
@@ -3075,11 +3299,13 @@ function PlanTab() {
  * second thought, not part of the record.
  */
 let splitDraftBefore: SplitDraft | null = null;
-/** Keep the current Split draft behind one undo (shared by both replace paths). */
-export function snapshotSplitDraft() { splitDraftBefore = { ...getState().split }; }
+/** What the pending draft undo says it undoes ("Draft replaced." for a whole-draft load, "Draft changed." for a fix). */
+let splitDraftUndoLabel = 'Draft replaced.';
+/** Keep the current Split draft behind one undo (shared by every replace path). */
+export function snapshotSplitDraft(label = 'Draft replaced.') { splitDraftBefore = { ...getState().split }; splitDraftUndoLabel = label; }
 /** Replace the whole Split draft, keeping the replaced one behind one undo. */
-export function replaceSplitDraft(next: SplitDraft) {
-  snapshotSplitDraft();
+export function replaceSplitDraft(next: SplitDraft, label?: string) {
+  snapshotSplitDraft(label);
   setState({ split: { ...next } });
 }
 export function undoSplitDraft(): boolean {
@@ -3092,33 +3318,37 @@ export function undoSplitDraft(): boolean {
 export function splitDraftUndoPending(): boolean { return splitDraftBefore !== null; }
 export function clearSplitDraftUndo() { splitDraftBefore = null; }
 
-function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
-  // The what-if lives in the store: a detour to the Log tab used to reset the plan being compared.
-  const sd = s.split;
-  // A partial carrying every draft key is a whole-draft load ("Try an example split"):
-  // it keeps the draft it replaces behind the one-level undo (audit §2.4). Any partial
-  // edit — a slider, a toggle — retires the offer instead (the Log undo's N2 rule).
-  const setSplit = (p: Partial<SplitDraft>) => {
-    if (Object.keys(DEFAULT_SPLIT).every((k) => k in p)) snapshotSplitDraft(); else clearSplitDraftUndo();
-    setState({ split: { ...sd, ...p } });
-  };
-  const { b1, b1s, dwell, drive, b2, b2s } = sd;
+/* ============================================================ Split Lab plan (capstone C2, P7 + M4) */
 
-  const base = useMemo(() => allSegments(s, now).filter((x) => !x.tentative), [s, now]);
+export type SplitBlockKey = 'b1' | 'dwell' | 'drive' | 'b2';
+/** The Lab's own ranges, the sliders' and the store sanitizer's. */
+export const SPLIT_BLOCK_MAX: Record<SplitBlockKey, number> = { b1: 600, dwell: 240, drive: 660, b2: 600 };
+
+/**
+ * The Split Lab's plan and everything the screen says about it, from one place: the
+ * strip, the bar, the cards and the block sheet all read this, so a fix button can never
+ * be computed from a different plan than the bar shows. The construction is the one the
+ * screen has always used (plan rows from the end of the log; `after` at the instant
+ * Break 2 ends; the #14 window-end formula) — moved, not changed. Pure.
+ */
+export function splitScenario(s: State, now: number, ev: FullEvaluation) {
+  const sd = s.split;
+  const { b1, b1s, dwell, drive, b2, b2s } = sd;
+  const base = allSegments(s, now).filter((x) => !x.tentative);
   // The record in time order with overlaps resolved. `base` is in the order rows were ENTERED, so its last
   // row is not the latest one once a forgotten entry has been added (re-check M9).
-  const timeline = useMemo(() => normalize(base), [base]);
+  const timeline = normalize(base);
   const t0 = Math.max(now, ...base.map((x) => x.end));
   const plan: Segment[] = [];
   let t = t0;
   const push = (status: DutyStatus, m: number, note: string) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
   push(b1s, b1, 'Break 1'); push('ON', dwell, 'On duty'); push('D', drive, 'Drive'); push(b2s, b2, 'Break 2');
-  const endB1 = t0 + b1, endDrive = t0 + b1 + dwell + drive, endB2 = t;
+  const endB1 = t0 + b1, endDwell = t0 + b1 + dwell, endDrive = t0 + b1 + dwell + drive, endB2 = t;
 
   // Evaluate at the instant Break 2 ends — every result card on this screen describes that
   // moment. Using endB2 + 1 put "stop by" a minute past the stated evaluation time (consumer-review-1).
   const after = evaluate([...base, ...plan], { asOf: endB2, config: s.config });
-  const atDriveEnd = evaluate([...base, ...plan.slice(0, 3)], { asOf: endDrive, config: s.config });
+  const atDriveEnd = evaluate([...base, ...plan.filter((r) => r.note !== 'Break 2')], { asOf: endDrive, config: s.config });
   const paired = after.shift.chain.length >= 2 && after.shift.chain[after.shift.chain.length - 1].end === endB2;
   // The pinned now-vs-after line (patch #14): the END of the 14-hour window itself, from the
   // same two evaluations this screen already makes. Paired rests after the anchor are
@@ -3132,6 +3362,221 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   const totalOk = b1 + b2 >= LIMITS.SPLIT_TOTAL;
   const planViol = after.violations.filter((v) => v.start >= t0);
   const strictViol = atDriveEnd.noSplit.violations.filter((v) => v.start >= t0);
+  return { sd, base, timeline, t0, plan, endB1, endDwell, endDrive, endB2, after, atDriveEnd, paired, windowEndNow, windowEndAfter, longOk, totalOk, planViol, strictViol };
+}
+export type SplitScenario = ReturnType<typeof splitScenario>;
+
+/**
+ * M4 fix-it buttons (audit §3): one per ✗ in "Does it pair?", each a DRAFT patch with
+ * the value set exactly — the engine then re-evaluates and the bar shows the truth.
+ * `block` is the bar block whose sheet carries the button. The merged-reset warning's
+ * fix is not built: it needs a new draft field (a leading on-duty stretch), which the
+ * audit flags as skippable when it fights the draft shape — it does (the draft is a
+ * persisted, sanitized object with a fixed key set).
+ */
+export interface SplitFix { id: 'short2h' | 'sleeper7' | 'total10' | 'shortenDrive'; block: SplitBlockKey; label: string; patch: Partial<SplitDraft> }
+export function splitFixes(s: State, sc: SplitScenario): SplitFix[] {
+  const { b1, b2, dwell, drive } = sc.sd;
+  const out: SplitFix[] = [];
+  if (!(b1 >= 120 && b2 >= 120)) {
+    const k = b1 <= b2 ? 'b1' : 'b2';
+    out.push({ id: 'short2h', block: k, label: 'Make the shorter break 2h', patch: { [k]: 120 } });
+  }
+  if (!sc.longOk) out.push({ id: 'sleeper7', block: 'b2', label: 'Make Break 2 sleeper, 7h', patch: { b2s: 'SB', b2: Math.max(b2, 420) } });
+  if (!sc.totalOk) out.push({ id: 'total10', block: 'b1', label: `Add ${dur(600 - b1 - b2)} to Break 1`, patch: { b1: b1 + (600 - b1 - b2) } });
+  if (sc.planViol.length > 0) {
+    // The engine's own driving time at the end of Break 1 + the on-duty stretch (one extra evaluate).
+    const lead = sc.plan.filter((r) => r.note === 'Break 1' || r.note === 'On duty');
+    const room = Math.max(0, Math.min(SPLIT_BLOCK_MAX.drive, evaluate([...sc.base, ...lead], { asOf: sc.endDwell, config: s.config }).driveNow));
+    if (room < drive) out.push({ id: 'shortenDrive', block: 'drive', label: `Shorten the drive to ${dur(room)}`, patch: { drive: room } });
+  }
+  return out;
+}
+/** Apply a fix: the draft only, behind the Lab's one-level draft undo. Never the log. */
+export function applySplitFix(fix: SplitFix) {
+  replaceSplitDraft({ ...getState().split, ...fix.patch }, 'Draft changed.');
+}
+
+/** "3h", "3h 15m", "30m" — block labels are short; the cards keep dur()'s full form. */
+const shortDur = (m: number): string => { const h = Math.floor(m / 60), r = m % 60; return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`; };
+
+/** Plan mode's data (audit §2.5): the four blocks, the 14-hour band's two markers, the pair bracket, the overruns. */
+export interface PlanBlock { key: SplitBlockKey; status: DutyStatus; minutes: number; label: string; name: string; len: string; aria: string }
+export interface PlanAxis {
+  blocks: PlanBlock[];
+  /** The 14-hour band: where the 14 ends now (ghost) and with this plan (solid). */
+  windowNow: number; windowAfter: number; afterWord: string;
+  paired: boolean; bracket: string;
+  /** Overrun intervals, hatched in place on the bar. */
+  hatch: { start: number; end: number; label: string }[];
+  onBlock: (k: SplitBlockKey) => void;
+}
+export function splitPlanAxis(sc: SplitScenario, onBlock: (k: SplitBlockKey) => void): PlanAxis {
+  const { b1, b1s, dwell, drive, b2, b2s } = sc.sd;
+  const rest = (st: 'OFF' | 'SB') => (st === 'SB' ? 'sleeper' : 'off duty');
+  return {
+    blocks: [
+      { key: 'b1', status: b1s, minutes: b1, label: `B1 ${b1s} ${shortDur(b1)}`, name: `B1 ${b1s}`, len: shortDur(b1), aria: `Break 1, ${rest(b1s)}, ${dur(b1)}. Change` },
+      { key: 'dwell', status: 'ON', minutes: dwell, label: `On ${shortDur(dwell)}`, name: 'On', len: shortDur(dwell), aria: `On duty, ${dur(dwell)}. Change` },
+      { key: 'drive', status: 'D', minutes: drive, label: `Drive ${shortDur(drive)}`, name: 'Drive', len: shortDur(drive), aria: `Drive, ${dur(drive)}. Change` },
+      { key: 'b2', status: b2s, minutes: b2, label: `B2 ${b2s} ${shortDur(b2)}`, name: `B2 ${b2s}`, len: shortDur(b2), aria: `Break 2, ${rest(b2s)}, ${dur(b2)}. Change` },
+    ],
+    windowNow: sc.windowEndNow, windowAfter: sc.windowEndAfter, afterWord: sc.paired ? 'with pair' : 'with plan',
+    paired: sc.paired,
+    bracket: `${sc.paired ? 'pair ✓' : 'no pair ✕'} ${shortDur(b1)} + ${shortDur(b2)} = ${shortDur(b1 + b2)}`,
+    hatch: sc.planViol.map((v) => ({ start: v.start, end: Math.max(v.end, v.start + v.minutes), label: `${limitName(v.kind, sc.after)} by ${dur(v.minutes)}` })),
+    onBlock,
+  };
+}
+
+/**
+ * TimeAxis in plan mode (audit §2.5): one 56px bar of four tappable blocks on the same
+ * left-to-right clock scale, the 14-hour band's two markers above it, the pair bracket
+ * under it, and every overrun hatched IN PLACE over the stretch of the bar that breaks
+ * the limit. A block narrower than a label moves its label under the bar on a leader
+ * line; every block keeps a 48px hit area however short it is. Status is carried by an
+ * icon and the label's own words, the stripe colour is a second cue only.
+ */
+function PlanBar({ from, plan, twin }: { from: number; plan: PlanAxis; twin: string }) {
+  const total = plan.blocks.reduce((a, b) => a + b.minutes, 0);
+  const span = Math.max(total, 1);
+  const pct = (m: number) => Math.max(0, Math.min(100, ((m - from) / span) * 100));
+  let at = 0;
+  const cells = plan.blocks.map((b, i) => {
+    // An empty plan has no lengths to scale by: four equal placeholders keep every block tappable.
+    const left = total === 0 ? i * 25 : (at / span) * 100;
+    const width = total === 0 ? 25 : (b.minutes / span) * 100;
+    at += b.minutes;
+    // Under ~40px at phone width the label goes under the bar; up to ~30% it stacks without the icon.
+    return { b, left, width, short: width < 14, compact: width >= 14 && width < 30 };
+  });
+  const mark = (m: number) => ({ left: `${pct(m)}%` });
+  const off = (m: number) => (m > from + span ? ' →' : m < from ? ' ←' : '');
+  return (
+    <div class="taxis-plan">
+      <p class="vh">{twin}</p>
+      <div class="plan-band" aria-hidden="true">
+        <span class="plan-key ghost">14 ends {laneValue(plan.windowNow, from)} now{off(plan.windowNow)}</span>
+        <span class="plan-key">{laneValue(plan.windowAfter, from)} {plan.afterWord}{off(plan.windowAfter)}</span>
+      </div>
+      <div class={`plan-bar ${total === 0 ? 'empty' : ''}`}>
+        {cells.map(({ b, left, width, short, compact }) => (
+          <button key={b.key} class={`pblock pblock-${b.key} ${short ? 'short' : ''} ${compact ? 'compact' : ''} ${b.minutes === 0 ? 'zero' : ''}`} data-block={b.key}
+            style={`left: ${left}%; width: ${width}%; --led: ${STATUS_COLOR[b.status]}`} aria-label={b.aria} onClick={() => plan.onBlock(b.key)}>
+            {!short && (compact
+              ? <span class="pblock-in"><span class="pblock-t">{b.name}</span><span class="pblock-t">{b.len}</span></span>
+              : <span class="pblock-in"><Icon d={STATUS_ICON[b.status]} size={16} /><span class="pblock-t">{b.label}</span></span>)}
+          </button>
+        ))}
+        {plan.hatch.map((h, i) => <span key={`h${i}`} class="plan-hatch" title={`over the ${h.label}`} style={`left: ${pct(h.start)}%; width: ${Math.max(0, pct(h.end) - pct(h.start))}%; --row: ${i}`} />)}
+        <span class="plan-mark ghost" style={mark(plan.windowNow)} />
+        <span class="plan-mark" style={mark(plan.windowAfter)} />
+      </div>
+      {cells.some((c) => c.short) && (
+        <div class="plan-leads" aria-hidden="true">
+          {cells.filter((c) => c.short).map(({ b, left, width }) => {
+            const mid = Math.max(0, Math.min(100, left + width / 2));
+            return <span key={b.key} class="plan-lead" style={`left: ${mid}%; transform: translateX(-${mid}%)`}>{b.label}</span>;
+          })}
+        </div>
+      )}
+      <div class={`plan-bracket ${plan.paired ? 'ok' : 'no'}`} aria-hidden="true"><span>{plan.bracket}</span></div>
+    </div>
+  );
+}
+
+/**
+ * The strip sentence (audit §2.5, sanction S4, decision C5-A). A clean plan keeps the
+ * patch-14 now-vs-after line and gains what is left to drive after Break 2; a plan that
+ * runs over a limit REPLACES it with the ✕ form naming every overrun — the words "with
+ * this pair" never stand over a plan that breaks a limit.
+ */
+function SplitLine({ sc }: { sc: SplitScenario }) {
+  if (sc.planViol.length > 0) {
+    return <><b class="sna-x">✕</b> <b>{sc.paired ? 'Pairs, but this plan runs over:' : 'No split credit, and this plan runs over:'}</b> {overrunList(sc.planViol, sc.after)}</>;
+  }
+  return <>Your 14 ends <b>{clock(sc.windowEndNow)}</b> now → <b>{clock(sc.windowEndAfter)}</b> {sc.paired ? 'with this pair' : 'with this plan (no split credit)'} · {dur(sc.after.driveNow)} drive after</>;
+}
+
+/** The exact-number box of a block sheet: validated, never silently substituted (the Slider's own rule). */
+function ExactMinutes({ label, value, max, onChange }: { label: string; value: number; max: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => { setText(String(value)); setNote(null); }, [value]);
+  const typed = (el: HTMLInputElement) => {
+    const raw = el.value;
+    const keep = `Still using ${dur(value)}.`;
+    setText(raw);
+    if (raw === '') { setNote(`Enter 0–${max} min. ${keep}`); return; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) { setNote(`Enter whole minutes. ${keep}`); return; }
+    if (n < 0 || n > max) { setNote(`Enter 0–${max} min — your entry was not applied. ${keep}`); return; }
+    setNote(null);
+    if (n !== value) onChange(n);
+  };
+  return (
+    <div class="pb-exact">
+      <label><span>Exact length · min</span>
+        <input type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value in min`} min={0} max={max} step={1} value={text}
+          onInput={(e) => typed(e.target as HTMLInputElement)} onBlur={() => { setText(String(value)); setNote(null); }} />
+      </label>
+      {note && <div class="warnbox small">{note}</div>}
+    </div>
+  );
+}
+
+const BLOCK_TITLE: Record<SplitBlockKey, string> = { b1: 'Break 1', dwell: 'On duty (dock, fuel)', drive: 'Drive', b2: 'Break 2' };
+
+/**
+ * Tap a block → this sheet (audit §2.5, decision C4-A): the block's status toggle where
+ * it has one, 56px −60 / −15 / +15 / +60 steppers and the exact number box — no drag in
+ * this build. The fix buttons for the ✗ lines this block can mend sit here too (M4).
+ * Everything here edits the DRAFT; nothing reaches the log.
+ */
+function SplitBlockSheet({ s, now, ev, block }: { s: State; now: number; ev: FullEvaluation; block: SplitBlockKey }) {
+  const sc = splitScenario(s, now, ev);
+  const value = s.split[block], max = SPLIT_BLOCK_MAX[block];
+  // A stepper, the box or the toggle is an ordinary draft edit: it retires a pending
+  // draft undo (the N2 rule — an undo must never throw away later work).
+  const edit = (p: Partial<SplitDraft>) => { clearSplitDraftUndo(); setState({ split: { ...getState().split, ...p } }); };
+  const set = (v: number) => edit({ [block]: Math.max(0, Math.min(max, Math.round(v))) });
+  const statusKey = block === 'b1' ? 'b1s' : block === 'b2' ? 'b2s' : null;
+  const fixes = splitFixes(s, sc).filter((f) => f.block === block);
+  return (
+    <Sheet title={`${BLOCK_TITLE[block]} · ${dur(value)}`}>
+      {statusKey && <Toggle options={[['OFF', 'Off duty'], ['SB', 'Sleeper']]} value={s.split[statusKey]} onChange={(v) => edit({ [statusKey]: v })} />}
+      <div class="pb-steps" role="group" aria-label={`${BLOCK_TITLE[block]} length`}>
+        {[-60, -15, 15, 60].map((d) => (
+          <button key={d} class="pb-step" disabled={d < 0 ? value <= 0 : value >= max} aria-label={`${d < 0 ? 'Shorten' : 'Lengthen'} ${BLOCK_TITLE[block]} by ${Math.abs(d)} min`} onClick={() => set(value + d)}>{d < 0 ? '−' : '+'}{Math.abs(d)}</button>
+        ))}
+      </div>
+      <ExactMinutes label={BLOCK_TITLE[block]} value={value} max={max} onChange={set} />
+      <p class="trust pb-result" data-tone={sc.planViol.length ? 'bad' : undefined}><SplitLine sc={sc} /></p>
+      {fixes.map((f) => <button key={f.id} class="wide fix" data-fix={f.id} onClick={() => applySplitFix(f)}>{f.label}</button>)}
+      {splitDraftUndoPending() && (
+        <div class="row undo">
+          <span>{splitDraftUndoLabel}</span>
+          <button class="mini" onClick={() => undoSplitDraft()}>Undo</button>
+        </div>
+      )}
+      <button class="primary wide" data-first onClick={() => openSheet(null)}>Done</button>
+    </Sheet>
+  );
+}
+
+function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+  // The what-if lives in the store: a detour to the Log tab used to reset the plan being compared.
+  const sd = s.split;
+  // A partial carrying every draft key is a whole-draft load ("Try an example split"):
+  // it keeps the draft it replaces behind the one-level undo (audit §2.4). Any partial
+  // edit — a slider, a toggle — retires the offer instead (the Log undo's N2 rule).
+  const setSplit = (p: Partial<SplitDraft>) => {
+    if (Object.keys(DEFAULT_SPLIT).every((k) => k in p)) snapshotSplitDraft(); else clearSplitDraftUndo();
+    setState({ split: { ...sd, ...p } });
+  };
+  const { b1, b1s, dwell, drive, b2, b2s } = sd;
+  const sc = useMemo(() => splitScenario(s, now, ev), [s, now, ev]);
+  const { timeline, t0, plan, endDrive, endB2, after, paired, longOk, totalOk, planViol, strictViol } = sc;
   const sh = safeHaven(after, s.mph);
   // The pair the clocks use now, and the rest that could start the next one — shown as two different
   // things. Side by side as "Period A … counts against your 14" and "Active split", a tester read them
@@ -3145,19 +3590,32 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
   const commit = () => setState({ tentative: plan });
   const clear = () => setState({ tentative: [] });
+  // M4: each ✗ below carries its fix; the same fixes sit in the block sheets.
+  const fixes = splitFixes(s, sc);
+  const fixBtn = (id: SplitFix['id']) => {
+    const f = fixes.find((x) => x.id === id);
+    return f ? <button class="mini fix" data-fix={f.id} onClick={() => applySplitFix(f)}>{f.label}</button> : null;
+  };
+  const twin = `Plan from ${clock(t0)}: Break 1 ${b1s === 'SB' ? 'sleeper' : 'off duty'} ${dur(b1)}, on duty ${dur(dwell)}, drive ${dur(drive)}, Break 2 ${b2s === 'SB' ? 'sleeper' : 'off duty'} ${dur(b2)}. ${paired ? 'The two breaks pair.' : 'No split credit.'}${planViol.length ? ` The plan runs over: ${overrunList(planViol, after)}.` : ''}`;
 
   return (
     <>
       <BackToPlan s={s} />
-      <div class="split-now-after" aria-live="polite">Your 14 ends <b>{clock(windowEndNow)}</b> now → <b>{clock(windowEndAfter)}</b> {paired ? 'with this pair' : 'with this plan (no split credit)'}</div>
+      {/* P7 (audit §2.5): the strip is the time axis in plan mode — the sentence, then the
+          one bar. The strip's own sticky slot is unchanged (P3). */}
+      <div class="split-now-after" data-tone={planViol.length ? 'bad' : undefined}>
+        <div class="sna-line" aria-live="polite"><SplitLine sc={sc} /></div>
+        <TimeAxis from={t0} lanes={[]} twin={twin} plan={splitPlanAxis(sc, (k) => openSheet({ kind: 'splitblock', block: k }))} />
+      </div>
       {splitDraftUndoPending() && (
         <div class="row undo">
-          <span>Draft replaced.</span>
+          <span>{splitDraftUndoLabel}</span>
           <button class="mini" onClick={() => undoSplitDraft()}>Undo</button>
         </div>
       )}
       <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
-        {activeNow && <p class="ok"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
+        {/* Informational lines are neutral (.trust), not green: green means Driving (audit §2.5). */}
+        {activeNow && <p class="trust"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
           ? (nextLeg
             ? <p class="muted"><b>Next pair (optional):</b> your {clock(nextLeg.start)}–{clock(nextLeg.end)} rest ({dur(nextLeg.duration)} {nextLeg.longestSB >= nextLeg.duration ? 'sleeper' : nextLeg.longestSB > 0 ? 'sleeper and off duty' : 'off duty'}) can also be the first half of your next split. It needs {nextNeed}. This does not change the pair above.</p>
@@ -3167,26 +3625,32 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           : ev.shift.pendingSplitLeg
           ? <p><b>First break logged:</b> {dur(ev.shift.pendingSplitLeg.duration)} ending {clock(ev.shift.pendingSplitLeg.end)} ({ev.shift.pendingSplitLeg.longestSB >= 420 ? '≥7h sleeper — needs a ≥2h partner' : `needs ≥7h sleeper, and ≥${dur(Math.max(120, 600 - ev.shift.pendingSplitLeg.duration))} to total 10h`}). Until the partner completes, this time <b>counts against your 14</b>.</p>
           : <p class="muted">No qualifying break (≥2h) pending since your clocks started at {clock(ev.shift.anchor)}.</p>}
-        {!activeNow && ev.shift.chain.length >= 2 && <p class="ok">Active split: your clocks count from {clock(ev.shift.anchor)} (end of first paired rest).</p>}
+        {!activeNow && ev.shift.chain.length >= 2 && <p class="trust">Active split: your clocks count from {clock(ev.shift.anchor)} (end of first paired rest).</p>}
       </Card>
 
       <Card title="What if… (starts at the end of your log)">
-        <p class="muted small">Plan begins {clock(t0)}.</p>
+        <p class="muted small">Plan begins {clock(t0)}. Tap a block on the bar above to change it.</p>
         <button class="wide-btn" onClick={() => setSplit({ ...DEFAULT_SPLIT })}>Try an example split</button>
-        <Toggle options={[['OFF', 'Break 1: Off duty'], ['SB', 'Break 1: Sleeper']]} value={b1s} onChange={(v) => setSplit({ b1s: v })} />
-        <Slider label="Break 1 length" value={b1} min={0} max={600} step={15} onChange={(v) => setSplit({ b1: v })} fmt={dur} unit="min" />
-        <Slider label="Then on-duty (dock, fuel)" value={dwell} min={0} max={240} step={15} onChange={(v) => setSplit({ dwell: v })} fmt={dur} unit="min" />
-        <Slider label="Then drive" value={drive} min={0} max={660} step={15} onChange={(v) => setSplit({ drive: v })} fmt={dur} unit="min" />
-        <Toggle options={[['SB', 'Break 2: Sleeper'], ['OFF', 'Break 2: Off duty']]} value={b2s} onChange={(v) => setSplit({ b2s: v })} />
-        <Slider label="Break 2 length" value={b2} min={0} max={600} step={15} onChange={(v) => setSplit({ b2: v })} fmt={dur} unit="min" />
+        {/* The four sliders stay, collapsed (audit §2.5): the bar's block sheets are the first way in. */}
+        <details class="fine">
+          <summary>Fine-tune</summary>
+          <Toggle options={[['OFF', 'Break 1: Off duty'], ['SB', 'Break 1: Sleeper']]} value={b1s} onChange={(v) => setSplit({ b1s: v })} />
+          <Slider label="Break 1 length" value={b1} min={0} max={600} step={15} onChange={(v) => setSplit({ b1: v })} fmt={dur} unit="min" />
+          <Slider label="Then on-duty (dock, fuel)" value={dwell} min={0} max={240} step={15} onChange={(v) => setSplit({ dwell: v })} fmt={dur} unit="min" />
+          <Slider label="Then drive" value={drive} min={0} max={660} step={15} onChange={(v) => setSplit({ drive: v })} fmt={dur} unit="min" />
+          <Toggle options={[['SB', 'Break 2: Sleeper'], ['OFF', 'Break 2: Off duty']]} value={b2s} onChange={(v) => setSplit({ b2s: v })} />
+          <Slider label="Break 2 length" value={b2} min={0} max={600} step={15} onChange={(v) => setSplit({ b2: v })} fmt={dur} unit="min" />
+        </details>
       </Card>
 
-      <Card title="Does it pair?" tone={paired ? 'good' : 'bad'}>
+      {/* Sanction S11 (decision C5-A): a green card promises a plan that pairs AND breaks no limit. */}
+      <Card title="Does it pair?" tone={paired && planViol.length === 0 ? 'good' : 'bad'}>
         <ul class="checks">
-          <li class={b1 >= 120 && b2 >= 120 ? 'ok' : 'no'}>Both breaks ≥ 2h</li>
-          <li class={longOk ? 'ok' : 'no'}>One break ≥ 7h in the sleeper berth</li>
-          <li class={totalOk ? 'ok' : 'no'}>Total ≥ 10h ({dur(b1 + b2)})</li>
+          <li class={b1 >= 120 && b2 >= 120 ? 'ok' : 'no'}>Both breaks ≥ 2h{fixBtn('short2h')}</li>
+          <li class={longOk ? 'ok' : 'no'}>One break ≥ 7h in the sleeper berth{fixBtn('sleeper7')}</li>
+          <li class={totalOk ? 'ok' : 'no'}>Total ≥ 10h ({dur(b1 + b2)}){fixBtn('total10')}</li>
           <li class={paired ? 'ok' : 'no'}>The rules pair these two breaks</li>
+          <li class={planViol.length === 0 ? 'ok' : 'no'}>{planViol.length === 0 ? 'No plan violations' : `Plan runs over: ${overrunList(planViol, after)}`}{fixBtn('shortenDrive')}</li>
         </ul>
         {(b1 >= 600 || b2 >= 600) && <p class="trust">A break of 10h+ is a full reset on its own. If it includes 7+ consecutive hours in the sleeper it can <i>also</i> pair with a later 2h+ break — whichever helps you more (FMCSA FAQ 22, July 2026).</p>}
         {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && timeline.length > 0 && (timeline[timeline.length - 1].status === 'OFF' || timeline[timeline.length - 1].status === 'SB') && (() => {
@@ -4057,6 +4521,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
+      {!disclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
     </div>

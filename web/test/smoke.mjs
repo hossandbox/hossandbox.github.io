@@ -4831,6 +4831,18 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   const evNow = evaluate(base, { asOf: T, config: CFG });
   const t1 = windowEnd(evNow);
+  // Sanction S4 (capstone C2, decision C5-A): every strip string gains
+  // " · {dur(after.driveNow)} drive after"; where the scenario's plan runs over a limit
+  // (engine violations starting at or after the plan's start) the ✕ form is expected
+  // instead. The expected values stay engine-computed here, as before.
+  const { dur: durS4 } = await import('../src/store.ts');
+  const limS4 = (k, e) => k === 'DRIVE_11' ? `${e.shift.limits.drive / 60}-hour driving` : k === 'WINDOW_14' ? `${e.shift.limits.window / 60}-hour window` : k === 'BREAK_30' ? '30-minute break rule' : `${e.cycle.limit / 60}-hour cycle`;
+  const s4 = (core, afterEv, t0, paired) => {
+    const pv = afterEv.violations.filter((v) => v.start >= t0);
+    return pv.length
+      ? `✕ ${paired ? 'Pairs, but this plan runs over:' : 'No split credit, and this plan runs over:'} ${pv.map((v) => `${limS4(v.kind, afterEv)} by ${durS4(v.minutes)}`).join(' · ')}`
+      : `${core} · ${durS4(afterEv.driveNow)} drive after`;
+  };
 
   // (a) the pairing default: T1 is the real window end, T2 is the after window end, the
   //     pair moves it later by the expected 16h, and the line sits above the pair-status card
@@ -4842,7 +4854,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const pairAfter = evalAfter(DS);
   const t2 = windowEnd(pairAfter.ev);
   if (t2 - t1 !== 960) throw new Error(`patch 14: the paired plan must move the 14 by 16h in this scenario (saw ${t2 - t1}m)`);
-  const pairLine = `Your 14 ends ${clock(t1)} now → ${clock(t2)} with this pair`;
+  const pairLine = s4(`Your 14 ends ${clock(t1)} now → ${clock(t2)} with this pair`, pairAfter.ev, T, true);
   if (strip(h) !== pairLine) throw new Error(`patch 14: the pinned line must read "${pairLine}" (saw "${strip(h)}")`);
 
   // (b) the line is LIVE, and an unpaired plan cannot claim a pair: shorten Break 2 so the
@@ -4853,7 +4865,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (windowEnd(evalAfter(noPairDraft).ev) !== t1) throw new Error('patch 14: the no-credit window end must equal the current one in this scenario');
   setState({ split: { ...noPairDraft } });
   h = out('patch 14/split line follows Break 2 change');
-  const noPairLine = `Your 14 ends ${clock(t1)} now → ${clock(t1)} with this plan (no split credit)`;
+  const noPairLine = s4(`Your 14 ends ${clock(t1)} now → ${clock(t1)} with this plan (no split credit)`, evalAfter(noPairDraft).ev, T, false);
   if (strip(h) !== noPairLine) throw new Error(`patch 14: an unpaired plan must read "${noPairLine}" (saw "${strip(h)}")`);
 
   // (c) the example button loads the canonical draft and nothing else. Render-to-string
@@ -4882,8 +4894,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     let t = Math.max(nowM, ...baseAll.map((x) => x.end)); const plan = [];
     const push = (status, m, note) => { if (m > 0) { plan.push({ status, start: t, end: t + m, tentative: true, note }); t += m; } };
     push(split.b1s, split.b1, 'Break 1'); push('ON', split.dwell, 'On duty'); push('D', split.drive, 'Drive'); push(split.b2s, split.b2, 'Break 2');
+    const t0 = Math.max(nowM, ...baseAll.map((x) => x.end));
     const afterEv = evaluate([...baseAll, ...plan], { asOf: t, config: CFG });
-    return { nowEv: evaluate(baseAll, { asOf: nowM, config: CFG }), afterEv, paired: afterEv.shift.chain.length >= 2 && afterEv.shift.chain[afterEv.shift.chain.length - 1].end === t };
+    return { t0, nowEv: evaluate(baseAll, { asOf: nowM, config: CFG }), afterEv, paired: afterEv.shift.chain.length >= 2 && afterEv.shift.chain[afterEv.shift.chain.length - 1].end === t };
   };
 
   // (d) the merged-reset plan (Opus scenario c): 10h OFF, 6h D, and the driver is 7h into
@@ -4903,7 +4916,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     split: DS,
   });
   if (scD.paired) throw new Error('patch 14: the merged-reset plan must not pair for this pin');
-  const lineD = `Your 14 ends ${clock(windowEnd(scD.nowEv))} now → ${clock(windowEnd(scD.afterEv))} with this plan (no split credit)`;
+  const lineD = s4(`Your 14 ends ${clock(windowEnd(scD.nowEv))} now → ${clock(windowEnd(scD.afterEv))} with this plan (no split credit)`, scD.afterEv, scD.t0, false);
   h = out('patch 14/merged reset plan');
   if (strip(h) !== lineD) throw new Error(`patch 14: a merged-reset plan must read "${lineD}" (saw "${strip(h)}")`);
 
@@ -4922,7 +4935,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (windowEnd(scE.afterEv) !== t1e) throw new Error('patch 14: an empty draft must leave the window end where it is');
   if (t1e - (scE.nowEv.shift.anchor + scE.nowEv.shift.limits.window) !== 120)
     throw new Error('patch 14: the active-pair T1 must sit exactly 2h past the anchor-only figure — the excluded later leg');
-  const lineE = `Your 14 ends ${clock(t1e)} now → ${clock(t1e)} with this plan (no split credit)`;
+  const lineE = s4(`Your 14 ends ${clock(t1e)} now → ${clock(t1e)} with this plan (no split credit)`, scE.afterEv, scE.t0, false);
   h = out('patch 14/active pair, empty draft');
   if (strip(h) !== lineE) throw new Error(`patch 14: an empty draft over an active pair must read "${lineE}" (saw "${strip(h)}")`);
 
@@ -4942,7 +4955,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!scG.paired) throw new Error('patch 14: the FAQ 22 reset-as-first-leg plan must pair for this pin');
   const t1g = windowEnd(scG.nowEv), t2g = windowEnd(scG.afterEv);
   if (t2g - t1g !== 120) throw new Error(`patch 14: the FAQ 22 pair must move the 14 by exactly Break 2's 2h (saw ${t2g - t1g}m)`);
-  const lineG = `Your 14 ends ${clock(t1g)} now → ${clock(t2g)} with this pair`;
+  const lineG = s4(`Your 14 ends ${clock(t1g)} now → ${clock(t2g)} with this pair`, scG.afterEv, scG.t0, true);
   h = out('patch 14/FAQ 22 reset as first leg');
   if (strip(h) !== lineG) throw new Error(`patch 14: the FAQ 22 pair line must read "${lineG}" (saw "${strip(h)}")`);
 
@@ -6014,5 +6027,83 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`patch 19: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false });
   console.log('patch 19 (shell is the one stable-height scroller, closed sideways; overflow sources fixed; adjust-start structure): OK');
+}
+// --- capstone C2 "Preview & one bar" (audit §2.3, §2.5, §3 M4; sanctions S4, S11) ---
+// The behaviour pins (snap-back, bounds, the store untouched, the engine values on the
+// standard seed, the block sheet, the fixes, the shared draft undo) are the DOM lane
+// test/dom/scrub.mjs, run by `npm run dom`. These are the source and render pins. All are
+// checked before any throws, so one run names every red pin.
+{
+  const { readFileSync: rfc2 } = await import('node:fs');
+  const appC2 = rfc2('src/app.tsx', 'utf8'), cssC2 = rfc2('public/styles.css', 'utf8'), storeC2 = rfc2('src/store.ts', 'utf8');
+  const A2 = await import('../src/app.tsx');
+  const { INITIAL_STATE: INIT2, DEFAULT_SPLIT: DS2 } = await import('../src/store.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const rulesC2 = (sel) => [...cssC2.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => m[1].split(',').map((x) => x.trim()).includes(sel)).map((m) => m[2]);
+  const CD2 = (day, hh, m = 0) => Math.floor(new Date(2026, 10, day, hh, m).getTime() / 60000);
+  const NY2 = { ...INIT2.config, timeZone: 'America/New_York' };
+  const seed2 = [
+    { status: 'OFF', start: CD2(8, 5, 40), end: CD2(8, 7, 40) }, { status: 'SB', start: CD2(8, 7, 40), end: CD2(8, 15, 40) },
+    { status: 'ON', start: CD2(8, 15, 40), end: CD2(8, 16, 25) }, { status: 'D', start: CD2(8, 16, 25), end: CD2(8, 19, 10) },
+    { status: 'OFF', start: CD2(8, 19, 10), end: CD2(8, 19, 40) }, { status: 'ON', start: CD2(8, 19, 40), end: CD2(8, 21, 55) }];
+  const now2 = CD2(9, 3, 4);
+  const mk2 = (over) => ({ ...INIT2, config: NY2, disclaimerAcked: true, historyAcknowledged: true, tzChosen: true, nowCard: 'timeline', nowCardAsked: true, nowOverride: now2, segments: seed2, current: { status: 'D', since: CD2(8, 21, 55) }, ...over });
+
+  // M16 rail 1: a parked driver's tool — never while Driving, only on the Timeline card.
+  need(typeof A2.previewOffered === 'function' && A2.previewOffered(mk2({ current: { status: 'ON', since: now2 } })) === true, 'c2 rail 1: the scrubber is offered on the Timeline while parked');
+  need(typeof A2.previewOffered === 'function' && A2.previewOffered(mk2({})) === false, 'c2 rail 1: never while the status is Driving');
+  need(typeof A2.previewOffered === 'function' && A2.previewOffered(mk2({ nowCard: 'dial', current: { status: 'ON', since: now2 } })) === false, 'c2 rail 1: only on the Timeline card');
+  // rail 1 / §2.7: the driving view renders no axis, no chip, no preview band.
+  setState(mk2({ drivingView: true, tab: 'now' }));
+  { const hd = render(h(App, {})); need(!/taxis|class="lever|pv-band|data-preview/.test(hd), 'c2 rail 1: the driving view must carry no .taxis, no .lever and no preview band'); }
+  // rail 6: now < T <= now + 24h, and the 15-minute snap stays inside it.
+  if (typeof A2.previewInBounds === 'function') {
+    need(!A2.previewInBounds(now2, now2) && A2.previewInBounds(now2 + 1, now2) && A2.previewInBounds(now2 + 1440, now2) && !A2.previewInBounds(now2 + 1441, now2) && !A2.previewInBounds(now2 - 15, now2), 'c2 rail 6: the preview is bounded now < T <= now + 24h');
+    need(A2.previewSnap(now2 + 5000, now2) <= now2 + 1440 && A2.previewSnap(now2 - 60, now2) > now2 && A2.previewSnap(now2 + 22, now2) % 15 === 0, 'c2 rail 6: the snap is to quarter hours and inside the bounds');
+  } else need(false, 'c2 rail 6: previewInBounds / previewSnap must exist');
+  // rail 4: the preview time lives in component state — never in State, parseSaved, the export or the sim snapshot.
+  need(/const \[pv, setPv\] = useState<\{ t: number; cont: PreviewCont \} \| null>\(null\);/.test(appC2), 'c2 rail 4: the preview time must be component state (useState)');
+  need(!/preview/i.test(storeC2), 'c2 rail 4: the store module must know nothing of the preview');
+  // rail 5: the alerts and the voice read App's own evaluation; nothing in the scrubber speaks or sounds.
+  need((appC2.match(/useDrivingAlerts\(/g) || []).length === 2 && /\n  useDrivingAlerts\(s, now, ev\);/.test(appC2), 'c2 rail 5: useDrivingAlerts is defined once and called once, from App, with App\'s ev');
+  { const scr = appC2.slice(appC2.indexOf('/* ============================================================ future scrubber'), appC2.indexOf('function LeverChips'));
+    need(scr.length > 1000 && !/speakAloud|\bsound\(|notify\(|setState\(/.test(scr), 'c2 rail 5/4: the scrubber code must never speak, sound, notify or write the store'); }
+  // rail 2: band, dashed border, inert + 40% for the rest of Now; rail 3: the 200ms snap, instant under reduced motion.
+  need(rulesC2('.hero.preview').some((r) => /border: 2px dashed var\(--accent\);/.test(r)), 'c2 rail 2: the preview card border is 2px dashed --accent');
+  need(rulesC2('.pv-band').some((r) => /min-height: 48px;/.test(r) && /font-size: 15px;/.test(r) && /font-weight: 700;/.test(r) && /background: var\(--tint-accent\);/.test(r) && /color: var\(--text\);/.test(r)), 'c2 rail 2: the band is 48px, 15px/700, --text on --tint-accent');
+  need(rulesC2('.now-rest.pv-dim > *').some((r) => /opacity: \.4;/.test(r)) && /inert=\{preview \? true : undefined\}/.test(appC2), 'c2 rail 2: the rest of Now goes inert and to 40%');
+  need(rulesC2('button.pv-step').some((r) => /min-height: 56px;/.test(r)), 'c2: the preview steppers are 56px');
+  need(/@keyframes pv-slide/.test(cssC2) && /animation: pv-slide 200ms/.test(cssC2) && /@media \(prefers-reduced-motion: reduce\) \{ \.pv-snapmark \+ \.hero \{ animation: none; \} \}/.test(cssC2), 'c2 rail 3: the snap is a 200ms slide, instant under reduced motion');
+  need(/PREVIEW_IDLE_MS = 10000/.test(appC2), 'c2 rail 3: the idle snap-back is 10 seconds');
+  need(typeof A2.previewBand === 'function' && A2.previewBand(CD2(9, 12), now2) === 'PREVIEW 12:00 — not now', 'c2 rail 2: the band reads "PREVIEW 12:00 — not now" verbatim');
+
+  // P7 on the standard seed with the shipped default draft (Appendix A §D).
+  setState(mk2({ tab: 'split', planReturn: 'plan', drivingView: false, split: { ...DS2 } }));
+  { const hs = render(h(App, {}));
+    const stripC2 = (hs.match(/<div class="split-now-after"[^>]*>([\s\S]*?)<div class="taxis-plan"/) || [])[1]?.replace(/<[^>]+>/g, '') ?? '';
+    need(stripC2 === '✕ Pairs, but this plan runs over: 14-hour window by 2h 54m · 11-hour driving by 1h 54m', `c2 S4/C5-A: the strip must read the ✕ form (saw "${stripC2}")`);
+    need(!/with this pair/.test(stripC2), 'c2 S4: "with this pair" never stands over a plan that breaks a limit');
+    need((hs.match(/class="plan-hatch"/g) || []).length === 2, 'c2 P7: both overruns hatched in place on the bar');
+    need((hs.match(/data-block="(b1|dwell|drive|b2)"/g) || []).length === 4, 'c2 P7: four tappable blocks on the bar');
+    need(/<section class="card bad"><h2>Does it pair\?<\/h2>/.test(hs), 'c2 S11: "Does it pair?" is bad-toned while the plan runs over');
+    need(/Shorten the drive to /.test(hs), 'c2 M4: the plan-runs-over ✗ carries its fix');
+  }
+  // S11 in source; the four sliders stay under "Fine-tune"; informational lines neutral.
+  need(appC2.includes("<Card title=\"Does it pair?\" tone={paired && planViol.length === 0 ? 'good' : 'bad'}>"), 'c2 S11: the card tone is paired && planViol.length === 0 ? good : bad');
+  { const sb = appC2.slice(appC2.indexOf('function SplitTab'), appC2.indexOf('/* ============================================================ Recap tab */'));
+    const fine = sb.slice(sb.indexOf('<details class="fine">'), sb.indexOf('</details>'));
+    need(/<summary>Fine-tune<\/summary>/.test(fine) && (fine.match(/<Slider /g) || []).length === 4 && (sb.match(/<Slider /g) || []).length === 4, 'c2 P7: the four sliders stay, collapsed under Fine-tune');
+    need(!/<p class="ok">/.test(sb) && /<p class="trust"><b>Split in use:<\/b>/.test(sb) && /<p class="trust">Active split:/.test(sb), 'c2 P7: the informational p.ok lines are .trust (green means Driving)'); }
+  need(rulesC2('button.pb-step').some((r) => /min-height: 56px;/.test(r)), 'c2 P7: the block steppers are 56px');
+  need(rulesC2('button.pblock.short::before').some((r) => /width: 48px;/.test(r)), 'c2 P7: a short block keeps a 48px hit area');
+  need(rulesC2('.plan-hatch').some((r) => /repeating-linear-gradient\(45deg, var\(--bad\) 0 6px, var\(--chip-ink\) 6px 12px\)/.test(r)), 'c2 P7: overruns are hatched (--bad / --chip-ink), a shape cue');
+  need(/export function applySplitFix\(fix: SplitFix\) \{\n  replaceSplitDraft\(/.test(appC2), 'c2 M4: a fix edits the draft only, through the one-level draft undo');
+  // copy fence on the new code
+  { const c2src = appC2.slice(appC2.indexOf('/* ============================================================ future scrubber'), appC2.indexOf('function LeverChips')) + appC2.slice(appC2.indexOf('/* ============================================================ Split Lab plan'), appC2.indexOf('function SplitTab'));
+    need(!/lorico|officer|inspection|\bproof\b/i.test(c2src), 'c2: the new copy names no person and has no officer / inspection / proof wording'); }
+  if (bad.length) throw new Error(`capstone C2: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, split: { ...DS2 }, drivingView: true });
+  console.log('capstone C2 (scrubber rails in source; one-bar Split strip, S4 ✕ form, S11 tone, Fine-tune, .trust, M4): OK');
 }
 console.log('OK');
