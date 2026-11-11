@@ -5948,4 +5948,71 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState(mk({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false }));
   console.log('capstone C1 (timeline card, levers L1–L4, C1-A install behaviour, draft undo): OK');
 }
+
+// --- patch 19 (combined): phone layout stability (Part B) + adjust current status start (Part A) ---
+// Part B's field report (Pixel, 2026-11-10): while a tab scrolled, the header and the status
+// dock / tab bar rode up and down with the browser's own chrome, and a sideways drag shifted
+// the whole screen. These are the SOURCE pins: the stable-height shell rule, the closed
+// sides, the shell slots in the rendered markup, and the two overflow sources fixed at
+// their roots. The measured half (scrollWidth, computed height, panels holding their pixels
+// while content scrolls, at 412x915 and 360x640) is the real-browser lane, test/dom/layout.mjs.
+// Part A's behaviour pins are their own DOM lane (test/dom/adjuststart.mjs, run by `npm run
+// dom`); the few here are the structural ones. All of the block's pins are checked before
+// any of them throws, so one run names every pin that is red.
+{
+  const css19 = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const app19 = await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8');
+  const store19 = await readFile(new URL('../src/store.ts', import.meta.url), 'utf8');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const rules = (sel) => [...css19.matchAll(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`, 'g'))].map((m) => m[1]);
+  // B1. the shell's height: one viewport, by the stable-unit strategy — 100vh first (the
+  // fallback), 100dvh after it (the height actually visible) — and never a min-height that
+  // lets the shell grow with its content and hand the scrolling back to the page.
+  const shell = rules('.app').find((r) => /height:/.test(r)) || '';
+  need(/(?:^|[;\s])height: 100vh; height: 100dvh;/.test(shell), `patch 19 B1: .app must be exactly one viewport tall — "height: 100vh; height: 100dvh;" in that order (got: ${shell.trim() || 'no height rule'})`);
+  need(!rules('.app').some((r) => /min-height:/.test(r)), 'patch 19 B1: .app must not carry a min-height (a shell that grows with its content makes the PAGE scroll, and the browser chrome with it)');
+  // B2. the shell is the one scroller, closed sideways; the document itself is pinned.
+  need(/overflow-y: auto;/.test(shell) && /overflow-x: hidden;/.test(shell), 'patch 19 B2: .app must scroll its own content (overflow-y: auto) and be closed sideways (overflow-x: hidden)');
+  need(rules('html, body').some((r) => /height: 100%;/.test(r) && /overflow: hidden;/.test(r)), 'patch 19 B2: html and body must be pinned to the viewport (height: 100%; overflow: hidden) so the page itself never scrolls');
+  need(rules('.app').some((r) => /scroll-padding-top: var\(--top-h,/.test(r)), 'patch 19 B2: anchored scrolling must clear the measured header on the shell, which is the scroller now');
+  // B3. the panels keep their slots: header sticky at the shell's top, dock sticky inside
+  // main, tab bar fixed to the bottom edge (their own older pins hold the offsets).
+  need(rules('.top').some((r) => /position: sticky; top: 0;/.test(r)), 'patch 19 B3: the header stays sticky at the top of the shell');
+  need(rules('.tabs').some((r) => /position: fixed; left: 0; right: 0; bottom: 0;/.test(r)), 'patch 19 B3: the tab bar stays fixed to the bottom edge');
+  need(rules('.dock').some((r) => /position: sticky; bottom: calc\(61px \+ env\(safe-area-inset-bottom\)\);/.test(r)), 'patch 19 B3: the dock stays sticky above the tab bar');
+  {
+    const at = getState().nowOverride ?? nowMin();
+    setState({ tab: 'now', nowOverride: null, tentative: [], segments: [{ status: 'OFF', start: at - 900, end: at - 300 }, { status: 'D', start: at - 300, end: at - 20 }], current: { status: 'ON', since: at - 20 }, nowCard: 'dial', nowCardAsked: true });
+    const h19 = render(h(App, {}));
+    const iApp = h19.search(/<div class="app[ "]/), iTop = h19.indexOf('<header class="top"'), iMain = h19.indexOf('<main'), iDock = h19.indexOf('<div class="dock">'), iMainEnd = h19.indexOf('</main>'), iNav = h19.indexOf('<nav class="tabs"');
+    need(iApp >= 0 && iApp < iTop && iTop < iMain && iMain < iDock && iDock < iMainEnd && iMainEnd < iNav, `patch 19 B3: the shell slots must render in order — .app > header.top, main (holding the dock), nav.tabs (got app ${iApp}, header ${iTop}, main ${iMain}, dock ${iDock}, /main ${iMainEnd}, nav ${iNav})`);
+    need(new RegExp('<div class="app[^"]*">(?:<div class="backdrop"[\\s\\S]*?)?<header class="top"').test(h19), 'patch 19 B3: the header must be the shell\'s own child');
+    need(/<\/main><nav class="tabs"/.test(h19), 'patch 19 B3: the tab bar must be the shell\'s own child, right after main');
+    need(h19.includes('Planning only — not a log, not an ELD'), 'patch 19 B: the header copy is unchanged');
+    // A (structural): the after-the-fact door is on Now, and the Log's live row still points there.
+    need(/<button class="rowbtn">[^]*?On Duty since [^<]*<\/span><br\/?><b>Fix the start time<\/b>/.test(h19), 'patch 19 A: Now must show the current status with its "Fix the start time" control');
+    setState({ tab: 'log' });
+    need(render(h(App, {})).includes('· now — change it on Now'), 'patch 19 A: the Log\'s live row still points to Now');
+    setState({ tab: 'now' });
+  }
+  // B4. the two overflow sources, fixed at their roots.
+  need(rules('.top-row > .pill').some((r) => /min-width: 0;/.test(r) && /white-space: normal;/.test(r)) && rules('.top-row > .top-right').some((r) => /flex: none;/.test(r)), 'patch 19 B4: in the header row the status capsule must give way (min-width: 0; white-space: normal) and the clock + theme switch must not (flex: none)');
+  need(/@supports \(grid-template-columns: subgrid\) \{\s*\.taxis \{ display: grid; grid-template-columns: 96px minmax\(0, 1fr\) minmax\(64px, max-content\);[^}]*\}\s*\.taxis > \.taxis-row \{ grid-column: 1 \/ -1; grid-template-columns: subgrid; \}/.test(css19), 'patch 19 B4: the timeline rows must share one set of columns, the value column sized to its widest value');
+  need(!/100vw/.test(css19), 'patch 19 B4: no 100vw anywhere in the stylesheet (it includes the scrollbar and overflows)');
+  // B5. the one scroll-to-top in the app follows the scroller.
+  need(/useEffect\(\(\) => \{ window\.scrollTo\(0, 0\); document\.querySelector\('\.app'\)\?\.scrollTo\?\.\(0, 0\); \}, \[step\]\)/.test(app19), 'patch 19 B5: a new load-check step must start at the top of the SHELL, which is the scroller now');
+  // A (structural): one store operation, one guard for both tap-time entries, no new storage key.
+  need(/export function adjustCurrentStart\(cur: State, newSince: number, now: number\): AdjustStartResult/.test(store19), 'patch 19 A: the store must export adjustCurrentStart(state, newSince, now)');
+  need((app19.match(/adjustCurrentStart\(/g) || []).length >= 2 && !/current: \{ \.\.\.[a-z.!]*current!?, since:/.test(app19), 'patch 19 A: the app must move the current start only through the store operation');
+  need(/return \[0, 5, 15, 30\]\.map\(\(m\) => \(\{ minutes: m, ok: backdateOk\(cur, now, m\) \}\)\);/.test(app19) && /if \(!backdateOk\(cur, now, r\.minutes\)\) return/.test(app19), 'patch 19 A: the presets\' ok-flags and the typed entry must share backdateOk');
+  need(/if \(minutesAgo > 0 && cur\.current && at <= cur\.current\.since\) return false;/.test(app19), 'patch 19 A: tapStatus keeps its own guard — a backdate at or past the start of the status being left never lands');
+  {
+    const keys = new Set([...app19.matchAll(/'(hos-sandbox[\w-]*)'/g), ...store19.matchAll(/'(hos-sandbox[\w-]*)'/g)].map((m) => m[1]));
+    need([...keys].sort().join(' ') === 'hos-sandbox-undo-v1 hos-sandbox-v1 hos-sandbox-v1-backup hos-sandbox-v1-sim', `patch 19: no new storage keys (found ${[...keys].sort().join(' ')})`);
+  }
+  if (bad.length) throw new Error(`patch 19: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false });
+  console.log('patch 19 (shell is the one stable-height scroller, closed sideways; overflow sources fixed; adjust-start structure): OK');
+}
 console.log('OK');

@@ -1042,6 +1042,94 @@ export function importProblem(d: unknown): string | null {
   return null;
 }
 
+/* ---------- "Adjust current status start" (patch 19) ---------- */
+
+/**
+ * Why an adjustment of the current status's start is refused:
+ *  - 'none'    there is no current status to adjust;
+ *  - 'invalid' the minute is not a whole, dateable minute, or the record it would leave fails
+ *              the app's own record check (importProblem, the one an imported file must pass);
+ *  - 'same'    it is the start the status already has — nothing to change;
+ *  - 'future'  it is now or later: a current status always keeps its start in the past (the
+ *              spirit of statusTap's guard — never leave current.since >= now);
+ *  - 'erase'   it is at or before the start of the status being left, which would erase that
+ *              status: an edit for the Log, not a start-time correction;
+ *  - 'overlap' another logged entry covers part of the time the start would move across.
+ */
+export type AdjustStartProblem = 'none' | 'invalid' | 'same' | 'future' | 'erase' | 'overlap';
+export type AdjustStartResult =
+  | { ok: true; patch: Pick<State, 'segments' | 'current' | 'dayCloses'> }
+  | { ok: false; problem: AdjustStartProblem };
+
+/**
+ * The status the current one follows: the logged (not what-if) row that ends exactly where
+ * the current status starts — the row a status tap closed. When more than one row ends
+ * there, the one that starts latest is the status that was actually being left. Null when
+ * nothing abuts the current status (it is the first thing in the record, or unlogged time
+ * sits before it).
+ */
+export function statusBeingLeft(s: Pick<State, 'segments' | 'current'>): Segment | null {
+  if (!s.current) return null;
+  let prev: Segment | null = null;
+  for (const x of s.segments) if (!x.tentative && x.end === s.current.since && (!prev || x.start > prev.start)) prev = x;
+  return prev;
+}
+
+/**
+ * Move the CURRENT (open) status's start to an exact minute (patch 19; field report: a
+ * driver went On Duty on his ELD at arrival and tapped the app seven minutes late — the
+ * closed rows could be edited, the open one could not, so the app overstated his driving
+ * by the late minutes). The boundary between the status being left and the current one
+ * moves as ONE edge: the row that ends at the current start ends at the new start instead
+ * — earlier shortens it by exactly the minutes moved, later lengthens it by exactly those
+ * minutes — and no other row is touched (each keeps its reference, as applySegmentEdit's
+ * callers rely on). Stamps are kept: this is the same tap, corrected, so anything typed
+ * over either row since still wins over it.
+ *
+ * Pure, in the statusTap pattern: it returns the patch for setState — so the simulated
+ * clock's quarantine and the save/backup rotation apply untouched — or the reason it is
+ * refused, and a refusal changes nothing. See AdjustStartProblem for the guards. A
+ * day-close bookmark written by the same tap (its `at` is the old start) moves with the
+ * start while it stays inside its own carrier day; any other bookmark is left for the
+ * store's one validity rule (dayCloseFor) to judge, as after every other edit.
+ */
+export function adjustCurrentStart(cur: State, newSince: number, now: number): AdjustStartResult {
+  const no = (problem: AdjustStartProblem): AdjustStartResult => ({ ok: false, problem });
+  if (!cur.current) return no('none');
+  if (!Number.isInteger(newSince) || !dateable(newSince)) return no('invalid');
+  const since = cur.current.since;
+  if (newSince === since) return no('same');
+  if (newSince >= now) return no('future');
+  const prev = statusBeingLeft(cur);
+  if (prev && newSince <= prev.start) return no('erase');
+  // Any OTHER logged row inside the stretch the start moves across is a correction the
+  // driver typed there on purpose; moving the edge through it would silently change what
+  // that time counts as. That is a job for the Log's editor, where the overlap is shown.
+  const lo = Math.min(since, newSince), hi = Math.max(since, newSince);
+  for (const x of cur.segments) if (x !== prev && !x.tentative && x.end > lo && x.start < hi) return no('overlap');
+  const segments = prev ? cur.segments.map((x) => (x === prev ? { ...x, end: newSince } : x)) : cur.segments;
+  const current: OpenSegment = { ...cur.current, since: newSince };
+  const dayCloses = cur.dayCloses.some((c) => c.at === since && carrierDayStart(newSince, cur.config) === c.dayStart)
+    ? cur.dayCloses.map((c) => (c.at === since && carrierDayStart(newSince, cur.config) === c.dayStart ? { ...c, at: newSince } : c))
+    : cur.dayCloses;
+  // The record this leaves must pass the same check a file must pass to be imported.
+  if (importProblem({ segments, tentative: cur.tentative, current }) !== null) return no('invalid');
+  return { ok: true, patch: { segments, current, dayCloses } };
+}
+
+/**
+ * One typed "minutes ago" box, whole minutes only — read by readEldEntry itself (an empty
+ * hours box and this box as the minutes), so a fraction is refused here exactly the way
+ * patch 9.2 refuses it in the drift check and the quick start: never rounded, never
+ * converted. An empty box is not zero here: it is no answer yet ('empty').
+ */
+export type MinutesAgoRead = { ok: true; minutes: number } | { ok: false; problem: 'empty' | 'fraction' | 'junk' };
+export function readMinutesAgo(text: string): MinutesAgoRead {
+  if (text.trim() === '') return { ok: false, problem: 'empty' };
+  const r = readEldEntry('', text);
+  return r.ok ? { ok: true, minutes: r.minutes } : { ok: false, problem: r.problem };
+}
+
 /** Materialize the open segment up to `now` so the engine sees it. */
 export function allSegments(s: State, now: number): Segment[] {
   const out = [...s.segments];

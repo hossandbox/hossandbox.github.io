@@ -53,7 +53,18 @@ html {
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
 button, input, select { font: inherit; color: inherit; }
-.app { min-height: 100dvh; display: flex; flex-direction: column; background: var(--ground); }
+/* Patch 19 (phone layout stability, field report 2026-11-10): the SHELL is the one scroller.
+   The page itself used to scroll (.app was min-height: 100dvh and grew with its content), and
+   a phone browser hides and shows its own chrome on a page scroll — which resizes the visible
+   viewport, so the sticky header and the fixed dock / tab bar rode up and down with it. Now
+   the document never scrolls: html and body are pinned to the viewport and .app is exactly one
+   viewport tall — 100dvh, the height actually visible, with 100vh as the fallback for a
+   runtime without dynamic units — and scrolls its own content. With no page scroll the
+   browser chrome stays where it is, so that height does not change under the driver's thumb,
+   and the header (sticky inside the shell), the dock (sticky inside main) and the tab bar
+   (fixed) keep the slots they always had. Sideways the shell is closed: nothing can pan it. */
+html, body { height: 100%; overflow: hidden; }
+.app { height: 100vh; height: 100dvh; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; background: var(--ground); }
 .mono, .meter-value, .why-time, .entry-len, .daytotals b, .tstep-value, .drive-clock, .clock { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); }
 h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -372,6 +383,13 @@ button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, butto
 .toggle button:not(.on) { background: transparent; }
 .meter-value { font-size: 14px; }
 .pill, .drive-clock, .top-right .clock { white-space: nowrap; }
+/* Patch 19: the header row was wider than the screen whenever the status capsule ran long
+   (3px over at 360 for "On Duty · 20m", 129px over at 412 for personal conveyance ten hours
+   in), and that overhang is what let a sideways drag shift the whole page. The clock and the
+   theme switch keep their size; the capsule takes the room that is left and wraps onto a
+   second line inside its own 42px face rather than widening the row. */
+.top-row > .pill { min-width: 0; white-space: normal; line-height: 1.25; }
+.top-row > .top-right { flex: none; }
 :root[data-theme="day"] main.drive.warn .dial-cap, :root[data-theme="day"] main.drive.bad .dial-cap { fill: var(--chip-ink); stroke: none; }
 
 /* Break buttons (driver report 2026-10-13): Settings rows and the add panel's rule hint. */
@@ -469,6 +487,8 @@ button:active { transform: translateY(1px); filter: brightness(.9); transition-d
 /* P3: anchored scrolling clears the measured header too (the sticky offsets read the same
    variable inline). */
 html { scroll-padding-top: var(--top-h, calc(114px + env(safe-area-inset-top))); }
+/* Patch 19: the shell is the scroller now, so the same padding rides on it. */
+.app { scroll-padding-top: var(--top-h, calc(114px + env(safe-area-inset-top))); }
 /* P2: the notices as one-line chips on Now — a 48px summary row at trust size, the warning
    shape in front of it, the full wording one tap down. */
 details.notice { background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-left: 4px solid var(--warn); border-radius: var(--r-14); padding: 0 var(--s-14); margin-bottom: 10px; }
@@ -513,6 +533,17 @@ button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: i
   .taxis-label .tl-short { display: inline; }
 }
 .taxis-value { font-size: 16px; font-weight: 700; text-align: right; white-space: nowrap; }
+/* Patch 19: the value column was a fixed 64px and its text does not wrap, so a value with a
+   day in it ("Wed 00:55", 90px) or a duration ("51h 40m left", 120px) ran out of the card —
+   25px past a 412px screen, the second source of the sideways drag. The rows now share ONE
+   set of columns (subgrid), with the value column as wide as the widest value on the axis, so
+   every lane still starts and ends on the same x and nothing overhangs. A runtime without
+   subgrid keeps the fixed columns above; the shell's closed sides contain the overhang there. */
+@supports (grid-template-columns: subgrid) {
+  .taxis { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(64px, max-content); column-gap: var(--s-8); }
+  .taxis > .taxis-row { grid-column: 1 / -1; grid-template-columns: subgrid; }
+  @media (max-width: 340px) { .taxis { grid-template-columns: 64px minmax(0, 1fr) minmax(64px, max-content); } }
+}
 .taxis-track { position: relative; height: 28px; display: block; }
 .taxis-track-head { height: 20px; }
 .taxis-tint { position: absolute; top: 0; bottom: 0; left: 0; background: var(--tint-accent); border-radius: var(--r-3); }

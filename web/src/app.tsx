@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, adjustCurrentStart, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -281,6 +281,8 @@ const STATUS_ICON: Record<DutyStatus, string> = { OFF: I.cup, SB: I.bunk, D: I.w
  */
 export type SheetKind =
   | { kind: 'status' }
+  // Patch 19: fix the start time of the status the driver is in now (the after-the-fact door).
+  | { kind: 'since' }
   | { kind: 'quickstart' }
   | { kind: 'drift' }
   | { kind: 'why' }
@@ -339,7 +341,7 @@ function Sheet({ title, children, onBack, focusKey }: { title: string; children:
  * minutes ago" — the commonest correction there is (the driver forgot to tap). It can never reach back
  * past the start of the status being left: that would erase it, which is an edit, not a tap.
  */
-export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
+export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0): boolean {
   // A tap is the browser's permission to play sound later, so a driving alert can be heard (alerts.ts).
   unlockAudio();
   // A tap changes the driver's record, so it goes through the undo slot like every other change
@@ -354,8 +356,11 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
   const cur = getState();
   const now = cur.nowOverride ?? nowMin();
   const at = now - Math.max(0, minutesAgo);
-  if (minutesAgo > 0 && cur.current && at <= cur.current.since) return;
-  if (!statusTap(cur, st, note, at)) return;
+  // (Patch 19: the same guard covers the status panel's typed "minutes ago" — a preset and a
+  // typed value arrive here as the same number, so neither has a way round it. The return
+  // value says whether the tap landed; nothing about what it does changed.)
+  if (minutesAgo > 0 && cur.current && at <= cur.current.since) return false;
+  if (!statusTap(cur, st, note, at)) return false;
   undoable(`${segLabel(st, note)} since ${clock(at, false)}`, () => {
     setState((c) => statusTap(c, st, note, at) ?? {});
   });
@@ -379,6 +384,7 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0) {
       speakAloud(statusSpeech(st, at));
     }
   }
+  return true;
 }
 
 /* ---------- the simulated clock's quarantine (patch 15, break-test #5) ---------- */
@@ -462,7 +468,65 @@ export function useRealClock() {
 }
 /** How far back "started earlier" may reach: only while the status being left is still running. */
 export function startOffsets(cur: State, now: number): { minutes: number; ok: boolean }[] {
-  return [0, 5, 15, 30].map((m) => ({ minutes: m, ok: m === 0 || !cur.current || now - m > cur.current.since }));
+  return [0, 5, 15, 30].map((m) => ({ minutes: m, ok: backdateOk(cur, now, m) }));
+}
+/**
+ * The ONE rule for a "started earlier" tap, shared by the presets' ok-flags above and the
+ * typed whole-minutes entry (patch 19), so a typed value can never be offered where a preset
+ * of the same size would be greyed out: the backdated start must still fall after the start
+ * of the status being left. (tapStatus enforces the same thing again at the tap.)
+ */
+export function backdateOk(cur: State, now: number, minutes: number): boolean {
+  return minutes === 0 || !cur.current || now - minutes > cur.current.since;
+}
+/** A typed backdate is for a late tap, not for rebuilding a day: past this it belongs on the Log. */
+export const MAX_TYPED_BACKDATE_MIN = 1440;
+/** Why a typed "minutes ago" cannot be used for a status tap, or null when it can (or the box is empty). */
+export function typedBackdateProblem(cur: State, now: number, text: string): string | null {
+  const r = readMinutesAgo(text);
+  if (!r.ok) {
+    return r.problem === 'empty' ? null
+      : r.problem === 'fraction' ? 'Whole minutes only — 7, not 7.5.'
+      : 'That box needs a plain number of minutes.';
+  }
+  if (r.minutes > MAX_TYPED_BACKDATE_MIN) return 'That is more than a day back — add it on the Log tab instead.';
+  if (!backdateOk(cur, now, r.minutes)) return `That reaches back to or past the start of the ${segLabel(cur.current!.status, cur.current!.note)} you are in (${clock(cur.current!.since)}) — it would erase it. Earlier than that? Add it on the Log tab.`;
+  return null;
+}
+
+/* ============================================================ adjust the current status's start (patch 19) */
+
+/** A refusal from the store's adjustCurrentStart, in the driver's words. */
+export function adjustStartProblemText(problem: AdjustStartProblem, cur: State, now: number): string {
+  const prev = statusBeingLeft(cur);
+  switch (problem) {
+    case 'none': return 'There is no current status yet — tap one on Now first.';
+    case 'same': return 'That is the start time it already has.';
+    case 'future': return `That is not in the past yet (now is ${clock(now)}). The status you are in has already started.`;
+    case 'erase': return prev
+      ? `That is at or before the start of the ${segLabel(prev.status, prev.note)} you were in before (${clock(prev.start)}) — it would erase it. To change that entry, use the Log tab.`
+      : 'That would erase the entry before it. To change that entry, use the Log tab.';
+    case 'overlap': return 'Another entry in your log covers part of that time. Fix it on the Log tab, where you can see both.';
+    default: return 'That time cannot be used. Pick another.';
+  }
+}
+/**
+ * Set the current status's start to an exact minute — the after-the-fact door (patch 19).
+ * One store operation (adjustCurrentStart) does the work and holds every guard; this wraps
+ * it in the app's single undo slot, labelled the way a status tap is ("On Duty since
+ * 14:07"), so the same chip above the dock and the same line on the Log take it back.
+ * Returns the driver-facing reason it was refused, or null when it landed. It never speaks
+ * and never asks the speech question: it is a correction, not a tap.
+ */
+export function adjustStartNow(newSince: number): string | null {
+  const cur = getState();
+  const now = cur.nowOverride ?? nowMin();
+  const r = adjustCurrentStart(cur, newSince, now);
+  if (!r.ok) return adjustStartProblemText(r.problem, cur, now);
+  undoable(`${segLabel(cur.current!.status, cur.current!.note)} since ${clock(newSince, false)}`, () => {
+    setState((c) => { const x = adjustCurrentStart(c, newSince, now); return x.ok ? x.patch : {}; });
+  });
+  return null;
 }
 
 // Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
@@ -1497,6 +1561,15 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       ) : (
         <button class="wide" onClick={() => endDay(now)}>End my day</button>
       ))}
+      {/* Patch 19: the status the driver is in, with the way to fix when it started — the
+          after-the-fact door for a tap made late (or early). The Log's live row says
+          "change it on Now"; this is where. */}
+      {s.current && (
+        <button class="rowbtn" onClick={() => openSheet({ kind: 'since' })}>
+          <span><span class="muted">{segLabel(s.current.status, s.current.note)} since {clock(s.current.since)}</span><br /><b>Fix the start time</b></span>
+          <Icon d={I.next} />
+        </button>
+      )}
       <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
         <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
         <Icon d={I.next} />
@@ -1973,8 +2046,22 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
 
 function StatusSheet({ s, now }: { s: State; now: number }) {
   const [ago, setAgo] = useState(0);
+  // Patch 19: an exact, typed "minutes ago" beside the presets (the field report's 7 minutes
+  // sits between 5 and 15). While the box holds anything it is the answer — a preset tap
+  // clears it — and a value that cannot be used (a fraction, or one reaching back to the
+  // start of the status being left) blocks the status buttons rather than falling back to
+  // some other time the driver did not ask for.
+  const [typed, setTyped] = useState('');
+  const [blocked, setBlocked] = useState(false);
   const offsets = startOffsets(s, now);
-  const pick = (st: DutyStatus, note?: string) => { tapStatus(st, note, ago); openSheet(null); };
+  const typedRead = readMinutesAgo(typed);
+  const typedProblem = typedBackdateProblem(s, now, typed);
+  const inUse = typed.trim() !== '';
+  const agoNow: number | null = !inUse ? ago : typedRead.ok && !typedProblem ? typedRead.minutes : null;
+  const pick = (st: DutyStatus, note?: string) => {
+    if (agoNow === null) { setBlocked(true); return; }
+    tapStatus(st, note, agoNow); openSheet(null);
+  };
   const cur = s.current;
   const isOn = (st: DutyStatus, note?: string) => cur?.status === st && (cur?.note ?? undefined) === note;
   return (
@@ -1990,9 +2077,125 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
       </div>
       <h3>When did it start?</h3>
       <div class="toggle" role="group" aria-label="When did it start?">
-        {offsets.map((o) => <button key={o.minutes} class={ago === o.minutes ? 'on' : ''} aria-pressed={ago === o.minutes} disabled={!o.ok} onClick={() => setAgo(o.minutes)}>{o.minutes ? `${o.minutes} min ago` : 'Now'}</button>)}
+        {offsets.map((o) => <button key={o.minutes} class={!inUse && ago === o.minutes ? 'on' : ''} aria-pressed={!inUse && ago === o.minutes} disabled={!o.ok} onClick={() => { setAgo(o.minutes); setTyped(''); setBlocked(false); }}>{o.minutes ? `${o.minutes} min ago` : 'Now'}</button>)}
       </div>
-      <p class="muted small">{ago ? `Starts at ${clock(now - ago)}. Use this when you forgot to tap.` : `Starts at ${clock(now)} — right now.`} Earlier than that? Add it on the <b>Log</b> tab.</p>
+      <div class="qs-row">
+        <span class="qs-label">Or the exact minutes<span class="muted small"> — whole minutes ago</span></span>
+        <span class="qs-inputs">
+          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Started this many minutes ago" value={typed}
+            onInput={(e) => { setTyped((e.target as HTMLInputElement).value); setBlocked(false); }} />
+          <span aria-hidden="true">min ago</span>
+        </span>
+      </div>
+      {typedProblem && <p class="warnbox small" role={blocked ? 'alert' : undefined}>{typedProblem}{blocked ? ' Nothing was changed.' : ''}</p>}
+      {agoNow !== null && <p class="muted small">{agoNow ? `Starts at ${clock(now - agoNow)}. Use this when you forgot to tap.` : `Starts at ${clock(now)} — right now.`} Earlier than that? Add it on the <b>Log</b> tab.</p>}
+      {cur && (
+        <div class="row">
+          <button onClick={() => openSheet({ kind: 'since' })}>Still {segLabel(cur.status, cur.note)}? Fix its start time</button>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/**
+ * "Fix the start time" (patch 19): the after-the-fact door. The driver is already in the
+ * status; only WHEN it started is wrong (the field report: On Duty tapped seven minutes
+ * after the ELD). The editor follows the Log editor's "when" step — day buttons, the big
+ * clock, nudge keys, another-day picker — and adds the two exact entries the report asked
+ * for: a time of day, and whole minutes ago (a fraction is refused the way the drift check
+ * refuses one). Every control moves one draft minute; the store's adjustCurrentStart
+ * judges it on every render, so the reason a time cannot be used is on screen before the
+ * button is. On apply the panel shows the resulting "since" time.
+ */
+function SinceSheet({ s, now }: { s: State; now: number }) {
+  const cur = s.current;
+  const [at, setAt] = useState<number>(cur ? cur.since : now);
+  const [agoTxt, setAgoTxt] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<number | null>(null);
+  if (!cur) {
+    return (
+      <Sheet title="Fix the start time">
+        <p class="small">{adjustStartProblemText('none', s, now)}</p>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>Close</button></div>
+      </Sheet>
+    );
+  }
+  const label = segLabel(cur.status, cur.note);
+  if (done !== null) {
+    return (
+      <Sheet title="Fix the start time">
+        <p><b>{label} since {clock(done)}</b></p>
+        <p class="small">The entry before it ends at that time now, and every clock has been worked out again from it.</p>
+        <p class="muted small">You can undo it from the Log.</p>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
+      </Sheet>
+    );
+  }
+  const set = (v: number) => { setAt(v); setAgoTxt(''); setErr(null); };
+  const read = readMinutesAgo(agoTxt);
+  const typedProblem = read.ok || read.problem === 'empty' ? null
+    : read.problem === 'fraction' ? 'Whole minutes only — 7, not 7.5.'
+    : 'That box needs a plain number of minutes.';
+  const check = adjustCurrentStart(s, at, now);
+  const unchanged = at === cur.since;
+  const problem = typedProblem ?? (check.ok || unchanged ? null : adjustStartProblemText(check.problem, s, now));
+  const key = (delta: number, text: string, aria: string) => <button key={delta} aria-label={aria} onClick={() => set(at + delta)}>{text}</button>;
+  const pickDate = (v: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return;
+    const t = new Date(at * 60000);
+    set(Math.floor(new Date(+m[1], +m[2] - 1, +m[3], t.getHours(), t.getMinutes()).getTime() / 60000));
+  };
+  const pickTime = (v: string) => {
+    const m = /^(\d{2}):(\d{2})/.exec(v);
+    if (!m) return;
+    const t = new Date(at * 60000);
+    t.setHours(+m[1], +m[2], 0, 0);
+    set(Math.floor(t.getTime() / 60000));
+  };
+  const typeAgo = (v: string) => {
+    setAgoTxt(v); setErr(null);
+    const r = readMinutesAgo(v);
+    if (r.ok) setAt(now - r.minutes);
+  };
+  const apply = () => {
+    if (problem || unchanged) return;
+    const e = adjustStartNow(at);
+    if (e) setErr(e); else setDone(at);
+  };
+  const chips = dayChips(now, false);
+  const onChip = chips.some((c) => sameDay(c.at, at));
+  return (
+    <Sheet title="Fix the start time">
+      <div class="ed-ctx">
+        <span class="dot" style={{ background: STATUS_COLOR[cur.status] }} />
+        <span class="ed-ctx-t">{label} since {clock(cur.since)}</span>
+        <span />
+      </div>
+      <Question>When did it really start?</Question>
+      <div class="chips ed-days" role="group" aria-label="Day">
+        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
+      </div>
+      <div class="ed-clock">
+        <output class="mono" aria-live="polite" aria-label={`Started ${clock(at)}`}>{clock(at, false)}</output>
+        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+      </div>
+      <div class="ed-keys four">{key(-5, '−5', '5 minutes earlier')}{key(-1, '−1', '1 minute earlier')}{key(1, '+1', '1 minute later')}{key(5, '+5', '5 minutes later')}</div>
+      <label class="ed-day">Exact time<input type="time" aria-label="Exact start time" value={toInput(at).slice(11, 16)} onInput={(e) => pickTime((e.target as HTMLInputElement).value)} /></label>
+      <div class="qs-row">
+        <span class="qs-label">Or minutes ago<span class="muted small"> — whole minutes</span></span>
+        <span class="qs-inputs">
+          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Started this many minutes ago" value={agoTxt}
+            onInput={(e) => typeAgo((e.target as HTMLInputElement).value)} />
+          <span aria-hidden="true">min ago</span>
+        </span>
+      </div>
+      <label class="ed-day">Another day<input type="date" value={dateInput(at)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>
+      {(problem || err) && <div class="warnbox small">{problem ?? err}</div>}
+      <button class="primary wide ed-go" disabled={!!problem || unchanged} onClick={apply}>{unchanged ? 'Pick the real start time' : `Set start to ${clock(at)}`}</button>
+      <p class="muted small ed-foot">You can undo it from the Log.</p>
     </Sheet>
   );
 }
@@ -3215,7 +3418,9 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
   const [step, setStep] = useState(lc.answered ? 4 : 1);
   // each question is its own screen: start it at the top, not wherever the last Next button was
-  useEffect(() => { window.scrollTo(0, 0); }, [step]);
+  // (Patch 19: the shell is the scroller now — the page itself no longer scrolls — so the
+  // shell is what goes back to the top; the window call stays for a runtime where it does.)
+  useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); }, [step]);
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const departure = now + lc.leaveIn;
   const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
@@ -3807,6 +4012,7 @@ export function App() {
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
         {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+        {!disclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}
         {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
       </div>
     );
@@ -3845,6 +4051,7 @@ export function App() {
         return <button key={k} class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setState({ tab: k })}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+      {!disclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
