@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
-import { Component, type ComponentChildren } from 'preact';
+import { useEffect, useMemo, useState, useRef, useContext } from 'preact/hooks';
+import { Component, createContext, type ComponentChildren } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
 import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, statusHaptic, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
 
@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, adjustCurrentStart, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -98,6 +98,25 @@ function Toggle<T extends string | boolean>({ options, value, onChange }: { opti
   // (consumer-review-6, finding 6).
   return <div class="toggle" role="group">{options.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => onChange(v)}>{l}</button>)}</div>;
 }
+/**
+ * Patch L1 item 5: the Now card's Timeline / Dial choice, on the card itself. It is the SAME
+ * setting as More → Planning → "Main card on Now" — one field in the store (`nowCard`), one
+ * setter, one option list — so the two switches are two views of one value and changing
+ * either moves the other. Either one also answers the one-time "New: timeline" question.
+ */
+export const NOW_CARD_OPTIONS: [State['nowCard'], string][] = [['timeline', 'Timeline'], ['dial', 'Dial']];
+export function setNowCard(v: State['nowCard']) { setState({ nowCard: v, nowCardAsked: true }); }
+/** The on-card switch. NowTab provides it through CardSwitchCtx; a hero drawn anywhere else (a sheet) gets none. */
+function NowCardSwitch({ value }: { value: State['nowCard'] }) {
+  return (
+    <div class="card-switch" role="group" aria-label="Main card on Now">
+      <span class="card-switch-l">Show as</span>
+      <Toggle options={NOW_CARD_OPTIONS} value={value} onChange={(v) => setNowCard(v)} />
+    </div>
+  );
+}
+const CardSwitchCtx = createContext<ComponentChildren>(null);
+function CardSwitchSlot() { return <>{useContext(CardSwitchCtx)}</>; }
 /**
  * Time-zone picker. The text is held locally and only applied once it names a real zone: an invalid
  * zone makes Intl.DateTimeFormat throw inside the engine, which would blank every tab behind the
@@ -294,8 +313,11 @@ export type SheetKind =
   | { kind: 'splitblock'; block: 'b1' | 'dwell' | 'drive' | 'b2' }
   // The load check's big clock (capstone C3, M7): the departure, or the receiver appointment.
   | { kind: 'loadtime'; field: 'leave' | 'appt' }
+  // Patch L1 item 3: the trip planner's departure, on the same shared clock picker.
+  | { kind: 'triptime' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
-  | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft }
+  // `live` (patch L1 item 1): `seg` is the OPEN status, materialised up to the minute it was tapped.
+  | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft; live?: boolean }
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
   // `resume`: the step a "Change" came from, to return to once the new answer is in.
   | { kind: 'add'; step?: EdStep; draft?: Draft; inside?: Segment; day?: number; resume?: EdStep };
@@ -522,15 +544,57 @@ export function adjustStartProblemText(problem: AdjustStartProblem, cur: State, 
  * Returns the driver-facing reason it was refused, or null when it landed. It never speaks
  * and never asks the speech question: it is a correction, not a tap.
  */
-export function adjustStartNow(newSince: number): string | null {
+export function adjustStartNow(newSince: number, absorb = false): string | null {
   const cur = getState();
   const now = cur.nowOverride ?? nowMin();
+  // Patch L1 item 4b: with the driver's one confirmation (`absorb`), a start that reaches back
+  // over the status being left — or across another entry — takes that stretch in instead of
+  // being refused. Without it the plain operation's guards stand exactly as before.
+  if (absorb) {
+    const r = absorbCurrentStart(cur, newSince, now);
+    if (!r.ok) return adjustStartProblemText(r.problem, cur, now);
+    undoable(`${segLabel(cur.current!.status, cur.current!.note)} since ${clock(newSince, false)}`, () => {
+      setState((c) => { const x = absorbCurrentStart(c, newSince, now); return x.ok ? x.patch : {}; });
+    });
+    return null;
+  }
   const r = adjustCurrentStart(cur, newSince, now);
   if (!r.ok) return adjustStartProblemText(r.problem, cur, now);
   undoable(`${segLabel(cur.current!.status, cur.current!.note)} since ${clock(newSince, false)}`, () => {
     setState((c) => { const x = adjustCurrentStart(c, newSince, now); return x.ok ? x.patch : {}; });
   });
   return null;
+}
+
+/* ---------- absorb, never overlap (patch L1, item 4): the warning and its one confirmation ---------- */
+
+/** One absorbed neighbour, in the driver's words: what it was, and what is left of it. */
+export function absorbedLine(a: Absorbed, now: number): string {
+  const name = a.live ? `your current ${segLabel(a.seg.status, a.seg.note)} (since ${clock(a.seg.start)})` : `your ${segLabel(a.seg.status, a.seg.note)} ${clock(a.seg.start)} → ${clock(a.seg.end)}`;
+  const span = (x: Segment) => `${clock(x.start)} → ${x.end >= now && a.live ? 'now' : clock(x.end)}`;
+  if (a.live) {
+    if (a.kind === 'removed') return `${name} would start at ${clock(a.seg.end)} instead`;
+    if (a.kind === 'split') return `${name} would be split around it: ${span(a.left[0])}, then again from ${clock(a.left[1].start)}`;
+    return a.left[0].start > a.seg.start ? `${name} would start at ${clock(a.left[0].start)} instead` : `${name} would end at ${clock(a.left[0].end)}, then this`;
+  }
+  if (a.kind === 'removed') return `${name} would be taken in whole`;
+  if (a.kind === 'split') return `${name} would be split around it: ${span(a.left[0])} and ${span(a.left[1])}`;
+  return `${name} would become ${span(a.left[0])}`;
+}
+/**
+ * The absorb warning (item 4): what the change runs into and exactly what happens to each
+ * entry, said BEFORE anything is saved. The panel's main button becomes the one explicit
+ * confirmation ("Absorb and …"); nothing is trimmed until it is tapped, and it can be undone.
+ */
+function AbsorbNote({ absorbed, now }: { absorbed: Absorbed[]; now: number }) {
+  if (!absorbed.length) return null;
+  return (
+    <div class="warnbox absorb" role="alert">
+      <b>This runs into {absorbed.length === 1 ? 'another entry' : `${absorbed.length} other entries`}.</b> Your log can only show one status at a time, so to save it:
+      <ul class="absorb-list">{absorbed.map((a, i) => <li key={i}>{absorbedLine(a, now)}.</li>)}</ul>
+      <span class="small">Nothing changes until you confirm below. You can undo it from the Log.</span>
+    </div>
+  );
 }
 
 // Keyed through the engine: during a ≥10h rest the shift start is "now" and moves every minute, so
@@ -611,6 +675,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
         <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Hours coming back</b> under <b>Plan</b> for when your {cycleWord} hours return.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
         {tail}
+        <CardSwitchSlot />
       </section>
     );
   }
@@ -633,6 +698,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
         <p class="hero-text">Any 30 minutes in a row without driving counts — off duty, sleeper, or on-duty work like fueling.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
         {tail}
+        <CardSwitchSlot />
       </section>
     );
   }
@@ -644,6 +710,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
         <p class="hero-text">On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
         {tail}
+        <CardSwitchSlot />
       </section>
     );
   }
@@ -654,6 +721,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
         <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
         {tail}
+        <CardSwitchSlot />
       </section>
     );
   }
@@ -666,6 +734,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
       {before >= 30 && before < 600 && <p class="hero-text">Your {dur(before)} off before this does not count toward the 10 hours — they have to be consecutive{before >= 120 ? ', though it can still be the short half of a sleeper split' : ''}.</p>}
       <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
       {tail}
+      <CardSwitchSlot />
     </section>
   );
 }
@@ -1070,6 +1139,7 @@ function HeroDrive({ ev, basis }: { ev: FullEvaluation; basis?: 'log' | 'estimat
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
         <div class="trust">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
       )}
+      <CardSwitchSlot />
     </section>
   );
 }
@@ -1199,7 +1269,7 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
       <div class="taxis" aria-hidden="true">
         <div class="taxis-row taxis-head">
           <span class="taxis-label" />
-          <span class="taxis-track taxis-track-head" onClick={tapAt}>
+          <span class={`taxis-track taxis-track-head${wallPct !== null || ghostWallPct !== null ? ' has-tag' : ''}`} onClick={tapAt}>
             {grid.map((g) => <span key={g} class="taxis-hour" style={{ left: `${pct(g)}%` }}>{hourLabel(g)}</span>)}
             {wallPct !== null && <span class="taxis-tag" style={{ left: `${wallPct}%` }}>STOP {clock(wall as number, false)}</span>}
             {ghostWallPct !== null && <span class="taxis-tag ghost" style={{ left: `${ghostWallPct}%` }}>STOP {clock(ghostWall as number, false)}</span>}
@@ -1340,6 +1410,7 @@ function TimelineDrive({ s, now, ev, basis, onTrack }: { s: State; now: number; 
       {(ev.shift.pendingSplitLeg || ev.shift.notes.length > 0) && (
         <div class="trust">{[ev.shift.pendingSplitLeg ? 'Split leg pending' : '', ev.shift.notes.length ? 'Exception active' : ''].filter(Boolean).join(' · ')}</div>
       )}
+      <CardSwitchSlot />
     </section>
   );
 }
@@ -1773,6 +1844,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {snap && !preview && <span class="pv-snapmark" aria-hidden="true" />}
+      <CardSwitchCtx.Provider value={<NowCardSwitch value={s.nowCard} />}>
       {timeline ? (
         preview
           ? <PreviewCard s={s} now={now} basis={basis} t={preview.t} cont={preview.cont}
@@ -1785,6 +1857,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       ) : (
         ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={basis} /> : <RestHero s={s} now={now} ev={ev} again={again} />
       )}
+      </CardSwitchCtx.Provider>
       {/* The scrubber's entry without the picture (the axis is aria-hidden): one plain
           button for a screen reader or a keyboard, into the same preview. */}
       {canPreview && !preview && <button class="vh" onClick={() => enterPreview(now + PREVIEW_STEP_MIN)}>Preview a later time</button>}
@@ -1799,7 +1872,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <div class="newcard">
           <span><b>New:</b> your limits on a timeline</span>
           <span class="newcard-btns">
-            <button class="mini primary" onClick={() => setState({ nowCard: 'timeline', nowCardAsked: true })}>Show me</button>
+            <button class="mini primary" onClick={() => setNowCard('timeline')}>Show me</button>
             <button class="mini" onClick={() => setState({ nowCardAsked: true })}>Keep the dial</button>
           </span>
         </div>
@@ -2434,23 +2507,13 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
   const typedProblem = read.ok || read.problem === 'empty' ? null
     : read.problem === 'fraction' ? 'Whole minutes only — 7, not 7.5.'
     : 'That box needs a plain number of minutes.';
-  const check = adjustCurrentStart(s, at, now);
+  // Patch L1 item 4b: a start at or before the status being left's start, or across another
+  // entry, is no longer refused — the panel says what it would absorb and the main button
+  // becomes the one explicit confirmation. The other refusals (future, invalid) stand.
+  const check = absorbCurrentStart(s, at, now);
   const unchanged = at === cur.since;
   const problem = typedProblem ?? (check.ok || unchanged ? null : adjustStartProblemText(check.problem, s, now));
-  const key = (delta: number, text: string, aria: string) => <button key={delta} aria-label={aria} onClick={() => set(at + delta)}>{text}</button>;
-  const pickDate = (v: string) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-    if (!m) return;
-    const t = new Date(at * 60000);
-    set(Math.floor(new Date(+m[1], +m[2] - 1, +m[3], t.getHours(), t.getMinutes()).getTime() / 60000));
-  };
-  const pickTime = (v: string) => {
-    const m = /^(\d{2}):(\d{2})/.exec(v);
-    if (!m) return;
-    const t = new Date(at * 60000);
-    t.setHours(+m[1], +m[2], 0, 0);
-    set(Math.floor(t.getTime() / 60000));
-  };
+  const absorbed = !problem && !unchanged && check.ok ? check.absorbed : [];
   const typeAgo = (v: string) => {
     setAgoTxt(v); setErr(null);
     const r = readMinutesAgo(v);
@@ -2458,11 +2521,9 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
   };
   const apply = () => {
     if (problem || unchanged) return;
-    const e = adjustStartNow(at);
+    const e = adjustStartNow(at, absorbed.length > 0);
     if (e) setErr(e); else setDone(at);
   };
-  const chips = dayChips(now, false);
-  const onChip = chips.some((c) => sameDay(c.at, at));
   return (
     <Sheet title="Fix the start time">
       <div class="ed-ctx">
@@ -2471,15 +2532,7 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
         <span />
       </div>
       <Question>When did it really start?</Question>
-      <div class="chips ed-days" role="group" aria-label="Day">
-        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
-      </div>
-      <div class="ed-clock">
-        <output class="mono" aria-live="polite" aria-label={`Started ${clock(at)}`}>{clock(at, false)}</output>
-        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-      </div>
-      <div class="ed-keys four">{key(-5, '−5', '5 minutes earlier')}{key(-1, '−1', '1 minute earlier')}{key(1, '+1', '1 minute later')}{key(5, '+5', '5 minutes later')}</div>
-      <label class="ed-day">Exact time<input type="time" aria-label="Exact start time" value={toInput(at).slice(11, 16)} onInput={(e) => pickTime((e.target as HTMLInputElement).value)} /></label>
+      <ClockPick at={at} set={set} now={now} future={false} say="Started" name="Exact start time" keys={KEYS_MINUTES} />
       <div class="qs-row">
         <span class="qs-label">Or minutes ago<span class="muted small"> — whole minutes</span></span>
         <span class="qs-inputs">
@@ -2488,9 +2541,9 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
           <span aria-hidden="true">min ago</span>
         </span>
       </div>
-      <label class="ed-day">Another day<input type="date" value={dateInput(at)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>
       {(problem || err) && <div class="warnbox small">{problem ?? err}</div>}
-      <button class="primary wide ed-go" disabled={!!problem || unchanged} onClick={apply}>{unchanged ? 'Pick the real start time' : `Set start to ${clock(at)}`}</button>
+      <AbsorbNote absorbed={absorbed} now={now} />
+      <button class={`primary wide ed-go${absorbed.length ? ' ed-absorb' : ''}`} disabled={!!problem || unchanged} onClick={apply}>{unchanged ? 'Pick the real start time' : absorbed.length ? `Absorb and set start to ${clock(at)}` : `Set start to ${clock(at)}`}</button>
       <p class="muted small ed-foot">You can undo it from the Log.</p>
     </Sheet>
   );
@@ -2710,8 +2763,15 @@ export function saveEntry(seg: Segment, next: { status: DutyStatus; start: numbe
   // The label: the one the panel picked, else the row's own, and only while it fits the status.
   const picked = 'note' in next ? next.note : seg.note;
   const fixed = { status: next.status, start: next.start, end: next.end, note: noteFits(picked, next.status) ? picked : undefined };
-  undoable(`Edited ${describe(seg)}`, () => setState((cur) => applySegmentEdit(cur, seg, fixed)));
+  // Patch L1 item 4: the corrected entry ABSORBS whatever it now covers (placeEntry), so the
+  // saved log never holds two entries for one minute. The panel shows what that trims and asks
+  // for one confirmation before it calls this (CheckStep).
+  undoable(`Edited ${describe(seg)}`, () => setState((cur) => placeEntry(cur, editedRow(seg, fixed), seg, now).patch));
   return null;
+}
+/** The corrected row as the store will hold it: an edit is a new entry, stamped so it wins (applySegmentEdit's rule). */
+function editedRow(seg: Segment, fixed: Partial<Segment>): Segment {
+  return { ...seg, ...fixed, createdAt: stamp() };
 }
 /** Delete an entry. Undo-able from the Log. */
 export function deleteEntry(seg: Segment) {
@@ -2722,8 +2782,30 @@ export function addEntry(status: DutyStatus, start: number, end: number, now: nu
   if (end <= start) return 'End must be after start.';
   if (end > now) return `End is after now (${clock(now)}). This log is for time that has happened — use Plan to look ahead, or tap your status on Now when it changes.`;
   const row: Segment = { status, start, end, createdAt: stamp(), ...(note ? { note } : {}) };
-  undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
+  // Item 4a: a back-filled entry absorbs what it covers — never saved as an overlap.
+  undoable(`Added ${describe(row)}`, () => setState((cur) => placeEntry(cur, row, null, now).patch));
   return null;
+}
+/** The open status, materialised as a row up to now — what the Log's live entry edits (item 1). */
+export function liveSeg(s: Pick<State, 'current'>, now: number): Segment | null {
+  const c = s.current;
+  if (!c) return null;
+  return { status: c.status, start: c.since, end: Math.max(now, c.since), ...(c.note ? { note: c.note } : {}), ...(c.createdAt !== undefined ? { createdAt: c.createdAt } : {}) };
+}
+/** "It wasn't …" on the live entry: the open status relabelled, its start kept. Undo-able. */
+export function restatusCurrent(status: DutyStatus, note?: string): void {
+  const c = getState().current;
+  if (!c) return;
+  const fits = noteFits(note, status) ? note : undefined;
+  undoable(`${segLabel(status, fits)} since ${clock(c.since, false)}`, () => setState((cur) => (cur.current ? { current: { status, since: cur.current.since, ...(fits ? { note: fits } : {}), ...(cur.current.createdAt !== undefined ? { createdAt: cur.current.createdAt } : {}) } } : {})));
+}
+/** "It never happened" on the live entry: the status before it is open again. Undo-able. */
+export function dropCurrent(): boolean {
+  const p = dropCurrentPatch(getState());
+  if (!p) return false;
+  const c = getState().current!;
+  undoable(`Deleted ${segLabel(c.status, c.note)} since ${clock(c.since)}`, () => setState((cur) => dropCurrentPatch(cur) ?? {}));
+  return true;
 }
 /**
  * Add the driving a drift check found missing, as one ordinary row on the Log (patch 9).
@@ -2870,7 +2952,13 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
         ) : (
           <>
             {s.current && s.current.since < day.end && (back === 0) && (
-              <div class="entry live"><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — change it on Now</span></span></div>
+              /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
+              <button class="entry live" aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} onClick={() => openSheet({ kind: 'edit', seg: liveSeg(s, now)!, live: true })}>
+                <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
+                <span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
+                <span class="entry-len">{dur(Math.max(0, now - s.current.since))}</span>
+                <Icon d={I.next} size={18} />
+              </button>
             )}
             {dayRows.map((seg, i) => (
               <button key={i} class="entry" aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
@@ -2939,6 +3027,124 @@ export function dayChips(now: number, future: boolean): { at: number; label: str
   });
 }
 const dateInput = (min: number) => toInput(min).slice(0, 10);
+
+/* ---------- the one clock picker (patch L1, items 2 + 3) ---------- */
+
+/**
+ * A typed time of day: "0641", "641", "06:41" or "6:41". 'partial' is a time still being typed
+ * (one or two digits); 'range' has the shape but is no time (25:00, 06:75). Exported for the tests.
+ */
+export type TypedClock = { ok: true; h: number; m: number } | { ok: false; problem: 'empty' | 'partial' | 'junk' | 'range' };
+export function readTypedClock(text: string): TypedClock {
+  const t = text.trim();
+  if (!t) return { ok: false, problem: 'empty' };
+  const m = /^(\d{1,2}):?(\d{2})$/.exec(t);
+  if (!m) return /^\d{1,2}:?\d?$/.test(t) ? { ok: false, problem: 'partial' } : { ok: false, problem: 'junk' };
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return { ok: false, problem: 'range' };
+  return { ok: true, h, m: mi };
+}
+/** `at`'s calendar day (device-local, as every clock in the app is) at h:m. */
+export function atClock(at: number, h: number, m: number): number {
+  const t = new Date(at * 60000);
+  t.setHours(h, m, 0, 0);
+  return Math.floor(t.getTime() / 60000);
+}
+/** The clock picker's own input ("HH:MM", what the phone's time picker reports), on `at`'s day; null if unreadable. */
+function fromTimeInput(at: number, v: string): number | null {
+  const m = /^(\d{2}):(\d{2})/.exec(v);
+  return m ? atClock(at, +m[1], +m[2]) : null;
+}
+
+/**
+ * Exact entry for one time (items 2 + 3): a typed box that brings up the phone's NUMBER pad
+ * (inputmode numeric — the driver types 0641) and the clock picker patch 19 shipped (the
+ * phone's own time picker, a type=time input). Both set the time on the day already chosen.
+ * A typed time lands as soon as it is a whole time (four digits, or h:mm); Done or Enter also
+ * takes three digits ("641"). A typed value that is no time is said so, never guessed.
+ */
+function TimeEntry({ at, set, name, typing, onDone }: { at: number; set: (v: number) => void; name: string; typing: boolean; onDone: () => void }) {
+  const [txt, setTxt] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (typing) { setTxt(''); setNote(null); box.current?.focus?.(); } }, [typing]);
+  const say = (r: TypedClock) => (r.ok || r.problem === 'empty' || r.problem === 'partial' ? null
+    : r.problem === 'range' ? 'That is not a time — hours 00 to 23, minutes 00 to 59.' : 'Type the time as four digits, like 0641.');
+  const typed = (v: string) => {
+    setTxt(v);
+    const r = readTypedClock(v);
+    setNote(say(r));
+    if (r.ok && /^\d{4}$|:\d{2}$/.test(v.trim())) set(atClock(at, r.h, r.m));
+  };
+  const done = () => {
+    const r = readTypedClock(txt);
+    if (r.ok) { set(atClock(at, r.h, r.m)); onDone(); return; }
+    if (r.problem === 'empty') { onDone(); return; }
+    setNote(r.problem === 'partial' ? 'Type the time as four digits, like 0641.' : say(r));
+  };
+  return (
+    <>
+      {typing && (
+        <div class="ed-type">
+          <input ref={box} type="text" class="num" inputMode="numeric" pattern="[0-9]*" autoComplete="off" maxLength={5} placeholder="0641"
+            aria-label={`${name}, type the time`} value={txt}
+            onInput={(e) => typed((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') done(); }} />
+          <button class="ed-type-ok" onClick={done}>Done</button>
+        </div>
+      )}
+      {typing && note && <div class="warnbox small">{note}</div>}
+      <label class="ed-day">Exact time<input type="time" aria-label={name} value={toInput(at).slice(11, 16)} onInput={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null) set(v); }} /></label>
+    </>
+  );
+}
+
+/** The preset keys under the clock: [minutes, text, aria] per key, one row per array. */
+type ClockKeys = [number, string, string][][];
+const KEYS_HOURS: ClockKeys = [
+  [[-60, '− 1 hour', '1 hour earlier'], [60, '+ 1 hour', '1 hour later']],
+  [[-15, '−15', '15 minutes earlier'], [-5, '−5', '5 minutes earlier'], [5, '+5', '5 minutes later'], [15, '+15', '15 minutes later']],
+];
+const KEYS_MINUTES: ClockKeys = [[[-5, '−5', '5 minutes earlier'], [-1, '−1', '1 minute earlier'], [1, '+1', '1 minute later'], [5, '+5', '5 minutes later']]];
+
+/**
+ * THE clock picker (patch L1 item 3) — patch 19's "Fix the start time" editor made one shared
+ * component, used wherever a time is edited: the Log editor's start (and its end, through
+ * TimeEntry), "Fix the start time", the load check's departure and appointment, and the trip
+ * planner's departure. Day buttons, the big clock — TAP IT to type the exact time (item 2) —
+ * the preset keys, the phone's clock picker, and another-day. `say` reads the big clock's time
+ * aloud ("Started 06:41"); `name` labels the exact-time boxes.
+ */
+function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true }: {
+  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean;
+}) {
+  const [typing, setTyping] = useState(false);
+  const chips = dayChips(now, future);
+  const onChip = chips.some((c) => sameDay(c.at, at));
+  const pickDate = (v: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return;
+    const t = new Date(at * 60000);
+    set(Math.floor(new Date(+m[1], +m[2] - 1, +m[3], t.getHours(), t.getMinutes()).getTime() / 60000));
+  };
+  return (
+    <>
+      <div class="chips ed-days" role="group" aria-label="Day">
+        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
+      </div>
+      <div class="ed-clock">
+        <button class="ed-clock-tap" aria-expanded={typing} aria-label={`${say} ${clock(at)}. Tap to type the time`} onClick={() => setTyping(!typing)}>
+          <output class="mono" aria-live="polite" aria-label={`${say} ${clock(at)}`}>{clock(at, false)}</output>
+        </button>
+        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}{typing ? '' : ' · tap the time to type it'}</span>
+      </div>
+      {extra}
+      {keys.map((row, i) => <div key={i} class={`ed-keys ${row.length === 2 ? 'two' : 'four'}`}>{row.map(([d, t, a]) => <button key={d} aria-label={a} onClick={() => set(at + d)}>{t}</button>)}</div>)}
+      <TimeEntry at={at} set={set} name={name} typing={typing} onDone={() => setTyping(false)} />
+      {anyDay && <label class="ed-day">Another day<input type="date" value={dateInput(at)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>}
+    </>
+  );
+}
 
 /**
  * The draft after "what" is answered. A first answer sets sensible times: the hour before now (or before
@@ -3025,7 +3231,7 @@ export function stepBack(k: SheetKind): SheetKind | null {
     if (step === 'menu') return null;
     if (step === 'what' || step === 'when') return { ...k, step: 'menu' };
     if (step === 'long') return { ...k, step: 'when' };
-    return { ...k, step: d?.fixedLen ? 'when' : 'long' };
+    return { ...k, step: d?.fixedLen || k.live ? 'when' : 'long' };
   }
   if (step === 'what') return d ? { ...k, step: k.resume ?? 'check', resume: undefined } : null; // came from a "Change": go back there
   // Back to the first question starts the answer again (a "what" holding a draft means a "Change" is open).
@@ -3124,8 +3330,17 @@ function WhatStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
   const choose = (status: DutyStatus, note?: string, minutes?: number) => {
     if (edit) {
       if (isOn({ status, note: note as WhatOpt['note'], title: '', sub: '' })) { openSheet(null); return; } // already that: nothing to change
+      // The open status (item 1): relabelled in place, its start kept.
+      if (k.kind === 'edit' && k.live) { restatusCurrent(status, relabel(edit, status, note)); openSheet(null); return; }
+      // Item 4: an entry that already overlaps another (an older record) would absorb it — that
+      // is never done on a status tap; the check step shows it and asks first.
+      const next = { status, start: edit.start, end: edit.end, note: relabel(edit, status, note) };
+      if (placeEntry(s, { ...edit, ...next }, edit, now).absorbed.length) {
+        openSheet({ ...k, step: 'check', draft: { status, note: next.note, start: edit.start, len: edit.end - edit.start } });
+        return;
+      }
       // A different status is one tap, kept as the times were; undo is on the Log.
-      const e = saveEntry(edit, { status, start: edit.start, end: edit.end, note: relabel(edit, status, note) }, now);
+      const e = saveEntry(edit, next, now);
       setErr(e);
       if (!e) openSheet(null);
       return;
@@ -3173,35 +3388,20 @@ function WhatStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
 function WhenStep({ k, now }: { k: EdKind; now: number }) {
   const d = k.draft!;
   const tentative = k.kind === 'edit' && !!k.seg.tentative;
+  const live = k.kind === 'edit' && !!k.live;
   const set = (start: number) => openSheet({ ...k, draft: { ...d, start } });
-  const problem = whenProblem(d, now, tentative);
-  const key = (delta: number, text: string, label: string) => <button key={delta} aria-label={label} onClick={() => set(d.start + delta)}>{text}</button>;
-  const pickDate = (v: string) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-    if (!m) return;
-    const t = new Date(d.start * 60000);
-    set(Math.floor(new Date(+m[1], +m[2] - 1, +m[3], t.getHours(), t.getMinutes()).getTime() / 60000));
-  };
-  const chips = dayChips(now, tentative);
-  const onChip = chips.some((c) => sameDay(c.at, d.start));
+  // The open status (item 1) has no length to pick — it runs until now — so its next step is the check.
+  const problem = live ? (d.start >= now ? `That is not in the past yet (now is ${clock(now)}). The status you are in has already started.` : null) : whenProblem(d, now, tentative);
+  const next: EdStep = live || d.fixedLen ? 'check' : 'long';
   return (
     <>
       {k.kind === 'add' && <StepCount at={2} of={d.fixedLen ? 2 : 3} />}
       <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'when' }) : undefined} />
       <Question>{k.kind === 'edit' ? 'When did it really start?' : 'When did it start?'}</Question>
-      <div class="chips ed-days" role="group" aria-label="Day">
-        {chips.map((c) => <button key={c.label} class={sameDay(c.at, d.start) ? 'on' : undefined} aria-pressed={sameDay(c.at, d.start)} onClick={() => set(onDay(d.start, c.at))}>{c.label}</button>)}
-      </div>
-      <div class="ed-clock">
-        <output class="mono" aria-live="polite" aria-label={`Started ${clock(d.start)}`}>{clock(d.start, false)}</output>
-        <span>{new Date(d.start * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-      </div>
-      {d.fixedLen && !tentative && <button class="wide-btn" onClick={() => set(now - d.len)}>It just ended: started {clock(now - d.len, false)}</button>}
-      <div class="ed-keys two">{key(-60, '− 1 hour', '1 hour earlier')}{key(60, '+ 1 hour', '1 hour later')}</div>
-      <div class="ed-keys four">{key(-15, '−15', '15 minutes earlier')}{key(-5, '−5', '5 minutes earlier')}{key(5, '+5', '5 minutes later')}{key(15, '+15', '15 minutes later')}</div>
-      <label class="ed-day">Another day<input type="date" value={dateInput(d.start)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>
+      <ClockPick at={d.start} set={set} now={now} future={tentative} say="Started" name="Exact start time" keys={KEYS_HOURS}
+        extra={d.fixedLen && !tentative ? <button class="wide-btn" onClick={() => set(now - d.len)}>It just ended: started {clock(now - d.len, false)}</button> : undefined} />
       {problem && <div class="warnbox small">{problem}</div>}
-      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: d.fixedLen ? 'check' : 'long' })}>{d.fixedLen ? 'Next: check it' : 'Next: how long'}</button>
+      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: next })}>{next === 'check' ? 'Next: check it' : 'Next: how long'}</button>
     </>
   );
 }
@@ -3212,6 +3412,10 @@ function LongStep({ k, now }: { k: EdKind; now: number }) {
   const d = k.draft!;
   const tentative = k.kind === 'edit' && !!k.seg.tentative;
   const set = (len: number) => openSheet({ ...k, draft: { ...d, len: Math.max(5, len), fixedLen: false } });
+  // Item 2/3: the end time is a time too — tap it to type it, or use the clock picker. An exact
+  // end is taken as given (no 5-minute floor), as long as it is after the start.
+  const [typingEnd, setTypingEnd] = useState(false);
+  const setEnd = (end: number) => { if (end > d.start) openSheet({ ...k, draft: { ...d, len: end - d.start, fixedLen: false } }); };
   const sinceStart = now - d.start;
   const problem = draftProblem(d, now, tentative);
   return (
@@ -3231,7 +3435,8 @@ function LongStep({ k, now }: { k: EdKind; now: number }) {
         <button aria-label="5 minutes longer" onClick={() => set(d.len + 5)}>+5</button>
         <button aria-label="15 minutes longer" onClick={() => set(d.len + 15)}>+15</button>
       </div>
-      <p class="ed-ends">Ends <b class="mono">{clock(d.start + d.len)}</b></p>
+      <p class="ed-ends">Ends <button class="ed-ends-tap mono" aria-expanded={typingEnd} aria-label={`Ends ${clock(d.start + d.len)}. Tap to type the time`} onClick={() => setTypingEnd(!typingEnd)}>{clock(d.start + d.len)}</button></p>
+      <TimeEntry at={d.start + d.len} set={setEnd} name="Exact end time" typing={typingEnd} onDone={() => setTypingEnd(false)} />
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: 'check' })}>Check it</button>
     </>
@@ -3242,49 +3447,71 @@ function CheckStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
   const [err, setErr] = useState<string | null>(null);
   const d = k.draft!;
   const edit = k.kind === 'edit' ? k.seg : null;
+  const live = k.kind === 'edit' && !!k.live;
   const tentative = !!edit?.tentative;
-  const end = d.start + d.len;
+  const end = live ? Math.max(now, d.start) : d.start + d.len;
   const cycleHours = s.config.cycle === '60/7' ? 60 : 70;
-  // The timeline without this entry (for what it overlaps), and with it (for the picture).
-  const without: State = edit ? { ...s, segments: s.segments.filter((x) => x !== edit), tentative: s.tentative.filter((x) => x !== edit) } : s;
+  // The timeline without this entry (for what it overlaps), and with it (for the picture). The
+  // picture is the record the save will leave (item 4): the entry placed, what it covers absorbed.
+  const without: State = live ? { ...s, current: null } : edit ? { ...s, segments: s.segments.filter((x) => x !== edit), tentative: s.tentative.filter((x) => x !== edit) } : s;
   const row: Segment = { status: d.status, start: d.start, end, createdAt: Number.MAX_SAFE_INTEGER, ...(d.note ? { note: d.note } : {}), ...(tentative ? { tentative: true } : {}) };
-  const withIt: State = tentative ? { ...without, tentative: [...without.tentative, row] } : { ...without, segments: [...without.segments, row] };
+  const liveCheck = live ? absorbCurrentStart(s, d.start, now) : null;
+  const placed = live ? null : placeEntry(s, row, edit, now);
+  const withIt: State = live
+    ? (liveCheck!.ok ? { ...s, ...liveCheck!.patch } : s)
+    : { ...s, ...placed!.patch };
+  const absorbed = live ? (liveCheck!.ok ? liveCheck!.absorbed : []) : placed!.absorbed;
   // Resolved, then joined on the label as the Log shows it: a drive logged as two touching rows is one drive.
   const before = joinDisplayRows(normalize(allSegments(without, now), { merge: false }));
   const after = joinDisplayRows(normalize(allSegments(withIt, now), { merge: false }));
   const from = carrierDayStart(d.start, s.config), to = nextCarrierDayStart(from, s.config);
-  const overlap = overlapNote(before, d, now);
-  const notes = draftNotes(d, cycleHours);
-  const problem = draftProblem(d, now, tentative);
+  const overlap = live ? null : overlapNote(before, d, now);
+  const notes = live ? [] : draftNotes(d, cycleHours);
+  const unchanged = live && d.start === s.current?.since;
+  const problem = live
+    ? (unchanged ? null : liveCheck!.ok ? null : adjustStartProblemText(liveCheck!.problem, s, now))
+    : draftProblem(d, now, tentative);
   const go = (step: EdStep) => openSheet({ ...k, step });
-  const save = () => { const e = commitDraft(k, d, now); setErr(e); if (!e) openSheet(null); };
+  const save = () => {
+    if (unchanged) { openSheet(null); return; }
+    const e = live ? adjustStartNow(d.start, absorbed.length > 0) : commitDraft(k, d, now);
+    setErr(e); if (!e) openSheet(null);
+  };
+  const verb = edit ? 'Save the change' : 'Add to my log';
   return (
     <>
       <Question>{edit ? 'Check the change' : 'Check and add'}</Question>
       <div class="ed-sum">
         <div><span>What</span><b>{segLabel(d.status, d.note)}</b>{edit ? <span /> : <button class="link" onClick={() => go('what')} aria-label="Change what you were doing">Change</button>}</div>
-        <div><span>When</span><b class="mono">{clock(d.start)} → {clock(end, !sameDay(d.start, end))}</b><button class="link" onClick={() => go('when')} aria-label="Change when it started">Change</button></div>
-        <div><span>Length</span><b class="mono">{dur(d.len)}</b><button class="link" onClick={() => go('long')} aria-label="Change how long it lasted">Change</button></div>
+        <div><span>When</span><b class="mono">{clock(d.start)} → {live ? 'now' : clock(end, !sameDay(d.start, end))}</b><button class="link" onClick={() => go('when')} aria-label="Change when it started">Change</button></div>
+        {live
+          ? <div><span>Length</span><b class="mono">{dur(end - d.start)} so far</b><span /></div>
+          : <div><span>Length</span><b class="mono">{dur(d.len)}</b><button class="link" onClick={() => go('long')} aria-label="Change how long it lasted">Change</button></div>}
       </div>
       <div>
         <div class="ed-lab">Your day with it {edit ? 'changed' : 'added'}</div>
         <Grid segments={after} from={from} to={to} tz={s.config.timeZone} mark={{ start: d.start, end }} />
       </div>
       {overlap && <p class="warnbox">{overlap}</p>}
+      <AbsorbNote absorbed={absorbed} now={now} />
       {notes.length > 0 && <ul class="brk-hint">{notes.map((t, i) => <li key={i}>{t}</li>)}</ul>}
       {(problem || err) && <div class="warnbox small">{problem ?? err}</div>}
-      <button class="primary wide ed-go" disabled={!!problem} onClick={save}>{edit ? 'Save the change' : 'Add to my log'}</button>
+      {/* Item 4: when the entry runs into others, this button IS the one explicit confirmation. */}
+      <button class={`primary wide ed-go${absorbed.length ? ' ed-absorb' : ''}`} disabled={!!problem} onClick={save}>{absorbed.length ? (edit ? 'Absorb and save the change' : 'Absorb and add to my log') : verb}</button>
       <p class="muted small ed-foot">You can undo it from the Log.</p>
     </>
   );
 }
 
 /** Tapping an entry: what is wrong with it, in the driver's words, rather than every field at once. */
-function MenuStep({ k }: { k: Extract<SheetKind, { kind: 'edit' }> }) {
+function MenuStep({ k, s }: { k: Extract<SheetKind, { kind: 'edit' }>; s: State }) {
   const seg = k.seg;
   const d = draftOf(seg);
   const label = segLabel(seg.status, seg.note);
   const middle = !seg.tentative && seg.end - seg.start >= 10;
+  // Item 1: the open status gets the same menu. "It never happened" puts the status before it
+  // back as the open one — offered only when there is one to go back to.
+  const back = k.live ? statusBeingLeft(s) : null;
   const worked = seg.status === 'D' || seg.status === 'ON';
   const act = (icon: string, title: string, sub: string, onClick: () => void, cls?: string) => (
     <button class={`act${cls ? ` ${cls}` : ''}`} onClick={onClick}>
@@ -3295,12 +3522,14 @@ function MenuStep({ k }: { k: Extract<SheetKind, { kind: 'edit' }> }) {
   );
   return (
     <>
-      <p class="ed-when mono">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</p>
+      <p class="ed-when mono">{clock(seg.start)} → {k.live ? 'now' : clock(seg.end)} · {dur(seg.end - seg.start)}{k.live ? ' so far' : ''}</p>
       <Question>What do you want to fix?</Question>
       {act(I.log, `It wasn’t ${label}`, 'Change what you were doing', () => openSheet({ ...k, step: 'what', draft: d }))}
       {act(I.now, 'The times are wrong', 'Change when it started or how long', () => openSheet({ ...k, step: 'when', draft: d }))}
       {middle && act(I.plus, worked ? 'I took a break in the middle' : 'I worked or drove in the middle', worked ? `Add a break inside this ${seg.status === 'D' ? 'drive' : 'entry'}` : 'Add something inside this entry', () => openSheet({ kind: 'add', inside: seg }))}
-      {act(I.trash, seg.tentative ? 'Remove this what-if' : 'It never happened', seg.tentative ? 'Take it out of the plan' : 'Delete this entry', () => { deleteEntry(seg); openSheet(null); }, 'del')}
+      {k.live
+        ? back && act(I.trash, 'It never happened', `Go back to ${segLabel(back.status, back.note)} since ${clock(back.start)}`, () => { dropCurrent(); openSheet(null); }, 'del')
+        : act(I.trash, seg.tentative ? 'Remove this what-if' : 'It never happened', seg.tentative ? 'Take it out of the plan' : 'Delete this entry', () => { deleteEntry(seg); openSheet(null); }, 'del')}
       <p class="muted small ed-foot">Every change can be undone from the Log.</p>
     </>
   );
@@ -3315,7 +3544,7 @@ function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
   const first = at === (k.kind === 'edit' ? 'menu' : 'what') && !(k.kind === 'add' && k.draft);
   return (
     <Sheet title={title} onBack={first ? undefined : sheetBack} focusKey={at}>
-      {at === 'menu' && k.kind === 'edit' && <MenuStep k={k} />}
+      {at === 'menu' && k.kind === 'edit' && <MenuStep k={k} s={s} />}
       {at === 'what' && <WhatStep k={k} s={s} now={now} />}
       {at === 'when' && <WhenStep k={k} now={now} />}
       {at === 'long' && <LongStep k={k} now={now} />}
@@ -4123,15 +4352,6 @@ function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave
     : (lc.appt != null && lc.appt > now ? lc.appt : nextHour(now + 180));
   const [at, setAt] = useState<number>(start);
   const problem = loadTimeProblem(field, at, now);
-  const key = (delta: number, text: string, aria: string) => <button key={delta} aria-label={aria} onClick={() => setAt(at + delta)}>{text}</button>;
-  const pickTime = (v: string) => {
-    const m = /^(\d{2}):(\d{2})/.exec(v);
-    if (!m) return;
-    const t = new Date(at * 60000);
-    t.setHours(+m[1], +m[2], 0, 0);
-    setAt(Math.floor(t.getTime() / 60000));
-  };
-  const chips = dayChips(now, true);
   const apply = () => {
     if (problem) return;
     editLoadDraft(field === 'leave' ? { leaveIn: at - now } : { appt: at });
@@ -4139,16 +4359,8 @@ function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave
   };
   return (
     <Sheet title={field === 'leave' ? 'When will you leave?' : 'Appointment at the receiver'}>
-      <div class="chips ed-days" role="group" aria-label="Day">
-        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => setAt(onDay(at, c.at))}>{c.label}</button>)}
-      </div>
-      <div class="ed-clock">
-        <output class="mono" aria-live="polite" aria-label={`${field === 'leave' ? 'Leave at' : 'Appointment at'} ${clock(at)}`}>{clock(at, false)}</output>
-        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-      </div>
-      <div class="ed-keys two">{key(-60, '− 1 hour', '1 hour earlier')}{key(60, '+ 1 hour', '1 hour later')}</div>
-      <div class="ed-keys four">{key(-15, '−15', '15 minutes earlier')}{key(-5, '−5', '5 minutes earlier')}{key(5, '+5', '5 minutes later')}{key(15, '+15', '15 minutes later')}</div>
-      <label class="ed-day">Exact time<input type="time" aria-label="Exact time" value={toInput(at).slice(11, 16)} onInput={(e) => pickTime((e.target as HTMLInputElement).value)} /></label>
+      {/* Patch L1 item 3: the one shared clock picker (the day buttons stop at three days out, as before: no another-day). */}
+      <ClockPick at={at} set={setAt} now={now} future={true} say={field === 'leave' ? 'Leave at' : 'Appointment at'} name="Exact time" keys={KEYS_HOURS} anyDay={false} />
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={apply}>{field === 'leave' ? `Leave at ${clock(at)}` : `Appointment ${clockFull(at)}`}</button>
     </Sheet>
@@ -4350,6 +4562,18 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
 /* ============================================================ Trip tab */
 
+/** The trip planner's departure on the shared clock picker (item 3). A past time stays allowed (a reconstruction), as it always was. */
+function TripTimeSheet({ s, now }: { s: State; now: number }) {
+  const [at, setAt] = useState<number>(fromInput(s.trip.dep ?? '') ?? now);
+  return (
+    <Sheet title="When do you leave?">
+      <ClockPick at={at} set={setAt} now={now} future={true} say="Depart" name="Exact departure time" keys={KEYS_HOURS} />
+      <button class="primary wide ed-go" onClick={() => { setState({ trip: { ...getState().trip, dep: toInput(at) } }); openSheet(null); }}>Depart {clockFull(at)}</button>
+      <button class="wide" onClick={() => { setState({ trip: { ...getState().trip, dep: null } }); openSheet(null); }}>Leave now</button>
+    </Sheet>
+  );
+}
+
 function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const d = s.trip;
   const setTrip = (p: Partial<TripDraft>) => setState({ trip: { ...d, ...p } });
@@ -4392,7 +4616,8 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <p class="muted small">Net speed (fuel, traffic, scales) is what matters — set it in Settings. Parking after 17:00 fills fast; plan the 60-min line, not the 0.</p>
       </Card>
       <Card title="Plan a run">
-        <label>Depart<input type="datetime-local" value={dep} onInput={(e) => setTrip({ dep: (e.target as HTMLInputElement).value })} /></label>
+        {/* Patch L1 item 3: the departure is edited on the one shared clock picker. */}
+        <label>Depart<button class="wide pick-time trip-dep" aria-label={`Depart ${clockFull(departure)}. Change`} onClick={() => openSheet({ kind: 'triptime' })}>{clockFull(departure)}</button></label>
         {pastDeparture && (
           <p class="warnbox small">That departure is <b>{dur(now - departure)}</b> in the past. This is a what-if from that time: the plan starts there and does not include anything you've logged since, so treat it as a reconstruction rather than a current plan.</p>
         )}
@@ -4554,7 +4779,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
-        <label>Main card on Now<Toggle options={[['timeline', 'Timeline'], ['dial', 'Dial']]} value={s.nowCard} onChange={(v) => setState({ nowCard: v as State['nowCard'], nowCardAsked: true })} /></label>
+        <label>Main card on Now<Toggle options={NOW_CARD_OPTIONS} value={s.nowCard} onChange={(v) => setNowCard(v)} /></label>
         <p class="muted small">Timeline shows your limits as lanes ending at their clock times, so you can see which one ends first. Dial is the gauge the app has always had. The driving view keeps the dial either way.</p>
         <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
         <p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
@@ -4899,7 +5124,8 @@ export function App() {
       {!disclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
       {!disclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
       {!disclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
-      {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
+      {!disclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
+      {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
     </div>
   );

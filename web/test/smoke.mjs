@@ -1344,7 +1344,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // (clock() uses Date#getHours), so a hard-coded "10:30" only passes on a machine whose local zone is
   // America/Chicago — it fails on a UTC box. Everything else in this suite derives its expectations, which
   // is why this was the only assertion that broke.
-  if (!h.includes(`since ${clock(L(12, 10, 30))} · now — change it on Now`)) throw new Error(`the live status must show on today, pointing to Now (got ${(h.match(/since [^<]*/) || ['?'])[0]})`);
+  // Patch L1 item 1 (sanctioned): the live status is now edited right here, like every other row (it pointed to Now).
+  if (!h.includes(`since ${clock(L(12, 10, 30))} · now — tap to fix it`) || !/<button class="entry live" aria-label="Edit /.test(h)) throw new Error(`the live status must show on today, as an editable row (got ${(h.match(/since [^<]*/) || ['?'])[0]})`);
   // 3. edit panel: big steppers, delete inside, all behind an inert screen
   setLaunchNotice(false);
   openSheet({ kind: 'edit', seg: day[2] });
@@ -2213,7 +2214,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet({ kind: 'add', step: 'check', draft: { status: 'OFF', note: breakNote('30-min break'), start: M(14), len: 30, fixedLen: true } });
   h = out('editor/check');
   const th = txt(h);
-  if (!/Check and add/.test(h) || !/What Off duty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go">Add to my log<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
+  if (!/Check and add/.test(h) || !/What Off duty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go ed-absorb">Absorb and add to my log<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
+  // ^ Patch L1 item 4a (sanctioned): an entry that runs into another now saves only through the one explicit absorb confirmation — the button was "Add to my log".
   // a drive logged as two touching rows is still one drive to the driver: the warning names all of it
   const keep = gs().segments;
   setState({ segments: [keep[0], { status: 'D', start: M(8), end: M(12), createdAt: 2 }, { status: 'D', start: M(12), end: M(16), createdAt: 3 }] });
@@ -6006,7 +6008,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     // A (structural): the after-the-fact door is on Now, and the Log's live row still points there.
     need(/<button class="rowbtn">[^]*?On Duty since [^<]*<\/span><br\/?><b>Fix the start time<\/b>/.test(h19), 'patch 19 A: Now must show the current status with its "Fix the start time" control');
     setState({ tab: 'log' });
-    need(render(h(App, {})).includes('· now — change it on Now'), 'patch 19 A: the Log\'s live row still points to Now');
+    // Patch L1 item 1 (sanctioned): the Log's live row is now an edit row of its own (it pointed to Now).
+    need(render(h(App, {})).includes('· now — tap to fix it'), 'patch 19 A / L1 item 1: the Log\'s live row is editable');
     setState({ tab: 'now' });
   }
   // B4. the two overflow sources, fixed at their roots.

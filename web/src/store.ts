@@ -305,6 +305,10 @@ const numIn = (v: unknown, lo: number, hi: number, fallback: number): number =>
 const boolAt = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
   (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : fallback);
+/** Bookmarks are labels, not records: keep enough for the history window and then some. (Declared
+ *  up here beside the helpers above for the same reason: sanitizeDayCloses reads it on the
+ *  module-load path, loadSaved → parseSaved, so it must be initialised before that runs.) */
+export const MAX_DAY_CLOSES = 40;
 
 export const SPLIT_MS = ['OFF', 'SB'] as const;
 export const TRIP_UNTILS = ['OFF', 'SB', 'D', 'ON', 'CURRENT'] as const;
@@ -554,9 +558,6 @@ export function statusTap(cur: State, status: DutyStatus, note: string | undefin
 }
 
 /* ============================================================ the day-close bookmark (patch 13) */
-
-/** Bookmarks are labels, not records: keep enough for the history window and then some. */
-export const MAX_DAY_CLOSES = 40;
 
 /**
  * Rebuild the bookmark list from whatever a save carried: only plain entries whose dayStart and
@@ -1137,6 +1138,123 @@ export function adjustCurrentStart(cur: State, newSince: number, now: number): A
   // The record this leaves must pass the same check a file must pass to be imported.
   if (importProblem({ segments, tentative: cur.tentative, current }) !== null) return no('invalid');
   return { ok: true, patch: { segments, current, dayCloses } };
+}
+
+/* ---------- Absorb, never overlap (patch L1, item 4) ---------- */
+
+/**
+ * What an edit did to a neighbouring entry it ran into. `left` is what remains of that entry
+ * (none when it was taken in whole, one piece when trimmed, two when split around the edit).
+ * `live` marks the open status (its `seg` is the open stretch up to now, materialised).
+ */
+export interface Absorbed { kind: 'removed' | 'trimmed' | 'split'; seg: Segment; left: Segment[]; live?: boolean }
+
+/**
+ * Clear [start, end) out of a list of rows: a row wholly inside is taken out, a row across one
+ * edge is trimmed back to that edge, a row across both edges is split around the span. Rows
+ * `keep` says to leave alone, and rows that do not meet the span, keep their reference; the
+ * pieces are copies that keep their stamps, notes and labels. Pure.
+ */
+export function clearSpan(list: Segment[], start: number, end: number, keep: (x: Segment) => boolean): { list: Segment[]; absorbed: Absorbed[] } {
+  const out: Segment[] = [];
+  const absorbed: Absorbed[] = [];
+  for (const x of list) {
+    if (keep(x) || x.end <= start || x.start >= end) { out.push(x); continue; }
+    if (x.start >= start && x.end <= end) { absorbed.push({ kind: 'removed', seg: x, left: [] }); continue; }
+    if (x.start < start && x.end > end) {
+      const a = { ...x, end: start }, b = { ...x, start: end };
+      out.push(a, b); absorbed.push({ kind: 'split', seg: x, left: [a, b] }); continue;
+    }
+    const piece = x.start < start ? { ...x, end: start } : { ...x, start: end };
+    out.push(piece); absorbed.push({ kind: 'trimmed', seg: x, left: [piece] });
+  }
+  return { list: out, absorbed };
+}
+
+/**
+ * Put one entry into the record — a new one, or `orig` replaced by its corrected self — so
+ * that the record never holds two entries for the same minute (field notes 2026-11-10:
+ * back-filling a forgotten entry left the saved log overlapping). Whatever the entry covers
+ * is ABSORBED: neighbouring rows are trimmed, split around it, or taken out (clearSpan), and
+ * the open status, if the entry reaches into it, starts where the entry ends (split, when the
+ * entry sits inside it). A what-if row is placed among the what-if rows only; it never touches
+ * the logged record. Pure: returns the patch and the list of what was absorbed, so the panel
+ * can show it and ask ONE explicit confirmation before anything is saved.
+ */
+export function placeEntry(s: Pick<State, 'segments' | 'tentative' | 'current'>, row: Segment, orig: Segment | null, now: number): { patch: Pick<State, 'segments' | 'tentative' | 'current'>; absorbed: Absorbed[] } {
+  if (row.tentative) {
+    const c = clearSpan(s.tentative, row.start, row.end, (x) => x === orig);
+    const tentative = orig && c.list.includes(orig) ? c.list.map((x) => (x === orig ? row : x)) : [...c.list, row];
+    return { patch: { segments: s.segments, tentative, current: s.current }, absorbed: c.absorbed };
+  }
+  const c = clearSpan(s.segments, row.start, row.end, (x) => x === orig || !!x.tentative);
+  const segments = orig && c.list.includes(orig) ? c.list.map((x) => (x === orig ? row : x)) : [...c.list, row];
+  const absorbed = c.absorbed;
+  let current = s.current;
+  const cur = s.current;
+  if (cur && row.end > cur.since && row.start < Math.max(now, cur.since + 1)) {
+    const live: Segment = { status: cur.status, start: cur.since, end: Math.max(now, cur.since), ...(cur.note ? { note: cur.note } : {}), ...(cur.createdAt !== undefined ? { createdAt: cur.createdAt } : {}) };
+    const tail: Segment[] = row.end < now ? [{ ...live, start: row.end }] : [];
+    if (row.start > cur.since) {
+      const head: Segment = { ...live, end: row.start };
+      segments.push(head);
+      absorbed.push({ kind: tail.length ? 'split' : 'trimmed', seg: live, left: [head, ...tail], live: true });
+    } else {
+      absorbed.push({ kind: tail.length ? 'trimmed' : 'removed', seg: live, left: tail, live: true });
+    }
+    current = { ...cur, since: Math.max(row.end, cur.since) };
+  }
+  return { patch: { segments, tentative: s.tentative, current }, absorbed };
+}
+
+/**
+ * "Fix the start time" with absorb (item 4b). adjustCurrentStart refuses a start at or before
+ * the start of the status being left ('erase') and one that crosses another entry ('overlap')
+ * — the common case it blocked is a driver who forgot to change status (went On Duty four hours
+ * ago, opened the app just now). Here those two are lifted: the stretch the start moves across
+ * is ABSORBED into the current status (moving earlier) or into the status being left (moving
+ * later), every entry in it trimmed or taken out, and the list of what was absorbed comes back
+ * for the panel's one confirmation. Every other refusal stands exactly as adjustCurrentStart
+ * gives it, and a move with nothing to absorb is adjustCurrentStart's own patch. Pure.
+ */
+export type AbsorbStartResult =
+  | { ok: true; patch: Pick<State, 'segments' | 'current' | 'dayCloses'>; absorbed: Absorbed[] }
+  | { ok: false; problem: AdjustStartProblem };
+export function absorbCurrentStart(cur: State, newSince: number, now: number): AbsorbStartResult {
+  const plain = adjustCurrentStart(cur, newSince, now);
+  if (plain.ok) return { ok: true, patch: plain.patch, absorbed: [] };
+  if (plain.problem !== 'erase' && plain.problem !== 'overlap') return plain;
+  const since = cur.current!.since;
+  const prev = statusBeingLeft(cur);
+  let segments: Segment[];
+  let absorbed: Absorbed[];
+  if (newSince < since) {
+    ({ list: segments, absorbed } = clearSpan(cur.segments, newSince, since, (x) => !!x.tentative));
+  } else {
+    const c = clearSpan(cur.segments, since, newSince, (x) => !!x.tentative || x === prev);
+    segments = prev ? c.list.map((x) => (x === prev ? { ...x, end: newSince } : x)) : c.list;
+    absorbed = c.absorbed;
+  }
+  const current: OpenSegment = { ...cur.current!, since: newSince };
+  const dayCloses = cur.dayCloses.some((c) => c.at === since && carrierDayStart(newSince, cur.config) === c.dayStart)
+    ? cur.dayCloses.map((c) => (c.at === since && carrierDayStart(newSince, cur.config) === c.dayStart ? { ...c, at: newSince } : c))
+    : cur.dayCloses;
+  if (importProblem({ segments, tentative: cur.tentative, current }) !== null) return { ok: false, problem: 'invalid' };
+  return { ok: true, patch: { segments, current, dayCloses }, absorbed };
+}
+
+/**
+ * The open status taken back (the Log's "It never happened" on the current entry, item 1):
+ * the status before it — the row that ends where it starts — becomes the open status again,
+ * from that row's own start, with its own label and stamp. Null when nothing abuts it (there
+ * is no status to go back to): then the panel does not offer it. Pure.
+ */
+export function dropCurrentPatch(s: Pick<State, 'segments' | 'current'>): Pick<State, 'segments' | 'current'> | null {
+  if (!s.current) return null;
+  const prev = statusBeingLeft(s);
+  if (!prev) return null;
+  const current: OpenSegment = { status: prev.status, since: prev.start, ...(prev.note ? { note: prev.note } : {}), ...(prev.createdAt !== undefined ? { createdAt: prev.createdAt } : {}) };
+  return { segments: s.segments.filter((x) => x !== prev), current };
 }
 
 /**

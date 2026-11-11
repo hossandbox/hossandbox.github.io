@@ -269,10 +269,12 @@ await pin('C5. editor: refusals show their reason before the button — a future
   let go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
   if (!disabled(go)) return 'future: apply enabled';
   await type('Started this many minutes ago', '300');
-  if (!/would erase it/.test(text())) return 'erase: no reason';
+  // Patch L1 item 4b (sanctioned): a start at the status being left's start is no longer a flat
+  // refusal. The reason still shows before the button — as the absorb warning naming the entry —
+  // and the only way to apply is the one explicit "Absorb and …" confirmation; nothing changes before it.
+  if (!/runs into another entry/.test(text()) || !new RegExp(`your Driving ${clock(T - 300)} → ${clock(T - 20)} would be taken in whole`).test(text())) return 'erase: no absorb warning';
   go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
-  if (!disabled(go)) return 'erase: apply enabled';
-  fire(go, 'click'); await sleep(40);
+  if (!go || !/\bed-absorb\b/.test(go.attributes.class ?? '') || !/^Absorb and set start to /.test(go.textContent)) return 'erase: the button must be the absorb confirmation, got ' + (go && go.textContent);
   return getState() === s0 || 'state changed';
 });
 await pin('C6. the status panel links to the editor for the status the driver is already in', async () => {

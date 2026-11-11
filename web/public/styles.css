@@ -533,6 +533,12 @@ button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: i
   .taxis-label .tl-short { display: inline; }
 }
 .taxis-value { font-size: 16px; font-weight: 700; text-align: right; white-space: nowrap; }
+/* Patch L1 item 6 (field report 2026-11-11: hour markers and the STOP time stamped over the top of
+   Now's timeline). A long value ("62h 00m left", "Wed 12:35") set the value column's max-content
+   width and crushed the track between label and value to ~70-130px, so the hour labels packed into
+   one blob. A value may now wrap at its spaces inside a capped width: the column stays sized to its
+   widest value (patch 19 B4), but no value can be wider than a two-line "62h 00m / left". */
+.taxis-row:not(.taxis-head) > .taxis-value { white-space: normal; max-width: 4.75em; justify-self: end; line-height: 1.15; }
 /* Patch 19: the value column was a fixed 64px and its text does not wrap, so a value with a
    day in it ("Wed 00:55", 90px) or a duration ("51h 40m left", 120px) ran out of the card —
    25px past a 412px screen, the second source of the sideways drag. The rows now share ONE
@@ -546,6 +552,10 @@ button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: i
 }
 .taxis-track { position: relative; height: 28px; display: block; }
 .taxis-track-head { height: 20px; }
+/* Item 6: the STOP tag sits on its own line ABOVE the hour labels. Both used to share one 20px
+   line, so a stop time near a gridline was printed on top of the hour markers. */
+.taxis-track-head.has-tag { height: 36px; }
+.taxis-track-head.has-tag .taxis-hour { top: 19px; line-height: 16px; }
 .taxis-tint { position: absolute; top: 0; bottom: 0; left: 0; background: var(--tint-accent); border-radius: var(--r-3); }
 .taxis-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); opacity: .6; }
 .taxis-hour { position: absolute; top: 2px; transform: translateX(2px); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 13px; color: var(--muted); }
@@ -654,3 +664,18 @@ button.rowbtn.moved { min-height: 48px; margin-bottom: var(--s-12); font-weight:
 .welcome { background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-left: 4px solid var(--warn); border-radius: var(--r-14); padding: var(--s-10) var(--s-14); margin-bottom: 10px; font-size: 15px; }
 .welcome p { margin: 0; }
 .welcome .row > button.mini { min-height: 48px; }
+/* Patch L1 item 5: the Timeline / Dial switch on the Now card itself (the More → Planning setting's twin). */
+.card-switch { display: flex; align-items: center; gap: var(--s-10); margin-top: var(--s-10); padding-top: var(--s-8); border-top: 1px solid var(--line); }
+.card-switch-l { font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.card-switch .toggle { flex: 1; margin-top: 0; }
+/* Patch L1 items 2 + 3: the shared clock picker. The big clock is a key now — tap it to type the time. */
+.ed-clock-tap { display: block; width: 100%; background: none; border: 0; box-shadow: none; padding: 0; min-height: 56px; color: inherit; cursor: text; }
+.ed-clock-tap:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-10); }
+.ed-type { display: flex; gap: var(--s-8); align-items: stretch; }
+.ed-type input { flex: 1; min-width: 0; text-align: center; font-size: 28px; font-weight: 700; letter-spacing: .08em; }
+.ed-type .ed-type-ok { min-height: 56px; min-width: 88px; font-weight: 800; }
+.ed-ends-tap { min-height: 48px; padding: 0 var(--s-8); font: inherit; font-weight: 800; text-decoration: underline dotted; text-underline-offset: 4px; }
+/* Item 4: the absorb warning lists exactly what the change trims; its main button is the confirmation. */
+.absorb-list { margin: var(--s-6) 0; padding-left: 1.2em; }
+.absorb-list li { margin: 2px 0; }
+button.trip-dep { display: block; width: 100%; margin-top: 4px; text-align: left; font-weight: 700; }
