@@ -624,3 +624,33 @@ button.pb-step { min-height: 56px; padding: var(--s-8) var(--s-4); font-size: 16
 .pb-exact { margin-top: var(--s-10); }
 .pb-result { margin: var(--s-10) 0 0; }
 button.wide.fix { margin-top: var(--s-8); }
+
+/* ===================== Capstone C3 "Dock & dispatch" (append-only; existing tokens only) ===================== */
+/* M7: the load check's typed departure / appointment, the appointment line, Text dispatch */
+button.wide.pick-time { margin-top: var(--s-10); }
+button.wide.pick-time.on { border: 2px solid var(--accent); }
+.verdict.appt { margin-top: var(--s-10); }
+.appt-big { font-size: 20px; font-weight: 800; line-height: 1.25; margin-top: var(--s-4); }
+.appt-big svg { vertical-align: -5px; }
+.verdict.appt.yes .appt-big svg { color: var(--good); }
+.verdict.appt.no .appt-big svg { color: var(--bad); }
+.row.dispatch { justify-content: flex-start; }
+.row.dispatch > * { flex: 0 0 auto; min-height: 48px; }
+/* M4 (load side): the fix line's one tap */
+.verdict button.wide.fixit { margin-top: var(--s-12); }
+/* D10-A + M8: Hours coming back, the week strip */
+.hours-back { font-size: 17px; line-height: 1.4; margin: 0 0 var(--s-12); }
+.weekstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--s-4); align-items: end; }
+button.wk-day { display: flex; flex-direction: column; align-items: stretch; gap: var(--s-4); min-height: 132px; padding: var(--s-4) 0; background: transparent; box-shadow: none; border-radius: var(--r-8); min-width: 0; }
+.wk-col { position: relative; display: flex; align-items: flex-end; height: 96px; border-bottom: 1px solid var(--line); }
+.wk-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--muted); border-radius: var(--r-3) var(--r-3) 0 0; overflow: hidden; }
+button.wk-day.today .wk-bar { background: var(--accent); }
+.wk-hatch { position: absolute; left: 0; right: 0; top: 0; display: block; background: repeating-linear-gradient(45deg, var(--accent) 0 4px, var(--panel) 4px 8px); }
+.wk-label { display: block; font-size: 13px; font-weight: 700; line-height: 1.15; text-align: center; color: var(--muted); overflow-wrap: anywhere; }
+button.wk-day.today .wk-label { color: var(--text); }
+.wk-key { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border-radius: var(--r-3); background: repeating-linear-gradient(45deg, var(--accent) 0 4px, var(--panel) 4px 8px); }
+button.rowbtn.moved { min-height: 48px; margin-bottom: var(--s-12); font-weight: 700; }
+/* M5: the welcome-back check — an open strip chip under the answer, never a modal */
+.welcome { background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-left: 4px solid var(--warn); border-radius: var(--r-14); padding: var(--s-10) var(--s-14); margin-bottom: 10px; font-size: 15px; }
+.welcome p { margin: 0; }
+.welcome .row > button.mini { min-height: 48px; }

@@ -238,6 +238,8 @@ export function statusSpeech(status: 'OFF' | 'SB' | 'D' | 'ON', at: number, driv
 let ctx: AudioContext | null = null;
 /** An alert that came due while sound was still locked: played on the next tap (re-check N3). */
 let pending: boolean | null = null;
+/** The waiting alert's mark (capstone C3, M13), so its haptic pattern plays with it; null = no mark given. */
+let pendingMark: number | null = null;
 
 /**
  * Browsers only allow sound after a tap. Call this from any tap (the launch notice, a status button,
@@ -251,7 +253,7 @@ export function unlockAudio(): void {
       ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!ctx && AC) ctx = new AC();
     void ctx?.resume();
-    if (ctx && pending !== null) { const u = pending; pending = null; chime(u); buzz(u); }
+    if (ctx && pending !== null) { const u = pending, m = pendingMark; pending = null; pendingMark = null; chime(u); buzz(u, m ?? undefined); }
   } catch { /* no sound on this browser */ }
 }
 
@@ -262,14 +264,19 @@ export function audioReady(): boolean { return ctx !== null && ctx.state === 'ru
  * Sound and vibrate for an alert. Before the first tap the browser blocks both, so the alert is kept
  * and played on the next tap rather than lost; the more urgent of two waiting alerts wins.
  */
-export function sound(urgent: boolean): void {
-  if (!ctx) { pending = pending === null ? urgent : pending || urgent; return; }
-  chime(urgent); buzz(urgent);
+export function sound(urgent: boolean, mark?: number): void {
+  if (!ctx) {
+    // The more urgent waiting alert wins, and its mark with it (a lower mark is the more urgent one).
+    if (mark !== undefined && (pendingMark === null || mark < pendingMark)) pendingMark = mark;
+    pending = pending === null ? urgent : pending || urgent;
+    return;
+  }
+  chime(urgent); buzz(urgent, mark);
 }
 /** Drop a waiting alert (the driver stopped driving before any tap): it would be stale. */
-export function clearPendingSound(): void { pending = null; }
+export function clearPendingSound(): void { pending = null; pendingMark = null; }
 /** Test hooks: the module's audio state. */
-export const audioForTest = { reset() { ctx = null; pending = null; }, pending: () => pending };
+export const audioForTest = { reset() { ctx = null; pending = null; pendingMark = null; }, pending: () => pending, pendingMark: () => pendingMark };
 
 /** Two short tones, or three higher ones when urgent. */
 export function chime(urgent: boolean): void {
@@ -290,9 +297,55 @@ export function chime(urgent: boolean): void {
   } catch { /* ignore */ }
 }
 
-/** Vibrate (Android; iPhones do not let web apps vibrate). */
-export function buzz(urgent: boolean): void {
-  try { navigator.vibrate?.(urgent ? [400, 150, 400, 150, 400] : [300, 150, 300]); } catch { /* ignore */ }
+/**
+ * The haptic language (capstone C3, audit §3 M13 — decision C9-A: alert marks and status
+ * changes only, no Split Lab haptics). Each mark has its own feel, so a moving driver knows
+ * which mark he is at without looking: two short at 60, three short at 30, one long and two
+ * short at 15, long-short-long at zero and on every 15-minute repeat after it. A status
+ * change is one firm 20ms pulse, replacing the 12ms tap tick on the four dock keys only.
+ * Android web only (navigator.vibrate); iPhones do not let web apps vibrate, so every call
+ * no-ops there. Gated by the existing alerts switch at the call sites — no new switch.
+ * The marks themselves (ALERT_MARKS, nextAlert) are untouched: this only says how each feels.
+ */
+export const HAPTIC_PATTERNS = {
+  status: [20],
+  60: [60, 80, 60],
+  30: [60, 80, 60, 80, 60],
+  15: [200, 100, 60, 100, 60],
+  0: [400, 120, 80, 120, 400],
+} as const;
+/** The pattern for a fired alert mark (60/30/15/0; anything at or under zero is the zero pattern). */
+export function hapticForMark(mark: number): readonly number[] {
+  if (mark <= 0) return HAPTIC_PATTERNS[0];
+  if (mark <= 15) return HAPTIC_PATTERNS[15];
+  if (mark <= 30) return HAPTIC_PATTERNS[30];
+  return HAPTIC_PATTERNS[60];
+}
+/** One guarded vibrate call: feature-detected and swallowed — a haptic must never throw. */
+export function vibrateGuarded(pattern: readonly number[] | number): boolean {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) { navigator.vibrate(pattern as number[] | number); return true; }
+  } catch { /* ignore */ }
+  return false;
+}
+
+/**
+ * Vibrate for an alert (Android; iPhones do not let web apps vibrate). With a mark, the mark's
+ * own pattern (M13); without one, the old two-pattern form.
+ */
+export function buzz(urgent: boolean, mark?: number): void {
+  vibrateGuarded(mark !== undefined ? hapticForMark(mark) : urgent ? [400, 150, 400, 150, 400] : [300, 150, 300]);
+}
+
+/**
+ * The status-change pulse (M13) for a dock key. With the alerts switch on, a tap that changed
+ * the status gets the 20ms pulse INSTEAD of the 12ms tap tick (the dock keys carry
+ * data-haptic, which the global tap tick skips, so there is never a double buzz). With the
+ * switch off, or a tap that changed nothing, the dock key gets the plain tap tick as before.
+ */
+export function statusHaptic(changed: boolean, alertsOn: boolean): void {
+  if (changed && alertsOn) vibrateGuarded(HAPTIC_PATTERNS.status);
+  else tapTick();
 }
 
 /**

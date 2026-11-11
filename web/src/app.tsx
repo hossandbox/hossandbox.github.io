@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'preact/hooks';
 import { Component, type ComponentChildren } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
-import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
+import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, statusHaptic, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
 
 /** A crashing tab shows an error card (with a one-tap bug report) instead of blanking the whole app. */
 class TabBoundary extends Component<{ tab: string; children: ComponentChildren }, { err: string | null }> {
@@ -201,7 +201,7 @@ async function shareVerdictText(text: string): Promise<'shared' | 'copied' | 'fa
   try { await navigator.clipboard.writeText(text); return 'copied'; } catch { return 'failed'; }
 }
 /** The Share button for the hero feet: the label itself is the feedback (Copied / Couldn't share). */
-function useShareButton(text: string) {
+function useShareButton(text: string, label = 'Share') {
   const [note, setNote] = useState('');
   const onClick = async () => {
     const r = await shareVerdictText(text);
@@ -209,7 +209,7 @@ function useShareButton(text: string) {
     setNote(r === 'copied' ? 'Copied ✓' : 'Couldn’t share');
     window.setTimeout(() => setNote(''), 2500);
   };
-  return <button class="link" onClick={onClick}><Icon d={I.share} size={18} /> {note || 'Share'}</button>;
+  return <button class="link" onClick={onClick}><Icon d={I.share} size={18} /> {note || label}</button>;
 }
 /** Driver-facing names for a violation. The enum id (WINDOW_14, BREAK_30…) is internal, never UI copy. */
 const violationLabel: Record<Violation['kind'], string> = {
@@ -292,6 +292,8 @@ export type SheetKind =
   | { kind: 'lever'; lever: Lever }
   // A Split Lab block's sheet (capstone C2, P7): steppers, the exact box, the block's fixes.
   | { kind: 'splitblock'; block: 'b1' | 'dwell' | 'drive' | 'b2' }
+  // The load check's big clock (capstone C3, M7): the departure, or the receiver appointment.
+  | { kind: 'loadtime'; field: 'leave' | 'appt' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
   | { kind: 'edit'; seg: Segment; step?: EdStep; draft?: Draft }
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
@@ -606,7 +608,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
       <section class="hero bad">
         {lead}
         <div class="hero-label">Out of driving time</div>
-        <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Recap</b> for when your {cycleWord} hours return.</p>
+        <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Hours coming back</b> under <b>Plan</b> for when your {cycleWord} hours return.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
         {tail}
       </section>
@@ -694,7 +696,8 @@ function useDrivingAlerts(s: State, now: number, ev: FullEvaluation | null) {
     // A simulated clock is for planning: show the banner, but never sound off.
     if (r.fire === null || !ev || !s.alertsOn || s.nowOverride !== null) return;
     const m = alertMessage(r.fire, alertReason(ev));
-    sound(r.fire <= 15); void notify(m.title, m.body);
+    // Capstone C3 (M13): the mark rides along, so the vibration is that mark's own pattern.
+    sound(r.fire <= 15, r.fire); void notify(m.title, m.body);
     // Patch 17 (M3): the same alert, read aloud — after the chime, from the same numbers.
     // Two gates on top of this effect's own: speechReady (the D7-A yes, and a real clock —
     // already guaranteed here) and alertsOn, the master alert switch: a driver who silenced
@@ -1567,7 +1570,9 @@ function StatusDock({ s }: { s: State }) {
     <div class="dock">
       <div class="status-buttons">{(['OFF', 'SB', 'D', 'ON'] as DutyStatus[]).map((st) => {
         const on = s.current?.status === st && !s.current?.note;
-        return <button key={st} style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => tapStatus(st)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
+        // Capstone C3 (M13): a dock key that changes the status answers with the 20ms status
+        // pulse instead of the 12ms tap tick (data-haptic keeps the global tick off it).
+        return <button key={st} data-haptic="status" style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => statusHaptic(tapStatus(st), getState().alertsOn)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
       })}</div>
       <button class="link dock-more" onClick={() => openSheet({ kind: 'status' })}>PC, yard move, or started earlier…</button>
     </div>
@@ -1598,6 +1603,68 @@ function StatusUndoChip() {
     <div class="row undo">
       <span>{undo.label}.</span>
       <button class="mini" onClick={undoLast}>Undo</button>
+    </div>
+  );
+}
+
+/* ---------- the welcome-back check (capstone C3, audit §3 M5 — decision C8-A) ---------- */
+
+/** Trigger 1: Driving, and the record has been out of driving time this long (engine violations). */
+export const WELCOME_OVER_MIN = 30;
+/** Trigger 2: On duty for more than this long in a row. */
+export const WELCOME_ON_MIN = 16 * 60;
+export interface WelcomeBack { key: string; status: DutyStatus; note?: string; since: number }
+const welcomeRunKey = (s: State): string => (s.current ? `${s.current.status}|${s.current.note ?? ''}|${s.current.since}` : '');
+/**
+ * Is the live status implausible? Exactly two triggers, nothing else (the Off > 34h trigger was
+ * dropped: a long rest is normal after home time). Never under a simulated clock. Trigger 1
+ * reads the engine's own violations — one still running at now, 30 minutes or more — so there
+ * is no new arithmetic; trigger 2 is now − the run's start (currentRunStart).
+ */
+export function welcomeBackDue(s: State, now: number, ev: FullEvaluation | null): WelcomeBack | null {
+  if (!s.current || !ev || s.nowOverride !== null) return null;
+  const st = s.current.status;
+  const since = currentRunStart(s, now);
+  const hit = (st === 'D' && ev.violations.some((v) => !v.tentative && v.end >= now && v.minutes >= WELCOME_OVER_MIN))
+    || (st === 'ON' && now - since > WELCOME_ON_MIN);
+  return hit ? { key: welcomeRunKey(s), status: st, note: s.current.note, since } : null;
+}
+/**
+ * The check runs on app open and on each return to the foreground — the moment a wrong status
+ * can still be fixed — and the chip it raises stays until a tap. In memory only: nothing here is
+ * stored, and nothing in the record changes until the driver taps a status. "Yes" dismisses it
+ * for this status run.
+ */
+let welcomeRaised: string | null = null;
+const welcomeDismissed = new Set<string>();
+const welcomeSubs = new Set<() => void>();
+export function welcomeCheck(s: State, now: number, ev: FullEvaluation | null) {
+  const w = welcomeBackDue(s, now, ev);
+  const k = w && !welcomeDismissed.has(w.key) ? w.key : null;
+  if (k !== welcomeRaised) { welcomeRaised = k; welcomeSubs.forEach((f) => f()); }
+}
+export function welcomeYes() {
+  if (welcomeRaised) welcomeDismissed.add(welcomeRaised);
+  welcomeRaised = null;
+  welcomeSubs.forEach((f) => f());
+}
+/** Test hook: forget every raised and dismissed check. */
+export function resetWelcomeForTest() { welcomeRaised = null; welcomeDismissed.clear(); }
+function useWelcome(): string | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); welcomeSubs.add(f); return () => { welcomeSubs.delete(f); }; }, []);
+  return welcomeRaised;
+}
+/** The chip itself: open, under the answer, never a modal. */
+function WelcomeBackChip({ w, now }: { w: WelcomeBack; now: number }) {
+  const label = segLabel(w.status, w.note);
+  return (
+    <div class="welcome" role="status">
+      <p><b>Still {label}?</b> Since {now - w.since < 1440 ? clock(w.since, false) : clock(w.since)} — {dur(now - w.since)}.</p>
+      <div class="row">
+        <button class="mini primary" onClick={welcomeYes}>Yes, still {label.toLowerCase()}</button>
+        <button class="mini" onClick={() => openSheet({ kind: 'status' })}>I stopped at…</button>
+      </div>
     </div>
   );
 }
@@ -1653,6 +1720,9 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
     return () => { live = false; clearTimeout(t); };
   }, [timeline, s.segments, s.current, s.config, s.tentative, basis, now]);
   const chips = pickChips(levers);
+  // M5: the welcome-back chip, while the run it was raised for is still the live one.
+  const raised = useWelcome();
+  const welcome = raised !== null && raised === welcomeRunKey(s) ? welcomeBackDue(s, now, ev) : null;
   const l3 = levers.find((l): l is Extract<Lever, { id: 'L3' }> => l.id === 'L3');
   /**
    * Capstone C2 — the future scrubber (audit §2.3). The preview time and its
@@ -1735,6 +1805,8 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         </div>
       )}
       {timeline && !preview && <LeverChips chips={chips} />}
+      {/* M5: never in a preview (and never in the driving view, which does not render NowTab). */}
+      {welcome && !preview && <WelcomeBackChip w={welcome} now={now} />}
       {/* The record's notices ride under the answer as one-line chips (patch 16, P2): the hero
           leads the screen now — in the cab and in the 3 a.m. review alike, the wrap-up business
           (splitting, ending the day) waits below the number it wraps up. */}
@@ -3266,7 +3338,7 @@ function BackToPlan({ s }: { s: State }) {
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
-function PlanTab() {
+function PlanTab({ ev }: { ev: FullEvaluation }) {
   const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
     <button class="plan-item" onClick={() => setState({ tab, planReturn: 'plan' })}>
       <span class="plan-icon"><Icon d={icon} size={26} /></span>
@@ -3280,6 +3352,8 @@ function PlanTab() {
       {item('load', I.truck, 'Can I take this load?', 'Miles and time at the receiver. Get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
       {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
+      {/* Capstone C3 (D10-A): one of the two founding workflows leaves the settings drawer. */}
+      {item('recap', I.recap, 'Hours coming back', `When your ${ev.cycle.limit / 60}-hour hours return, day by day.`)}
     </>
   );
 }
@@ -3302,7 +3376,7 @@ let splitDraftBefore: SplitDraft | null = null;
 /** What the pending draft undo says it undoes ("Draft replaced." for a whole-draft load, "Draft changed." for a fix). */
 let splitDraftUndoLabel = 'Draft replaced.';
 /** Keep the current Split draft behind one undo (shared by every replace path). */
-export function snapshotSplitDraft(label = 'Draft replaced.') { splitDraftBefore = { ...getState().split }; splitDraftUndoLabel = label; }
+export function snapshotSplitDraft(label = 'Draft replaced.') { loadDraftBefore = null; splitDraftBefore = { ...getState().split }; splitDraftUndoLabel = label; }
 /** Replace the whole Split draft, keeping the replaced one behind one undo. */
 export function replaceSplitDraft(next: SplitDraft, label?: string) {
   snapshotSplitDraft(label);
@@ -3317,6 +3391,34 @@ export function undoSplitDraft(): boolean {
 }
 export function splitDraftUndoPending(): boolean { return splitDraftBefore !== null; }
 export function clearSplitDraftUndo() { splitDraftBefore = null; }
+
+/*
+ * The same one-level DRAFT undo, shared by the load check's fix (capstone C3, audit §3 M4):
+ * "Plan it" replaces the load draft's departure and keeps the draft it replaced behind the one
+ * Undo. One level for both drafts: the newest draft replace owns the slot (a load fix retires
+ * a pending Split undo and the other way round), and any other change to the load draft
+ * retires the offer (the N2 rule above). Draft only — never the log, never persisted.
+ */
+let loadDraftBefore: LoadCheckDraft | null = null;
+export function replaceLoadDraft(patch: Partial<LoadCheckDraft>) {
+  splitDraftBefore = null;
+  loadDraftBefore = { ...getState().loadCheck };
+  setState({ loadCheck: { ...getState().loadCheck, ...patch } });
+}
+export function undoLoadDraft(): boolean {
+  if (!loadDraftBefore) return false;
+  const b = loadDraftBefore;
+  loadDraftBefore = null;
+  setState({ loadCheck: b });
+  return true;
+}
+export function loadDraftUndoPending(): boolean { return loadDraftBefore !== null; }
+export function clearLoadDraftUndo() { loadDraftBefore = null; }
+/** Any ordinary change to the load draft: it retires a pending load-fix undo first (N2). */
+export function editLoadDraft(patch: Partial<LoadCheckDraft>) {
+  clearLoadDraftUndo();
+  setState({ loadCheck: { ...getState().loadCheck, ...patch } });
+}
 
 /* ============================================================ Split Lab plan (capstone C2, P7 + M4) */
 
@@ -3765,6 +3867,71 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
   );
 }
 
+/* ---------- Hours coming back (capstone C3, audit §3 D10-A + M8) ---------- */
+
+/** "midnight" for a 00:00 carrier day, else the hour ("06:00"). */
+const dayStartWord = (h: number): string => (h === 0 ? 'midnight' : `${String(h).padStart(2, '0')}:00`);
+/**
+ * The screen's one sentence: "{cycle}: {left} left · +{drops} back at {roll} ({day start} {zone})".
+ * Every number is the evaluation's own (cycle.remaining, forecast[0]) — the same source the
+ * week strip's hatching reads.
+ */
+export function hoursBackSentence(ev: FullEvaluation, now: number, cfg: State['config']): string {
+  const head = `${ev.cycle.limit / 60} hours: ${dur(ev.cycle.remaining)} left`;
+  const f = ev.cycle.forecast[0];
+  if (!f) return head;
+  return `${head} · +${dur(f.dropsOff)} back at ${laneValue(f.dayStart, now)} (${dayStartWord(cfg.dayStartHour)} ${zoneShort(cfg.timeZone)})`;
+}
+/** A week-strip bar's label: the weekday for today and yesterday, then "N days ago" — never "D-3". */
+export function weekLabel(isoDay: string, back: number): string {
+  if (back >= 2) return `${back} days ago`;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDay);
+  return m ? DOW_SHORT[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()] : isoDay;
+}
+/** The strip's bars: one per carrier day, oldest first; the oldest carries the hatch that rolls off next. */
+export function weekBars(ev: FullEvaluation): { start: number; label: string; onDuty: number; hatch: number; today: boolean }[] {
+  const days = ev.cycle.days;
+  const drop = ev.cycle.forecast[0]?.dropsOff ?? 0;
+  return days.map((d, i) => ({
+    start: d.start, label: weekLabel(d.label, days.length - 1 - i), onDuty: d.onDuty,
+    // The day that rolls off at the next day-roll is the oldest in the window; its hatched
+    // minutes ARE the forecast's dropsOff (one source, audit §3 M8 pin).
+    hatch: i === 0 ? drop : 0, today: i === days.length - 1,
+  }));
+}
+/** The History day a week-strip tap opened: scrolled to once, then forgotten. Module state, never stored. */
+let historyFocus: number | null = null;
+export function openHistoryDay(start: number) { historyFocus = start; setState({ tab: 'history', planReturn: 'recap' }); }
+
+/**
+ * M8: the week strip — a picture of the driver's own on-duty hours, one bar per carrier day.
+ * Fence (§7): never printed, exported or shared as a record; the only action is opening the day
+ * in History, which is for his own review.
+ */
+function WeekStrip({ ev, now }: { ev: FullEvaluation; now: number }) {
+  const bars = weekBars(ev);
+  const scale = Math.max(840, ...bars.map((b) => b.onDuty));
+  const f = ev.cycle.forecast[0];
+  return (
+    <div class="weekstrip" role="group" aria-label="On-duty time, one bar per day">
+      {bars.map((b) => {
+        const hatch = Math.min(b.hatch, b.onDuty);
+        const aria = `${b.label}: ${dur(b.onDuty)} on duty${b.hatch > 0 && f ? `; ${dur(b.hatch)} of it comes back at ${laneValue(f.dayStart, now)}` : ''}. Open this day in History.`;
+        return (
+          <button key={b.start} class={`wk-day${b.today ? ' today' : ''}`} aria-label={aria} onClick={() => openHistoryDay(b.start)}>
+            <span class="wk-col" aria-hidden="true">
+              <span class="wk-bar" style={`height: ${(b.onDuty / scale) * 100}%`}>
+                {b.hatch > 0 && <span class="wk-hatch" data-drops={b.hatch} style={`height: ${b.onDuty ? (hatch / b.onDuty) * 100 : 0}%`} />}
+              </span>
+            </span>
+            <span class="wk-label" aria-hidden="true">{b.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const firstLogged = s.segments.length ? Math.min(...s.segments.map((x) => x.start)) : null;
@@ -3778,7 +3945,18 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
   return (
     <>
-      <Card title={`${ev.cycle.limit / 60}-hour / ${ev.cycle.windowDays}-day recap`}>
+      <BackToPlan s={s} />
+      <h1 class="screen-title">Hours coming back</h1>
+      <p class="hours-back"><b>{hoursBackSentence(ev, now, s.config)}</b></p>
+      <Card title="On duty, day by day">
+        <WeekStrip ev={ev} now={now} />
+        {ev.cycle.forecast[0] && ev.cycle.forecast[0].dropsOff > 0 && <p class="muted small"><span class="wk-key" aria-hidden="true" /> Striped: what comes back at {laneValue(ev.cycle.forecast[0].dayStart, now)}. Tap a day to see it in History.</p>}
+      </Card>
+      <Card title="Hours coming back">
+        <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{dur(f.dropsOff)} drops</span><b>{dur(f.availableAtStart)} available</b></li>)}</ul>
+      </Card>
+      <Card title="Fix a day">
+        <p class="muted small">{ev.cycle.limit / 60}-hour / {ev.cycle.windowDays}-day recap, as the engine counts it.</p>
         <table class="recap"><thead><tr><th>Day</th><th>On duty</th><th></th></tr></thead><tbody>
           {days.map((d, i) => {
             const isToday = i === days.length - 1;
@@ -3799,9 +3977,6 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         </div>
         {hist !== 'known' && <p class="warnbox small">This recap rests on an incomplete basis: your record does not cover the whole {ev.cycle.windowDays}-day period, so the days before it count as zero. Use <b>set</b> on those days, or confirm that your record really starts here.</p>}
         <p class="muted small">"set" a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so the whole engine sees it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)}</b> — the times in this table use your device zone.</>}</p>
-      </Card>
-      <Card title="Hours coming back">
-        <ul class="forecast">{ev.cycle.forecast.map((f) => <li key={f.label}><span>{clock(f.dayStart)}</span><span>+{dur(f.dropsOff)} drops</span><b>{dur(f.availableAtStart)} available</b></li>)}</ul>
       </Card>
       <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'recap' })}>
         <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
@@ -3847,12 +4022,16 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
   // bookmark is a label on the day only: totals, gaps and the "Not logged" reading above are
   // computed exactly as before and never see it.
   const closes = new Map(days.map((d) => [d.start, dayCloseFor(s, d.start)]));
+  // A week-strip tap (capstone C3, M8) opens this screen at its day: read once, then forgotten.
+  const [focus] = useState(() => { const f = historyFocus; historyFocus = null; return f; });
+  useEffect(() => { if (focus !== null) document.querySelector('.hist-focus')?.scrollIntoView?.({ block: 'start' }); }, []);
   return (
     <>
       <BackToPlan s={s} />
       <h1 class="screen-title">Your last 8 days</h1>
       <p class="muted small">What you logged, day by day, on your carrier's clock — days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}, and the times below read in your device zone ({deviceTz}), like everywhere else in the app.</p>
-      {days.map((d) => (
+      {days.map((d) => {
+        const card = (
         <Card key={d.start} title={d.isToday ? `Today — ${d.label}` : d.label}>
           <p class="small">Driving <b>{dur(d.totals.D)}</b> · On duty <b>{dur(d.totals.ON)}</b> · Off duty <b>{dur(d.totals.OFF)}</b> · Sleeper <b>{dur(d.totals.SB)}</b>{d.notLogged > 0 && <> · Not logged <b>{dur(d.notLogged)}</b></>}</p>
           {closes.get(d.start) && <p class="small">Day closed {clock(closes.get(d.start)!.at, false)}</p>}
@@ -3862,7 +4041,9 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
             <li key={i}><span class="dot" style={{ background: STATUS_COLOR[it.status] }} /><span>{segLabel(it.status, it.note)}</span><span class="muted">{clock(it.start)} → {clock(it.end)} · {dur(it.end - it.start)}</span></li>
           ))}</ul>
         </Card>
-      ))}
+        );
+        return d.start === focus ? <div key={d.start} class="hist-focus">{card}</div> : card;
+      })}
       {foot}
     </>
   );
@@ -3877,9 +4058,109 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
  * coming back changes nothing — the one deliberate clear is the answer screen's "Check another
  * load" (patch 7.1), which resets the draft to the defaults and starts the questions over.
  */
+/* ---------- dispatch mode (capstone C3, audit §3 M7 + the load side of M4) ---------- */
+
+/** The furthest a typed departure may sit from now: the draft's own bound (sanitizeLoadCheck). */
+export const LOAD_LEAVE_MAX_MIN = 1440;
+/** The furthest ahead an appointment may be typed. */
+export const LOAD_APPT_MAX_MIN = 14 * 1440;
+/** Why a picked time can't be used, or null. */
+export function loadTimeProblem(field: 'leave' | 'appt', at: number, now: number): string | null {
+  if (at <= now) return 'Pick a time after now.';
+  if (field === 'leave' && at - now > LOAD_LEAVE_MAX_MIN) return 'Up to 24 hours from now. For a later start, use Plan a run.';
+  if (field === 'appt' && at - now > LOAD_APPT_MAX_MIN) return 'Up to two weeks ahead.';
+  return null;
+}
+/**
+ * The appointment line (C6-A: wheels stop at the receiver vs the appointment). Display
+ * subtraction of an engine time (the winning plan's `driveEnd`) and a typed time — no rule
+ * math. On time includes the boundary: wheels stop at the appointment minute is "0m to spare".
+ */
+export function apptLine(appt: number, driveEnd: number): { onTime: boolean; text: string } {
+  return driveEnd <= appt
+    ? { onTime: true, text: `On time — ${dur(appt - driveEnd)} to spare` }
+    : { onTime: false, text: `Late by ${dur(driveEnd - appt)} — earliest arrival ${clockFull(driveEnd)}` };
+}
+/**
+ * [Text dispatch] (M7): built only from what the answer card shows — plan times, never a
+ * logged row, never a place or mile marker — and always ending on the planning disclaimer.
+ * The "Leave by" clause appears only when the leave-by search returned a time.
+ */
+export function dispatchText(o: { latest: number | null; driveEnd: number; appt: number | null; mph: number }): string {
+  const parts = ['Can take it.'];
+  if (o.latest !== null) parts.push(`Leave by ${clockFull(o.latest)} at the latest.`);
+  parts.push(`Wheels stop ${clockFull(o.driveEnd)}.`);
+  if (o.appt !== null) {
+    const a = apptLine(o.appt, o.driveEnd);
+    parts.push(a.onTime ? `On time for the ${clockFull(o.appt)} appointment — ${dur(o.appt - o.driveEnd)} to spare.` : `Late for the ${clockFull(o.appt)} appointment by ${dur(o.driveEnd - o.appt)}.`);
+  }
+  parts.push(`Planning estimate at ${o.mph} mph — my ELD governs.`);
+  return parts.join(' ');
+}
+/**
+ * The No verdict's fix (M4, load side): the "+{fix} off duty before you leave" line gains
+ * [Plan it: leave at …], which sets the draft departure there and the wait to off duty — the
+ * exact input the fix line was judged on. Offered only where the draft can say that: leaving
+ * now, or a wait already planned off duty. A wait planned ON duty followed by the extra rest
+ * is two statuses, which the draft's one wait flag cannot hold — there the line stays, without
+ * the button, rather than claim rest the driver did not plan.
+ */
+export function loadFixFor(lc: LoadCheckDraft, now: number, fix: { minutes: number } | null): { leaveIn: number; label: string } | null {
+  if (!fix || fix.minutes <= 0) return null;
+  if (lc.leaveIn > 0 && !lc.waitOff) return null;
+  const leaveIn = lc.leaveIn + fix.minutes;
+  if (leaveIn > LOAD_LEAVE_MAX_MIN) return null;
+  return { leaveIn, label: `Plan it: leave at ${clock(now + leaveIn)}` };
+}
+/** The next whole hour after `min`, on the phone's clock. */
+const nextHour = (min: number): number => { const d = new Date(min * 60000); d.setMinutes(60, 0, 0); return Math.floor(d.getTime() / 60000); };
+
+/** The load check's big clock: the Log editor's when-keys, for a departure or an appointment. */
+function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave' | 'appt' }) {
+  const lc = s.loadCheck;
+  const start = field === 'leave'
+    ? (lc.leaveIn > 0 ? now + lc.leaveIn : nextHour(now))
+    : (lc.appt != null && lc.appt > now ? lc.appt : nextHour(now + 180));
+  const [at, setAt] = useState<number>(start);
+  const problem = loadTimeProblem(field, at, now);
+  const key = (delta: number, text: string, aria: string) => <button key={delta} aria-label={aria} onClick={() => setAt(at + delta)}>{text}</button>;
+  const pickTime = (v: string) => {
+    const m = /^(\d{2}):(\d{2})/.exec(v);
+    if (!m) return;
+    const t = new Date(at * 60000);
+    t.setHours(+m[1], +m[2], 0, 0);
+    setAt(Math.floor(t.getTime() / 60000));
+  };
+  const chips = dayChips(now, true);
+  const apply = () => {
+    if (problem) return;
+    editLoadDraft(field === 'leave' ? { leaveIn: at - now } : { appt: at });
+    openSheet(null);
+  };
+  return (
+    <Sheet title={field === 'leave' ? 'When will you leave?' : 'Appointment at the receiver'}>
+      <div class="chips ed-days" role="group" aria-label="Day">
+        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => setAt(onDay(at, c.at))}>{c.label}</button>)}
+      </div>
+      <div class="ed-clock">
+        <output class="mono" aria-live="polite" aria-label={`${field === 'leave' ? 'Leave at' : 'Appointment at'} ${clock(at)}`}>{clock(at, false)}</output>
+        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+      </div>
+      <div class="ed-keys two">{key(-60, '− 1 hour', '1 hour earlier')}{key(60, '+ 1 hour', '1 hour later')}</div>
+      <div class="ed-keys four">{key(-15, '−15', '15 minutes earlier')}{key(-5, '−5', '5 minutes earlier')}{key(5, '+5', '5 minutes later')}{key(15, '+15', '15 minutes later')}</div>
+      <label class="ed-day">Exact time<input type="time" aria-label="Exact time" value={toInput(at).slice(11, 16)} onInput={(e) => pickTime((e.target as HTMLInputElement).value)} /></label>
+      {problem && <div class="warnbox small">{problem}</div>}
+      <button class="primary wide ed-go" disabled={!!problem} onClick={apply}>{field === 'leave' ? `Leave at ${clock(at)}` : `Appointment ${clockFull(at)}`}</button>
+    </Sheet>
+  );
+}
+
 function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const lc = s.loadCheck;
-  const setLoad = (p: Partial<LoadCheckDraft>) => setState({ loadCheck: { ...lc, ...p } });
+  // A draft saved before C3 has no `appt` field in memory until the next parse: read it as none.
+  const appt = lc.appt ?? null;
+  const setLoad = (p: Partial<LoadCheckDraft>) => editLoadDraft(p);
+  const draftUndo = loadDraftUndoPending();
   const [step, setStep] = useState(lc.answered ? 4 : 1);
   // each question is its own screen: start it at the top, not wherever the last Next button was
   // (Patch 19: the shell is the scroller now — the page itself no longer scrolls — so the
@@ -3919,20 +4200,25 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const openGaps = meaningfulGaps(ev.gaps);
   const provisional = openGaps.length > 0;
   const leaveWord = lc.leaveIn ? `in ${dur(lc.leaveIn)}` : 'now';
+  const loadFix = step === 4 && !best.feasible ? loadFixFor(lc, now, advice?.fix ?? null) : null;
+  // [Text dispatch] (M7): the patch-4 share mechanics — the share sheet, else the clipboard; a
+  // cancelled share sheet is the driver's choice and never falls back to a copy.
+  const dispatch = useShareButton(dispatchText({ latest: advice?.latest ?? null, driveEnd: best.driveEnd, appt, mph: s.mph }), 'Text dispatch');
   // Back out of the flow returns to wherever the driver entered it from (patch 7.1): Now, the
   // Plan hub, or Recap — not always Plan, which is where it landed before. The label names it.
   const returnLabel = s.planReturn === 'now' ? 'Now' : s.planReturn === 'recap' ? 'Recap' : 'Plan';
-  const head = (n: number) => (
+  const head = (n: number, count?: string) => (
     <>
       <div class="flow-head">
-        <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n - 1))}><Icon d={I.back} /></button>
+        <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n === 3.5 ? 3 : n - 1))}><Icon d={I.back} /></button>
         <b>Can I take this load?</b>
-        <span class="muted">{n} of 3</span>
+        <span class="muted">{count ?? `${n} of 3`}</span>
       </div>
       <div class="flow-dots" aria-hidden="true">{[1, 2, 3].map((k) => <span key={k} class={k <= n ? 'on' : ''} />)}</div>
     </>
   );
-  const next = (n: number, label: string) => <button class="primary wide flow-next" onClick={() => { if (n === 3) setLoad({ answered: true }); setStep(n + 1); }}>{label} <Icon d={I.next} /></button>;
+  // Question 3 leads to the optional appointment question ("3½", capstone C3 M7), then the answer.
+  const next = (n: number, label: string) => <button class="primary wide flow-next" onClick={() => { if (n === 3) setLoad({ answered: true }); setStep(n === 3 ? 3.5 : n + 1); }}>{label} <Icon d={I.next} /></button>;
   const chips = <T,>(opts: [T, string][], value: T, set: (v: T) => void) => (
     <div class="chips">{opts.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => set(v)}>{l}</button>)}</div>
   );
@@ -3957,6 +4243,9 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         {head(2)}
         <h1 class="flow-q">When will you leave?</h1>
         {chips([[0, 'Now'], [30, 'In 30 min'], [60, 'In 1 hour'], [120, 'In 2 hours']] as [number, string][], lc.leaveIn, (v) => setLoad({ leaveIn: v }))}
+        {/* Capstone C3 (M7): a typed departure, past the chips' two hours, on the Log editor's big clock. */}
+        <button class={`wide pick-time${[0, 30, 60, 120].includes(lc.leaveIn) ? '' : ' on'}`} onClick={() => openSheet({ kind: 'loadtime', field: 'leave' })}>Pick a time</button>
+        {![0, 30, 60, 120].includes(lc.leaveIn) && <p class="small"><b>Leaving at {clock(now + lc.leaveIn)}</b> — in {dur(lc.leaveIn)}.</p>}
         {lc.leaveIn > 0 && (
           <>
             <h3>Until then, you will be</h3>
@@ -3976,7 +4265,22 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         {chips([[0, 'None'], [30, '30 min'], [60, '1 hour'], [120, '2 hours'], [180, '3 hours'], [240, '4 hours']] as [number, string][], lc.dwell, (v) => setLoad({ dwell: v }))}
         <h3>While you are there, you are</h3>
         {chips([[false, 'On duty (unloading)'], [true, 'Off duty (relieved)']] as [boolean, string][], lc.dwellOff, (v) => setLoad({ dwellOff: v }))}
-        {next(3, 'Show me the answer')}
+        {next(3, 'Next: appointment time')}
+      </>
+    );
+  }
+  if (step === 3.5) {
+    return (
+      <>
+        {head(3, 'Optional')}
+        <h1 class="flow-q">Appointment at the receiver?</h1>
+        <p class="muted">With a time, the answer says whether you make it.</p>
+        <div class="chips">
+          <button class={appt === null ? 'on' : ''} aria-pressed={appt === null} onClick={() => { setLoad({ appt: null }); setStep(4); }}>No appointment</button>
+          <button class={appt !== null ? 'on' : ''} aria-pressed={appt !== null} onClick={() => openSheet({ kind: 'loadtime', field: 'appt' })}>Pick a time</button>
+        </div>
+        {appt !== null && <p class="small"><b>Appointment {clockFull(appt)}</b></p>}
+        <button class="primary wide flow-next" onClick={() => setStep(4)}>Show me the answer <Icon d={I.next} /></button>
       </>
     );
   }
@@ -3999,8 +4303,31 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clockFull(best.arrival)}` : `There by ${clockFull(best.driveEnd)}`}</div>
         {best.feasible && advice?.latest != null && <div class="verdict-sub">Leave by {clockFull(advice.latest)} at the latest.</div>}
         {!best.feasible && advice?.fix && <div class="verdict-sub">+{dur(advice.fix.minutes)} off duty before you leave → legal, {advice.fix.plan.arrival > advice.fix.plan.driveEnd ? `unloaded by ${clockFull(advice.fix.plan.arrival)}` : `there by ${clockFull(advice.fix.plan.driveEnd)}`}.</div>}
+        {/* M4 (load side): the fix line's one tap. It edits the load DRAFT only — the departure
+            and the wait — behind the shared draft undo; the verdict above re-computes. */}
+        {!best.feasible && loadFix && <button class="primary wide fixit" onClick={() => replaceLoadDraft({ leaveIn: loadFix.leaveIn, waitOff: true })}>{loadFix.label}</button>}
         {!best.feasible && advice?.fixSearched && !advice.fix && <div class="verdict-sub">No amount of extra rest before leaving makes this one legal — the load itself has to change.</div>}
       </section>
+      {draftUndo && (
+        <div class="row undo">
+          <span>Load plan changed.</span>
+          <button class="mini" onClick={undoLoadDraft}>Undo</button>
+        </div>
+      )}
+      {/* Dispatch mode (M7): the appointment against the winning plan's wheels-stop time. Shown
+          on a legal plan only — an on-time line over an illegal plan would be a promise the
+          rules do not keep. */}
+      {best.feasible && appt !== null && (() => {
+        const a = apptLine(appt, best.driveEnd);
+        return (
+          <section class={`verdict appt ${a.onTime ? 'yes' : 'no'}`}>
+            <div class="verdict-label">Appointment {clockFull(appt)}</div>
+            <div class="appt-big"><Icon d={a.onTime ? I.check : I.x} size={26} /> {a.text}</div>
+            <button class="link" onClick={() => openSheet({ kind: 'loadtime', field: 'appt' })}>Pick another time</button>
+          </section>
+        );
+      })()}
+      {best.feasible && <div class="row dispatch">{dispatch}</div>}
       {provisional && <p class="warnbox small"><b>Provisional.</b> {openGaps.map((g) => `${clock(g.start)} → ${clock(g.end)}`).join(', ')} {openGaps.length === 1 ? 'is' : 'are'} unlogged and counted as off duty. Fill {openGaps.length === 1 ? 'it' : 'them'} in and this verdict can change.</p>}
       {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm that the record starts here.</p>}
       <div class="clocks">
@@ -4016,7 +4343,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <Card title="How it goes"><PlanCompare both={both} from={now} /></Card>
       <p class="trust">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
       <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
-      <button class="wide" onClick={() => { setState({ loadCheck: { ...DEFAULT_LOADCHECK } }); setStep(1); }}>Check another load</button>
+      <button class="wide" onClick={() => { clearLoadDraftUndo(); setState({ loadCheck: { ...DEFAULT_LOADCHECK } }); setStep(1); }}>Check another load</button>
     </>
   );
 }
@@ -4120,7 +4447,8 @@ function DrivingAlertsCard({ s }: { s: State }) {
   const [awakeOk, setAwakeOk] = useState(true);
   const [speechOk, setSpeechOk] = useState(false);
   useEffect(() => { setNotif(notifyState()); setAwakeOk(canKeepAwake()); setSpeechOk(speechSynthesisAvailable()); }, []);
-  const test = () => { unlockAudio(); chime(true); buzz(true); };
+  // "Test alert" plays the 60-minute pattern (capstone C3, M13): the first mark a driver will feel.
+  const test = () => { unlockAudio(); chime(true); buzz(true, 60); };
   return (
     <Card title="Driving alerts">
       <label class="check"><input type="checkbox" checked={s.alertsOn} onChange={(e) => setState({ alertsOn: (e.target as HTMLInputElement).checked })} /> Sound and vibration at 60, 30 and 15 minutes of driving left, and every 15 minutes once you are out of time</label>
@@ -4212,9 +4540,10 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
   };
   return (
     <>
-      <button class="rowbtn" onClick={() => setState({ tab: 'recap' })}>
-        <span><span class="muted">Recap</span><br /><b>Hours coming back, day by day</b></span>
-        <Icon d={I.next} />
+      {/* Capstone C3 (D10-A, decision C7-A): the Recap row moved to Plan. For one release
+          this plain row says where it went and goes there; the patch after removes it. */}
+      <button class="rowbtn moved" onClick={() => setState({ tab: 'recap', planReturn: 'plan' })}>
+        <span>Hours coming back has moved to Plan ›</span>
       </button>
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
@@ -4371,6 +4700,26 @@ declare const __BUILD__: string;
  */
 let launchNotice = true;
 let backNav: BackNav | null = null;
+
+/* ---------- home-screen shortcuts (capstone C3, audit §3 M14) ---------- */
+export type GoTarget = 'load' | 'stopped' | 'recap' | 'unknown';
+/** The shortcut's `go` value, or null when the address has none. An unrecognised value is 'unknown'. */
+export function readGo(search: string): GoTarget | null {
+  let v: string | null = null;
+  try { v = new URLSearchParams(search).get('go'); } catch { return null; }
+  if (v === null) return null;
+  return v === 'load' || v === 'stopped' || v === 'recap' ? v : 'unknown';
+}
+/**
+ * Land where the shortcut points: the load question, Hours coming back (both returning to
+ * Now), or the status panel ("I've stopped"). An unknown value lands on Now. The panel waits
+ * behind the launch disclaimer like every panel (the shell renders none while it is up).
+ */
+export function applyGo(go: GoTarget) {
+  if (go === 'load' || go === 'recap') setState({ tab: go, planReturn: 'now' });
+  else if (go === 'stopped') openSheet({ kind: 'status' });
+  else setState({ tab: 'now' });
+}
 export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
 export function App() {
@@ -4424,13 +4773,39 @@ export function App() {
   useEffect(() => {
     const f = (e: Event) => {
       const b = (e.target as HTMLElement | null)?.closest?.('button');
-      if (b && !(b as HTMLButtonElement).disabled) tapTick();
+      // A key with its own haptic (the dock's status keys, capstone C3 M13) is never ticked twice.
+      if (b && !(b as HTMLButtonElement).disabled && b.getAttribute?.('data-haptic') == null) tapTick();
     };
     document.addEventListener('click', f, true);
     return () => document.removeEventListener('click', f, true);
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
+  // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
+  // and clean the address — keeping history.state, which carries the back-nav marker. Runs
+  // before the back-nav is created, so its entries are built for the screen the shortcut chose.
+  useEffect(() => {
+    const go = readGo(typeof location !== 'undefined' ? location.search : '');
+    if (go === null) return;
+    applyGo(go);
+    try { window.history.replaceState(window.history.state, '', './'); } catch { /* ignore */ }
+  }, []);
+  // Capstone C3 (M5): the welcome-back check, on open and on each return to the foreground,
+  // against the real clock only.
+  useEffect(() => {
+    const check = () => {
+      const st = getState();
+      if (st.nowOverride !== null) { welcomeCheck(st, 0, null); return; }
+      const t = nowMin();
+      let e: FullEvaluation | null = null;
+      try { e = evaluate(allSegments(st, t), { asOf: t, config: st.config }); } catch { e = null; }
+      welcomeCheck(st, t, e);
+    };
+    check();
+    const f = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', f);
+    return () => document.removeEventListener('visibilitychange', f);
+  }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
     const nav = createBackNav(window.history, () => ({ tab: getState().tab, sheet: currentSheet() !== null }),
@@ -4461,9 +4836,10 @@ export function App() {
     );
   }
   const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['settings', 'More', I.more]];
-  // The planning screens sit under Plan and Recap sits under More: the tab bar shows where you are,
-  // not a fifth or sixth tab (declutter patch, 2026-11-05).
-  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' ? 'plan' : t === 'recap' || t === 'history' ? 'settings' : t);
+  // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
+  // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
+  // and the last-8-days view it opens moved from More to Plan.
+  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t);
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
@@ -4501,7 +4877,7 @@ export function App() {
         <TabBoundary key={s.tab} tab={s.tab}>
           {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />}
           {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
-          {s.tab === 'plan' && <PlanTab />}
+          {s.tab === 'plan' && <PlanTab ev={ev} />}
           {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
           {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
           {s.tab === 'history' && <HistoryTab s={s} now={now} />}
@@ -4522,6 +4898,7 @@ export function App() {
       {!disclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!disclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
       {!disclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
+      {!disclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
       {!disclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.seg.start}-${sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!disclaimer && s.speakAskOpen && <SpeakAskDialog />}
     </div>

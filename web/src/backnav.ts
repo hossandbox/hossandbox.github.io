@@ -22,6 +22,14 @@ export interface HistoryLike {
 type Layer = 'tab' | 'sub' | 'sheet';
 /** Screens reached from Plan: Back returns to Plan. */
 export const PLAN_SCREENS = ['split', 'trip', 'load'];
+/**
+ * Capstone C3 (audit §3 D10-A): "Hours coming back" (tab id 'recap') now lives under Plan, so the
+ * phone's Back from it lands on Plan, not Now. It keeps the ONE history entry every tab has
+ * (rather than a Plan sub-screen's second one) — the existing pin "moving between tabs must not
+ * pile up entries" walks Log → recap — and the Back that pops it goes to Plan instead of Now.
+ * History stays out: its phone Back keeps landing on Now, as before.
+ */
+export const BACK_TO_PLAN = ['recap'];
 const MARK = 'hos-sandbox';
 
 export interface BackNav {
@@ -96,7 +104,7 @@ export function createBackNav(
     layers.pop();
     const v = view();
     if (v.sheet) act.closeSheet();
-    else if (PLAN_SCREENS.includes(v.tab)) act.goTo('plan');
+    else if (PLAN_SCREENS.includes(v.tab) || BACK_TO_PLAN.includes(v.tab)) act.goTo('plan');
     else if (v.tab !== 'now') act.goTo('now');
     sync();
   };

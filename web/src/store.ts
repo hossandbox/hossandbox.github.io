@@ -198,7 +198,16 @@ export const DEFAULT_SPLIT: SplitDraft = { b1: 180, b1s: 'OFF', dwell: 30, drive
  * rest (consumer-review-2). `answered` = the steps were completed once, so the screen reopens on the
  * answer rather than the first question.
  */
-export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean; leaveIn: number; waitOff: boolean; answered: boolean }
+/*
+ * Capstone C3 (audit §3 M7, dispatch mode): `appt` is the receiver's appointment, an absolute
+ * minute (epoch minutes); null or absent = "no appointment". It lives inside the existing load
+ * draft (no new storage key), is sanitized like the other draft fields (a value that is not
+ * null or a whole dateable minute falls back — on a damaged save, to none: the side that
+ * claims nothing), and rides the export with the rest of `loadCheck`. Absent is a real state,
+ * not a gap: a draft written before C3 has no key and must round-trip byte-identical (re-check
+ * M8's import pin), so the key appears only once the driver answers the appointment question.
+ */
+export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean; leaveIn: number; waitOff: boolean; answered: boolean; appt?: number | null }
 export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false, leaveIn: 0, waitOff: false, answered: false };
 
 /** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
@@ -939,7 +948,20 @@ export function sanitizeLoadCheck(d: unknown, fallback: LoadCheckDraft): LoadChe
     leaveIn: numIn(d.leaveIn, 0, 1440, fallback.leaveIn),
     waitOff: boolAt(d.waitOff, fallback.waitOff),
     answered: boolAt(d.answered, fallback.answered),
+    // A draft saved or exported before appointments existed has none: absent stays absent.
+    ...('appt' in d ? apptField(sanitizeAppt(d.appt, fallback.appt ?? null)) : {}),
   };
+}
+// A hoisted declaration, not a const arrow: loadSaved → parseSaved runs at MODULE LOAD, before a
+// const further down this file is initialised (a const here threw in its TDZ and a relaunch with a
+// saved appointment fell back to a blank state — caught by the c3 browser lane, run 21).
+function apptField(v: number | null | undefined): { appt?: number | null } { return v === undefined ? {} : { appt: v }; }
+
+/** The load draft's appointment (capstone C3, M7): null, or a whole dateable minute; anything else falls back. */
+export function sanitizeAppt(v: unknown, fallback: number | null): number | null {
+  if (v === null) return null;
+  if (typeof v === 'number' && Number.isInteger(v) && dateable(v)) return v;
+  return fallback !== null && Number.isInteger(fallback) && dateable(fallback) ? fallback : null;
 }
 
 export function sanitizeTrip(d: unknown, fallback: TripDraft): TripDraft {
@@ -996,7 +1018,7 @@ export function draftResets(d: unknown, cur: State): string[] {
   const sameSplit = (a: SplitDraft, b: SplitDraft) =>
     a.b1 === b.b1 && a.b1s === b.b1s && a.dwell === b.dwell && a.drive === b.drive && a.b2 === b.b2 && a.b2s === b.b2s;
   const sameLoad = (a: LoadCheckDraft, b: LoadCheckDraft) =>
-    a.miles === b.miles && a.dwell === b.dwell && a.dwellOff === b.dwellOff && a.leaveIn === b.leaveIn && a.waitOff === b.waitOff && a.answered === b.answered;
+    a.miles === b.miles && a.dwell === b.dwell && a.dwellOff === b.dwellOff && a.leaveIn === b.leaveIn && a.waitOff === b.waitOff && a.answered === b.answered && (a.appt ?? null) === (b.appt ?? null);
   if (isObj(d.split) && !sameSplit(sanitizeSplit(d.split, cur.split), { ...DEFAULT_SPLIT, ...d.split } as SplitDraft)) out.push('the Split Lab plan');
   if (isObj(d.loadCheck) && !sameLoad(sanitizeLoadCheck(d.loadCheck, cur.loadCheck), { ...DEFAULT_LOADCHECK, ...d.loadCheck } as LoadCheckDraft)) out.push('the load question');
   if (isObj(d.trip)) {
