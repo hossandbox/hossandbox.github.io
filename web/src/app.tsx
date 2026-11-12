@@ -79,7 +79,7 @@ function Slider({ label, value, min, max, step, onChange, fmt, unit }: { label: 
             step makes the browser snap the control to min + k*step — 20 reads as 26, and with
             min=1/step=25 even the maximum (3000) was unreachable at 2976 (consumer-review-4). The
             −/+ buttons keep the coarse increment. */}
-        <input type="range" aria-label={`${label}${unit ? ` (${unit})` : ''}`} min={min} max={max} step={1} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
+        <input type="range" style={`--fill:${max > min ? Math.max(0, Math.min(100, Math.round(((value - min) / (max - min)) * 100))) : 0}%`} aria-label={`${label}${unit ? ` (${unit})` : ''}`} min={min} max={max} step={1} value={value} onInput={(e) => set(Number((e.target as HTMLInputElement).value))} />
         <button class="mini" title={`Decrease by ${step}${unit ? ` ${unit}` : ''}`} aria-label={`Decrease ${label} by ${step}${unit ? ` ${unit}` : ''}`} onClick={() => set(value - step)}>−{step}</button>
         <input
           type="number" class="num" inputMode="numeric" aria-label={`${label}, type an exact value${unit ? ` in ${unit}` : ''}`}

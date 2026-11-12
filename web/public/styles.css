@@ -683,3 +683,189 @@ button.rowbtn.moved { min-height: 48px; margin-bottom: var(--s-12); font-weight:
 .absorb-list { margin: var(--s-6) 0; padding-left: 1.2em; }
 .absorb-list li { margin: 2px 0; }
 button.trip-dep { display: block; width: 100%; margin-top: 4px; text-align: left; font-weight: 700; }
+
+/* ===================================================================================
+   TACTILE PASS (polish, 2026-11-11) — the whole app as a modern truck dashboard.
+   Direction: Lorico, 2026-11-11 — physical, chunky, grippy controls; depth and pressed
+   states on buttons, toggles and sliders; instrumentation character; and good-looking in
+   its own right, in both themes.
+
+   This block is APPEND-ONLY and self-contained: no rule above it was edited, the palette
+   in the two :root blocks is untouched (the contrast gate and the night-light budget read
+   it there), and deleting everything from this banner to the end of the file restores the
+   L2 look exactly. Presentation only.
+
+   The grammar, used the same way on every screen:
+     KEY      a raised push-button — lit top edge, a face, a solid skirt under it. A press
+              sinks it onto the skirt. A key that is latched ON stays down, with its lamp lit.
+     ROCKER   a segmented choice — a recessed well, the chosen side a raised key with a lamp.
+     SLIDER   a groove with a knurled grip riding in it.
+     READOUT  anything that only shows a value — recessed, like a gauge window.
+   One control scale, and nothing tappable got smaller than it was:
+     48  the floor — inline links, icon buttons, the keys inside a rocker
+     56  the standard key, stepper and field
+     64  rows (title + detail + chevron) and the commit key of a screen
+   =================================================================================== */
+html {
+  --ctl-floor: 48px; --ctl: 56px; --ctl-lg: 64px;
+  --t-well: var(--bg);
+  --t-well-in: inset 0 2px 5px rgba(0,0,0,.72), inset 0 0 0 1px rgba(0,0,0,.4);
+  --t-lip: 0 1px 0 rgba(255,255,255,.05);
+  --t-bevel: rgba(0,0,0,.42);
+  --t-cast: rgba(0,0,0,.5);
+  --t-press: inset 0 2px 6px rgba(0,0,0,.65);
+  --t-ridge-hi: rgba(255,255,255,.14); --t-ridge-lo: rgba(0,0,0,.55);
+  --t-accent-lo: color-mix(in srgb, var(--accent-solid) 82%, #000);
+  --t-accent-skirt: color-mix(in srgb, var(--accent-solid) 48%, #000);
+  --t-key: linear-gradient(180deg, var(--key-hi), var(--key-lo));
+  --t-key-top: rgba(255,255,255,.09);
+  --t-key-shadow: inset 0 1px 0 var(--t-key-top), inset 0 -1px 0 var(--t-bevel), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast);
+  --t-key-down: var(--t-press), 0 1px 0 var(--key-base);
+  --t-grip: linear-gradient(180deg, #6b7885, #4a5560); --t-grip-edge: #2a333d;
+}
+html[data-theme="day"] {
+  --t-well: #d3dae1;
+  --t-well-in: inset 0 2px 4px rgba(30,45,60,.24), inset 0 0 0 1px rgba(30,45,60,.07);
+  --t-lip: 0 1px 0 rgba(255,255,255,.95);
+  --t-bevel: rgba(30,45,60,.10);
+  --t-cast: rgba(30,45,60,.18);
+  --t-press: inset 0 2px 5px rgba(30,45,60,.30);
+  --t-ridge-hi: rgba(255,255,255,.95); --t-ridge-lo: rgba(30,45,60,.34);
+  --t-grip: linear-gradient(180deg, #ffffff, #e5e9ed); --t-grip-edge: #9aa6b2;
+  --t-key-top: var(--edge-hi);
+}
+
+/* ---------- KEY: every button that has a face ---------- */
+button { min-height: var(--ctl); border-radius: var(--r-12); font-weight: 700; box-shadow: var(--t-key-shadow); transition: transform 90ms ease-out, box-shadow 90ms ease-out, filter 120ms ease-out; }
+/* The controls with no face keep none, and keep the floor they had. */
+button.link, button.back, button.x, button.drive-details { min-height: var(--ctl-floor); }
+.icon-btn { min-height: var(--ctl-floor); }
+button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, button.sheet-backdrop, .toggle button, button.drive-details, button.rowbtn.flat, button.taxis-row, button.addbtn, .tabs button, button.wk-day, button.pblock, .ed-clock-tap, button.vh { box-shadow: none; }
+/* A press sinks the key onto its skirt. (Faceless controls keep patch 16's 1px settle.) */
+button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):active { transform: translateY(2px); filter: none; box-shadow: var(--t-key-down); transition-duration: 0ms; }
+button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):disabled { box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 0 var(--key-base); }
+@media (prefers-reduced-motion: reduce) { button:where(:not(.link)):active { transform: none; } }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* key faces that were flat panels become the one key face */
+button.rowbtn, .plan-item, .chips button, .lever, button.dock-more, button.danger, button.act.del { background: var(--t-key); }
+button.dock-more { box-shadow: var(--t-key-shadow); }
+button.dock-more:active { box-shadow: var(--t-key-down); }
+
+/* the commit key: the accent face, lit from above, on its own dark-accent skirt */
+button.primary, .chips button.on, .ed-len button.on { background: linear-gradient(180deg, var(--accent-solid), var(--t-accent-lo)); border-color: var(--t-accent-lo); color: var(--on-accent); }
+button.primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.22), 0 3px 0 var(--t-accent-skirt), 0 6px 12px var(--t-cast), 0 0 16px var(--glow); }
+button.primary:active { box-shadow: inset 0 2px 6px rgba(0,0,0,.4), 0 1px 0 var(--t-accent-skirt); }
+button.primary:disabled { box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 0 var(--t-accent-skirt); }
+.sheet button.ed-go { box-shadow: 0 -10px 18px var(--panel), inset 0 1px 0 rgba(255,255,255,.28), 0 3px 0 var(--t-accent-skirt); }
+.sheet button.ed-go:active { box-shadow: 0 -10px 18px var(--panel), inset 0 2px 6px rgba(0,0,0,.4), 0 1px 0 var(--t-accent-skirt); }
+/* a preset that is chosen is a key latched down, lamp on */
+.chips button.on, .ed-len button.on { transform: translateY(2px); box-shadow: inset 0 2px 6px rgba(0,0,0,.38), 0 1px 0 var(--t-accent-skirt), 0 0 14px var(--glow); }
+/* destructive keys: the red legend and edge on a key face, a red-shaded skirt */
+button.danger, button.act.del { box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 color-mix(in srgb, var(--bad) 45%, var(--key-base)), 0 5px 9px var(--t-cast); }
+button.danger:active, button.act.del:active { box-shadow: var(--t-press), 0 1px 0 color-mix(in srgb, var(--bad) 45%, var(--key-base)); }
+/* outlined-on keys (PC / yard move, resolved timeline, a typed time): latched, accent ring kept */
+button.on-outline { transform: translateY(2px); box-shadow: inset 0 0 0 2px var(--accent), var(--t-press), 0 1px 0 var(--key-base); }
+button.opt[aria-pressed="true"] { transform: translateY(2px); box-shadow: inset 0 0 0 2px var(--accent), var(--t-press), 0 1px 0 var(--key-base); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, var(--key-lo)), color-mix(in srgb, var(--accent) 6%, var(--key-lo))); }
+button.wide.pick-time.on { transform: translateY(2px); box-shadow: var(--t-press), 0 1px 0 var(--key-base); }
+
+/* ---------- the control scale ---------- */
+/* 56: standard keys, steppers, fields */
+.ed-days button { font-size: 14px; padding: 0 2px; }
+.ed-days button, .row.dispatch > *, button.rowbtn.moved, .welcome .row > button.mini { min-height: var(--ctl); }
+.ed-fine button, .ed-fine output, .tstep-value { min-height: var(--ctl); }
+.toggle.big button { min-height: 58px; }
+.filebtn { min-height: var(--ctl); border-radius: var(--r-12); background: var(--t-key); box-shadow: var(--t-key-shadow); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+button.mini { border-radius: var(--r-12); font-size: 15px; }
+.slider-row { gap: var(--s-6); }
+.slider-row .mini { padding-left: var(--s-10); padding-right: var(--s-10); }
+/* stepper legends: one size, one weight, wherever a value is nudged */
+.ed-keys button, .ed-fine button, .tstep-row button, .brk-len button, button.pb-step, .steps4 button, .slider-row .mini { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+button.pv-step { font-size: 16px; }
+/* 64: rows and the commit key */
+button.wide, button.rowbtn, .lever, .ed-len button, .steps4 button { min-height: var(--ctl-lg); }
+button.wide, button.rowbtn, button.opt, button.act, .lever { border-radius: var(--r-16); }
+.ed-len button { font-size: 17px; }
+.plan-text b { font-size: 18px; }
+.lever-text b { font-size: 18px; font-weight: 800; }
+button.rowbtn { font-size: 16px; }
+.chips button { font-size: 17px; }
+/* the icon tile on a plan row is a small recessed window */
+.plan-icon { background: var(--screen); box-shadow: var(--t-well-in), var(--t-lip); }
+
+/* ---------- status keys: the lit one is latched down ---------- */
+.status-buttons button.on, .big-status button.on { transform: translateY(2px); background: linear-gradient(180deg, color-mix(in srgb, var(--led, var(--muted)) 20%, var(--key-lo)), color-mix(in srgb, var(--led, var(--muted)) 9%, var(--key-lo))); box-shadow: inset 0 3px 7px var(--t-cast), 0 1px 0 var(--key-base), 0 0 18px color-mix(in srgb, var(--led, transparent) 35%, transparent); }
+.status-buttons button::before, .big-status button::before { height: 5px; border-radius: 3px; }
+button.drive-stop:active { box-shadow: var(--t-press), 0 1px 0 var(--key-base); transform: translateY(3px); }
+
+/* ---------- ROCKER: the segmented toggle ---------- */
+/* Night keeps its exact colours (the L2 pin reads them): the depth is all shadow. In day the
+   well is a shade deeper than the page, so the chosen white key can never wash out again. */
+.toggle { background: var(--t-well); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); }
+.toggle button { position: relative; min-height: 50px; border-radius: 9px; padding: 8px 4px 12px; font-size: 15px; font-weight: 700; }
+.toggle button.on { background-image: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0)); box-shadow: inset 0 1px 0 var(--edge-hi), 0 2px 0 var(--key-base), 0 3px 6px var(--t-cast); }
+:root[data-theme="day"] .toggle button.on { background-image: none; box-shadow: inset 0 0 0 1px var(--tick), 0 2px 0 var(--key-base), 0 3px 6px var(--t-cast); }
+/* the lamp on the chosen side: selection is carried by position, weight, edge AND a lit bar */
+.toggle button.on::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 22px; height: 3px; margin-left: -11px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+.toggle button:not(.on):active { box-shadow: var(--t-press); }
+
+/* ---------- switches: a checkbox is a dash slide switch ---------- */
+label.check { gap: var(--s-14); min-height: var(--ctl); }
+label.check input { -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 56px; height: 48px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: var(--r-12); background: none; box-shadow: none; cursor: pointer; }
+label.check input::before { content: ""; box-sizing: border-box; position: absolute; left: 0; right: 0; top: 8px; height: 32px; border-radius: var(--r-pill); border: 1px solid var(--line); background: radial-gradient(circle at 41px 50%, transparent 3px, var(--muted) 3.5px, var(--muted) 5px, transparent 5.5px), var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+label.check input::after { content: ""; box-sizing: border-box; position: absolute; top: 11px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--t-grip); border: 1px solid var(--t-grip-edge); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 3px var(--t-cast); transition: transform 120ms ease-out; }
+label.check input:checked::before { border-color: var(--t-accent-lo); background: linear-gradient(var(--on-accent), var(--on-accent)) 14px 50% / 2px 10px no-repeat, var(--accent-solid); }
+label.check input:checked::after { transform: translateX(24px); }
+label.check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { label.check input::after { transition: none; } }
+
+/* ---------- SLIDER: a groove and a knurled grip ---------- */
+.slider input[type=range], input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; height: 56px; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--accent) 0, var(--accent) var(--fill, 0%), var(--t-well) var(--fill, 0%)); box-shadow: var(--t-well-in), var(--t-lip); }
+input[type=range]::-moz-range-track { height: 14px; border-radius: 7px; background: var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+input[type=range]::-moz-range-progress { height: 14px; border-radius: 7px; background: var(--accent); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 36px; height: 44px; margin-top: -15px; border-radius: 10px; border: 1px solid var(--t-grip-edge); background: linear-gradient(90deg, transparent 11px, var(--t-ridge-lo) 11px, var(--t-ridge-lo) 12px, var(--t-ridge-hi) 12px, var(--t-ridge-hi) 13px, transparent 13px, transparent 16px, var(--t-ridge-lo) 16px, var(--t-ridge-lo) 17px, var(--t-ridge-hi) 17px, var(--t-ridge-hi) 18px, transparent 18px, transparent 21px, var(--t-ridge-lo) 21px, var(--t-ridge-lo) 22px, var(--t-ridge-hi) 22px, var(--t-ridge-hi) 23px, transparent 23px) center / 100% 20px no-repeat, var(--t-grip); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast); }
+input[type=range]::-moz-range-thumb { width: 36px; height: 44px; border-radius: 10px; border: 1px solid var(--t-grip-edge); background: var(--t-grip); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast); }
+input[type=range]:active::-webkit-slider-thumb { box-shadow: var(--t-press), 0 1px 0 var(--key-base); }
+input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-8); }
+
+/* ---------- READOUT: fields and value windows are recessed ---------- */
+label input, label select, input.num, input.hrs, input.tstep-pick, .ed-day input, .ed-type input { background: var(--screen); border: 1px solid var(--line); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); min-height: var(--ctl); }
+label input:focus-visible, label select:focus-visible, input.num:focus-visible, input.hrs:focus-visible, input.tstep-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bignum, .tstep-value, .ed-fine output, .lenrow, .ed-ctx, .stat { background: var(--screen); border: 1px solid var(--line); box-shadow: var(--t-well-in), var(--t-lip); }
+.tstep-value, .ed-fine output { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; }
+.limit-plate, .ed-clock, .grid { box-shadow: var(--t-well-in), var(--t-lip); }
+.meter-bar { height: 12px; border-radius: 4px; box-shadow: var(--t-well-in), var(--t-lip); }
+.meter-bar span { height: 12px; }
+.flow-dots span, .ed-bar span { height: 6px; background: var(--t-well); box-shadow: var(--t-well-in); }
+.flow-dots span.on, .ed-bar span.on { background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+
+/* ---------- panels, header, dock, tab bar, sheets ---------- */
+.card, .meters, .split-now-after { box-shadow: inset 0 1px 0 var(--edge-hi), inset 0 -1px 0 var(--t-bevel), 0 8px 20px var(--drop); }
+.top { box-shadow: 0 1px 0 var(--edge-hi), 0 8px 14px -10px var(--t-cast); }
+.dock { box-shadow: inset 0 1px 0 var(--edge-hi), 0 -8px 14px -10px var(--t-cast); }
+.tabs { box-shadow: inset 0 1px 0 var(--edge-hi), 0 -8px 16px -8px var(--t-cast); }
+.tabs button + button { box-shadow: -1px 0 0 var(--line), inset 1px 0 0 var(--edge-hi); }
+.tabs button.on { background: linear-gradient(180deg, var(--tint-accent), transparent 70%); }
+.tabs button:active { box-shadow: var(--t-press); transform: none; }
+.tabs button.on::before { height: 4px; left: 22%; right: 22%; }
+/* the sheet's handle is a recessed finger slot */
+.sheet-handle { width: 52px; height: 6px; border-radius: 3px; background: var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+.modal { box-shadow: inset 0 1px 0 var(--edge-hi), 0 24px 48px var(--t-cast); background: linear-gradient(180deg, var(--surface-hi), var(--panel)); }
+
+/* ---------- Now: the Timeline | Dial switch, compact, in the panel's own top corner ---------- */
+/* Field note (Lorico): the switch took a whole line. It is now the size of the header's
+   Day | Night control and sits in the top-right corner of the Now panel, sharing the band the
+   panel's label already had. Its two keys keep the 48px floor. A browser without :has() keeps
+   the L2 full-line layout — nothing is lost, only not compacted. */
+@supports selector(:has(*)) {
+  .hero:has(> .card-switch) > .card-switch { position: absolute; top: 12px; right: 12px; z-index: 2; margin: 0; padding: 0; border: 0; gap: 0; }
+  .hero:has(> .card-switch) .card-switch-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hero:has(> .card-switch) .card-switch .toggle { flex: none; }
+  .hero:has(> .card-switch) .card-switch .toggle button { flex: none; min-height: var(--ctl-floor); min-width: 56px; padding: 0 var(--s-12) 4px; font-size: 13px; letter-spacing: .02em; }
+  .hero:has(> .card-switch) > .hero-label:first-child,
+  .hero:has(> .card-switch) > .hero-lead:first-child,
+  .hero:has(> .card-switch) > .tl-head:first-child .hero-label { display: flex; align-items: center; min-height: 50px; padding-right: 158px; }
+  .hero:has(> .card-switch) > .pv-band:first-child { margin-right: 158px; }
+  .hero:has(> .card-switch) > .dial:first-child { margin-top: 28px; }
+}
