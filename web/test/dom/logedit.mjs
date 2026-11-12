@@ -354,6 +354,23 @@ await pin('F3. no new storage keys', async () => {
   return extra.length === 0 || 'extra keys: ' + extra.join(', ');
 });
 
+/* ===== quick patch (2026-11-11): the break step names the break he just tapped ===== */
+await pin('Q1. a break in the middle of a drive: step one asks "Which break did you take?" — not "What happened in the middle?" again', async () => {
+  await seed({ segments: [{ status: 'OFF', start: T - 900, end: T - 300, createdAt: 1 }], current: { status: 'D', since: T - 300, createdAt: 2 } });
+  fire(liveRow(), 'click'); await sleep(60);
+  await click(/^I took a break in the middle/);
+  const t = sheetText();
+  if (/What happened in the middle\?/.test(t)) return 'still the old heading: ' + t.slice(0, 160);
+  return /Which break did you take\?/.test(t) || 'heading was: ' + t.slice(0, 160);
+});
+await pin('Q2. worked or drove in the middle of an off-duty entry: the general question stays', async () => {
+  await seed(day());
+  openSheet({ kind: 'edit', seg: getState().segments[0] }); await sleep(60);
+  await click(/^I worked or drove in the middle/);
+  const t = sheetText();
+  return (/What happened in the middle\?/.test(t) && !/Which break did you take\?/.test(t)) || 'heading was: ' + t.slice(0, 160);
+});
+
 render(null, root);
 for (const [k, n, i] of res) console.log(`${k} ${n}${i ? '  — ' + i : ''}`);
 const fails = res.filter((r) => r[0] === 'FAIL').length;

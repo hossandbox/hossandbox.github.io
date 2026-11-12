@@ -13,6 +13,7 @@
     "c2browser": "node test/dom/c2browser.mjs",
     "c3browser": "node test/dom/c3browser.mjs",
     "lebrowser": "node test/dom/lebrowser.mjs",
+    "quickfix": "node test/dom/quickfix.mjs",
     "contrast": "node test/contrast.mjs",
     "ocr-corpus": "node tools/ocr-corpus-run.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

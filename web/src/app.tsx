@@ -3368,7 +3368,7 @@ function WhatStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
   return (
     <>
       {!edit && <StepCount at={1} of={k.draft?.fixedLen ? 2 : 3} />}
-      <Question>{edit ? 'What were you really doing?' : inside ? 'What happened in the middle?' : 'What were you doing?'}</Question>
+      <Question>{edit ? 'What were you really doing?' : breaksFirst ? 'Which break did you take?' : inside ? 'What happened in the middle?' : 'What were you doing?'}</Question>
       {breaksFirst && breakRow}
       {breaksFirst && <div class="ed-lab">Or</div>}
       {WHAT.map((o) => <OptRow key={o.status} o={o} on={isOn(o)} onPick={() => choose(o.status)} />)}

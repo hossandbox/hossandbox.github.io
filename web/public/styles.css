@@ -127,6 +127,10 @@ label.check { display: flex; align-items: center; gap: 12px; color: var(--text);
 .toggle { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-10); padding: 3px; margin-top: 8px; }
 .toggle button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 10px 6px; font-size: 14px; min-height: 48px; }
 .toggle button.on { background: var(--panel2); color: var(--text); }
+/* Day theme (quick patch, field report 2026-11-11): panel2 on the track measured 1.03:1 in day mode —
+   the chosen side of every toggle was invisible in sunlight. In day the chosen key is the lit white
+   key face with a lifted edge and a tick-grey ring; the night key above is untouched. */
+:root[data-theme="day"] .toggle button.on { background: var(--surface-hi); box-shadow: 0 1px 3px var(--drop), inset 0 0 0 1px var(--tick); font-weight: 700; }
 
 .slider { margin-top: 12px; }
 .slider-head { display: flex; justify-content: space-between; font-size: 14px; color: var(--text); }

@@ -2239,7 +2239,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet({ kind: 'add', inside: gs().segments[1] });
   h = out('editor/inside');
   const pin = h.slice(h.indexOf('role="dialog"'));
-  if (!/What happened in the middle\?/.test(h) || pin.indexOf('Break buttons') < 0 || pin.indexOf('Break buttons') > pin.indexOf('<b>Driving</b>')) throw new Error('inside a drive, the break buttons come first');
+  if (!/Which break did you take\?/.test(h) || pin.indexOf('Break buttons') < 0 || pin.indexOf('Break buttons') > pin.indexOf('<b>Driving</b>')) throw new Error('inside a drive, the break buttons come first');
   // 8. saving: the break goes in, the drive splits, the clocks follow; the Log's grid shows it as the clocks do
   if (commitDraft({ kind: 'add', inside: gs().segments[1] }, draftFor({ status: 'OFF', note: breakNote('30-min break'), minutes: 30 }, undefined, NOW, gs().segments[1]), NOW) !== null) throw new Error('the break saves');
   const sh = evaluate(all(gs(), NOW), { asOf: NOW, config: gs().config }).shift;
