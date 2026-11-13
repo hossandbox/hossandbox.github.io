@@ -1134,7 +1134,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/limited by 11-hour driving limit/.test(t)) throw new Error('the hero must name the limit in full');
   for (const re of [/11-hr driving 7h 30m left/, /14-hr window 9h 15m left/, /30-min break due in 8h 00m/, /70-hr \/ 8-day cycle 65h 45m left/]) if (!re.test(t)) throw new Error(`Now is missing a limit row: ${re}`);
   if (!/class="meter on"[^>]*><span class="meter-label">11-hr driving/.test(h)) throw new Error('the limit that sets the stop time must be marked');
-  if ((h.match(/class="dock"/g) || []).length !== 1 || !/aria-pressed="true"[^>]*>[\s\S]{0,400}On Duty/.test(h)) throw new Error('Now must end with the status buttons, the current one pressed');
+  if ((h.match(/class="dock"/g) || []).length !== 1 || !/aria-pressed="true"[^>]*>[\s\S]{0,900}On Duty/.test(h)) throw new Error('Now must end with the status buttons, the current one pressed');
   if (/class="stat-value"/.test(header(h))) throw new Error('the header must no longer carry the clock tiles');
   if (/drive again at|of driving · Stop by/.test(header(h))) throw new Error('on Now the header must not repeat what the main card says');
 
@@ -1965,7 +1965,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ nowOverride: T, tab: 'now', drivingView: true, historyAcknowledged: true, tentative: [],
     segments: [{ status: 'OFF', start: T - 900, end: T - 210 }, { status: 'D', start: T - 210, end: T }], current: { status: 'ON', since: T } });
   let h = out('now/cab dial');
-  if (!/<section class="hero"><div class="dial calm">/.test(h)) throw new Error('Now leads with the dial');
+  // Reimagine (2026-11-12): the card opens with its state sign; the dial is the next thing in it.
+  if (!/<section class="hero"><div class="sign sign-go"><svg[\s\S]{0,900}?<\/svg><span class="sign-word">Hours left<\/span><\/div><div class="dial calm">/.test(h)) throw new Error('Now leads with the state sign, then the dial');
   if (!/<path class="dial-fill"/.test(h) || !/<circle class="dial-cap"/.test(h)) throw new Error('the dial shows what is left');
   // 3h30 driven: the 30-minute break binds first (4h30 left of 8h), so the dial is the break's
   if (!/class="dial-center"><div class="hero-label">You can drive<\/div><div class="hero-value good">4h 30m<\/div>/.test(h)) throw new Error('the number sits in the middle of the dial');
@@ -2248,7 +2249,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (sh.driveUsed !== 450 || sh.breakRemaining !== 255) throw new Error(`the break splits the drive: 7h30 driven, 8 hours counted again from 12:15 (got ${sh.driveUsed}, ${sh.breakRemaining})`);
   openSheet(null);
   h = out('editor/log after');
-  const grid = h.slice(h.indexOf('<svg viewBox="0 0 360 88" class="grid">'), h.indexOf('</svg>', h.indexOf('class="grid"')));
+  const grid = h.slice(h.indexOf('<svg viewBox="0 0 360 102" class="grid">'), h.indexOf('</svg>', h.indexOf('class="grid"')));
   if ((grid.match(/class="s-D"/g) || []).length !== 2) throw new Error('the Log’s grid draws the drive in two pieces, as the clocks read it, not straight through the break');
   if (!/Undo/.test(h)) throw new Error('the add is undo-able');
   const seg = gs().segments.find((x) => x.note === breakNote('30-min break'));

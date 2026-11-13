@@ -24,7 +24,7 @@ html {
   /* The cab look (2026-10-12): a carbon instrument cluster at night. Materials on the frame (machined
      edges, backlit keys, a dial with a printed scale), flat high-contrast type on every number. */
   --bg: #090c10; --panel: #11161c; --panel2: #19212a; --line: #26303b; --tick: #3a4756;
-  --text: #eaf2f8; --muted: #9aa9b9; --good: #3ee08f; --warn: #ffb547; --bad: #ff6464;
+  --text: #f3eee4; --muted: #aaa79d; --good: #3ee08f; --warn: #ffb547; --bad: #ff6464;
   --accent: #7cc8ff; --accent-solid: #1d6aa8; --on-accent: #fff; --chip-ink: #000; --link: #9fd6ff;
   --sb: #a993ff;
   --tint-warn: rgba(255,181,71,.15); --tint-bad: rgba(255,100,100,.15); --tint-accent: rgba(124,200,255,.10);
@@ -869,3 +869,154 @@ label input:focus-visible, label select:focus-visible, input.num:focus-visible, 
   .hero:has(> .card-switch) > .pv-band:first-child { margin-right: 158px; }
   .hero:has(> .card-switch) > .dial:first-child { margin-top: 28px; }
 }
+
+/* ===================================================================================
+   REIMAGINE (2026-11-12) — "Road signs by day, dash lights by night".
+   Direction: Lorico, 2026-11-12 (voice) — reimagine the design, free rein, grounded in
+   owner-operator trucking: more intuitive, more tactile, more pleasant; for a tired driver
+   in a cab at 2 a.m. — gloves, glare, vibration, one hand, a glance.
+
+   A driver already reads two visual languages without thinking: highway signs (shape and
+   colour, built to be read at speed in glare) and the dash (lit legends on black, built to
+   spare night vision). This layer borrows both instead of inventing a third:
+     SIGN     every answer card opens with a small road sign — green rectangle (hours
+              left), yellow diamond (under an hour / break due), red octagon (out of
+              hours), blue rest-area square (resting). Solid sign colours by day; a dark
+              plate with a lit legend by night.
+     CLOCKS   the four clocks (11 · 14 · break · 70) as a cluster of gauge windows.
+     ROCKERS  the four duty statuses as icon keys; the one you are in is fully lit.
+   Append-only like the tactile pass above it: nothing above this banner was edited except
+   the two palette values named in package-reimagine (night --text / --muted), which the
+   contrast gate reads and verifies in place. Presentation only.
+   =================================================================================== */
+html {
+  /* FHWA-family sign colours; each ink pair is ≥ 4.5:1 (checked by test/dom/reimagine-signs) */
+  --sign-go: #006b3f; --sign-go-ink: #ffffff;
+  --sign-warn: #ffc20e; --sign-warn-ink: #14110a;
+  --sign-stop: #b3202a; --sign-stop-ink: #ffffff;
+  --sign-rest: #0b4a9e; --sign-rest-ink: #ffffff;
+  /* night: the plate goes dark and the legend is the lamp */
+  --lamp-go: var(--good); --lamp-warn: var(--warn); --lamp-stop: var(--bad); --lamp-rest: var(--accent);
+}
+
+/* ---------- SIGN ---------- */
+.sign { --sg: var(--sign-go); --sg-ink: var(--sign-go-ink); --lamp: var(--lamp-go);
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin: 4px 0 10px; padding: 0 14px 0 6px;
+  border-radius: 9px; font-size: 13px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; line-height: 1;
+  background: color-mix(in srgb, var(--sg) 24%, #05070a); color: var(--lamp);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lamp) 55%, transparent), 0 0 14px color-mix(in srgb, var(--lamp) 16%, transparent); }
+.sign-warn { --sg: var(--sign-warn); --sg-ink: var(--sign-warn-ink); --lamp: var(--lamp-warn); }
+.sign-stop { --sg: var(--sign-stop); --sg-ink: var(--sign-stop-ink); --lamp: var(--lamp-stop); }
+.sign-rest { --sg: var(--sign-rest); --sg-ink: var(--sign-rest-ink); --lamp: var(--lamp-rest); }
+.sign-shape { flex: none; }
+.sign-face { fill: var(--lamp); stroke: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--lamp) 55%, transparent)); }
+.sign-mark { fill: none; stroke: #05070a; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* day: the reflective sign — solid colour, the inset keyline every highway sign carries */
+:root[data-theme="day"] .sign { background: var(--sg); color: var(--sg-ink);
+  box-shadow: inset 0 0 0 2px var(--sg), inset 0 0 0 3.5px color-mix(in srgb, var(--sg-ink) 88%, transparent), 0 2px 0 color-mix(in srgb, var(--sg) 60%, #000), 0 4px 8px var(--t-cast); }
+:root[data-theme="day"] .sign-face { fill: var(--sg-ink); filter: none; }
+:root[data-theme="day"] .sign-mark { stroke: var(--sg); }
+:root[data-theme="day"] .sign { padding-left: 9px; }
+
+/* the hero frame wears the state too (the border the tactile pass left neutral) */
+@supports selector(:has(*)) {
+  .hero:has(> .sign-go) { border-color: color-mix(in srgb, var(--lamp-go) 34%, var(--line)); }
+  .hero:has(> .sign-warn) { border-color: color-mix(in srgb, var(--lamp-warn) 70%, var(--line)); }
+  .hero:has(> .sign-stop) { border-color: color-mix(in srgb, var(--lamp-stop) 75%, var(--line)); }
+  .hero:has(> .sign-rest) { border-color: color-mix(in srgb, var(--lamp-rest) 45%, var(--line)); }
+  :root[data-theme="day"] .hero:has(> .sign-go) { border-color: color-mix(in srgb, var(--sign-go) 55%, var(--line)); }
+  :root[data-theme="day"] .hero:has(> .sign-warn) { border-color: color-mix(in srgb, var(--sign-warn) 80%, #7a5a00); border-width: 2px; }
+  :root[data-theme="day"] .hero:has(> .sign-stop) { border-color: var(--sign-stop); border-width: 2px; }
+  :root[data-theme="day"] .hero:has(> .sign-rest) { border-color: color-mix(in srgb, var(--sign-rest) 60%, var(--line)); }
+  /* the sign owns the top band now; the label under it no longer has to dodge the switch */
+  .hero:has(> .sign) > .hero-label, .hero:has(> .sign) > .hero-lead, .hero:has(> .sign) > .tl-head .hero-label { display: block; min-height: 0; padding-right: 0; }
+  .hero:has(> .sign) > .dial { margin-top: 0; }
+  /* narrow phones: the switch tightens so the sign always fits beside it */
+  @media (max-width: 389px) {
+    .hero:has(> .card-switch) .card-switch .toggle button { padding: 0 var(--s-8) 4px; font-size: 12px; }
+  }
+}
+
+/* ---------- the answer: bigger, and the stop time gets its own readout ---------- */
+.hero .tl-head { align-items: flex-end; margin-bottom: var(--s-10); }
+.hero .tl-main .hero-value { font-size: clamp(56px, 17vw, 72px); line-height: 1; letter-spacing: -1px; margin-top: 2px; }
+.hero .tl-head .hero-stop { background: var(--screen); border: 1px solid var(--line); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); padding: 6px 12px 7px; align-items: flex-end; margin-top: 0; }
+.hero .tl-head .hero-stop-date { font-size: 12px; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+.hero .tl-head .hero-stop-time { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 32px; line-height: 1.05; }
+
+/* ---------- CLOCKS: the four limits as a gauge cluster ---------- */
+.meters { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-10); padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.meter { container-type: inline-size; display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-height: 92px; padding: 10px 12px 12px; border-radius: var(--r-14); background: var(--screen); border: 1px solid var(--line); box-shadow: var(--t-well-in), var(--t-lip); font-size: 15px; }
+.meter-label { font-size: 12px; letter-spacing: .08em; }
+.meter-value { order: 2; text-align: left; font-size: 20px; font-size: min(22px, 12cqi); font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.meter-bar { order: 3; margin-top: auto; }
+.meter.on { border-color: var(--accent); box-shadow: var(--t-well-in), 0 0 0 1px var(--accent), 0 0 14px var(--glow); }
+.meter.on .meter-label::after { content: "sets your stop time"; display: block; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 700; color: var(--link); margin-top: 1px; }
+.meter:not(.on) .meter-label::after { content: "\00a0"; display: block; font-size: 12px; margin-top: 1px; }
+.meter:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* ---------- ROCKERS: the status dock ---------- */
+.status-buttons { gap: 8px; }
+.status-buttons button { min-height: 78px; padding: 12px 2px 8px; gap: 3px; font-size: 14px; letter-spacing: .01em; }
+.status-buttons button .dock-ico { display: block; line-height: 0; color: var(--led, var(--muted)); }
+.status-buttons button::before { top: 6px; left: 30%; right: 30%; }
+/* the status you are in: the whole key is lit in its colour, ink on top (ink pairs are gated) */
+.status-buttons button.on { background: linear-gradient(180deg, color-mix(in srgb, var(--led) 92%, #fff), var(--led)); color: var(--chip-ink); border-color: var(--led); box-shadow: inset 0 3px 6px rgba(0,0,0,.28), 0 1px 0 var(--key-base), 0 0 20px color-mix(in srgb, var(--led) 40%, transparent); }
+.status-buttons button.on .dock-ico { color: var(--chip-ink); }
+.status-buttons button.on::before { background: var(--chip-ink); opacity: .55; box-shadow: none; }
+/* not by colour alone: the lit key also carries a check, as a badge in its corner */
+.status-buttons button.on > svg { position: absolute; top: 7px; right: 7px; width: 18px; height: 18px; stroke-width: 3; color: var(--chip-ink); }
+
+/* ---------- tab bar: bigger pictures, a lamp over the one you are on ---------- */
+.tabs button svg { width: 26px; height: 26px; }
+.tabs button { font-size: 12px; letter-spacing: .08em; padding: 5px 4px 6px; gap: 2px; line-height: 1.2; }  /* the bar keeps its 60px slot: the dock above is pinned to it */
+.tabs button.on { color: var(--text); }
+.tabs button.on svg { color: var(--accent); }
+
+/* ---------- driving view ---------- */
+.drive-body > .sign { transform: scale(1.2); margin: 0 0 14px; }
+button.drive-stop { min-height: 112px; font-size: 28px; letter-spacing: .01em; }
+:root[data-theme="day"] main.drive.warn .sign, :root[data-theme="day"] main.drive.bad .sign { box-shadow: inset 0 0 0 2px var(--sg), inset 0 0 0 3.5px color-mix(in srgb, var(--sg-ink) 88%, transparent), 0 0 0 2px var(--chip-ink); }
+
+/* the timeline's value column: a day and a time on ONE line ("Fri 00:11"), never stacked */
+.taxis-row { grid-template-columns: 92px 1fr 88px; }
+.taxis-row:not(.taxis-head) > .taxis-value { max-width: 6em; font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 15px; }
+.taxis-label { font-size: 14px; font-weight: 700; }
+.taxis-row { min-height: 32px; }
+/* the door to the less common statuses: quieter than the four rockers above it */
+button.dock-more { min-height: 46px; margin-top: 8px; font-size: 14px; }
+
+/* ---------- the sentence labels in an answer card: sentence case, read once, not decoded ----------
+   (the tracked small-caps label is kept for the two-word "You can drive" inside the dial) */
+.hero > .hero-label, .hero > .tl-head .hero-label { font-size: 16px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text); line-height: 1.3; }
+.hero > .tl-head .hero-label { color: var(--muted); font-size: 17px; }
+/* the sign already says it: the one-line "Out of driving hours/time" label under a stop sign is a repeat */
+.hero > .sign-stop + .hero-label { display: none; }
+.hero > .hero-value { font-size: clamp(52px, 16vw, 68px); line-height: 1.02; margin-top: 2px; }
+.hero > .hero-stop { text-transform: none; align-items: flex-start; font-size: 19px; font-weight: 700; margin-top: 6px; }
+.hero > .hero-stop-date { font-size: 16px; color: var(--muted); }
+.hero > .hero-lead { font-size: 20px; line-height: 1.2; margin-bottom: 8px; }
+
+/* the status panel's four big keys light the same way the dock's do */
+.big-status button.on { background: linear-gradient(180deg, color-mix(in srgb, var(--led) 92%, #fff), var(--led)); color: var(--chip-ink); border-color: var(--led); box-shadow: inset 0 3px 6px rgba(0,0,0,.28), 0 1px 0 var(--key-base), 0 0 20px color-mix(in srgb, var(--led) 40%, transparent); }
+.big-status button.on::before { background: var(--chip-ink); opacity: .55; box-shadow: none; }
+
+/* ---------- More: explanations fold behind one row; the settings are the content ---------- */
+details.help { margin: 2px 0 6px; }
+details.help > summary { display: flex; align-items: center; gap: 8px; min-height: var(--ctl-floor); padding: 0 4px; color: var(--link); font-size: 15px; font-weight: 700; cursor: pointer; list-style: none; border-radius: var(--r-10); }
+details.help > summary::-webkit-details-marker { display: none; }
+details.help > summary::after { content: "+"; margin-left: auto; font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 20px; font-weight: 700; color: var(--muted); padding-right: 6px; }
+details.help[open] > summary::after { content: "–"; }
+details.help > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.help > p { margin: 0 4px 8px; padding: 10px 12px; border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+
+/* ---------- the log graph: drawn like the paper log — one stair-step line, an hour ruler (M · 6 · N · 6) ---------- */
+.grid-step { stroke: var(--text); stroke-width: 2; stroke-linecap: round; opacity: .85; }
+.grid-hour { fill: var(--muted); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 12px; font-weight: 700; }
+.grid-label { font-size: 13px; font-weight: 800; }
+/* narrow phones: the longest sign words ("UNDER 1 HOUR", "OUT OF HOURS") keep clear of the switch */
+@media (max-width: 389px) { .hero > .sign { letter-spacing: .03em; gap: 6px; padding-right: 10px; } }
+/* the stop time is always in the same place: one full-width readout under the big number */
+.hero .tl-head { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: var(--s-8); }
+.hero .tl-head .hero-stop { flex-direction: row; justify-content: space-between; align-items: center; gap: var(--s-12); padding: 6px 14px; }
+.hero .tl-head .hero-stop-date { font-size: 13px; }

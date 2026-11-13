@@ -15,6 +15,7 @@
     "lebrowser": "node test/dom/lebrowser.mjs",
     "quickfix": "node test/dom/quickfix.mjs",
     "polish": "node test/dom/polish.mjs",
+    "reimagine": "node test/dom/reimagine.mjs",
     "contrast": "node test/contrast.mjs",
     "ocr-corpus": "node tools/ocr-corpus-run.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

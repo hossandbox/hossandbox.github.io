@@ -290,6 +290,46 @@ function Icon({ d, size = 22 }: { d: string; size?: number }) {
 }
 const STATUS_ICON: Record<DutyStatus, string> = { OFF: I.cup, SB: I.bunk, D: I.wheel, ON: I.case };
 
+/**
+ * The state sign (reimagine, 2026-11-12): every answer card opens with a small road sign that
+ * says where the clocks stand before a digit is read. Shape AND colour carry it, the way the
+ * signs a driver reads all day do — a green guide rectangle (hours available), a yellow
+ * warning diamond (under an hour, or a break due), a red octagon (out of hours), and the blue
+ * rest-area square (resting) — so colour is never the only cue. The words are descriptive,
+ * never a command: this is a planning tool. Presentation only; it reads the same evaluation
+ * the card under it prints.
+ */
+/**
+ * A folded explanation (reimagine, 2026-11-12): on More, the settings are the content and
+ * the long "how this works" paragraphs wait one tap away behind a 48px row — a driver
+ * scanning for the cycle switch at a fuel island should not have to scroll past an essay.
+ * The wording itself is unchanged and stays in the page. Safety lines are never folded.
+ */
+function Help({ label, children }: { label: string; children: ComponentChildren }) {
+  return <details class="help"><summary><Icon d={I.info} size={18} /> <span>{label}</span></summary>{children}</details>;
+}
+type SignKind = 'go' | 'warn' | 'stop' | 'rest';
+const SIGN_SHAPE: Record<SignKind, string> = {
+  go: 'M4 6.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16V8A1.5 1.5 0 0 1 4 6.5z',
+  warn: 'M12 2.2 21.8 12 12 21.8 2.2 12z',
+  stop: 'M8.1 2.5h7.8l5.6 5.6v7.8l-5.6 5.6H8.1l-5.6-5.6V8.1z',
+  rest: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z',
+};
+const SIGN_MARK: Record<SignKind, string> = {
+  go: 'M7.5 12h8M12.5 9l3 3-3 3',
+  warn: 'M12 7.5v5.5M12 16.2v.3',
+  stop: 'M8 12h8',
+  rest: 'M7 15.5v-6M7 13h10v2.5M17 13v-1.2a1.8 1.8 0 0 0-1.8-1.8H10.5V13',
+};
+function Sign({ kind, children }: { kind: SignKind; children: ComponentChildren }) {
+  return (
+    <div class={`sign sign-${kind}`}>
+      <svg class="sign-shape" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path class="sign-face" d={SIGN_SHAPE[kind]} /><path class="sign-mark" d={SIGN_MARK[kind]} /></svg>
+      <span class="sign-word">{children}</span>
+    </div>
+  );
+}
+
 /* ============================================================ sheets */
 
 /**
@@ -670,6 +710,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   if (off === null) {
     return (
       <section class="hero bad">
+        <Sign kind="stop">Out of hours</Sign>
         {lead}
         <div class="hero-label">Out of driving time</div>
         <p class="hero-text"><b>Driving does not come back within 36 hours of rest.</b> See <b>Hours coming back</b> under <b>Plan</b> for when your {cycleWord} hours return.</p>
@@ -693,6 +734,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   if (ev.binding === 'BREAK_30') {
     return (
       <section class="hero warn">
+        {status === 'D' ? <Sign kind="stop">Out of hours</Sign> : resting ? <Sign kind="rest">On break</Sign> : <Sign kind="warn">Break due</Sign>}
         {lead}
         {time('30-min break needed — you can drive again at')}
         <p class="hero-text">Any 30 minutes in a row without driving counts — off duty, sleeper, or on-duty work like fueling.</p>
@@ -705,6 +747,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   if (ev.binding === 'CYCLE') {
     return (
       <section class="hero warn">
+        {resting ? <Sign kind="rest">Resting</Sign> : <Sign kind="stop">Out of hours</Sign>}
         {lead}
         {time(`Out of ${cycleWord} hours — ${resting ? 'if you stay off duty, you' : 'go off duty now and you'} can drive again at`)}
         <p class="hero-text">On-duty work is allowed, but it counts toward your {cycleWord} hours and can push this later.</p>
@@ -717,6 +760,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   if (resting) {
     return (
       <section class="hero">
+        <Sign kind="rest">Resting</Sign>
         {time('You can drive again at')}
         <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
         <div class="hero-foot"><span class="hero-actions">{share}{why}</span></div>
@@ -727,6 +771,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   }
   return (
     <section class="hero warn">
+      <Sign kind="stop">Out of hours</Sign>
       {lead ?? <div class="hero-label">Out of driving hours</div>}
       <p class="hero-text"><b>On-duty work is allowed; driving is not.</b></p>
       {time('Go off duty now and you can drive again at')}
@@ -1126,6 +1171,7 @@ function HeroDrive({ ev, basis }: { ev: FullEvaluation; basis?: 'log' | 'estimat
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
     <section class="hero">
+      {tone === 'warn' ? <Sign kind="warn">Under 1 hour</Sign> : <Sign kind="go">Hours left</Sign>}
       <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270} basis={basis}>
         <div class="hero-label">You can drive</div>
         <div class={`hero-value ${tone}`}>{left}</div>
@@ -1394,6 +1440,7 @@ function TimelineDrive({ s, now, ev, basis, onTrack }: { s: State; now: number; 
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
     <section class="hero">
+      {tone === 'warn' ? <Sign kind="warn">Under 1 hour</Sign> : <Sign kind="go">Hours left</Sign>}
       <div class="tl-head">
         <div class="tl-main">
           <div class="hero-label">You can drive</div>
@@ -1643,7 +1690,7 @@ function StatusDock({ s }: { s: State }) {
         const on = s.current?.status === st && !s.current?.note;
         // Capstone C3 (M13): a dock key that changes the status answers with the 20ms status
         // pulse instead of the 12ms tap tick (data-haptic keeps the global tick off it).
-        return <button key={st} data-haptic="status" style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => statusHaptic(tapStatus(st), getState().alertsOn)}>{on && <Icon d={I.check} size={16} />}{STATUS_LABEL[st]}</button>;
+        return <button key={st} data-haptic="status" style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => statusHaptic(tapStatus(st), getState().alertsOn)}>{on && <Icon d={I.check} size={16} />}<span class="dock-ico"><Icon d={STATUS_ICON[st]} size={26} /></span>{STATUS_LABEL[st]}</button>;
       })}</div>
       <button class="link dock-more" onClick={() => openSheet({ kind: 'status' })}>PC, yard move, or started earlier…</button>
     </div>
@@ -1865,6 +1912,9 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           real-now number never sits beside a preview number unmarked. The wrapper makes
           no box of its own (display: contents), so the dock's sticky slot is unchanged. */}
       <div class={preview ? 'now-rest pv-dim' : 'now-rest'} inert={preview ? true : undefined}>
+      {/* Reimagine: the four clocks sit directly under the answer they explain (dial mode;
+          on the Timeline the lanes are the clocks). */}
+      {!timeline && <Meters ev={ev} />}
       {/* The one-time Timeline chip (decision C1-A): an existing install — a save holding
           a record — that is still on the dial sees it once, under the hero. Either tap
           answers it for good; the More → Planning switch is the standing way back. */}
@@ -1893,7 +1943,6 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
         <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Answer three questions, get a yes or no.</span></span>
         <Icon d={I.next} />
       </button>
-      {!timeline && <Meters ev={ev} />}
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
           Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
@@ -2012,6 +2061,7 @@ function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; 
         </span>
       </div>
       <div class="drive-body">
+        <Sign kind={level === 'bad' ? 'stop' : level === 'warn' ? 'warn' : 'go'}>{level === 'bad' ? 'Out of hours' : level === 'warn' ? 'Under 1 hour' : 'Hours left'}</Sign>
         <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={level} size={320} basis={ringBasis(s, now, ev)}>
           <div class="drive-label">{level === 'bad' ? 'Out of driving time' : 'Driving left'}</div>
           <div class={`drive-num ${left.length > 4 ? '' : 'short'}`}>{left}</div>
@@ -2637,19 +2687,46 @@ export function gridTicks(from: number, to: number, tz?: string): { m: number; m
   return out;
 }
 
+/**
+ * The hour under a major gridline, the way the paper log prints its ruler (reimagine,
+ * 2026-11-12): M for midnight, N for noon, the hour between them; a line that does not fall
+ * on the hour (the rolling "last 24 hours" view) carries its clock time instead.
+ */
+export function gridHourLabel(m: number, tz?: string): string {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz ?? deviceTz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(m * 60000));
+  const hh = p.find((x) => x.type === 'hour')?.value ?? '', mm = p.find((x) => x.type === 'minute')?.value ?? '';
+  if (mm !== '00') return `${hh}:${mm}`;
+  return hh === '00' ? 'M' : hh === '12' ? 'N' : String(Number(hh));
+}
+
 function Grid({ segments, from, to, tz, mark }: { segments: Segment[]; from: number; to: number; tz?: string; mark?: { start: number; end: number } }) {
   const rows: DutyStatus[] = ['OFF', 'SB', 'D', 'ON'];
-  const W = 360, H = 88, left = 34, rowH = 18;
+  // Reimagine: 14 more units of height for the hour ruler under the four rows; the rows
+  // themselves sit exactly where they did.
+  const W = 360, H = 102, left = 34, rowH = 18;
   const x = (m: number) => left + ((Math.min(Math.max(m, from), to) - from) / (to - from)) * (W - left - 4);
+  const rowY = (st: DutyStatus) => 12 + rows.indexOf(st) * rowH + 9;
+  // The paper log's line is ONE line: where one status hands over to the next, a vertical
+  // stroke joins the two rows — the stair-step every driver has drawn with a ruler.
+  const shown = segments.filter((s) => s.end > from && s.start < to).slice().sort((a, b) => a.start - b.start);
+  const steps = shown.flatMap((s, i) => {
+    const prev = shown[i - 1];
+    return prev && prev.end === s.start && prev.status !== s.status && s.start > from && s.start < to
+      ? [{ at: s.start, y1: rowY(prev.status), y2: rowY(s.status), dashed: !!(s.tentative || prev.tentative) }]
+      : [];
+  });
+  const ticks = gridTicks(from, to, tz);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} class="grid">
       {rows.map((r, i) => <g key={r}><text x={2} y={12 + i * rowH + 8} class="grid-label">{r}</text><line x1={left} x2={W - 4} y1={12 + i * rowH + 9} y2={12 + i * rowH + 9} class="grid-line" /></g>)}
-      {gridTicks(from, to, tz).map((t, i) => <line key={i} x1={x(t.m)} x2={x(t.m)} y1={10} y2={H - 6} class={t.major ? 'grid-tick major' : 'grid-tick'} />)}
+      {ticks.map((t, i) => <line key={i} x1={x(t.m)} x2={x(t.m)} y1={10} y2={82} class={t.major ? 'grid-tick major' : 'grid-tick'} />)}
+      {ticks.filter((t) => t.major).map((t, i) => <text key={`h${i}`} x={x(t.m)} y={97} text-anchor={x(t.m) > W - 20 ? 'end' : x(t.m) < left + 8 ? 'start' : 'middle'} class="grid-hour">{gridHourLabel(t.m, tz)}</text>)}
+      {steps.map((st, i) => <line key={`s${i}`} class="grid-step" x1={x(st.at)} x2={x(st.at)} y1={st.y1} y2={st.y2} stroke-dasharray={st.dashed ? '3 3' : undefined} />)}
       {segments.filter((s) => s.end > from && s.start < to).map((s, i) => {
         const y = 12 + rows.indexOf(s.status) * rowH + 9;
         return <line key={i} class={`s-${s.status}`} x1={x(s.start)} x2={x(s.end)} y1={y} y2={y} stroke-width={6} stroke-dasharray={s.tentative ? '4 3' : undefined} />;
       })}
-      {mark && mark.end > from && mark.start < to && <rect class="grid-mark" x={x(mark.start) - 2} y={6} width={Math.max(4, x(mark.end) - x(mark.start) + 4)} height={H - 14} rx={3} />}
+      {mark && mark.end > from && mark.start < to && <rect class="grid-mark" x={x(mark.start) - 2} y={6} width={Math.max(4, x(mark.end) - x(mark.start) + 4)} height={74} rx={3} />}
     </svg>
   );
 }
@@ -4681,8 +4758,8 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <label class="check"><input type="checkbox" checked={s.drivingView} onChange={(e) => setState({ drivingView: (e.target as HTMLInputElement).checked })} /> Big driving screen while your status is Driving</label>
       <label class="check"><input type="checkbox" checked={s.darkDriveAtNight} onChange={(e) => setState({ darkDriveAtNight: (e.target as HTMLInputElement).checked })} /> Dark driving screen at night</label>
       {speechOk && <label class="check"><input type="checkbox" checked={s.speakAlerts} onChange={(e) => setState({ speakAlerts: (e.target as HTMLInputElement).checked, speechAsked: true })} /> Read driving alerts out loud</label>}
-      {speechOk && <p class="muted small">At 60, 30 and 15 minutes of driving left — and when time runs out — the app says the numbers out loud after the alert sound, and confirms out loud when you tap a status, so you never have to read while you roll. Changing this switch is your answer to the one-time question the app asks on your first Driving tap. It uses this browser's voice; nothing is recorded or sent anywhere.</p>}
-      <p class="muted small">Between 7 PM and 7 AM on this phone's clock, the driving screen wears the dark theme even when the app is set to Day — a lit screen in a dark cab is glare. The rest of the app keeps your theme.</p>
+      {speechOk && <Help label="About reading alerts out loud"><p class="muted small">At 60, 30 and 15 minutes of driving left — and when time runs out — the app says the numbers out loud after the alert sound, and confirms out loud when you tap a status, so you never have to read while you roll. Changing this switch is your answer to the one-time question the app asks on your first Driving tap. It uses this browser's voice; nothing is recorded or sent anywhere.</p></Help>}
+      <Help label="About the dark driving screen"><p class="muted small">Between 7 PM and 7 AM on this phone's clock, the driving screen wears the dark theme even when the app is set to Day — a lit screen in a dark cab is glare. The rest of the app keeps your theme.</p></Help>
       {!awakeOk && <p class="small">This browser cannot keep the screen on. Set your phone's auto-lock to "Never" while you drive, or the alerts will stop when it locks.</p>}
       <div class="row">
         <button onClick={test}>Test alert</button>
@@ -4691,8 +4768,9 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <p class="muted small">
         {notif === 'granted' ? 'Notifications are on: if the app is open behind another app, alerts also show as notifications. ' : ''}
         {notif === 'denied' ? 'Notifications are blocked for this site in your browser settings. ' : ''}
-        Alerts only work while Split Decision is open — when the phone locks or the app is closed, the phone stops it. Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive. <b>Your ELD is your official warning.</b>
+        Alerts only work while Split Decision is open — when the phone locks or the app is closed, the phone stops it. <b>Your ELD is your official warning.</b>
       </p>
+      <Help label="Keeping alerts running"><p class="muted small">Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive.</p></Help>
     </Card>
   );
 }
@@ -4710,7 +4788,8 @@ function BreakButtonsCard({ s }: { s: State }) {
   };
   return (
     <Card title="Break buttons">
-      <p class="muted small">Shown when you add an entry on the Log. A break is not a duty status of its own: each button logs the length and status you set here. For example, a 20-minute paid break and a 40-minute lunch, each logged the way your carrier has you log it.</p>
+      <p class="muted small">Shown when you add an entry on the Log.</p>
+      <Help label="What a break button does"><p class="muted small">A break is not a duty status of its own: each button logs the length and status you set here. For example, a 20-minute paid break and a 40-minute lunch, each logged the way your carrier has you log it.</p></Help>
       {list.map((b, i) => (
         <div class="brk-row" key={`${i}-${b.name}`}>
           <label>Name<input type="text" maxLength={24} value={b.name} onChange={(e) => set(i, { name: (e.target as HTMLInputElement).value })} /></label>
@@ -4780,9 +4859,9 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
         <label>Main card on Now<Toggle options={NOW_CARD_OPTIONS} value={s.nowCard} onChange={(v) => setNowCard(v)} /></label>
-        <p class="muted small">Timeline shows your limits as lanes ending at their clock times, so you can see which one ends first. Dial is the gauge the app has always had. The driving view keeps the dial either way.</p>
+        <Help label="Timeline or Dial?"><p class="muted small">Timeline shows your limits as lanes ending at their clock times, so you can see which one ends first. Dial is the gauge the app has always had. The driving view keeps the dial either way.</p></Help>
         <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
-        <p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p>
+        <Help label="How Day and Night are picked"><p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p></Help>
       </Card>
       <DrivingAlertsCard s={s} />
       <BreakButtonsCard s={s} />
