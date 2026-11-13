@@ -1,0 +1,1022 @@
+/* Atkinson Hyperlegible Next (SIL OFL 1.1, fonts/OFL.txt): made by the Braille Institute for low-vision
+   readers; 0/O, 1/l/I and 5/S are drawn to be told apart at a glance. Self-hosted, so the app still
+   makes no outside requests and the font works offline. Glyphs it lacks (→ ≤ ⚠) fall back to the system font. */
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/atkinson-next-400.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/atkinson-next-600.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/atkinson-next-700.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Next'; font-style: normal; font-weight: 800; font-display: swap; src: url('fonts/atkinson-next-800.woff2') format('woff2'); }
+/* Atkinson Hyperlegible Mono (SIL OFL 1.1, fonts/OFL-mono.txt): the instrument-readout face for clocks and
+   figures — every digit the same width, so a clock or a countdown never shifts as it ticks. */
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/atkinson-mono-500.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/atkinson-mono-700.woff2') format('woff2'); }
+html {
+  /* Spacing scale (Item 0): aliases of values already in use; changing one moves every surface that uses it. */
+  --s-2: 2px; --s-4: 4px; --s-6: 6px; --s-8: 8px; --s-10: 10px; --s-12: 12px; --s-14: 14px;
+  --s-16: 16px; --s-18: 18px; --s-20: 20px;
+  /* Radius scale (Item 0): same rule. */
+  --r-3: 3px; --r-8: 8px; --r-10: 10px; --r-12: 12px; --r-14: 14px; --r-16: 16px; --r-18: 18px;
+  --r-22: 22px; --r-pill: 999px;
+}
+:root {
+  /* Day is the stored default; the boot script in index.html paints the first frame in the theme
+     the app is about to choose (patch 16, P1a). Every pair below is verified by web/test/contrast.mjs against
+     WCAG AA — change a colour and the suite fails instead of drifting silently. */
+  /* The cab look (2026-10-12): a carbon instrument cluster at night. Materials on the frame (machined
+     edges, backlit keys, a dial with a printed scale), flat high-contrast type on every number. */
+  --bg: #090c10; --panel: #11161c; --panel2: #19212a; --line: #26303b; --tick: #3a4756;
+  --text: #f3eee4; --muted: #aaa79d; --good: #3ee08f; --warn: #ffb547; --bad: #ff6464;
+  --accent: #7cc8ff; --accent-solid: #1d6aa8; --on-accent: #fff; --chip-ink: #000; --link: #9fd6ff;
+  --sb: #a993ff;
+  --tint-warn: rgba(255,181,71,.15); --tint-bad: rgba(255,100,100,.15); --tint-accent: rgba(124,200,255,.10);
+  /* materials: lit top edge, surface gradient, drop shadow, key faces, the recessed log screen, glow */
+  --edge-hi: rgba(255,255,255,.06); --surface-hi: #151b22; --drop: rgba(0,0,0,.5);
+  --key-hi: #1b232b; --key-lo: #10151b; --key-base: #040608; --screen: #070a0d;
+  --glow: rgba(124,200,255,.55); --dial-track: #19212a;
+  --ground: radial-gradient(120% 55% at 50% 0%, #131b23 0%, #0b1015 50%, #090c10 100%);
+  color-scheme: dark;
+}
+/* Day theme: for reading in sunlight. Chosen by the driver, or by the phone's light setting
+   until he chooses. */
+:root[data-theme="day"] {
+  /* Daylight: brushed titanium, dark ink. Built for the sun on the glass, where a dark screen is the worst case. */
+  --bg: #e4e9ee; --panel: #f9fafb; --panel2: #e8ecf0; --line: #c3cbd3; --tick: #9aa6b2;
+  --text: #0b1117; --muted: #45525f; --good: #0f7a40; --warn: #8a5200; --bad: #b32020;
+  --accent: #0b5fa8; --accent-solid: #0b5fa8; --on-accent: #fff; --chip-ink: #fff; --link: #0b4f8c;
+  --sb: #5b3fc4;
+  --tint-warn: rgba(138,82,0,.16); --tint-bad: rgba(179,32,32,.12); --tint-accent: rgba(11,95,168,.09);
+  --edge-hi: rgba(255,255,255,.9); --surface-hi: #ffffff; --drop: rgba(30,45,60,.14);
+  --key-hi: #ffffff; --key-lo: #e5e9ed; --key-base: #b3bcc5; --screen: #f2f4f6;
+  --glow: rgba(11,95,168,0); --dial-track: #dce2e7;
+  --ground: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 1px, rgba(255,255,255,0) 1px 3px), linear-gradient(180deg, #e9edf1 0%, #dce2e7 100%);
+  color-scheme: light;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+/* Patch 19 (phone layout stability, field report 2026-11-10): the SHELL is the one scroller.
+   The page itself used to scroll (.app was min-height: 100dvh and grew with its content), and
+   a phone browser hides and shows its own chrome on a page scroll — which resizes the visible
+   viewport, so the sticky header and the fixed dock / tab bar rode up and down with it. Now
+   the document never scrolls: html and body are pinned to the viewport and .app is exactly one
+   viewport tall — 100dvh, the height actually visible, with 100vh as the fallback for a
+   runtime without dynamic units — and scrolls its own content. With no page scroll the
+   browser chrome stays where it is, so that height does not change under the driver's thumb,
+   and the header (sticky inside the shell), the dock (sticky inside main) and the tab bar
+   (fixed) keep the slots they always had. Sideways the shell is closed: nothing can pan it. */
+html, body { height: 100%; overflow: hidden; }
+.app { height: 100vh; height: 100dvh; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; background: var(--ground); }
+.mono, .meter-value, .why-time, .entry-len, .daytotals b, .tstep-value, .drive-clock, .clock { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); }
+h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+h3 { margin: 12px 0 6px; font-size: 14px; color: var(--muted); }
+p { margin: 8px 0; }
+.small { font-size: 13px; } .muted { color: var(--muted); } .ok { color: var(--good); }
+
+/* Opaque: a see-through bottom edge drew the header's text over the content scrolling under it. */
+.top { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 var(--edge-hi); padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+.top-row { display: flex; justify-content: space-between; align-items: center; gap: var(--s-8); }
+/* The status capsule: an LED in the status colour (--led, set inline) on a dark key face. Colour is never
+   the only cue: the status is spelled out beside it. */
+.pill { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 var(--s-16) 0 var(--s-14); border-radius: var(--r-pill); font-weight: 800; font-size: 15px; letter-spacing: .02em; color: var(--text); background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 2px var(--drop); }
+.pill::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--led, var(--muted)); box-shadow: 0 0 10px 1px var(--led, transparent); flex: none; }
+:root[data-theme="day"] .pill::before { box-shadow: 0 0 4px var(--led, transparent); }
+.clocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s-8); }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-12); padding: var(--s-10) var(--s-12); }
+.stat-label { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.stat-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.stat-sub { font-size: 12px; color: var(--muted); }
+.stat.good .stat-value { color: var(--good); } .stat.warn .stat-value { color: var(--warn); } .stat.bad .stat-value { color: var(--bad); }
+
+.card { background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: var(--r-18); padding: var(--s-14); box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop); }
+.card.good { border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+.card.warn { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
+.card.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
+.card .clocks { margin-top: 8px; }
+
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(4, 1fr); background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tabs button { position: relative; background: none; border: 0; border-radius: 0; padding: 8px 4px 10px; min-height: 60px; color: var(--muted); font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-shadow: none; }
+.tabs button.on { color: var(--text); font-weight: 800; }
+.tabs button.on::before { content: ""; position: absolute; top: 0; left: 26%; right: 26%; height: 3px; border-radius: 0 0 var(--r-3) var(--r-3); background: var(--accent); box-shadow: 0 0 10px var(--glow); }
+
+/* Big-touch floor (patch #6, Lorico's ELD-phone report): 48px is the smallest target in the app —
+   Google's minimum, above Apple's 44 — and primary controls, steppers and number fields sit at 56.
+   Drivers' fingers are bigger and the phones are smaller; the hit area grows, the glyphs stay calm. */
+button { background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-weight: 600; min-height: 48px; box-shadow: inset 0 1px 0 var(--edge-hi); transition: transform 120ms ease-out, filter 120ms ease-out; }
+button:disabled { opacity: .4; }
+button.primary { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 2px 0 var(--key-base), 0 0 16px var(--glow); }
+button.danger { background: transparent; border-color: var(--bad); color: var(--bad); margin-top: 8px; }
+button.x { background: transparent; border: 0; color: var(--muted); font-size: 20px; padding: 0 var(--s-6); }
+.row { display: flex; gap: var(--s-8); margin-top: 10px; flex-wrap: wrap; } .row > * { flex: 1; }
+label { display: block; font-size: 13px; color: var(--muted); margin-top: 8px; }
+label input, label select { display: block; width: 100%; margin-top: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text); min-height: 48px; }
+label.check { display: flex; align-items: center; gap: 12px; color: var(--text); min-height: 48px; font-size: 15px; } label.check input { width: 22px; height: 22px; margin: 0; flex: none; }
+.filebtn { position: relative; text-align: center; background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-10); padding: var(--s-12) var(--s-14); font-weight: 600; color: var(--text); margin: 0; min-height: 48px; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; }
+
+.status-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+/* Selection is a ring, not opacity: dimming the whole chip dropped these to 2.23:1 (consumer-review). */
+/* Backlit switch keys: a dark key face, an LED strip in the status colour (--led, set inline). The lit key
+   is the current status: its strip glows, its edge takes the colour and it carries a check mark, so the
+   selection never rests on colour alone. */
+.status-buttons button, .big-status button { position: relative; color: var(--text); background: linear-gradient(180deg, var(--key-hi), var(--key-lo)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--key-base), 0 6px 12px var(--drop); font-weight: 800; }
+.status-buttons button::before, .big-status button::before { content: ""; position: absolute; left: 24%; right: 24%; top: 8px; height: 4px; border-radius: 2px; background: var(--led, var(--muted)); opacity: .38; }
+.status-buttons button.on, .big-status button.on { border: 2px solid var(--led, var(--text)); outline: none; box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--key-base), 0 0 18px color-mix(in srgb, var(--led, transparent) 35%, transparent); }
+.status-buttons button.on::before, .big-status button.on::before { opacity: 1; box-shadow: 0 0 10px 1px var(--led, transparent); }
+.status-buttons button { padding: var(--s-14) var(--s-4) var(--s-6); min-height: 66px; font-size: 15px; border-radius: var(--r-14); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-2); }
+
+.toggle { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-10); padding: 3px; margin-top: 8px; }
+.toggle button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 10px 6px; font-size: 14px; min-height: 48px; }
+.toggle button.on { background: var(--panel2); color: var(--text); }
+/* Day theme (quick patch, field report 2026-11-11): panel2 on the track measured 1.03:1 in day mode —
+   the chosen side of every toggle was invisible in sunlight. In day the chosen key is the lit white
+   key face with a lifted edge and a tick-grey ring; the night key above is untouched. */
+:root[data-theme="day"] .toggle button.on { background: var(--surface-hi); box-shadow: 0 1px 3px var(--drop), inset 0 0 0 1px var(--tick); font-weight: 700; }
+
+.slider { margin-top: 12px; }
+.slider-head { display: flex; justify-content: space-between; font-size: 14px; color: var(--text); }
+.slider-head b { font-variant-numeric: tabular-nums; }
+.slider input[type=range] { width: 100%; accent-color: var(--accent); height: 48px; }
+/* Slider + steppers + exact numeric entry, so a phone user never has to drag to a precise value. */
+.slider-row { display: grid; grid-template-columns: 1fr auto 5.5em auto; gap: var(--s-8); align-items: center; margin-top: 8px; }
+.slider-row input[type=range] { margin: 0; }
+.slider-row .mini { padding: 8px 12px; min-height: 56px; }
+input.num { width: 100%; text-align: right; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; font-variant-numeric: tabular-nums; min-height: 56px; }
+
+.grid { width: 100%; height: auto; display: block; background: var(--screen); border-radius: var(--r-10); box-shadow: inset 0 2px 8px var(--drop); }
+.grid-label { fill: var(--muted); font-size: 14px; font-weight: 700; }
+.grid-line { stroke: var(--line); stroke-width: 1; }
+.grid-tick { stroke: var(--line); stroke-width: .5; } .grid-tick.major { stroke: var(--tick); stroke-width: 1; }
+
+.seglist, .viol, .forecast, .checks, .itin { list-style: none; margin: 0; padding: 0; }
+.seglist li, .itin li { display: grid; grid-template-columns: 12px 1fr auto auto auto; gap: var(--s-8); align-items: center; padding: var(--s-8) 0; border-top: 1px solid var(--line); font-size: 14px; }
+.seglist li.editing { grid-template-columns: 1fr; }
+.segedit { display: flex; flex-direction: column; gap: var(--s-10); width: 100%; }
+.row.undo { align-items: center; }
+.row.undo > * { flex: 0 0 auto; }
+.row.undo span { flex: 1 1 auto; }
+.itin li { grid-template-columns: 12px 1fr auto; }
+.itin { counter-reset: none; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+/* SVG presentation attributes cannot hold var(), so the grid gets status classes instead of a stroke. */
+.s-OFF { stroke: var(--muted); } .s-SB { stroke: var(--sb); } .s-D { stroke: var(--good); } .s-ON { stroke: var(--warn); }
+/* at night the log lines glow faintly, like an ELD screen; never in daylight */
+:root:not([data-theme="day"]) .s-D { filter: drop-shadow(0 0 3px rgba(62,224,143,.55)); }
+:root:not([data-theme="day"]) .s-ON { filter: drop-shadow(0 0 3px rgba(255,181,71,.5)); }
+.top-right { display: flex; align-items: center; gap: var(--s-8); }
+.theme-btn { padding: 6px 12px; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; gap: 6px; min-height: 48px; }
+.viol li { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); margin-top: 6px; background: var(--tint-bad); border-left: 3px solid var(--bad); font-size: 14px; }
+.viol li.nominal { background: var(--tint-warn); border-left-color: var(--warn); }
+.checks li { padding: var(--s-6) 0; font-size: 15px; } .checks li::before { content: "✗  "; color: var(--bad); font-weight: 800; } .checks li.ok::before { content: "✓  "; color: var(--good); }
+.forecast li { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--s-6); padding: var(--s-8) 0; border-top: 1px solid var(--line); font-size: 14px; }
+.warnbox { background: var(--tint-warn); border-left: 4px solid var(--warn); padding: 8px 10px; border-radius: 10px; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td, th { padding: var(--s-8) var(--s-6); border-top: 1px solid var(--line); text-align: left; } th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; border: 0; }
+tr.today td { background: var(--tint-accent); }
+input.hrs { width: 70px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px; color: var(--text); min-height: 56px; }
+.cutoffs td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+button.ghost { background: transparent; border-style: dashed; color: var(--muted); width: 100%; }
+button.on-outline { box-shadow: inset 0 0 0 2px var(--accent); color: var(--text); }
+button.mini { padding: var(--s-8) var(--s-12); font-size: 14px; border-radius: var(--r-10); }
+.dayedit { display: flex; gap: var(--s-6); align-items: flex-end; flex-wrap: wrap; }
+.dayedit label { margin: 0; font-size: 13px; } .dayedit input.hrs { width: 58px; margin-top: 2px; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s-8); margin-bottom: 10px; }
+.plancard { text-align: left; padding: var(--s-10) var(--s-12); border-radius: var(--r-12); background: var(--bg); border: 1px solid var(--line); }
+.plancard.on { border-color: var(--accent); background: var(--tint-accent); }
+.plancard.bad .stat-value { color: var(--bad); }
+.plancard .stat-value { font-size: 20px; }
+
+/* Startup disclaimer. A driver who believes a planning scratchpad is their legal log is the exact
+   failure this product must not have, so the notice is unavoidable rather than buried in a tab. */
+.backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: var(--s-16); }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-16); padding: var(--s-18); max-width: 460px; max-height: 85dvh; overflow: auto; }
+.modal h2 { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 18px; margin-bottom: 6px; }
+.modal button { width: 100%; margin-top: 10px; }
+/* Driving alert banner (alerts.ts): the warnbox and violation-row colors, which the contrast test covers, made larger. */
+.alertbox { padding: var(--s-10) var(--s-12); border-radius: var(--r-10); font-size: 16px; margin: 6px 0; background: var(--tint-warn); border-left: 4px solid var(--warn); }
+.alertbox.bad { background: var(--tint-bad); border-left-color: var(--bad); }
+
+/* ---------------------------------------------------------------- redesign, 2026-10-10 */
+.compact { margin-top: 6px; font-size: 15px; }
+.screen-title { margin: 4px 2px 0; font-size: 24px; }
+button.link { background: transparent; border: 0; padding: 0 var(--s-4); color: var(--link); font-weight: 800; font-size: 15px; display: inline-flex; align-items: center; gap: var(--s-6); }
+.icon-btn { width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; color: var(--muted); }
+button.wide { width: 100%; min-height: 56px; font-size: 18px; font-weight: 800; border-radius: 16px; }
+button.back { align-self: flex-start; background: transparent; border: 0; padding: 0 var(--s-8) 0 0; color: var(--link); font-weight: 800; font-size: 16px; display: inline-flex; align-items: center; gap: var(--s-2); }
+
+/* The main card on Now: one number, big enough to read at arm's length in a mount. */
+.hero { position: relative; background: radial-gradient(90% 80% at 50% 38%, var(--surface-hi) 0%, var(--panel) 70%); border: 1px solid var(--line); border-radius: 26px; padding: var(--s-16) var(--s-18) var(--s-12); box-shadow: inset 0 1px 0 var(--edge-hi), inset 0 0 0 5px var(--panel), inset 0 0 0 6px var(--line), 0 16px 32px var(--drop); }
+.hero.warn { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }
+.hero.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
+.hero-label { font-size: 16px; font-weight: 600; color: var(--muted); }
+.hero-value { font-size: 64px; line-height: 1.05; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.hero-value.good { color: var(--good); } .hero-value.warn { color: var(--warn); }
+.hero-stop { font-size: 22px; font-weight: 800; margin-top: 6px; }
+.hero-lead { margin: 0 0 6px; font-size: 18px; font-weight: 800; color: var(--bad); }
+.hero-text { font-size: 15px; margin: 8px 0 0; }
+.hero-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); min-height: 48px; margin-top: 4px; font-size: 15px; }
+.hero-actions { display: inline-flex; align-items: center; gap: var(--s-4); }
+/* "limited by …" reads as a recessed plate under the dial */
+.limit-plate { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--s-12); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); box-shadow: inset 0 2px 4px var(--drop); color: var(--text); font-weight: 700; font-size: 14px; }
+
+.meters { display: flex; flex-direction: column; gap: var(--s-10); padding: var(--s-2) var(--s-4); }
+.meters { background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: var(--r-18); padding: var(--s-10) var(--s-14); box-shadow: inset 0 1px 0 var(--edge-hi); }
+.meter { display: grid; grid-template-columns: 132px 1fr auto; align-items: center; gap: var(--s-10); font-size: 15px; }
+.meter-label { color: var(--muted); font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+/* a segmented gauge: the gaps are drawn over the fill, so it reads as LED segments */
+.meter-bar { position: relative; height: 10px; border-radius: var(--r-3); background: var(--panel2); overflow: hidden; box-shadow: inset 0 1px 3px var(--drop); }
+.meter-bar span { display: block; height: 10px; background: var(--muted); }
+.meter-bar::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 10px, var(--panel) 10px 12px); }
+.meter.on .meter-label { color: var(--text); }
+.meter.on .meter-bar span { background: var(--accent); box-shadow: 0 0 10px var(--glow); }
+.meter-value { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+
+button.rowbtn { width: 100%; min-height: 60px; display: flex; align-items: center; justify-content: space-between; text-align: left; background: var(--panel); border-radius: var(--r-16); font-size: 15px; }
+
+/* The status buttons stay at the bottom of Now, within thumb reach, whatever the page scroll. */
+/* The dock must rest in ONE place. It is sticky inside <main>, so at the end of the page it sits at its own
+   spot in the page, which <main>'s bottom padding put 23px higher than its sticky spot: scrolling up from
+   the end dropped it 23px onto the tab bar, the opener flush against it (Lorico, 2026-10-10). On Now, main's
+   bottom padding is therefore exactly the sticky offset, and the dock carries its own 12px gap. */
+.dock { position: sticky; bottom: calc(61px + env(safe-area-inset-bottom)); z-index: 4; background: var(--bg); margin: 0 -12px; padding: 8px 12px 12px; border-top: 1px solid var(--line); }
+main.has-dock { padding-bottom: calc(61px + env(safe-area-inset-bottom)); }
+/* Must look tappable: this element also carries `link`, which zeroes the border and background, so this
+   rule has to re-state them explicitly (same specificity, so only the properties it sets win). A driver
+   could not tell it was a button (Lorico, 2026-10-10, on the live preview).
+   Height stays 44px (border-box, so the border is inside) — making it taller only crowded the dock.
+   margin-top clears the active status button's ring: outline-offset 2px + 3px outline reaches 5px past
+   its box, and the dock has no bottom padding, so a smaller gap draws that ring across this border. */
+button.dock-more { width: 100%; justify-content: center; min-height: 44px; color: var(--text); font-weight: 700; font-size: 15px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; margin-top: 10px; }
+
+.plan-item { width: 100%; min-height: 84px; display: grid; grid-template-columns: 52px 1fr 24px; align-items: center; gap: var(--s-12); text-align: left; background: var(--panel); border-radius: var(--r-18); padding: var(--s-12) var(--s-14); }
+.plan-icon { width: 52px; height: 52px; border-radius: var(--r-14); background: var(--panel2); display: flex; align-items: center; justify-content: center; }
+.plan-text { display: flex; flex-direction: column; gap: var(--s-2); font-size: 17px; }
+
+/* Split Lab (patch #14): the now-vs-after answer rides at the top of the screen while the
+   driver drags the break sliders, so the consequence never scrolls away from the control.
+   The offset clears the sticky app header on a planning screen (status row, compact drive
+   line and disclaimer, plus the header's own padding); the strip's own colours are the
+   card's — existing tokens only, no new palette. */
+.split-now-after { position: sticky; top: var(--top-h, calc(114px + env(safe-area-inset-top))); z-index: 3; background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop); font-size: 15px; font-weight: 600; }
+.split-now-after b { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Slide-up panels (Sheet in app.tsx). */
+.sheet-wrap { position: fixed; inset: 0; z-index: 40; }
+button.sheet-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: rgba(0,0,0,.55); padding: 0; min-height: 0; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 88dvh; overflow: auto; background: linear-gradient(180deg, var(--surface-hi), var(--panel) 30%); border-top: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--edge-hi), 0 -20px 40px var(--drop); border-radius: 24px 24px 0 0; padding: 8px 16px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); max-width: 640px; margin: 0 auto; }
+.sheet-handle { width: 44px; height: 5px; border-radius: var(--r-3); background: var(--line); align-self: center; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); }
+.sheet-head h2 { margin: 0; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 21px; }
+.sheet h3 { margin: 4px 0 0; color: var(--text); font-size: 16px; }
+.sheet-lead { margin: 0; font-size: 16px; }
+.big-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-10); }
+.big-status button { min-height: 96px; border-radius: var(--r-18); display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: var(--s-20) var(--s-16) var(--s-14); font-size: 19px; }
+.big-status button::before { left: 16px; right: auto; width: 56px; }
+.why { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-8); }
+.why li { border: 1px solid var(--line); border-radius: var(--r-14); padding: var(--s-10) var(--s-12); background: var(--panel2); box-shadow: inset 0 1px 0 var(--edge-hi); }
+.why li.on { border: 2px solid var(--accent); box-shadow: 0 0 18px color-mix(in srgb, var(--glow) 40%, transparent); }
+.why-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); font-size: 16px; }
+.why-time { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+.why-time small { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+.why-tag { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 800; color: var(--on-accent); background: var(--accent-solid); border-radius: var(--r-8); padding: 3px var(--s-10); letter-spacing: .04em; }
+.why-cite { font-size: 12px; color: var(--muted); margin-top: 3px; letter-spacing: .03em; }
+
+/* Driving view: a glance, not a read. Night keeps the dark ground and frames the screen instead of
+   flooding the cab with light; day floods amber at an hour left and red at zero. */
+main.drive { min-height: 100dvh; padding: calc(10px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 0; }
+main.drive.warn { box-shadow: inset 0 0 0 8px var(--warn); }
+main.drive.bad { position: relative; }
+:root[data-theme="day"] main.drive.warn { background: var(--warn); color: var(--chip-ink); box-shadow: none; }
+:root[data-theme="day"] main.drive.bad { background: var(--bad); color: var(--chip-ink); box-shadow: none; }
+.drive-clock { font-size: 17px; font-weight: 600; }
+button.drive-details { background: transparent; color: inherit; border: 2px solid currentColor; border-radius: var(--r-12); font-weight: 800; }
+.drive-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 var(--s-8); }
+.drive-label { font-size: 13px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+.drive-num { font-size: clamp(44px, 15vw, 60px); line-height: 1; font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--text); }
+.drive-num.short { font-size: clamp(64px, 22vw, 88px); }
+main.drive.warn .drive-num { color: var(--warn); text-shadow: none; } main.drive.bad .drive-num { color: var(--bad); text-shadow: none; }
+main.drive.calm { background: radial-gradient(85% 45% at 50% 36%, var(--surface-hi) 0%, var(--bg) 70%); }
+:root[data-theme="day"] main.drive.warn .drive-num, :root[data-theme="day"] main.drive.bad .drive-num { color: var(--chip-ink); }
+.drive-head { font-size: 28px; font-weight: 800; line-height: 1.15; margin-top: 8px; text-align: center; }
+.drive-why { font-size: 18px; margin-top: 8px; text-align: center; }
+.drive-foot { display: flex; flex-direction: column; gap: var(--s-10); }
+.drive-note { text-align: center; font-size: 14px; }
+button.drive-stop { min-height: 88px; border-radius: var(--r-22); font-size: 24px; font-weight: 800; color: var(--text); box-shadow: inset 0 1px 0 var(--edge-hi), 0 4px 0 var(--key-base), 0 10px 22px var(--drop); }
+:root[data-theme="day"] main.drive.warn button.drive-stop, :root[data-theme="day"] main.drive.bad button.drive-stop { background: var(--chip-ink); color: var(--text); box-shadow: none; }
+
+/* Log, one day at a time (redesign 3/5). Rows are whole-width buttons: no small Edit and × targets. */
+.daynav { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; }
+.daynav-title { display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 18px; }
+.daytotals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-4); margin-top: 10px; padding-top: var(--s-8); border-top: 1px solid var(--line); text-align: center; }
+.daytotals div { display: flex; flex-direction: column; } .daytotals b { font-variant-numeric: tabular-nums; }
+button.entry, .entry { width: 100%; min-height: 60px; display: grid; grid-template-columns: 12px 1fr auto 18px; align-items: center; gap: var(--s-10); text-align: left; background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: var(--s-8) var(--s-2); font-size: 16px; }
+.entry > span:nth-child(2) { display: flex; flex-direction: column; }
+.entry.live { grid-template-columns: 12px 1fr; }
+.entry-len { font-weight: 800; font-variant-numeric: tabular-nums; }
+button.addbtn { width: 100%; min-height: 56px; border: 2px dashed var(--tick); background: transparent; border-radius: var(--r-16); font-size: 17px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: var(--s-8); }
+.toggle.big button { min-height: 52px; font-size: 15px; font-weight: 700; }
+.tstep-label { font-size: 15px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
+.tstep-row { display: grid; grid-template-columns: 52px 52px 1fr 52px 52px; gap: var(--s-6); align-items: center; }
+.tstep-row button { min-height: 56px; padding: 0; font-size: 16px; font-weight: 800; }
+.tstep-value { min-height: 52px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--line); border-radius: var(--r-12); font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+input.tstep-pick { margin-top: 6px; width: 100%; min-height: 44px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-10); color: var(--muted); font-size: 14px; padding: 0 var(--s-10); }
+.lenrow { display: flex; justify-content: space-between; background: var(--bg); border-radius: var(--r-12); padding: var(--s-12) var(--s-14); font-size: 16px; }
+button.danger.wide { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-8); margin-top: 0; }
+
+/* Can I take this load? (redesign 4/5): one question per screen, then the answer. */
+.flow-head { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: var(--s-4); font-size: 18px; }
+.flow-dots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-6); }
+.flow-dots span { height: 5px; border-radius: var(--r-3); background: var(--panel2); } .flow-dots span.on { background: var(--accent); }
+.flow-q { margin: 18px 0 0; font-size: 30px; line-height: 1.15; }
+.bignum { border: 2px solid var(--line); border-radius: 20px; padding: var(--s-14); text-align: center; font-size: 26px; font-weight: 800; color: var(--muted); background: var(--panel); }
+.bignum b { font-size: 60px; color: var(--text); font-variant-numeric: tabular-nums; }
+.steps4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-8); }
+.steps4 button { min-height: 60px; font-size: 19px; font-weight: 800; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.chips button { min-height: 56px; border-radius: 999px; padding: 0 18px; font-size: 17px; font-weight: 800; background: var(--panel); }
+.chips button.on { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+button.flow-next { margin-top: 12px; display: inline-flex; align-items: center; justify-content: center; gap: var(--s-8); }
+.verdict { border-radius: var(--r-22); padding: var(--s-18) var(--s-20); color: var(--text); border: 1px solid var(--line); }
+.verdict.yes { background: linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 2px solid var(--good); border-left: 8px solid var(--good); }
+.verdict.no { background: linear-gradient(var(--tint-bad), var(--tint-bad)), linear-gradient(180deg, var(--surface-hi), var(--panel)); border: 1px solid var(--line); border-left: 8px solid var(--bad); }
+.verdict-big svg { vertical-align: -5px; }
+.verdict.yes .verdict-big svg { color: var(--good); }
+.verdict.no .verdict-big svg { color: var(--bad); }
+.verdict-plan { font-size: 15px; font-weight: 600; margin-top: 6px; }
+.verdict-label { font-size: 15px; font-weight: 600; }
+.verdict-big { font-size: 32px; font-weight: 800; line-height: 1.1; margin-top: 4px; }
+.verdict-sub { font-size: 20px; font-weight: 800; margin-top: 8px; }
+.answers { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-16); }
+.answers li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--s-8); padding: var(--s-4) var(--s-12); min-height: 52px; border-top: 1px solid var(--line); font-size: 15px; }
+.answers li:first-child { border-top: 0; } .answers li span { color: var(--muted); }
+
+
+/* ---------------------------------------------------------------- the cab look, 2026-10-12 */
+/* The dial (Dial in app.tsx): a fuel-gauge arc of what is left of the limit that binds, a printed scale
+   outside the arc, the number in the middle. SVG presentation attributes cannot hold var(), so colour
+   comes from these classes. */
+.dial { position: relative; width: 100%; aspect-ratio: 1 / 0.9; margin: 0 auto; }
+.dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.dial-track { fill: none; stroke: var(--dial-track); stroke-linecap: round; }
+.dial-ticks line { stroke: var(--tick); stroke-linecap: round; }
+.dial-fill { fill: none; stroke: var(--accent); stroke-linecap: round; filter: drop-shadow(0 0 3px var(--glow)); }
+.dial-cap { fill: #f4fbff; filter: drop-shadow(0 0 6px var(--glow)); }
+:root[data-theme="day"] .dial-cap { fill: #fff; stroke: var(--accent); stroke-width: 3px; }
+.dial.warn .dial-fill { stroke: var(--warn); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 60%, transparent)); }
+.dial.bad .dial-fill { stroke: var(--bad); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--bad) 60%, transparent)); }
+:root[data-theme="day"] .dial-fill { filter: none; }
+.dial-scale { fill: var(--muted); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 12px; }
+.dial-center { container-type: inline-size; position: absolute; left: 50%; top: 55.5%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; width: 76%; }
+.hero .dial { max-width: 300px; }
+.hero .hero-label { font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.hero .hero-value { font-size: 42px; font-size: clamp(42px, 23cqi, 56px); letter-spacing: 0; white-space: nowrap; }
+.hero .hero-value.good { color: var(--text); }
+.hero .hero-stop { margin-top: 4px; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.15; }
+.hero-stop-date { font-size: 15px; font-weight: 700; letter-spacing: .05em; }
+.hero-stop-time { font-size: 28px; font-weight: 800; letter-spacing: .02em; }
+.drive-body .dial { max-width: 320px; }
+/* In daylight the driving view floods amber/red: the dial draws in the ink colour on top of it. */
+:root[data-theme="day"] main.drive.warn .dial-fill, :root[data-theme="day"] main.drive.bad .dial-fill { stroke: var(--chip-ink); }
+:root[data-theme="day"] main.drive.warn .dial-track, :root[data-theme="day"] main.drive.bad .dial-track { stroke: rgba(255,255,255,.28); }
+:root[data-theme="day"] main.drive.warn .dial-ticks line, :root[data-theme="day"] main.drive.bad .dial-ticks line,
+:root[data-theme="day"] main.drive.warn .dial-scale, :root[data-theme="day"] main.drive.bad .dial-scale { stroke: rgba(255,255,255,.6); fill: var(--chip-ink); }
+:root[data-theme="day"] main.drive.warn .drive-label, :root[data-theme="day"] main.drive.bad .drive-label { color: var(--chip-ink); }
+/* See-through controls (links, icon buttons, list rows, toggles) carry no key face: the base button's lit edge
+   drew a ghost box behind "Why?". */
+button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, button.sheet-backdrop, .toggle button, button.drive-details, button.rowbtn.flat { box-shadow: none; }
+.toggle button:not(.on) { background: transparent; }
+.meter-value { font-size: 14px; }
+.pill, .drive-clock, .top-right .clock { white-space: nowrap; }
+/* Patch 19: the header row was wider than the screen whenever the status capsule ran long
+   (3px over at 360 for "On Duty · 20m", 129px over at 412 for personal conveyance ten hours
+   in), and that overhang is what let a sideways drag shift the whole page. The clock and the
+   theme switch keep their size; the capsule takes the room that is left and wraps onto a
+   second line inside its own 42px face rather than widening the row. */
+.top-row > .pill { min-width: 0; white-space: normal; line-height: 1.25; }
+.top-row > .top-right { flex: none; }
+:root[data-theme="day"] main.drive.warn .dial-cap, :root[data-theme="day"] main.drive.bad .dial-cap { fill: var(--chip-ink); stroke: none; }
+
+/* Break buttons (driver report 2026-10-13): Settings rows and the add panel's rule hint. */
+.brk-row { display: flex; flex-direction: column; gap: var(--s-8); padding: var(--s-12) 0; border-top: 1px solid var(--line); }
+.brk-row:first-of-type { border-top: 0; }
+.brk-len { display: grid; grid-template-columns: 64px 1fr 64px; gap: var(--s-8); align-items: center; }
+.brk-len button { min-height: 56px; font-weight: 800; font-size: 16px; }
+button.wide-btn { width: 100%; margin-top: 8px; font-weight: 800; }
+.brk-hint { margin: 10px 0 0; padding: var(--s-10) var(--s-12) var(--s-10) 28px; border-radius: var(--r-12); background: var(--tint-accent); font-size: 14px; display: flex; flex-direction: column; gap: var(--s-6); }
+.sub-hint { list-style: none; padding: var(--s-10) var(--s-12); margin: 0; }
+/* The Log's editor, one question per screen (redesign, 2026-10-13). */
+.sheet-head h2 { flex: 1; }
+.ed-steps { display: flex; flex-direction: column; gap: var(--s-4); }
+.ed-bar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: var(--s-6); }
+.ed-bar span { height: 5px; border-radius: var(--r-3); background: var(--line); }
+.ed-bar span.on { background: var(--accent-solid); }
+.ed-count { font-size: 14px; color: var(--muted); text-align: right; }
+/* A panel taller than the screen scrolls; its rows must not be squeezed to fit instead. */
+.sheet > * { flex-shrink: 0; }
+.sheet .ed-q { margin: 2px 0 0; font-size: 26px; line-height: 1.15; color: var(--text); outline: none; }
+.ed-lab { font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 4px 2px 0; }
+.ed-foot { text-align: center; margin: 0; }
+button.opt, button.act { width: 100%; min-height: 64px; display: grid; grid-template-columns: 8px 1fr 20px; align-items: center; gap: var(--s-14); padding: var(--s-10) var(--s-14) var(--s-10) var(--s-12); text-align: left; border-radius: var(--r-16); }
+button.act { grid-template-columns: 24px 1fr 20px; color: var(--text); }
+button.act > svg:first-child { color: var(--link); }
+button.act.del, button.act.del > svg:first-child { color: var(--bad); border-color: var(--bad); }
+.opt .led { width: 8px; height: 38px; border-radius: 4px; }
+.opt b, .act b { display: block; font-size: 18px; font-weight: 800; }
+.opt .sub, .act .sub { display: block; font-size: 14px; color: var(--muted); font-weight: 400; margin-top: 1px; }
+button.opt[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.ed-brk { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: var(--s-8); }
+.ed-brk button { min-height: 60px; padding: var(--s-8) var(--s-12); border-radius: var(--r-14); text-align: left; }
+.ed-brk b { display: block; font-size: 16px; font-weight: 800; }
+.ed-brk span { display: block; font-size: 13px; color: var(--muted); font-weight: 400; }
+.ed-ctx { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: var(--s-10); min-height: 48px; padding: 0 var(--s-6) 0 var(--s-12); border-radius: var(--r-12); background: var(--bg); border: 1px solid var(--line); }
+.ed-ctx .dot { width: 10px; height: 10px; border-radius: 50%; }
+.ed-ctx-t { font-size: 15px; font-weight: 700; }
+.ed-ctx button.link { min-height: 48px; }
+.ed-day { display: flex; align-items: center; gap: var(--s-10); font-size: 15px; color: var(--muted); font-weight: 700; }
+.ed-day input { flex: 1; min-height: 48px; }
+.ed-day input.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ed-clock { padding: var(--s-12); border-radius: var(--r-18); background: var(--screen); border: 1px solid var(--line); box-shadow: inset 0 2px 8px var(--drop); text-align: center; }
+.ed-clock output { display: block; font-size: 64px; font-weight: 700; line-height: 1; color: var(--text); }
+.ed-clock span { display: block; font-size: 15px; color: var(--muted); margin-top: 4px; }
+.ed-keys { display: grid; gap: var(--s-8); }
+.ed-keys.two { grid-template-columns: 1fr 1fr; }
+.ed-keys.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ed-keys button { min-height: 56px; padding: 0; font-size: 18px; font-weight: 800; }
+.ed-from, .ed-ends, .ed-when { margin: 0; font-size: 16px; }
+.ed-ends { text-align: center; }
+.ed-len { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-8); }
+.ed-len button { min-height: 58px; font-size: 18px; font-weight: 800; }
+.ed-len button.on { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+.ed-len button.all { grid-column: 1 / -1; }
+.ed-fine { display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr 1fr; gap: var(--s-6); align-items: center; }
+.ed-fine button { min-height: 52px; padding: 0; font-size: 16px; font-weight: 800; }
+.ed-fine output { min-height: 52px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--line); border-radius: var(--r-12); font-size: 17px; font-weight: 800; white-space: nowrap; }
+.ed-sum { border: 1px solid var(--line); border-radius: var(--r-16); background: var(--panel); }
+.ed-sum > div { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: var(--s-8); min-height: 52px; padding: var(--s-2) var(--s-6) var(--s-2) var(--s-12); border-top: 1px solid var(--line); }
+.ed-sum > div:first-child { border-top: 0; }
+.ed-sum > div > span:first-child { color: var(--muted); font-size: 14px; }
+.ed-sum button.link { min-height: 48px; }
+.grid-mark { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
+p.warnbox { margin: 0; font-size: 15px; line-height: 1.35; }
+.ed-days { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-6); }
+.ed-days button { padding: 0 4px; font-size: 16px; min-height: 48px; }
+/* The step's main button stays in reach at the foot of the panel while the rest scrolls. */
+.sheet button.ed-go { position: sticky; bottom: 0; z-index: 1; box-shadow: 0 -10px 18px var(--panel), 0 2px 0 var(--key-base); }
+
+/* Declutter patch (2026-11-05): the one-line disclaimer rides the header on every screen, and a
+   fresh clock — nothing logged, numbers assumed — is stamped as the demo it is. */
+.disclaimer-line { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-align: center; padding-top: var(--s-6); }
+.demo-word { color: var(--bad); letter-spacing: .05em; }
+.app.is-demo .hero { overflow: hidden; }
+.app.is-demo .hero::after { content: "DEMO"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 96px; font-weight: 800; letter-spacing: .1em; transform: rotate(-14deg); color: rgba(255,255,255,.06); pointer-events: none; }
+:root[data-theme="day"] .app.is-demo .hero::after { color: rgba(11,17,23,.05); }
+
+/* ELD clocks quick start (patch 8): the demo banner's way in, and the four clocks as
+   hours + minutes boxes on the 56px number-field floor patch 6 set. */
+.qs-cta { display: flex; align-items: center; gap: var(--s-12); margin-top: 10px; flex-wrap: wrap; }
+.qs-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-12); padding: var(--s-8) 0; }
+.qs-label { flex: 1; font-weight: 600; }
+.qs-inputs { display: inline-flex; align-items: center; gap: var(--s-6); font-weight: 600; }
+.qs-inputs input.num { width: 78px; }
+
+/* ---- patch 16 "Night & Glance" ---- */
+/* P4: trust-role text — the lines a plan's honesty hangs on read at full size in the text
+   colour; "muted and small" is reserved for what is genuinely secondary. */
+.trust { font-size: 15px; font-weight: 600; color: var(--text); }
+small.trust { font-size: 15px; }
+/* P13: a press answers under the finger — a 1px settle and a dim, instant on the way down,
+   eased on the way back; nothing at all for a driver who asked the phone for less motion. */
+button:active { transform: translateY(1px); filter: brightness(.9); transition-duration: 0ms; }
+@media (prefers-reduced-motion: reduce) { button:active { transform: none; filter: none; } }
+/* P3: anchored scrolling clears the measured header too (the sticky offsets read the same
+   variable inline). */
+html { scroll-padding-top: var(--top-h, calc(114px + env(safe-area-inset-top))); }
+/* Patch 19: the shell is the scroller now, so the same padding rides on it. */
+.app { scroll-padding-top: var(--top-h, calc(114px + env(safe-area-inset-top))); }
+/* P2: the notices as one-line chips on Now — a 48px summary row at trust size, the warning
+   shape in front of it, the full wording one tap down. */
+details.notice { background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-left: 4px solid var(--warn); border-radius: var(--r-14); padding: 0 var(--s-14); margin-bottom: 10px; }
+details.notice > summary { min-height: 48px; display: flex; align-items: center; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer; list-style: none; }
+details.notice > summary::-webkit-details-marker { display: none; }
+details.notice > summary::before { content: "⚠ "; color: var(--warn); font-size: 16px; font-weight: 800; margin-right: 2px; }
+.notice-body { padding: var(--s-2) 0 var(--s-12); font-size: 15px; line-height: 1.45; }
+.notice-body .warnbox { margin-top: 4px; }
+/* P5: warnings carry a shape, not just a colour (decision D3-A — the palette is unchanged). */
+.warnbox::before { content: "⚠ "; color: var(--warn); font-size: 16px; font-weight: 800; }
+.alertbox::before { content: "⚠ "; color: var(--warn); font-size: 16px; font-weight: 800; }
+.alertbox.bad::before { color: var(--bad); }
+.hero.warn .hero-label::before { content: "⚠ "; color: var(--warn); }
+/* M11: the hero ring's substance says what the number stands on — dotted while any part of
+   the answer is estimated, a hollow outline on the demo clock. */
+.dial.basis-estimate .dial-fill { stroke-linecap: butt; stroke-dasharray: 12 9; }
+.hero-basis { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text); margin-top: 2px; }
+.dial.basis-demo .dial-fill { stroke-width: 2.5; filter: none; }
+.dial.basis-demo .dial-cap { display: none; }
+/* P8: out of time, the driving view wears a hazard frame — black/yellow chevrons in the
+   warning colours of the road — instead of a red flood at night or a plain red frame. The
+   day flood itself is unchanged underneath (its pin stands); the frame sits around it. */
+main.drive { position: relative; }
+main.drive.bad::after { content: ""; position: absolute; inset: 0; pointer-events: none; border: 8px solid transparent; border-image: repeating-linear-gradient(45deg, var(--bad) 0 10px, var(--chip-ink) 10px 20px) 8; }
+
+/* Capstone C1: the time axis (Timeline card, Why sheet, lever sheets), the lever chips
+   and the one-time Timeline chip. Existing tokens only — no new colour pair is created,
+   so the contrast gate's pairs and the nightlight budget are untouched. Lane bars are
+   8px tall, under the light budget's large-surface threshold (audit §2.1). */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tl-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s-12); flex-wrap: wrap; margin-bottom: var(--s-8); }
+.hero .tl-head .hero-stop { align-items: flex-end; text-align: right; }
+.taxis { display: flex; flex-direction: column; margin-top: var(--s-6); }
+.taxis-row { display: grid; grid-template-columns: 96px 1fr 64px; align-items: center; min-height: 28px; gap: var(--s-8); }
+button.taxis-row { width: 100%; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; min-height: 48px; }
+.taxis-head { min-height: 20px; }
+.taxis-label { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; }
+.taxis-label .tl-short { display: none; }
+@media (max-width: 340px) {
+  .taxis-row { grid-template-columns: 64px 1fr 64px; }
+  .taxis-label .tl-full { display: none; }
+  .taxis-label .tl-short { display: inline; }
+}
+.taxis-value { font-size: 16px; font-weight: 700; text-align: right; white-space: nowrap; }
+/* Patch L1 item 6 (field report 2026-11-11: hour markers and the STOP time stamped over the top of
+   Now's timeline). A long value ("62h 00m left", "Wed 12:35") set the value column's max-content
+   width and crushed the track between label and value to ~70-130px, so the hour labels packed into
+   one blob. A value may now wrap at its spaces inside a capped width: the column stays sized to its
+   widest value (patch 19 B4), but no value can be wider than a two-line "62h 00m / left". */
+.taxis-row:not(.taxis-head) > .taxis-value { white-space: normal; max-width: 4.75em; justify-self: end; line-height: 1.15; }
+/* Patch 19: the value column was a fixed 64px and its text does not wrap, so a value with a
+   day in it ("Wed 00:55", 90px) or a duration ("51h 40m left", 120px) ran out of the card —
+   25px past a 412px screen, the second source of the sideways drag. The rows now share ONE
+   set of columns (subgrid), with the value column as wide as the widest value on the axis, so
+   every lane still starts and ends on the same x and nothing overhangs. A runtime without
+   subgrid keeps the fixed columns above; the shell's closed sides contain the overhang there. */
+@supports (grid-template-columns: subgrid) {
+  .taxis { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(64px, max-content); column-gap: var(--s-8); }
+  .taxis > .taxis-row { grid-column: 1 / -1; grid-template-columns: subgrid; }
+  @media (max-width: 340px) { .taxis { grid-template-columns: 64px minmax(0, 1fr) minmax(64px, max-content); } }
+}
+.taxis-track { position: relative; height: 28px; display: block; }
+.taxis-track-head { height: 20px; }
+/* Item 6: the STOP tag sits on its own line ABOVE the hour labels. Both used to share one 20px
+   line, so a stop time near a gridline was printed on top of the hour markers. */
+.taxis-track-head.has-tag { height: 36px; }
+.taxis-track-head.has-tag .taxis-hour { top: 19px; line-height: 16px; }
+.taxis-tint { position: absolute; top: 0; bottom: 0; left: 0; background: var(--tint-accent); border-radius: var(--r-3); }
+.taxis-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); opacity: .6; }
+.taxis-hour { position: absolute; top: 2px; transform: translateX(2px); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 13px; color: var(--muted); }
+.taxis-tag { position: absolute; top: -2px; transform: translateX(-50%); font-size: 12px; font-weight: 800; letter-spacing: .04em; color: var(--text); white-space: nowrap; z-index: 3; }
+.taxis-tag.ghost { color: var(--muted); font-weight: 600; }
+.taxis-bar { position: absolute; top: 10px; height: 8px; left: 0; background: var(--accent); border-radius: var(--r-3); }
+.taxis-bar.faded { opacity: .4; border-radius: 0 var(--r-3) var(--r-3) 0; }
+.taxis-track.has-ghost .taxis-bar { top: 16px; }
+.taxis-bar.ghost { background: transparent; border: 1.5px solid var(--muted); top: 3px; }
+.taxis-bar.basis-estimate { background: transparent; border: 1.5px dashed var(--accent); }
+.taxis-bar.basis-demo { background: transparent; border: 1.5px solid var(--accent); }
+.taxis-bar.outline { background: transparent; border: 1.5px solid var(--accent); }
+.taxis-cap { position: absolute; top: 8px; width: 3px; height: 12px; background: var(--text); transform: translateX(-1.5px); }
+.taxis-track.has-ghost .taxis-cap { top: 14px; }
+.taxis-arrow { position: absolute; right: -2px; top: 6px; color: var(--muted); font-weight: 700; }
+.taxis-wall { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--text); transform: translateX(-1.5px); z-index: 2; }
+.taxis-wall.ghost { width: 2px; background: var(--muted); }
+.taxis-hazard { position: absolute; left: 0; top: 2px; bottom: 2px; width: 8px; background: repeating-linear-gradient(45deg, var(--bad) 0 6px, var(--chip-ink) 6px 12px); border-radius: var(--r-3); z-index: 1; }
+.taxis-bracket { position: absolute; left: 0; top: 15px; font-size: 12px; color: var(--muted); font-weight: 700; }
+.lever { display: flex; align-items: center; gap: var(--s-10); width: 100%; min-height: 56px; padding: var(--s-8) var(--s-12); background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r-12); color: var(--text); font-size: 16px; text-align: left; cursor: pointer; }
+.lever-text { display: flex; flex-direction: column; gap: var(--s-2); flex: 1; }
+.lever-text b { font-weight: 600; font-size: 16px; }
+.lever-sub { font-size: 14px; color: var(--muted); }
+.newcard { display: flex; align-items: center; justify-content: space-between; gap: var(--s-10); min-height: 48px; padding: var(--s-6) var(--s-12); background: var(--tint-accent); border: 1px solid var(--line); border-radius: var(--r-12); font-size: 15px; }
+.newcard-btns { display: inline-flex; gap: var(--s-6); flex-shrink: 0; }
+/* ===== Capstone C2 — future scrubber (M16, audit §2.3). Existing tokens only (contrast 44/44 unchanged). */
+.hero.preview { border: 2px dashed var(--accent); }
+.pv-band { display: flex; align-items: center; min-height: 48px; margin: calc(-1 * var(--s-6)) 0 var(--s-6); padding: 0 var(--s-12); background: var(--tint-accent); border-radius: var(--r-12); font-size: 15px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.pv-frame { margin: var(--s-8) 0 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.pv-over { color: var(--text); }
+.pv-steps { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: var(--s-6); margin-top: var(--s-10); }
+button.pv-step { min-height: 56px; padding: var(--s-8); font-size: 15px; font-weight: 700; }
+/* Everything else on Now while a preview is up: inert (the attribute) and at 40%. The wrapper
+   makes no box (display: contents keeps the dock's sticky slot), so the dimming rides its children. */
+.now-rest { display: contents; }
+.now-rest.pv-dim > * { opacity: .4; }
+/* The dock is sticky over scrolled content: it keeps its opaque floor, and its controls take the 40%. */
+.now-rest.pv-dim > .dock { opacity: 1; }
+.now-rest.pv-dim > .dock > * { opacity: .4; }
+/* The snap back to now: a 200ms slide, instant under reduced motion. */
+.pv-snapmark { display: none; }
+.pv-snapmark + .hero { animation: pv-slide 200ms ease-out; }
+@keyframes pv-slide { from { transform: translateX(-12px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pv-snapmark + .hero { animation: none; } }
+
+/* ===== Capstone C2 — the one-bar Split Lab (P7, audit §2.5). */
+.split-now-after[data-tone="bad"] { border-left: 4px solid var(--bad); }
+.sna-x { color: var(--bad); }
+.taxis-plan { margin-top: var(--s-8); font-weight: 600; }
+.plan-band { display: flex; justify-content: space-between; gap: var(--s-8); font-size: 13px; font-variant-numeric: tabular-nums; }
+.plan-key { color: var(--text); font-weight: 800; white-space: nowrap; }
+.plan-key.ghost { color: var(--muted); font-weight: 600; }
+.plan-bar { position: relative; height: 56px; margin-top: var(--s-4); }
+button.pblock { position: absolute; top: 0; height: 56px; min-height: 56px; padding: 0 var(--s-4); background: var(--panel2); border: 1px solid var(--line); border-top: 4px solid var(--led, var(--muted)); border-radius: var(--r-8); box-shadow: none; color: var(--text); font-size: 13px; font-weight: 700; overflow: visible; }
+button.pblock .pblock-in { display: inline-flex; align-items: center; gap: var(--s-4); white-space: nowrap; overflow: hidden; max-width: 100%; }
+button.pblock .pblock-t { overflow: hidden; text-overflow: ellipsis; }
+/* A mid-width block drops its icon and stacks its words ("B1 OFF" over "3h"); the status word carries the status. */
+button.pblock.compact .pblock-in { flex-direction: column; gap: 0; line-height: 1.15; }
+/* A short block keeps an invisible 48px hit area; its label moves under the bar on a leader line. */
+button.pblock.short::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 48px; transform: translateX(-50%); }
+button.pblock.zero { border-left-width: 0; border-right-width: 0; padding: 0; }
+.plan-hatch { position: absolute; bottom: calc(var(--row, 0) * 12px); height: 10px; background: repeating-linear-gradient(45deg, var(--bad) 0 6px, var(--chip-ink) 6px 12px); border-radius: 0 0 var(--r-3) var(--r-3); pointer-events: none; z-index: 2; }
+.plan-mark { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--text); transform: translateX(-1.5px); pointer-events: none; z-index: 3; }
+.plan-mark.ghost { width: 0; background: none; border-left: 2px dashed var(--muted); transform: translateX(-1px); }
+.plan-leads { position: relative; height: 20px; margin-top: var(--s-2); }
+.plan-lead { position: absolute; top: 0; font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; border-top: 1px solid var(--muted); padding-top: 2px; }
+.plan-bracket { margin-top: var(--s-4); border: 1px solid var(--muted); border-top: 0; border-radius: 0 0 var(--r-8) var(--r-8); height: 10px; position: relative; }
+.plan-bracket span { position: absolute; left: 50%; top: 2px; transform: translateX(-50%); padding: 0 var(--s-6); background: var(--panel); font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.plan-bracket.no { border-style: dashed; }
+.plan-bracket { margin-bottom: var(--s-8); }
+details.fine { margin-top: var(--s-8); }
+details.fine > summary { min-height: 48px; display: flex; align-items: center; font-size: 15px; font-weight: 700; color: var(--text); cursor: pointer; }
+.checks li button.fix { display: block; margin: var(--s-6) 0 0 var(--s-18); }
+.pb-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-6); margin-top: var(--s-10); }
+button.pb-step { min-height: 56px; padding: var(--s-8) var(--s-4); font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pb-exact { margin-top: var(--s-10); }
+.pb-result { margin: var(--s-10) 0 0; }
+button.wide.fix { margin-top: var(--s-8); }
+
+/* ===================== Capstone C3 "Dock & dispatch" (append-only; existing tokens only) ===================== */
+/* M7: the load check's typed departure / appointment, the appointment line, Text dispatch */
+button.wide.pick-time { margin-top: var(--s-10); }
+button.wide.pick-time.on { border: 2px solid var(--accent); }
+.verdict.appt { margin-top: var(--s-10); }
+.appt-big { font-size: 20px; font-weight: 800; line-height: 1.25; margin-top: var(--s-4); }
+.appt-big svg { vertical-align: -5px; }
+.verdict.appt.yes .appt-big svg { color: var(--good); }
+.verdict.appt.no .appt-big svg { color: var(--bad); }
+.row.dispatch { justify-content: flex-start; }
+.row.dispatch > * { flex: 0 0 auto; min-height: 48px; }
+/* M4 (load side): the fix line's one tap */
+.verdict button.wide.fixit { margin-top: var(--s-12); }
+/* D10-A + M8: Hours coming back, the week strip */
+.hours-back { font-size: 17px; line-height: 1.4; margin: 0 0 var(--s-12); }
+.weekstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--s-4); align-items: end; }
+button.wk-day { display: flex; flex-direction: column; align-items: stretch; gap: var(--s-4); min-height: 132px; padding: var(--s-4) 0; background: transparent; box-shadow: none; border-radius: var(--r-8); min-width: 0; }
+.wk-col { position: relative; display: flex; align-items: flex-end; height: 96px; border-bottom: 1px solid var(--line); }
+.wk-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--muted); border-radius: var(--r-3) var(--r-3) 0 0; overflow: hidden; }
+button.wk-day.today .wk-bar { background: var(--accent); }
+.wk-hatch { position: absolute; left: 0; right: 0; top: 0; display: block; background: repeating-linear-gradient(45deg, var(--accent) 0 4px, var(--panel) 4px 8px); }
+.wk-label { display: block; font-size: 13px; font-weight: 700; line-height: 1.15; text-align: center; color: var(--muted); overflow-wrap: anywhere; }
+button.wk-day.today .wk-label { color: var(--text); }
+.wk-key { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border-radius: var(--r-3); background: repeating-linear-gradient(45deg, var(--accent) 0 4px, var(--panel) 4px 8px); }
+button.rowbtn.moved { min-height: 48px; margin-bottom: var(--s-12); font-weight: 700; }
+/* M5: the welcome-back check — an open strip chip under the answer, never a modal */
+.welcome { background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-left: 4px solid var(--warn); border-radius: var(--r-14); padding: var(--s-10) var(--s-14); margin-bottom: 10px; font-size: 15px; }
+.welcome p { margin: 0; }
+.welcome .row > button.mini { min-height: 48px; }
+/* Patch L1 item 5: the Timeline / Dial switch on the Now card itself (the More → Planning setting's twin). */
+.card-switch { display: flex; align-items: center; gap: var(--s-10); margin-top: var(--s-10); padding-top: var(--s-8); border-top: 1px solid var(--line); }
+.card-switch-l { font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.card-switch .toggle { flex: 1; margin-top: 0; }
+/* Patch L1 items 2 + 3: the shared clock picker. The big clock is a key now — tap it to type the time. */
+.ed-clock-tap { display: block; width: 100%; background: none; border: 0; box-shadow: none; padding: 0; min-height: 56px; color: inherit; cursor: text; }
+.ed-clock-tap:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-10); }
+.ed-type { display: flex; gap: var(--s-8); align-items: stretch; }
+.ed-type input { flex: 1; min-width: 0; text-align: center; font-size: 28px; font-weight: 700; letter-spacing: .08em; }
+.ed-type .ed-type-ok { min-height: 56px; min-width: 88px; font-weight: 800; }
+.ed-ends-tap { min-height: 48px; padding: 0 var(--s-8); font: inherit; font-weight: 800; text-decoration: underline dotted; text-underline-offset: 4px; }
+/* Item 4: the absorb warning lists exactly what the change trims; its main button is the confirmation. */
+.absorb-list { margin: var(--s-6) 0; padding-left: 1.2em; }
+.absorb-list li { margin: 2px 0; }
+button.trip-dep { display: block; width: 100%; margin-top: 4px; text-align: left; font-weight: 700; }
+
+/* ===================================================================================
+   TACTILE PASS (polish, 2026-11-11) — the whole app as a modern truck dashboard.
+   Direction: Lorico, 2026-11-11 — physical, chunky, grippy controls; depth and pressed
+   states on buttons, toggles and sliders; instrumentation character; and good-looking in
+   its own right, in both themes.
+
+   This block is APPEND-ONLY and self-contained: no rule above it was edited, the palette
+   in the two :root blocks is untouched (the contrast gate and the night-light budget read
+   it there), and deleting everything from this banner to the end of the file restores the
+   L2 look exactly. Presentation only.
+
+   The grammar, used the same way on every screen:
+     KEY      a raised push-button — lit top edge, a face, a solid skirt under it. A press
+              sinks it onto the skirt. A key that is latched ON stays down, with its lamp lit.
+     ROCKER   a segmented choice — a recessed well, the chosen side a raised key with a lamp.
+     SLIDER   a groove with a knurled grip riding in it.
+     READOUT  anything that only shows a value — recessed, like a gauge window.
+   One control scale, and nothing tappable got smaller than it was:
+     48  the floor — inline links, icon buttons, the keys inside a rocker
+     56  the standard key, stepper and field
+     64  rows (title + detail + chevron) and the commit key of a screen
+   =================================================================================== */
+html {
+  --ctl-floor: 48px; --ctl: 56px; --ctl-lg: 64px;
+  --t-well: var(--bg);
+  --t-well-in: inset 0 2px 5px rgba(0,0,0,.72), inset 0 0 0 1px rgba(0,0,0,.4);
+  --t-lip: 0 1px 0 rgba(255,255,255,.05);
+  --t-bevel: rgba(0,0,0,.42);
+  --t-cast: rgba(0,0,0,.5);
+  --t-press: inset 0 2px 6px rgba(0,0,0,.65);
+  --t-ridge-hi: rgba(255,255,255,.14); --t-ridge-lo: rgba(0,0,0,.55);
+  --t-accent-lo: color-mix(in srgb, var(--accent-solid) 82%, #000);
+  --t-accent-skirt: color-mix(in srgb, var(--accent-solid) 48%, #000);
+  --t-key: linear-gradient(180deg, var(--key-hi), var(--key-lo));
+  --t-key-top: rgba(255,255,255,.09);
+  --t-key-shadow: inset 0 1px 0 var(--t-key-top), inset 0 -1px 0 var(--t-bevel), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast);
+  --t-key-down: var(--t-press), 0 1px 0 var(--key-base);
+  --t-grip: linear-gradient(180deg, #6b7885, #4a5560); --t-grip-edge: #2a333d;
+}
+html[data-theme="day"] {
+  --t-well: #d3dae1;
+  --t-well-in: inset 0 2px 4px rgba(30,45,60,.24), inset 0 0 0 1px rgba(30,45,60,.07);
+  --t-lip: 0 1px 0 rgba(255,255,255,.95);
+  --t-bevel: rgba(30,45,60,.10);
+  --t-cast: rgba(30,45,60,.18);
+  --t-press: inset 0 2px 5px rgba(30,45,60,.30);
+  --t-ridge-hi: rgba(255,255,255,.95); --t-ridge-lo: rgba(30,45,60,.34);
+  --t-grip: linear-gradient(180deg, #ffffff, #e5e9ed); --t-grip-edge: #9aa6b2;
+  --t-key-top: var(--edge-hi);
+}
+
+/* ---------- KEY: every button that has a face ---------- */
+button { min-height: var(--ctl); border-radius: var(--r-12); font-weight: 700; box-shadow: var(--t-key-shadow); transition: transform 90ms ease-out, box-shadow 90ms ease-out, filter 120ms ease-out; }
+/* The controls with no face keep none, and keep the floor they had. */
+button.link, button.back, button.x, button.drive-details { min-height: var(--ctl-floor); }
+.icon-btn { min-height: var(--ctl-floor); }
+button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, button.sheet-backdrop, .toggle button, button.drive-details, button.rowbtn.flat, button.taxis-row, button.addbtn, .tabs button, button.wk-day, button.pblock, .ed-clock-tap, button.vh { box-shadow: none; }
+/* A press sinks the key onto its skirt. (Faceless controls keep patch 16's 1px settle.) */
+button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):active { transform: translateY(2px); filter: none; box-shadow: var(--t-key-down); transition-duration: 0ms; }
+button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):disabled { box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 0 var(--key-base); }
+@media (prefers-reduced-motion: reduce) { button:where(:not(.link)):active { transform: none; } }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* key faces that were flat panels become the one key face */
+button.rowbtn, .plan-item, .chips button, .lever, button.dock-more, button.danger, button.act.del { background: var(--t-key); }
+button.dock-more { box-shadow: var(--t-key-shadow); }
+button.dock-more:active { box-shadow: var(--t-key-down); }
+
+/* the commit key: the accent face, lit from above, on its own dark-accent skirt */
+button.primary, .chips button.on, .ed-len button.on { background: linear-gradient(180deg, var(--accent-solid), var(--t-accent-lo)); border-color: var(--t-accent-lo); color: var(--on-accent); }
+button.primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(0,0,0,.22), 0 3px 0 var(--t-accent-skirt), 0 6px 12px var(--t-cast), 0 0 16px var(--glow); }
+button.primary:active { box-shadow: inset 0 2px 6px rgba(0,0,0,.4), 0 1px 0 var(--t-accent-skirt); }
+button.primary:disabled { box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 0 var(--t-accent-skirt); }
+.sheet button.ed-go { box-shadow: 0 -10px 18px var(--panel), inset 0 1px 0 rgba(255,255,255,.28), 0 3px 0 var(--t-accent-skirt); }
+.sheet button.ed-go:active { box-shadow: 0 -10px 18px var(--panel), inset 0 2px 6px rgba(0,0,0,.4), 0 1px 0 var(--t-accent-skirt); }
+/* a preset that is chosen is a key latched down, lamp on */
+.chips button.on, .ed-len button.on { transform: translateY(2px); box-shadow: inset 0 2px 6px rgba(0,0,0,.38), 0 1px 0 var(--t-accent-skirt), 0 0 14px var(--glow); }
+/* destructive keys: the red legend and edge on a key face, a red-shaded skirt */
+button.danger, button.act.del { box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 color-mix(in srgb, var(--bad) 45%, var(--key-base)), 0 5px 9px var(--t-cast); }
+button.danger:active, button.act.del:active { box-shadow: var(--t-press), 0 1px 0 color-mix(in srgb, var(--bad) 45%, var(--key-base)); }
+/* outlined-on keys (PC / yard move, resolved timeline, a typed time): latched, accent ring kept */
+button.on-outline { transform: translateY(2px); box-shadow: inset 0 0 0 2px var(--accent), var(--t-press), 0 1px 0 var(--key-base); }
+button.opt[aria-pressed="true"] { transform: translateY(2px); box-shadow: inset 0 0 0 2px var(--accent), var(--t-press), 0 1px 0 var(--key-base); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, var(--key-lo)), color-mix(in srgb, var(--accent) 6%, var(--key-lo))); }
+button.wide.pick-time.on { transform: translateY(2px); box-shadow: var(--t-press), 0 1px 0 var(--key-base); }
+
+/* ---------- the control scale ---------- */
+/* 56: standard keys, steppers, fields */
+.ed-days button { font-size: 14px; padding: 0 2px; }
+.ed-days button, .row.dispatch > *, button.rowbtn.moved, .welcome .row > button.mini { min-height: var(--ctl); }
+.ed-fine button, .ed-fine output, .tstep-value { min-height: var(--ctl); }
+.toggle.big button { min-height: 58px; }
+.filebtn { min-height: var(--ctl); border-radius: var(--r-12); background: var(--t-key); box-shadow: var(--t-key-shadow); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+button.mini { border-radius: var(--r-12); font-size: 15px; }
+.slider-row { gap: var(--s-6); }
+.slider-row .mini { padding-left: var(--s-10); padding-right: var(--s-10); }
+/* stepper legends: one size, one weight, wherever a value is nudged */
+.ed-keys button, .ed-fine button, .tstep-row button, .brk-len button, button.pb-step, .steps4 button, .slider-row .mini { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+button.pv-step { font-size: 16px; }
+/* 64: rows and the commit key */
+button.wide, button.rowbtn, .lever, .ed-len button, .steps4 button { min-height: var(--ctl-lg); }
+button.wide, button.rowbtn, button.opt, button.act, .lever { border-radius: var(--r-16); }
+.ed-len button { font-size: 17px; }
+.plan-text b { font-size: 18px; }
+.lever-text b { font-size: 18px; font-weight: 800; }
+button.rowbtn { font-size: 16px; }
+.chips button { font-size: 17px; }
+/* the icon tile on a plan row is a small recessed window */
+.plan-icon { background: var(--screen); box-shadow: var(--t-well-in), var(--t-lip); }
+
+/* ---------- status keys: the lit one is latched down ---------- */
+.status-buttons button.on, .big-status button.on { transform: translateY(2px); background: linear-gradient(180deg, color-mix(in srgb, var(--led, var(--muted)) 20%, var(--key-lo)), color-mix(in srgb, var(--led, var(--muted)) 9%, var(--key-lo))); box-shadow: inset 0 3px 7px var(--t-cast), 0 1px 0 var(--key-base), 0 0 18px color-mix(in srgb, var(--led, transparent) 35%, transparent); }
+.status-buttons button::before, .big-status button::before { height: 5px; border-radius: 3px; }
+button.drive-stop:active { box-shadow: var(--t-press), 0 1px 0 var(--key-base); transform: translateY(3px); }
+
+/* ---------- ROCKER: the segmented toggle ---------- */
+/* Night keeps its exact colours (the L2 pin reads them): the depth is all shadow. In day the
+   well is a shade deeper than the page, so the chosen white key can never wash out again. */
+.toggle { background: var(--t-well); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); }
+.toggle button { position: relative; min-height: 50px; border-radius: 9px; padding: 8px 4px 12px; font-size: 15px; font-weight: 700; }
+.toggle button.on { background-image: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0)); box-shadow: inset 0 1px 0 var(--edge-hi), 0 2px 0 var(--key-base), 0 3px 6px var(--t-cast); }
+:root[data-theme="day"] .toggle button.on { background-image: none; box-shadow: inset 0 0 0 1px var(--tick), 0 2px 0 var(--key-base), 0 3px 6px var(--t-cast); }
+/* the lamp on the chosen side: selection is carried by position, weight, edge AND a lit bar */
+.toggle button.on::after { content: ""; position: absolute; left: 50%; bottom: 5px; width: 22px; height: 3px; margin-left: -11px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+.toggle button:not(.on):active { box-shadow: var(--t-press); }
+
+/* ---------- switches: a checkbox is a dash slide switch ---------- */
+label.check { gap: var(--s-14); min-height: var(--ctl); }
+label.check input { -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 56px; height: 48px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: var(--r-12); background: none; box-shadow: none; cursor: pointer; }
+label.check input::before { content: ""; box-sizing: border-box; position: absolute; left: 0; right: 0; top: 8px; height: 32px; border-radius: var(--r-pill); border: 1px solid var(--line); background: radial-gradient(circle at 41px 50%, transparent 3px, var(--muted) 3.5px, var(--muted) 5px, transparent 5.5px), var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+label.check input::after { content: ""; box-sizing: border-box; position: absolute; top: 11px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--t-grip); border: 1px solid var(--t-grip-edge); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 3px var(--t-cast); transition: transform 120ms ease-out; }
+label.check input:checked::before { border-color: var(--t-accent-lo); background: linear-gradient(var(--on-accent), var(--on-accent)) 14px 50% / 2px 10px no-repeat, var(--accent-solid); }
+label.check input:checked::after { transform: translateX(24px); }
+label.check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { label.check input::after { transition: none; } }
+
+/* ---------- SLIDER: a groove and a knurled grip ---------- */
+.slider input[type=range], input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; height: 56px; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--accent) 0, var(--accent) var(--fill, 0%), var(--t-well) var(--fill, 0%)); box-shadow: var(--t-well-in), var(--t-lip); }
+input[type=range]::-moz-range-track { height: 14px; border-radius: 7px; background: var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+input[type=range]::-moz-range-progress { height: 14px; border-radius: 7px; background: var(--accent); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 36px; height: 44px; margin-top: -15px; border-radius: 10px; border: 1px solid var(--t-grip-edge); background: linear-gradient(90deg, transparent 11px, var(--t-ridge-lo) 11px, var(--t-ridge-lo) 12px, var(--t-ridge-hi) 12px, var(--t-ridge-hi) 13px, transparent 13px, transparent 16px, var(--t-ridge-lo) 16px, var(--t-ridge-lo) 17px, var(--t-ridge-hi) 17px, var(--t-ridge-hi) 18px, transparent 18px, transparent 21px, var(--t-ridge-lo) 21px, var(--t-ridge-lo) 22px, var(--t-ridge-hi) 22px, var(--t-ridge-hi) 23px, transparent 23px) center / 100% 20px no-repeat, var(--t-grip); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast); }
+input[type=range]::-moz-range-thumb { width: 36px; height: 44px; border-radius: 10px; border: 1px solid var(--t-grip-edge); background: var(--t-grip); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 3px 0 var(--key-base), 0 5px 9px var(--t-cast); }
+input[type=range]:active::-webkit-slider-thumb { box-shadow: var(--t-press), 0 1px 0 var(--key-base); }
+input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-8); }
+
+/* ---------- READOUT: fields and value windows are recessed ---------- */
+label input, label select, input.num, input.hrs, input.tstep-pick, .ed-day input, .ed-type input { background: var(--screen); border: 1px solid var(--line); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); min-height: var(--ctl); }
+label input:focus-visible, label select:focus-visible, input.num:focus-visible, input.hrs:focus-visible, input.tstep-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bignum, .tstep-value, .ed-fine output, .lenrow, .ed-ctx, .stat { background: var(--screen); border: 1px solid var(--line); box-shadow: var(--t-well-in), var(--t-lip); }
+.tstep-value, .ed-fine output { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; }
+.limit-plate, .ed-clock, .grid { box-shadow: var(--t-well-in), var(--t-lip); }
+.meter-bar { height: 12px; border-radius: 4px; box-shadow: var(--t-well-in), var(--t-lip); }
+.meter-bar span { height: 12px; }
+.flow-dots span, .ed-bar span { height: 6px; background: var(--t-well); box-shadow: var(--t-well-in); }
+.flow-dots span.on, .ed-bar span.on { background: var(--accent); box-shadow: 0 0 8px var(--glow); }
+
+/* ---------- panels, header, dock, tab bar, sheets ---------- */
+.card, .meters, .split-now-after { box-shadow: inset 0 1px 0 var(--edge-hi), inset 0 -1px 0 var(--t-bevel), 0 8px 20px var(--drop); }
+.top { box-shadow: 0 1px 0 var(--edge-hi), 0 8px 14px -10px var(--t-cast); }
+.dock { box-shadow: inset 0 1px 0 var(--edge-hi), 0 -8px 14px -10px var(--t-cast); }
+.tabs { box-shadow: inset 0 1px 0 var(--edge-hi), 0 -8px 16px -8px var(--t-cast); }
+.tabs button + button { box-shadow: -1px 0 0 var(--line), inset 1px 0 0 var(--edge-hi); }
+.tabs button.on { background: linear-gradient(180deg, var(--tint-accent), transparent 70%); }
+.tabs button:active { box-shadow: var(--t-press); transform: none; }
+.tabs button.on::before { height: 4px; left: 22%; right: 22%; }
+/* the sheet's handle is a recessed finger slot */
+.sheet-handle { width: 52px; height: 6px; border-radius: 3px; background: var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
+.modal { box-shadow: inset 0 1px 0 var(--edge-hi), 0 24px 48px var(--t-cast); background: linear-gradient(180deg, var(--surface-hi), var(--panel)); }
+
+/* ---------- Now: the Timeline | Dial switch, compact, in the panel's own top corner ---------- */
+/* Field note (Lorico): the switch took a whole line. It is now the size of the header's
+   Day | Night control and sits in the top-right corner of the Now panel, sharing the band the
+   panel's label already had. Its two keys keep the 48px floor. A browser without :has() keeps
+   the L2 full-line layout — nothing is lost, only not compacted. */
+@supports selector(:has(*)) {
+  .hero:has(> .card-switch) > .card-switch { position: absolute; top: 12px; right: 12px; z-index: 2; margin: 0; padding: 0; border: 0; gap: 0; }
+  .hero:has(> .card-switch) .card-switch-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .hero:has(> .card-switch) .card-switch .toggle { flex: none; }
+  .hero:has(> .card-switch) .card-switch .toggle button { flex: none; min-height: var(--ctl-floor); min-width: 56px; padding: 0 var(--s-12) 4px; font-size: 13px; letter-spacing: .02em; }
+  .hero:has(> .card-switch) > .hero-label:first-child,
+  .hero:has(> .card-switch) > .hero-lead:first-child,
+  .hero:has(> .card-switch) > .tl-head:first-child .hero-label { display: flex; align-items: center; min-height: 50px; padding-right: 158px; }
+  .hero:has(> .card-switch) > .pv-band:first-child { margin-right: 158px; }
+  .hero:has(> .card-switch) > .dial:first-child { margin-top: 28px; }
+}
+
+/* ===================================================================================
+   REIMAGINE (2026-11-12) — "Road signs by day, dash lights by night".
+   Direction: Lorico, 2026-11-12 (voice) — reimagine the design, free rein, grounded in
+   owner-operator trucking: more intuitive, more tactile, more pleasant; for a tired driver
+   in a cab at 2 a.m. — gloves, glare, vibration, one hand, a glance.
+
+   A driver already reads two visual languages without thinking: highway signs (shape and
+   colour, built to be read at speed in glare) and the dash (lit legends on black, built to
+   spare night vision). This layer borrows both instead of inventing a third:
+     SIGN     every answer card opens with a small road sign — green rectangle (hours
+              left), yellow diamond (under an hour / break due), red octagon (out of
+              hours), blue rest-area square (resting). Solid sign colours by day; a dark
+              plate with a lit legend by night.
+     CLOCKS   the four clocks (11 · 14 · break · 70) as a cluster of gauge windows.
+     ROCKERS  the four duty statuses as icon keys; the one you are in is fully lit.
+   Append-only like the tactile pass above it: nothing above this banner was edited except
+   the two palette values named in package-reimagine (night --text / --muted), which the
+   contrast gate reads and verifies in place. Presentation only.
+   =================================================================================== */
+html {
+  /* FHWA-family sign colours; each ink pair is ≥ 4.5:1 (checked by test/dom/reimagine-signs) */
+  --sign-go: #006b3f; --sign-go-ink: #ffffff;
+  --sign-warn: #ffc20e; --sign-warn-ink: #14110a;
+  --sign-stop: #b3202a; --sign-stop-ink: #ffffff;
+  --sign-rest: #0b4a9e; --sign-rest-ink: #ffffff;
+  /* night: the plate goes dark and the legend is the lamp */
+  --lamp-go: var(--good); --lamp-warn: var(--warn); --lamp-stop: var(--bad); --lamp-rest: var(--accent);
+}
+
+/* ---------- SIGN ---------- */
+.sign { --sg: var(--sign-go); --sg-ink: var(--sign-go-ink); --lamp: var(--lamp-go);
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin: 4px 0 10px; padding: 0 14px 0 6px;
+  border-radius: 9px; font-size: 13px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; line-height: 1;
+  background: color-mix(in srgb, var(--sg) 24%, #05070a); color: var(--lamp);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lamp) 55%, transparent), 0 0 14px color-mix(in srgb, var(--lamp) 16%, transparent); }
+.sign-warn { --sg: var(--sign-warn); --sg-ink: var(--sign-warn-ink); --lamp: var(--lamp-warn); }
+.sign-stop { --sg: var(--sign-stop); --sg-ink: var(--sign-stop-ink); --lamp: var(--lamp-stop); }
+.sign-rest { --sg: var(--sign-rest); --sg-ink: var(--sign-rest-ink); --lamp: var(--lamp-rest); }
+.sign-shape { flex: none; }
+.sign-face { fill: var(--lamp); stroke: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--lamp) 55%, transparent)); }
+.sign-mark { fill: none; stroke: #05070a; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* day: the reflective sign — solid colour, the inset keyline every highway sign carries */
+:root[data-theme="day"] .sign { background: var(--sg); color: var(--sg-ink);
+  box-shadow: inset 0 0 0 2px var(--sg), inset 0 0 0 3.5px color-mix(in srgb, var(--sg-ink) 88%, transparent), 0 2px 0 color-mix(in srgb, var(--sg) 60%, #000), 0 4px 8px var(--t-cast); }
+:root[data-theme="day"] .sign-face { fill: var(--sg-ink); filter: none; }
+:root[data-theme="day"] .sign-mark { stroke: var(--sg); }
+:root[data-theme="day"] .sign { padding-left: 9px; }
+
+/* the hero frame wears the state too (the border the tactile pass left neutral) */
+@supports selector(:has(*)) {
+  .hero:has(> .sign-go) { border-color: color-mix(in srgb, var(--lamp-go) 34%, var(--line)); }
+  .hero:has(> .sign-warn) { border-color: color-mix(in srgb, var(--lamp-warn) 70%, var(--line)); }
+  .hero:has(> .sign-stop) { border-color: color-mix(in srgb, var(--lamp-stop) 75%, var(--line)); }
+  .hero:has(> .sign-rest) { border-color: color-mix(in srgb, var(--lamp-rest) 45%, var(--line)); }
+  :root[data-theme="day"] .hero:has(> .sign-go) { border-color: color-mix(in srgb, var(--sign-go) 55%, var(--line)); }
+  :root[data-theme="day"] .hero:has(> .sign-warn) { border-color: color-mix(in srgb, var(--sign-warn) 80%, #7a5a00); border-width: 2px; }
+  :root[data-theme="day"] .hero:has(> .sign-stop) { border-color: var(--sign-stop); border-width: 2px; }
+  :root[data-theme="day"] .hero:has(> .sign-rest) { border-color: color-mix(in srgb, var(--sign-rest) 60%, var(--line)); }
+  /* the sign owns the top band now; the label under it no longer has to dodge the switch */
+  .hero:has(> .sign) > .hero-label, .hero:has(> .sign) > .hero-lead, .hero:has(> .sign) > .tl-head .hero-label { display: block; min-height: 0; padding-right: 0; }
+  .hero:has(> .sign) > .dial { margin-top: 0; }
+  /* narrow phones: the switch tightens so the sign always fits beside it */
+  @media (max-width: 389px) {
+    .hero:has(> .card-switch) .card-switch .toggle button { padding: 0 var(--s-8) 4px; font-size: 12px; }
+  }
+}
+
+/* ---------- the answer: bigger, and the stop time gets its own readout ---------- */
+.hero .tl-head { align-items: flex-end; margin-bottom: var(--s-10); }
+.hero .tl-main .hero-value { font-size: clamp(56px, 17vw, 72px); line-height: 1; letter-spacing: -1px; margin-top: 2px; }
+.hero .tl-head .hero-stop { background: var(--screen); border: 1px solid var(--line); border-radius: var(--r-12); box-shadow: var(--t-well-in), var(--t-lip); padding: 6px 12px 7px; align-items: flex-end; margin-top: 0; }
+.hero .tl-head .hero-stop-date { font-size: 12px; letter-spacing: .08em; color: var(--muted); font-weight: 800; }
+.hero .tl-head .hero-stop-time { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 32px; line-height: 1.05; }
+
+/* ---------- CLOCKS: the four limits as a gauge cluster ---------- */
+.meters { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-10); padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.meter { container-type: inline-size; display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-height: 92px; padding: 10px 12px 12px; border-radius: var(--r-14); background: var(--screen); border: 1px solid var(--line); box-shadow: var(--t-well-in), var(--t-lip); font-size: 15px; }
+.meter-label { font-size: 12px; letter-spacing: .08em; }
+.meter-value { order: 2; text-align: left; font-size: 20px; font-size: min(22px, 12cqi); font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.meter-bar { order: 3; margin-top: auto; }
+.meter.on { border-color: var(--accent); box-shadow: var(--t-well-in), 0 0 0 1px var(--accent), 0 0 14px var(--glow); }
+.meter.on .meter-label::after { content: "sets your stop time"; display: block; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 700; color: var(--link); margin-top: 1px; }
+.meter:not(.on) .meter-label::after { content: "\00a0"; display: block; font-size: 12px; margin-top: 1px; }
+.meter:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* ---------- ROCKERS: the status dock ---------- */
+.status-buttons { gap: 8px; }
+.status-buttons button { min-height: 78px; padding: 12px 2px 8px; gap: 3px; font-size: 14px; letter-spacing: .01em; }
+.status-buttons button .dock-ico { display: block; line-height: 0; color: var(--led, var(--muted)); }
+.status-buttons button::before { top: 6px; left: 30%; right: 30%; }
+/* the status you are in: the whole key is lit in its colour, ink on top (ink pairs are gated) */
+.status-buttons button.on { background: linear-gradient(180deg, color-mix(in srgb, var(--led) 92%, #fff), var(--led)); color: var(--chip-ink); border-color: var(--led); box-shadow: inset 0 3px 6px rgba(0,0,0,.28), 0 1px 0 var(--key-base), 0 0 20px color-mix(in srgb, var(--led) 40%, transparent); }
+.status-buttons button.on .dock-ico { color: var(--chip-ink); }
+.status-buttons button.on::before { background: var(--chip-ink); opacity: .55; box-shadow: none; }
+/* not by colour alone: the lit key also carries a check, as a badge in its corner */
+.status-buttons button.on > svg { position: absolute; top: 7px; right: 7px; width: 18px; height: 18px; stroke-width: 3; color: var(--chip-ink); }
+
+/* ---------- tab bar: bigger pictures, a lamp over the one you are on ---------- */
+.tabs button svg { width: 26px; height: 26px; }
+.tabs button { font-size: 12px; letter-spacing: .08em; padding: 5px 4px 6px; gap: 2px; line-height: 1.2; }  /* the bar keeps its 60px slot: the dock above is pinned to it */
+.tabs button.on { color: var(--text); }
+.tabs button.on svg { color: var(--accent); }
+
+/* ---------- driving view ---------- */
+.drive-body > .sign { transform: scale(1.2); margin: 0 0 14px; }
+button.drive-stop { min-height: 112px; font-size: 28px; letter-spacing: .01em; }
+:root[data-theme="day"] main.drive.warn .sign, :root[data-theme="day"] main.drive.bad .sign { box-shadow: inset 0 0 0 2px var(--sg), inset 0 0 0 3.5px color-mix(in srgb, var(--sg-ink) 88%, transparent), 0 0 0 2px var(--chip-ink); }
+
+/* the timeline's value column: a day and a time on ONE line ("Fri 00:11"), never stacked */
+.taxis-row { grid-template-columns: 92px 1fr 88px; }
+.taxis-row:not(.taxis-head) > .taxis-value { max-width: 6em; font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 15px; }
+.taxis-label { font-size: 14px; font-weight: 700; }
+.taxis-row { min-height: 32px; }
+/* the door to the less common statuses: quieter than the four rockers above it */
+button.dock-more { min-height: 46px; margin-top: 8px; font-size: 14px; }
+
+/* ---------- the sentence labels in an answer card: sentence case, read once, not decoded ----------
+   (the tracked small-caps label is kept for the two-word "You can drive" inside the dial) */
+.hero > .hero-label, .hero > .tl-head .hero-label { font-size: 16px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text); line-height: 1.3; }
+.hero > .tl-head .hero-label { color: var(--muted); font-size: 17px; }
+/* the sign already says it: the one-line "Out of driving hours/time" label under a stop sign is a repeat */
+.hero > .sign-stop + .hero-label { display: none; }
+.hero > .hero-value { font-size: clamp(52px, 16vw, 68px); line-height: 1.02; margin-top: 2px; }
+.hero > .hero-stop { text-transform: none; align-items: flex-start; font-size: 19px; font-weight: 700; margin-top: 6px; }
+.hero > .hero-stop-date { font-size: 16px; color: var(--muted); }
+.hero > .hero-lead { font-size: 20px; line-height: 1.2; margin-bottom: 8px; }
+
+/* the status panel's four big keys light the same way the dock's do */
+.big-status button.on { background: linear-gradient(180deg, color-mix(in srgb, var(--led) 92%, #fff), var(--led)); color: var(--chip-ink); border-color: var(--led); box-shadow: inset 0 3px 6px rgba(0,0,0,.28), 0 1px 0 var(--key-base), 0 0 20px color-mix(in srgb, var(--led) 40%, transparent); }
+.big-status button.on::before { background: var(--chip-ink); opacity: .55; box-shadow: none; }
+
+/* ---------- More: explanations fold behind one row; the settings are the content ---------- */
+details.help { margin: 2px 0 6px; }
+details.help > summary { display: flex; align-items: center; gap: 8px; min-height: var(--ctl-floor); padding: 0 4px; color: var(--link); font-size: 15px; font-weight: 700; cursor: pointer; list-style: none; border-radius: var(--r-10); }
+details.help > summary::-webkit-details-marker { display: none; }
+details.help > summary::after { content: "+"; margin-left: auto; font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 20px; font-weight: 700; color: var(--muted); padding-right: 6px; }
+details.help[open] > summary::after { content: "–"; }
+details.help > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.help > p { margin: 0 4px 8px; padding: 10px 12px; border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+
+/* ---------- the log graph: drawn like the paper log — one stair-step line, an hour ruler (M · 6 · N · 6) ---------- */
+.grid-step { stroke: var(--text); stroke-width: 2; stroke-linecap: round; opacity: .85; }
+.grid-hour { fill: var(--muted); font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-size: 12px; font-weight: 700; }
+.grid-label { font-size: 13px; font-weight: 800; }
+/* narrow phones: the longest sign words ("UNDER 1 HOUR", "OUT OF HOURS") keep clear of the switch */
+@media (max-width: 389px) { .hero > .sign { letter-spacing: .03em; gap: 6px; padding-right: 10px; } }
+/* the stop time is always in the same place: one full-width readout under the big number */
+.hero .tl-head { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: var(--s-8); }
+.hero .tl-head .hero-stop { flex-direction: row; justify-content: space-between; align-items: center; gap: var(--s-12); padding: 6px 14px; }
+.hero .tl-head .hero-stop-date { font-size: 13px; }
