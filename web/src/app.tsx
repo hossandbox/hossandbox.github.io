@@ -3192,10 +3192,10 @@ const KEYS_MINUTES: ClockKeys = [[[-5, '−5', '5 minutes earlier'], [-1, '−1'
  * the preset keys, the phone's clock picker, and another-day. `say` reads the big clock's time
  * aloud ("Started 06:41"); `name` labels the exact-time boxes.
  */
-function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true }: {
-  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean;
+function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true, typeFirst = false }: {
+  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean; typeFirst?: boolean;
 }) {
-  const [typing, setTyping] = useState(false);
+  const [typing, setTyping] = useState(typeFirst);
   const chips = dayChips(now, future);
   const onChip = chips.some((c) => sameDay(c.at, at));
   const pickDate = (v: string) => {
@@ -3491,6 +3491,11 @@ function LongStep({ k, now }: { k: EdKind; now: number }) {
   const set = (len: number) => openSheet({ ...k, draft: { ...d, len: Math.max(5, len), fixedLen: false } });
   // Item 2/3: the end time is a time too — tap it to type it, or use the clock picker. An exact
   // end is taken as given (no 5-minute floor), as long as it is after the start.
+  // Patch L3 (field report 2026-11-17): the end is picked on the SAME clock picker as the
+  // start, day included — a status can end on a later day than it began (Off Duty from
+  // Saturday 00:00 to Monday 18:40 could not be said at all when the end was a time of day
+  // on the start's day). The typed box starts open, as it did when the end had a picker of
+  // its own; the day chips and the "Another day" date sit alongside it.
   const [typingEnd, setTypingEnd] = useState(false);
   const setEnd = (end: number) => { if (end > d.start) openSheet({ ...k, draft: { ...d, len: end - d.start, fixedLen: false } }); };
   const sinceStart = now - d.start;
@@ -3512,8 +3517,8 @@ function LongStep({ k, now }: { k: EdKind; now: number }) {
         <button aria-label="5 minutes longer" onClick={() => set(d.len + 5)}>+5</button>
         <button aria-label="15 minutes longer" onClick={() => set(d.len + 15)}>+15</button>
       </div>
-      <p class="ed-ends">Ends <button class="ed-ends-tap mono" aria-expanded={typingEnd} aria-label={`Ends ${clock(d.start + d.len)}. Tap to type the time`} onClick={() => setTypingEnd(!typingEnd)}>{clock(d.start + d.len)}</button></p>
-      <TimeEntry at={d.start + d.len} set={setEnd} name="Exact end time" typing={typingEnd} onDone={() => setTypingEnd(false)} />
+      <p class="ed-ends">Ends <button class="ed-ends-tap mono" aria-expanded={typingEnd} aria-label={`Ends ${clock(d.start + d.len)}. Tap to set the day and time it ends`} onClick={() => setTypingEnd(!typingEnd)}>{clock(d.start + d.len)}</button></p>
+      {typingEnd && <ClockPick at={d.start + d.len} set={setEnd} now={now} future={tentative} say="Ended" name="Exact end time" keys={KEYS_HOURS} typeFirst />}
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: 'check' })}>Check it</button>
     </>

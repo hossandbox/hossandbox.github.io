@@ -1180,6 +1180,18 @@ export function clearSpan(list: Segment[], start: number, end: number, keep: (x:
  * entry sits inside it). A what-if row is placed among the what-if rows only; it never touches
  * the logged record. Pure: returns the patch and the list of what was absorbed, so the panel
  * can show it and ask ONE explicit confirmation before anything is saved.
+ *
+ * Patch L3 (field report 2026-11-17): an edit also keeps the JOIN it moves. Absorb only ever
+ * pulls a neighbour toward the entry; pulling an end EARLIER (or pushing a start LATER) opened
+ * a gap the neighbour never followed into — worst case the open status, whose start stayed
+ * put while the entry before it shrank (Driving edited to end 07:08, On Duty still "since
+ * 07:19": eleven minutes owned by nobody). So when an edit moves a boundary the corrected
+ * row shared with a neighbour that ABUTTED it, the neighbour's side of that boundary moves
+ * the same way: the next row's start (or the open status's start) takes the new end, the
+ * previous row's end takes the new start. One step only — the neighbour's far side never
+ * moves — the moved boundary must stay inside the entry's own old span (a whole-entry move
+ * hands over nothing and leaves a gap, never a neighbour stretched across other rows), and
+ * a gap that was already there is not the edit's to close.
  */
 export function placeEntry(s: Pick<State, 'segments' | 'tentative' | 'current'>, row: Segment, orig: Segment | null, now: number): { patch: Pick<State, 'segments' | 'tentative' | 'current'>; absorbed: Absorbed[] } {
   if (row.tentative) {
@@ -1188,10 +1200,28 @@ export function placeEntry(s: Pick<State, 'segments' | 'tentative' | 'current'>,
     return { patch: { segments: s.segments, tentative, current: s.current }, absorbed: c.absorbed };
   }
   const c = clearSpan(s.segments, row.start, row.end, (x) => x === orig || !!x.tentative);
-  const segments = orig && c.list.includes(orig) ? c.list.map((x) => (x === orig ? row : x)) : [...c.list, row];
+  let segments = orig && c.list.includes(orig) ? c.list.map((x) => (x === orig ? row : x)) : [...c.list, row];
   const absorbed = c.absorbed;
   let current = s.current;
   const cur = s.current;
+  // Patch L3: keep the join (see the note above). Only for an edit, only where the corrected
+  // row abutted a neighbour, and only in the direction absorb does not already cover. The
+  // moved boundary must also stay INSIDE the entry's own old span: the neighbour may only
+  // be handed time the entry itself gave up. A boundary landing outside the old span means
+  // the entry MOVED — dragging the neighbour then would stretch it across the rows in
+  // between, and the saved log would hold two entries for one minute (inventing or erasing
+  // logged time). A move leaves a gap, as it did before this patch.
+  if (orig) {
+    if (row.end < orig.end && row.end > orig.start) {
+      const next = segments.find((x) => x !== row && !x.tentative && x.start === orig.end);
+      if (next) segments = segments.map((x) => (x === next ? { ...x, start: row.end } : x));
+      else if (cur && orig.end === cur.since && row.end < cur.since) current = { ...cur, since: row.end };
+    }
+    if (row.start > orig.start && row.start < orig.end) {
+      const prev = segments.find((x) => x !== row && !x.tentative && x.end === orig.start);
+      if (prev) segments = segments.map((x) => (x === prev ? { ...x, end: row.start } : x));
+    }
+  }
   if (cur && row.end > cur.since && row.start < Math.max(now, cur.since + 1)) {
     const live: Segment = { status: cur.status, start: cur.since, end: Math.max(now, cur.since), ...(cur.note ? { note: cur.note } : {}), ...(cur.createdAt !== undefined ? { createdAt: cur.createdAt } : {}) };
     const tail: Segment[] = row.end < now ? [{ ...live, start: row.end }] : [];
