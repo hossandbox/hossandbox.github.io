@@ -6,12 +6,9 @@ Free beta, paid App Store version later. All placeholders filled (URL, contact e
 
 ## Beta rules (post these verbatim, or link to them)
 
-**What you get**
-- **$5 for every bug you're first to report and I confirm.** Cap $50 per driver; pool closes at $300.
-- **The paid App Store version free when it launches** (a promo code — redeem within 30 days).
+**The deal**
 - The app is free to use now, during beta.
-- **Never post a payment handle in a public issue.** When a bug is confirmed I comment on the issue;
-  you then email your Venmo handle to hossandbox.app@gmail.com and I pay within 48 hours.
+- Report bugs with the in-app 🐞 button or the GitHub form — reports are how the clocks get checked against real ELDs.
 
 **What counts as a bug**
 - The app's clocks disagree with the regulation (49 CFR 395.1(g) / 395.3) or with your ELD on the same inputs. *The ELD is not automatically right — if you think the ELD is wrong, say so and we'll check the reg together.*
@@ -79,7 +76,7 @@ What's different, concretely:
 
 Found along the way: several popular trucking sites have the split rule *wrong* (they say only the 7-hour period comes out of your 14; the reg says both do). That's why I don't trust my own testing and want yours.
 
-**It's free while it's in beta** — and I'm asking for your eyes, not your money. $5 for every bug you're first to report and I confirm, plus the paid App Store version free when it launches. Rules and the report form are on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together.
+**It's free while it's in beta** — and I'm asking for your eyes, not your money. If you find a bug, report it — the report form is on the GitHub page linked from the app. If your ELD and my app disagree, I want to know either way — we'll look at the reg together.
 
 What it is NOT: it is not an ELD, it's not registered with anybody, it doesn't log for you. It's the napkin, not the logbook.
 
@@ -95,7 +92,7 @@ Every HOS calculator I found does one slice — recap only, or "do these two res
 
 So I built one. Free, no account, no GPS, nothing leaves your phone. Sliders for "3-hour nap now, 7 in the bunk tonight — what do I wake up with, and what am I sitting in if I bail on the 7?" Plus 70-hour recap forecast, trip planner that runs splits, and miles-to-parking with buffer lines. Current with FMCSA's July 2026 split guidance. Math is open source, tested against FMCSA's own examples.
 
-Need CDL drivers to break it while it's free. **$5 per confirmed bug (first reporter), plus the paid App Store version free when it launches.**
+Need CDL drivers to break it while it's free. **Found a bug? Report it — reports are how this gets checked against real ELDs.**
 
 https://hossandbox.github.io/ — add to home screen.
 
@@ -103,7 +100,7 @@ https://hossandbox.github.io/ — add to home screen.
 
 ## Post 3 — Comment version (when someone in a thread asks the split question)
 
-Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I want drivers to break it before it goes on the App Store, so it's $5 per confirmed bug plus the paid version free. If it disagrees with your ELD, tell me.
+Not to hijack, but I built a free calculator for exactly this — sliders for the nap + the bunk time, shows your 11/14 after the pair completes *and* what you're sitting in if you skip the second break (that's the part other calculators leave out). Handles days with multiple breaks and the new July 2026 FMCSA guidance on 10-hour sleeper resets. Not an ELD, nothing to install, nothing leaves your phone: https://hossandbox.github.io/ — I want drivers to break it before it goes on the App Store, so please try. If it disagrees with your ELD, tell me.
 
 ---
 
@@ -145,14 +142,14 @@ So I built a free tool that answers the "what if." You slide the bars — nap he
 
 To be clear: this is not a legal paper log and it's not an ELD. When your ELD is down, you still have to do your paper RODS the way your carrier requires. This is the scratchpad you use to *plan* the day — what your hours look like before you commit to them.
 
-Here's the favor. I'm one person, and I built this by reading the actual federal regulations on top of driving for a living. Before I put it on the App Store I want real drivers to try to break it. It's free while it's in beta, and anyone who's first to report a confirmed bug gets **$5 and the paid version free** when it launches.
+Here's the favor. I'm one person, and I built this by reading the actual federal regulations on top of driving for a living. Before I put it on the App Store I want real drivers to try to break it. It's free while it's in beta, and I'm asking anyone who finds a bug to report it.
 
-Found a bug? Use the "Report a bug" link in the app. **Please don't post your payment info publicly** — I'll reply on your report once I confirm it, and you can send me your Venmo handle privately. 🚛
+Found a bug? Use the "Report a bug" link in the app — I'll reply on your report once I've had a look. 🚛
 
 ---
 
 **What I changed and why:**
-- **"include your Venmo creds!" → removed.** Never collect payment handles in a public post or issue. Venmo exposes the account holder's real name, anyone can send a payment *request* against a handle, and you'd be publishing a list of drivers' identities tied to your app. The safe flow — now in the README, the issue form, and the app — is: report publicly → I confirm → handle emailed privately to hossandbox.app@gmail.com → paid within 48 h. ("Creds" also means passwords; asking for credentials in a post reads like phishing.)
+- **"include your Venmo creds!" → removed.** Never ask for payment handles (or anything credential-shaped) in a public post or issue — it reads like phishing and publishes drivers' identities. Bug reports go through the GitHub form; that's the whole flow.
 - **Naming the employer → "driving for a living."** Naming your employer while promoting a personal product is exactly what corporate social-media policies exist to catch. Same credibility, no exposure. Check the policy if you'd rather name them.
 - **Added the paper-log disclaimer.** When an ELD fails, §395.34 puts the driver on paper RODS. This app can't satisfy that, and a driver who thinks it does is in real trouble. One line protects both of you.
 - **"send this github link" → the app link.** Drivers want the app, not a repository. GitHub reads as techy to a Facebook audience; the app URL installs to a home screen in two taps.
@@ -167,7 +164,7 @@ I built a free tool for the question no logging device answers: "if I nap 3 hour
 
 https://hossandbox.github.io/
 
-Know a CDL driver? Send it to them. It's free while it's in beta, and the first to report a confirmed bug gets $5 and the paid version free. Tag them below. Thank you!
+Know a CDL driver? Send it to them. It's free while it's in beta — if they find a bug, the Report link is right in the app. Tag them below. Thank you!
 
 ---
 
@@ -181,7 +178,7 @@ Tips for the personal page:
 
 ## Modmail (send before posting on r/Truckers)
 
-Hi mods — I'd like to post about a free split-sleeper/recap calculator I built (web app, not an ELD, no account, no ads, no data collection). It's in free beta and I'm asking drivers to test it against their ELDs and report mismatches; the first person to report a confirmed bug gets the paid App Store version free when it launches. No money changes hands. I know this brushes against the promotion rules — happy to post it however you prefer (weekly thread, flair, no link in the body, whatever works). Draft is below. Thanks for the community.
+Hi mods — I'd like to post about a free split-sleeper/recap calculator I built (web app, not an ELD, no account, no ads, no data collection). It's in free beta and I'm asking drivers to test it against their ELDs and report mismatches. No money changes hands. I know this brushes against the promotion rules — happy to post it however you prefer (weekly thread, flair, no link in the body, whatever works). Draft is below. Thanks for the community.
 
 ---
 
@@ -196,16 +193,10 @@ Hi mods — I'd like to post about a free split-sleeper/recap calculator I built
 
 ## Cost of the beta
 
-**Cash reward: $5 per confirmed bug**, first reporter only, cap **$50 per driver**, pool closes at
-**$300**. Plan on 10–25 confirmed bugs = $50–125; the cap is what keeps it bounded. Pay by Venmo
-within 48 hours of confirming — and only after the reporter emails their handle to
-hossandbox.app@gmail.com. Never collect a handle from a public post or issue.
+**No cash rewards.** Bug reports are unpaid — drivers report because the clocks matter to them,
+and every report gets a reply.
 
-**Non-cash reward:** the paid app free at launch (promo code, redeem within 30 days). Keep the
-founders list under **100** — Apple's promo-code limit per app version — and don't promise "free
-forever"; promise the code and the window, which is what you can actually deliver.
-
-Real costs: the $5s above, plus the Apple Developer Program ($99/yr) when you're ready to ship.
+Real costs: the Apple Developer Program ($99/yr) when you're ready to ship.
 
 ## Pricing & the App Store path (decide before launch)
 

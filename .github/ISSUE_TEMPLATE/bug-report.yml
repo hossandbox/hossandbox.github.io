@@ -6,8 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing. **$5 for each bug you're first to report and I confirm, plus the paid App Store version free** when it launches (see the beta rules in the README).
-        **Never put a payment handle in this issue** — I'll comment when a bug is confirmed, then you email your Venmo handle to hossandbox.app@gmail.com.
+        Thanks for testing. Reports from drivers are how the clocks get checked against real ELDs (see the beta rules in the README).
         HOS Sandbox is a planning scratchpad, not an ELD. Your official log governs.
   - type: input
     id: device

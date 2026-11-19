@@ -71,8 +71,8 @@ hh = out('trip/both strategies');
 console.log('compare cards:', (hh.match(/plancard/g) || []).length === 2, '· sleeper option present:', /Sleeper splits/.test(hh));
 setState({ tab: 'recap' }); hh = out('recap/day editor');
 console.log('day editor buttons:', (hh.match(/class="mini"/g) || []).length >= 7);
-setState({ tab: 'settings', bugEmail: 'bugs@example.com' }); hh = out('settings/bug email');
-console.log('bug button labelled:', /Report a bug<\/button>/.test(hh) || /Report a bug/.test(hh));
+setState({ tab: 'settings' }); hh = out('settings/bug reports');
+console.log('bug button labelled:', /Report a bug \(GitHub\)/.test(hh), '· no email field:', !/Prefer email instead/.test(hh));
 
 // Regression: "Fresh start" (only an OFF segment, then Driving) + Split Lab crashed on an undefined lastWork.end (2026-09-19)
 setState({ tab: 'split', segments: [{ status: 'OFF', start: now - 600, end: now }], current: { status: 'D', since: now }, tentative: [] });
@@ -423,13 +423,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     trip: { ...DEFAULT_TRIP, miles: 1234, pre: 45, stopMile: 600, stopMin: 90, until: 'OFF', view: 'restart34' },
     split: { ...getState().split, drive: 222 },
     loadCheck: { ...getState().loadCheck, miles: 777, leaveIn: 60, waitOff: true, answered: true },
-    bugEmail: 'roundtrip@example.com',
   };
   setState(original);
   const payload = JSON.parse(exportState(getState()));
 
   // import into a DIFFERENT state, as a restore would
-  setState({ segments: [], tentative: [], config: { ...getState().config, cycle: '70/8', timeZone: tz }, mph: 55, trip: { ...DEFAULT_TRIP }, bugEmail: '',
+  setState({ segments: [], tentative: [], config: { ...getState().config, cycle: '70/8', timeZone: tz }, mph: 55, trip: { ...DEFAULT_TRIP },
     split: { ...getState().split, drive: 1 }, loadCheck: { ...getState().loadCheck, miles: 1, leaveIn: 0, waitOff: false, answered: false } });
   setState((cur) => applyImportedState(cur, payload));
   const restored = getState();
@@ -443,7 +442,6 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     ['trip distance', restored.trip.miles === 1234],
     ['trip stop', restored.trip.stopMile === 600 && restored.trip.stopMin === 90],
     ['trip view', restored.trip.view === 'restart34'],
-    ['report email', restored.bugEmail === 'roundtrip@example.com'],
     // re-check M8: the Split Lab plan and the load question are part of a backup too
     ['split plan', restored.split.drive === 222],
     ['load question', restored.loadCheck.miles === 777 && restored.loadCheck.leaveIn === 60 && restored.loadCheck.waitOff === true && restored.loadCheck.answered === true],
@@ -464,7 +462,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState((cur) => applyImportedState(cur, oldPayload));
   if (getState().split.drive !== 111 || getState().loadCheck.miles !== 333) throw new Error('an older backup without plans must not reset the plans on screen');
 
-  setState({ nowOverride: null, segments: [], tentative: [], trip: { ...DEFAULT_TRIP }, config: { ...getState().config, timeZone: tz, cycle: '70/8' }, mph: 55, bugEmail: '' });
+  setState({ nowOverride: null, segments: [], tentative: [], trip: { ...DEFAULT_TRIP }, config: { ...getState().config, timeZone: tz, cycle: '70/8' }, mph: 55 });
   console.log('export/import round trip: OK');
 }
 // Regression (day/night theme + contrast): day must stay the default, the palette must not drift

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useContext } from 'preact/hooks';
-import { Component, createContext, type ComponentChildren } from 'preact';
+import { Component, createContext, type ComponentChildren, type JSX } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
 import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, statusHaptic, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
 
@@ -13,7 +13,7 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
     return (
       <div class="card warn">
         <h3>This tab hit a bug</h3>
-        <p class="small">Your log is safe. The other tabs still work. Please report this — $5 for the first person to report a confirmed bug, plus the paid App Store version free:</p>
+        <p class="small">Your log is safe. The other tabs still work. Please report this:</p>
         <pre class="small" style="white-space:pre-wrap">{this.state.err}</pre>
         <a class="btn" href={issue} target="_blank" rel="noopener">🐞 Report this crash</a>
         <button class="ghost" onClick={() => this.setState({ err: null })}>Try again</button>
@@ -240,23 +240,18 @@ const violationLabel: Record<Violation['kind'], string> = {
 
 const REPO = 'hossandbox/hossandbox.github.io';
 
-/** Copies the exported state to the clipboard and opens a prefilled GitHub issue (email fallback if set). */
+/** Copies the exported state to the clipboard and opens a prefilled GitHub issue — the only report channel. */
 function reportBug(s: State, ev: FullEvaluation) {
   const json = exportState(s);
   // GitHub rejects issue URLs past ~8 KB (414/500), and the log is URL-encoded at roughly 1.5×, so
   // only a short log rides in the URL; anything longer goes via the clipboard (bug report C4).
   const clocks = `drive now ${dur(ev.driveNow)} (${ev.binding}) · ${ev.shift.limits.drive / 60}-hr left ${dur(ev.shift.driveRemaining)} · ${ev.shift.limits.window / 60}-hr left ${dur(ev.shift.windowRemaining)} · cycle left ${dur(ev.cycle.remaining)}`;
   navigator.clipboard?.writeText(json).catch(() => {});
-  if (s.bugEmail) {
-    const body = ['What I did:', '', 'What the app showed:', '', 'What I expected (ELD / reg):', '', `Build: ${__BUILD__}`, `Clocks: ${clocks}`, '', json.length < 1500 ? json : '(log copied to clipboard — paste here)'].join('\n');
-    location.href = `mailto:${s.bugEmail}?subject=${encodeURIComponent('Split Decision bug')}&body=${encodeURIComponent(body)}`;
-    return;
-  }
   const q = new URLSearchParams({ template: 'bug-report.yml', title: '[bug] ', build: __BUILD__, clocks, log: json.length < 2500 ? json : '(log too long — it is on your clipboard; paste it here)' });
   window.open(`https://github.com/${REPO}/issues/new?${q}`, '_blank', 'noopener');
 }
 function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
-  return <button class="ghost" onClick={() => reportBug(s, ev)}>🐞 Report a bug{s.bugEmail ? ' (email)' : ' (GitHub)'}</button>;
+  return <button class="ghost" onClick={() => reportBug(s, ev)}>🐞 Report a bug (GitHub)</button>;
 }
 
 /* ============================================================ icons */
@@ -1287,7 +1282,7 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
     onTrack(from + Math.max(0, Math.min(1, x)) * span);
   } : undefined;
   const track = (l?: AxisLane) => (
-    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`} onClick={l?.onTap ? undefined : tapAt}>
+    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`} data-noswipe onClick={l?.onTap ? undefined : tapAt}>
       {wallPct !== null && <span class="taxis-tint" style={{ width: `${wallPct}%` }} />}
       {grid.map((g) => <span key={g} class="taxis-grid" style={{ left: `${pct(g)}%` }} />)}
       {hazard && <span class="taxis-hazard" />}
@@ -4873,7 +4868,6 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       <Card title="Bug reports">
         <BugButton s={s} ev={ev} />
         <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
-        <label>Prefer email instead? Send reports to<input type="email" placeholder="leave blank to use GitHub" value={s.bugEmail} onChange={(e) => setState({ bugEmail: (e.target as HTMLInputElement).value.trim() })} /></label>
       </Card>
       <Card title="Data">
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
@@ -5031,11 +5025,49 @@ export function applyGo(go: GoTarget) {
 }
 export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
+/* ============================================================ panel pager */
+
+/** Bottom-bar panels in display order (Lorico, 2026-11-18: Plan and Log swap places). The tab
+ * ids are unchanged — only the order the bar shows them in, and the order swipes walk. */
+export const PANEL_ORDER: State['tab'][] = ['now', 'plan', 'log', 'settings'];
+
+/** The panel the bottom bar lights for a tab: the planning screens sit under Plan (declutter
+ * patch, 2026-11-05; Capstone C3 D10-A moved recap/history there too). */
+export function navPanelOf(t: State['tab']): State['tab'] {
+  return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
+}
+
+/** Where a panel swipe lands: dir +1 walks forward (a left swipe), −1 back (a right swipe).
+ * Null at the ends — the pager does not wrap. From a planning sub-screen a swipe walks from
+ * Plan, its bottom-bar home. */
+export function panelSwipeTarget(tab: State['tab'], dir: 1 | -1): State['tab'] | null {
+  const j = PANEL_ORDER.indexOf(navPanelOf(tab)) + dir;
+  return j >= 0 && j < PANEL_ORDER.length ? PANEL_ORDER[j] : null;
+}
+
+const SWIPE_TAGS = new Set(['button', 'a', 'input', 'select', 'textarea', 'label']);
+/** True when a touch starts on (or inside) something the driver is operating — a button, a link,
+ * a form control, a log entry (entries are <button>s), a slider — or on anything marked
+ * data-noswipe (the timeline scrub track): the gesture belongs to that control, never to the
+ * panel pager. Walks the parent chain by hand; closest() is not present in every runtime this
+ * app is tested under. */
+export function swipeGuardHit(target: unknown): boolean {
+  let n = target as { localName?: string; hasAttribute?: (k: string) => boolean; parentNode?: unknown } | null | undefined;
+  for (let i = 0; n && i < 24; i++) {
+    if (n.localName && SWIPE_TAGS.has(n.localName.toLowerCase())) return true;
+    if (typeof n.hasAttribute === 'function' && n.hasAttribute('data-noswipe')) return true;
+    n = n.parentNode as typeof n;
+  }
+  return false;
+}
+
 export function App() {
   const s = useStore();
   const now = useNow();
   // Startup disclaimer — dismissed for this launch only; a fresh launch shows it again.
   const [, redraw] = useState(0);
+  // Panel pager: where the current touch began, and whether it began on open panel space.
+  const swipeStart = useRef<{ x: number; y: number; ok: boolean } | null>(null);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
   // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
@@ -5144,15 +5176,35 @@ export function App() {
       </main></div>
     );
   }
-  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['log', 'Log', I.log], ['plan', 'Plan', I.plan], ['settings', 'More', I.more]];
+  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['plan', 'Plan', I.plan], ['log', 'Log', I.log], ['settings', 'More', I.more]];
   // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
   // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
   // and the last-8-days view it opens moved from More to Plan.
-  const navOf = (t: State['tab']): State['tab'] => (t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t);
+  const navOf = navPanelOf;
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
   const blocked = disclaimer || sheet !== null;
+  // Panel pager handlers: a mostly-horizontal swipe of 48px+ on open panel space moves one
+  // panel along the bar's order; the bar follows because it renders from s.tab. A gesture that
+  // started on a control (see swipeGuardHit) or while a sheet/disclaimer blocks the screen
+  // never pages. Vertical scrolls stay scrolls: the horizontal run must dominate.
+  const onPanelTouchStart = (e: JSX.TargetedTouchEvent<HTMLElement>) => {
+    const t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    swipeStart.current = t ? { x: t.clientX, y: t.clientY, ok: !blocked && !swipeGuardHit(e.target) } : null;
+  };
+  const onPanelTouchEnd = (e: JSX.TargetedTouchEvent<HTMLElement>) => {
+    const st = swipeStart.current; swipeStart.current = null;
+    if (!st || !st.ok || blocked) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - st.x;
+    const dy = t.clientY - st.y;
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    const next = panelSwipeTarget(s.tab, dx < 0 ? 1 : -1);
+    if (next && next !== s.tab) setState({ tab: next });
+  };
+  const onPanelTouchCancel = () => { swipeStart.current = null; };
   if (showsDrivingView(s)) {
     return (
       <div class="app">
@@ -5170,7 +5222,7 @@ export function App() {
     <div class={fresh ? 'app is-demo' : 'app'}>
       {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); acknowledgeDisclaimer(); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
-      <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined}>
+      <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined} onTouchStart={onPanelTouchStart} onTouchEnd={onPanelTouchEnd} onTouchCancel={onPanelTouchCancel}>
         {s.nowOverride !== null && (
           <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. Anything you change while it is up is thrown away when you go back to the real clock. <button class="mini" onClick={() => useRealClock()}>Use real clock</button></p>
         )}

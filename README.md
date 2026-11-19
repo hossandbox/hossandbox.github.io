@@ -10,20 +10,16 @@ Property-carrying drivers, 49 CFR Part 395.
 > Split Decision is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not
 > replace your record of duty status. Your official log and your carrier's ELD govern.
 
-## Free beta — and how testers get the paid version free
+## Free beta
 
 **The app is free while it's in beta.** No account, no payment, no ads, nothing uploaded. When the
 App Store version launches it will be a paid app; this web version becomes a free **Lite** edition.
 
-**How to help (and what you get)**
+**How to help**
 - Drive with it for a few days and compare it to your ELD. **Open an issue** with the *Bug report*
   template — the in-app 🐞 button pre-fills it with your clocks and log.
-- **$5 for every bug you're first to report and I confirm**, plus **the paid App Store version free**
-  when it ships (promo code, redeem within 30 days of launch). Cap $50 per driver; pool closes at $300.
-- **Never post a payment handle in a public issue.** When your bug is confirmed I'll comment on the
-  issue; you then email your Venmo handle to **hossandbox.app@gmail.com** and I pay within 48 hours.
-- Email that same address to join the launch list.
-- Suggestions go through the *Suggestion* template. No cash, but they shape the app.
+- Email **hossandbox.app@gmail.com** to join the launch list.
+- Suggestions go through the *Suggestion* template. They shape the app.
 
 **Counts as a bug:** clocks that disagree with 49 CFR 395.1(g)/395.3 or with your ELD on the same
 inputs (if the ELD is the one that's wrong, that's worth knowing too); crashes, lost data, dead

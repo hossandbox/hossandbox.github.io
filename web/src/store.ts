@@ -133,8 +133,6 @@ export interface State {
    * only the three real origins, so an old or damaged save behaves exactly as the app did before.
    */
   planReturn: 'now' | 'plan' | 'recap';
-  /** where "Report a bug" sends mail */
-  bugEmail: string;
   /** Sound, vibration and notification alerts while driving (driver report 2026-10-06). Device setting: not exported. */
   alertsOn: boolean;
   /** Keep the screen on while the status is Driving, so a mounted phone keeps running its alerts. Device setting. */
@@ -244,7 +242,7 @@ export const INITIAL_STATE: State = {
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   nowCard: 'dial', nowCardAsked: false,
   disclaimerAcked: false, seededAt: null, dayCloses: [],
-  tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', bugEmail: '', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true, speakAlerts: false, speechAsked: false, speakAskOpen: false,
+  tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true, speakAlerts: false, speechAsked: false, speakAskOpen: false,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
 };
 
@@ -1008,7 +1006,6 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
     // before they were exported has neither, and then what is on screen stays rather than being reset.
     split: 'split' in d ? sanitizeSplit(d.split, cur.split) : cur.split,
     loadCheck: 'loadCheck' in d ? sanitizeLoadCheck(d.loadCheck, cur.loadCheck) : cur.loadCheck,
-    bugEmail: typeof d.bugEmail === 'string' ? d.bugEmail : cur.bugEmail,
   };
 }
 
@@ -2001,5 +1998,5 @@ export function segLabel(status: DutyStatus, note?: string): string {
 /** Everything a bug report needs. Kept small enough to paste into an email. */
 export function exportState(s: State): string {
   return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, bugEmail: s.bugEmail, nowOverride: s.nowOverride });
+    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, nowOverride: s.nowOverride });
 }
