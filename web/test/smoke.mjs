@@ -24,6 +24,17 @@ const out = (label) => {
   }
   return html;
 };
+// Panel strip (2026-11-18): every render carries all four pages at once, so a check
+// that asserts what one SCREEN omits must scope to that screen's page — from its
+// page-* marker to the next page's (nested cards are <section class="card">, never
+// "page page-*"). Presence checks keep reading the whole tree, as before.
+const pageOut = (html, page) => {
+  const marks = ['page-now', 'page-plan', 'page-log', 'page-settings'];
+  const i = html.indexOf(page);
+  if (i < 0) return '';
+  const next = marks.map((m) => html.indexOf(m, i + 1)).filter((j) => j > i);
+  return html.slice(i, next.length ? Math.min(...next) : html.length);
+};
 
 out('log/empty');
 setState({ segments: [{ status: 'OFF', start: now - 600, end: now }], current: { status: 'D', since: now - 120 } });
@@ -1605,10 +1616,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   let h = out('log/terminal far east');
   if (!/Today, Sun, Oct 11/.test(h)) throw new Error(`the carrier day must carry the terminal's date (${(h.match(/Today, [^<]*/) || [''])[0]})`);
   if (dz !== east && !/Carrier day from 00:00 Pacific\/Kiritimati · [A-Z][a-z]{2} \d\d:\d\d on this phone/.test(h)) throw new Error('with two zones, say when the day rolls on the phone clock');
-  // one zone: no extra words
+  // one zone: no extra words (scoped to the Log page: the Now page's ELD card and the
+  // More page's help text say "on this phone" for their own reasons, and both ride
+  // along in every render now that the pages stay mounted)
   setState({ config: { ...getState().config, timeZone: dz } });
   h = out('log/one zone');
-  if (/on this phone/.test(h)) throw new Error('with one zone the subtitle stays short');
+  if (/on this phone/.test(pageOut(h, 'page-log'))) throw new Error('with one zone the subtitle stays short');
   setLaunchNotice(true);
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
   console.log('re-check N6 (Log date in the terminal zone): OK');
@@ -1929,11 +1942,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet(null);
   h = out('now/meters');
   if (!/30-min break<\/span>[\s\S]{0,400}?due in 7h 55m/.test(h)) throw new Error('the meter says the break is DUE in a time, not that it happens then');
-  // the dock rests where it sticks: Now's <main> bottom padding equals the dock's sticky offset
-  if (!/<main[^>]*class="has-dock"/.test(h)) throw new Error('Now must mark its main as holding the dock');
+  // the dock rests where it sticks: inside the strip the Now page's bottom padding IS
+  // the clearance — it equals the base .dock offset (the tab bar's height) — and the
+  // page-scoped sticky offset is 0. The two must not stack (the dock would float a
+  // tab-bar height above the bar); with padding == clearance its stuck place and its
+  // end-of-page place coincide, so it never jumps (the layout lane measures this).
+  if (!/<section[^>]*class="page page-now has-dock/.test(h)) throw new Error('Now must mark its page as holding the dock');
   const css = readFileSync('public/styles.css', 'utf8');
-  const stick = (css.match(/\.dock \{[^}]*bottom: ([^;]+);/) || [])[1], pad = (css.match(/main\.has-dock \{ padding-bottom: ([^;]+);/) || [])[1];
-  if (!stick || stick !== pad) throw new Error(`the dock's sticky offset (${stick}) and Now's bottom padding (${pad}) must match, or the dock jumps at the end of the page`);
+  const stick = (css.match(/^\.dock \{[^}]*bottom: ([^;]+);/m) || [])[1], pad = (css.match(/\.page\.has-dock \{ padding-bottom: ([^;]+);/) || [])[1], pageStick = (css.match(/\.page \.dock \{ bottom: ([^;]+);/) || [])[1];
+  if (!stick || stick !== pad || pageStick !== '0') throw new Error(`the dock's page clearance (${pad}), base offset (${stick}) and in-page offset (${pageStick}) must read padding == base offset with in-page offset 0, or the dock jumps at the end of the page`);
   if (!/\.dock \{[^}]*padding: 8px 12px 12px/.test(css)) throw new Error('the dock keeps its own gap above the tab bar');
   setLaunchNotice(true); setState({ nowOverride: null, drivingView: true, historyAcknowledged: false, segments: [], current: null });
   console.log('driver question (break wording, dock rests in one place): OK');
@@ -2059,7 +2076,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (pan.indexOf('<b>Driving</b>') < 0 || pan.indexOf('<b>Driving</b>') > pan.indexOf('Break buttons')) throw new Error('on a plain add, the statuses come first');
   setState({ breakPresets: [] });
   h = out('log/add panel, no breaks');
-  if (/Break buttons/.test(h) || !/<b>Driving<\/b>/.test(h)) throw new Error('with no break buttons the panel shows the statuses only');
+  // scoped to the panel itself: the More page carries its own "Break buttons" section
+  // heading, and it rides along in every render now that the pages stay mounted
+  const pan2 = h.slice(h.indexOf('role="dialog"'));
+  if (/Break buttons/.test(pan2) || !/<b>Driving<\/b>/.test(pan2)) throw new Error('with no break buttons the panel shows the statuses only');
   openSheet(null);
   setState({ breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }, { name: '20-min paid', minutes: 20, status: 'ON' }, { name: '40-min lunch', minutes: 40, status: 'OFF' }] });
   // 8. Settings: the buttons are the driver's to set
@@ -2256,9 +2276,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (moved.start !== M(13) || moved.end !== M(13.75)) throw new Error('the times change');
   // a break moved between off and on duty stays that break; picked to Driving it is not one
   if (relabel(moved, 'ON') !== moved.note || relabel(moved, 'D') !== undefined || relabel(moved, 'OFF', 'PC') !== 'PC' || relabel({ status: 'OFF', start: 0, end: 1, note: 'PC' }, 'ON') !== undefined) throw new Error('relabel keeps a break, drops what no longer fits');
-  // 9. "Start over" left the add panel for More, and its undo is on the Log
+  // 9. "Start over" left the add panel for More, and its undo is on the Log (scoped to
+  // the panel: More's own Start over button is exactly where it should be, and the
+  // More page rides along in every render now that the pages stay mounted)
   openSheet({ kind: 'add' });
-  if (/Start over/.test(out('editor/no start over'))) throw new Error('"Start over" must not sit in the add panel');
+  if (/Start over/.test(out('editor/no start over').split('role="dialog"')[1] ?? '')) throw new Error('"Start over" must not sit in the add panel');
   openSheet(null);
   setState({ tab: 'settings' });
   if (!/Start over: fresh 10-hour rest ending now/.test(out('settings/start over'))) throw new Error('"Start over" is under More');
@@ -2839,18 +2861,22 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // (a)+(d)+(f) the render: 8 day sections, the totals in the driver's words, "Not logged" on
   //     screen, and the ELD named as the official record
   let h = out('patch 7.2/history seeded');
-  if ((h.match(/<h2>/g) || []).length !== 8) throw new Error('patch 7.2: the view must render 8 day sections');
-  if (!/Today — 2026-10-12/.test(h) || !/2026-10-05/.test(h)) throw new Error('patch 7.2: the day sections must run from the oldest day to Today');
-  if (!/Driving <b>5h 00m<\/b>/.test(h) || !/Sleeper <b>7h 00m<\/b>/.test(h) || !/Not logged <b>15h 30m<\/b>/.test(h))
+  // scoped to the Plan page, where the history view lives: every page rides along in
+  // the render now that the panels stay mounted, and the other pages have their own
+  // headings, totals and buttons
+  const hist = pageOut(h, 'page-plan');
+  if ((hist.match(/<h2>/g) || []).length !== 8) throw new Error('patch 7.2: the view must render 8 day sections');
+  if (!/Today — 2026-10-12/.test(hist) || !/2026-10-05/.test(hist)) throw new Error('patch 7.2: the day sections must run from the oldest day to Today');
+  if (!/Driving <b>5h 00m<\/b>/.test(hist) || !/Sleeper <b>7h 00m<\/b>/.test(hist) || !/Not logged <b>15h 30m<\/b>/.test(hist))
     throw new Error('patch 7.2: the rendered per-day totals must match the seeded logged entries');
-  if (!/>Not logged</.test(h)) throw new Error('patch 7.2: unlogged stretches must render as Not logged');
-  if (!/For your own review — your ELD holds the official record\./.test(h)) throw new Error('patch 7.2: the view must name the ELD as the official record');
+  if (!/>Not logged</.test(hist)) throw new Error('patch 7.2: unlogged stretches must render as Not logged');
+  if (!/For your own review — your ELD holds the official record\./.test(hist)) throw new Error('patch 7.2: the view must name the ELD as the official record');
 
   // (g) read-only: the view wires no click handler, opens no editor and offers no add/delete —
   //     the only button on the screen is the shared back bar, which lives outside the component
   const body = app.slice(app.indexOf('function HistoryTab'), app.indexOf('/* ============================================================ Can I take this load?'));
   if (/onClick|openSheet|setState|undoable/.test(body)) throw new Error('patch 7.2: the reflection view must not wire any editing or state-changing control');
-  if (/Edit|Delete|Add a break/.test(h)) throw new Error('patch 7.2: the rendered view must carry no edit, delete or add controls');
+  if (/Edit|Delete|Add a break/.test(pageOut(h, 'page-plan'))) throw new Error('patch 7.2: the rendered view must carry no edit, delete or add controls');
 
   // the door and the way back: Recap offers the view, entering records Recap as the origin
   // (the patch 7.1 pattern), and the back bar names Recap and lands there
@@ -2867,9 +2893,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // (e) the DEMO/fresh state shows the empty state, not a week of invented history
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'history' });
   h = out('patch 7.2/history fresh');
-  if (!/Nothing logged yet — this fills in as you enter your real day\./.test(h)) throw new Error('patch 7.2: a fresh install must show the empty state');
-  if ((h.match(/<h2>/g) || []).length !== 0 || />Not logged</.test(h)) throw new Error('patch 7.2: the fresh state must render no day sections and no not-logged rows');
-  if (!/For your own review — your ELD holds the official record\./.test(h)) throw new Error('patch 7.2: the ELD note must ride the empty state too');
+  const histFresh = pageOut(h, 'page-plan');
+  if (!/Nothing logged yet — this fills in as you enter your real day\./.test(histFresh)) throw new Error('patch 7.2: a fresh install must show the empty state');
+  if ((histFresh.match(/<h2>/g) || []).length !== 0 || />Not logged</.test(histFresh)) throw new Error('patch 7.2: the fresh state must render no day sections and no not-logged rows');
+  if (!/For your own review — your ELD holds the official record\./.test(histFresh)) throw new Error('patch 7.2: the ELD note must ride the empty state too');
 
   // (h) bucketing follows the TERMINAL zone: 03:30–04:30 UTC is one stretch on the phone's
   //     clock but straddles the New York carrier midnight (04:00 UTC), so it must split
@@ -6015,8 +6042,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(rules('.top-row > .pill').some((r) => /min-width: 0;/.test(r) && /white-space: normal;/.test(r)) && rules('.top-row > .top-right').some((r) => /flex: none;/.test(r)), 'patch 19 B4: in the header row the status capsule must give way (min-width: 0; white-space: normal) and the clock + theme switch must not (flex: none)');
   need(/@supports \(grid-template-columns: subgrid\) \{\s*\.taxis \{ display: grid; grid-template-columns: 96px minmax\(0, 1fr\) minmax\(64px, max-content\);[^}]*\}\s*\.taxis > \.taxis-row \{ grid-column: 1 \/ -1; grid-template-columns: subgrid; \}/.test(css19), 'patch 19 B4: the timeline rows must share one set of columns, the value column sized to its widest value');
   need(!/100vw/.test(css19), 'patch 19 B4: no 100vw anywhere in the stylesheet (it includes the scrollbar and overflows)');
-  // B5. the one scroll-to-top in the app follows the scroller.
-  need(/useEffect\(\(\) => \{ window\.scrollTo\(0, 0\); document\.querySelector\('\.app'\)\?\.scrollTo\?\.\(0, 0\); \}, \[step\]\)/.test(app19), 'patch 19 B5: a new load-check step must start at the top of the SHELL, which is the scroller now');
+  // B5. the one scroll-to-top in the app follows the scroller (panel strip: the scroller
+  // is the strip page the load check sits in; the shell call rides along, a no-op there).
+  need(/useEffect\(\(\) => \{ window\.scrollTo\(0, 0\); document\.querySelector\('\.app'\)\?\.scrollTo\?\.\(0, 0\); document\.querySelector\('\.pages \.page\.is-active'\)\?\.scrollTo\?\.\(0, 0\); \}, \[step\]\)/.test(app19), 'patch 19 B5: a new load-check step must start at the top of its strip page, which is the scroller now');
   // A (structural): one store operation, one guard for both tap-time entries, no new storage key.
   need(/export function adjustCurrentStart\(cur: State, newSince: number, now: number\): AdjustStartResult/.test(store19), 'patch 19 A: the store must export adjustCurrentStart(state, newSince, now)');
   need((app19.match(/adjustCurrentStart\(/g) || []).length >= 2 && !/current: \{ \.\.\.[a-z.!]*current!?, since:/.test(app19), 'patch 19 A: the app must move the current start only through the store operation');

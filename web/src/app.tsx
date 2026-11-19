@@ -1282,7 +1282,7 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
     onTrack(from + Math.max(0, Math.min(1, x)) * span);
   } : undefined;
   const track = (l?: AxisLane) => (
-    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`} data-noswipe onClick={l?.onTap ? undefined : tapAt}>
+    <span class={`taxis-track ${l?.ghostEnd != null ? 'has-ghost' : ''}`} onClick={l?.onTap ? undefined : tapAt}>
       {wallPct !== null && <span class="taxis-tint" style={{ width: `${wallPct}%` }} />}
       {grid.map((g) => <span key={g} class="taxis-grid" style={{ left: `${pct(g)}%` }} />)}
       {hazard && <span class="taxis-hazard" />}
@@ -4453,8 +4453,10 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const [step, setStep] = useState(lc.answered ? 4 : 1);
   // each question is its own screen: start it at the top, not wherever the last Next button was
   // (Patch 19: the shell is the scroller now — the page itself no longer scrolls — so the
-  // shell is what goes back to the top; the window call stays for a runtime where it does.)
-  useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); }, [step]);
+  // shell is what goes back to the top; the window call stays for a runtime where it does.
+  // Panel strip: the scroller is the strip page this screen sits in, so it goes to the top
+  // too — the shell call above it is a no-op in the strip, where nothing overflows .app.)
+  useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); document.querySelector('.pages .page.is-active')?.scrollTo?.(0, 0); }, [step]);
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const departure = now + lc.leaveIn;
   const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
@@ -5025,10 +5027,10 @@ export function applyGo(go: GoTarget) {
 }
 export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
-/* ============================================================ panel pager */
+/* ============================================================ panel strip */
 
 /** Bottom-bar panels in display order (Lorico, 2026-11-18: Plan and Log swap places). The tab
- * ids are unchanged — only the order the bar shows them in, and the order swipes walk. */
+ * ids are unchanged — only the order the bar shows them in, and the order the strip walks. */
 export const PANEL_ORDER: State['tab'][] = ['now', 'plan', 'log', 'settings'];
 
 /** The panel the bottom bar lights for a tab: the planning screens sit under Plan (declutter
@@ -5037,37 +5039,39 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-/** Where a panel swipe lands: dir +1 walks forward (a left swipe), −1 back (a right swipe).
- * Null at the ends — the pager does not wrap. From a planning sub-screen a swipe walks from
- * Plan, its bottom-bar home. */
-export function panelSwipeTarget(tab: State['tab'], dir: 1 | -1): State['tab'] | null {
-  const j = PANEL_ORDER.indexOf(navPanelOf(tab)) + dir;
-  return j >= 0 && j < PANEL_ORDER.length ? PANEL_ORDER[j] : null;
-}
+/* The panels live side by side in a horizontal scroll-snap strip — The Daily Number's
+ * mechanism, copied at Lorico's word (2026-11-18): the browser's own scrolling decides
+ * what a drag means, each page is its own vertical scroller, and the bottom bar follows
+ * the strip's scroll position. The touch-classifying pager this replaces (a swipe only
+ * counted from bare non-control space) is gone: on the Plan panel — four full-width
+ * buttons — nearly every real touch started inside a control and was swallowed, so the
+ * swipe worked exactly once, Now → Plan, and never again (see HANDOFF-SWIPE.md). */
 
-const SWIPE_TAGS = new Set(['button', 'a', 'input', 'select', 'textarea', 'label']);
-/** True when a touch starts on (or inside) something the driver is operating — a button, a link,
- * a form control, a log entry (entries are <button>s), a slider — or on anything marked
- * data-noswipe (the timeline scrub track): the gesture belongs to that control, never to the
- * panel pager. Walks the parent chain by hand; closest() is not present in every runtime this
- * app is tested under. */
-export function swipeGuardHit(target: unknown): boolean {
-  let n = target as { localName?: string; hasAttribute?: (k: string) => boolean; parentNode?: unknown } | null | undefined;
-  for (let i = 0; n && i < 24; i++) {
-    if (n.localName && SWIPE_TAGS.has(n.localName.toLowerCase())) return true;
-    if (typeof n.hasAttribute === 'function' && n.hasAttribute('data-noswipe')) return true;
-    n = n.parentNode as typeof n;
-  }
-  return false;
-}
+/** rAF when the runtime has it, a timer otherwise (the test shim has no rAF). */
+const rafOf = (cb: () => void): number => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => cb()) : (setTimeout(cb, 0) as unknown as number));
+const cancelRafOf = (id: number): void => { if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id); else clearTimeout(id as unknown as ReturnType<typeof setTimeout>); };
+const prefersReducedMotion = (): boolean => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function App() {
   const s = useStore();
   const now = useNow();
   // Startup disclaimer — dismissed for this launch only; a fresh launch shows it again.
   const [, redraw] = useState(0);
-  // Panel pager: where the current touch began, and whether it began on open panel space.
-  const swipeStart = useRef<{ x: number; y: number; ok: boolean } | null>(null);
+  // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
+  // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
+  // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
+  const pagesRef = useRef<HTMLElement>(null);
+  const [barPanel, setBarPanel] = useState<State['tab']>(() => navPanelOf(s.tab));
+  const barPanelRef = useRef(barPanel);
+  const stripRaf = useRef(0);
+  const stripSettle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stripPlaced = useRef(false);
+  // The panel index a programmatic scroll (tab tap, restore, back) is travelling to, or
+  // null when the strip is the driver's own. A settle may never commit a different
+  // panel than the goal while one is set: a smooth scroll can pause its events for
+  // longer than the settle window mid-flight, and committing the panel it happens to
+  // be passing would fight the very tap that sent it there.
+  const stripGoal = useRef<number | null>(null);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
   // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
@@ -5180,31 +5184,77 @@ export function App() {
   // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
   // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
   // and the last-8-days view it opens moved from More to Plan.
-  const navOf = navPanelOf;
+  const planFamily = navPanelOf(s.tab) === 'plan';
+  // The two global notices, defined once and ridden at the top of every strip page.
+  const warnbox = s.nowOverride !== null ? (
+    <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. Anything you change while it is up is thrown away when you go back to the real clock. <button class="mini" onClick={() => useRealClock()}>Use real clock</button></p>
+  ) : null;
+  const themeNoticeCard = s.themeNotice ? (
+    <div class="card warn">
+      <div class="row">
+        <span class="small">Switched to the <b>Day</b> theme — it is the new default. The header switch or Settings will put it back to Night.</span>
+        <button class="mini" onClick={() => setState({ themeNotice: false })}>Got it</button>
+      </div>
+    </div>
+  ) : null;
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
   // Behind the launch notice or an open panel, nothing else can take focus or be read as current.
   const blocked = disclaimer || sheet !== null;
-  // Panel pager handlers: a mostly-horizontal swipe of 48px+ on open panel space moves one
-  // panel along the bar's order; the bar follows because it renders from s.tab. A gesture that
-  // started on a control (see swipeGuardHit) or while a sheet/disclaimer blocks the screen
-  // never pages. Vertical scrolls stay scrolls: the horizontal run must dominate.
-  const onPanelTouchStart = (e: JSX.TargetedTouchEvent<HTMLElement>) => {
-    const t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
-    swipeStart.current = t ? { x: t.clientX, y: t.clientY, ok: !blocked && !swipeGuardHit(e.target) } : null;
+  // Panel strip: the bar lights the strip's nearest snapped panel while it scrolls
+  // (rAF-throttled, like The Daily Number's pill); when the scroll settles, the store's
+  // tab catches up — unless the current tab already lives on that panel (a planning
+  // sub-screen sits on Plan and is never walked back to the Plan menu by a settle), or a
+  // sheet/disclaimer owns the screen. The store is the strip's master the other way:
+  // whenever the tab's panel changes any other way — a bar tap, the back button, a
+  // shortcut, a restored state — the strip scrolls to meet it.
+  const activePanel = navPanelOf(s.tab);
+  const onPagesScroll = () => {
+    const el = pagesRef.current; if (!el) return;
+    cancelRafOf(stripRaf.current);
+    stripRaf.current = rafOf(() => {
+      const w = el.clientWidth || 0; if (!w) return;
+      const idx = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w)));
+      const panel = PANEL_ORDER[idx];
+      if (panel !== barPanelRef.current) { barPanelRef.current = panel; setBarPanel(panel); }
+      if (stripSettle.current) clearTimeout(stripSettle.current);
+      stripSettle.current = setTimeout(() => {
+        stripSettle.current = null;
+        if (launchNotice || currentSheet() !== null) return;
+        const w2 = el.clientWidth || 0; if (!w2) return;
+        const i2 = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w2)));
+        if (Math.abs(el.scrollLeft - i2 * w2) > 2) return; // not resting on a page yet
+        if (stripGoal.current !== null && stripGoal.current !== i2) return; // still travelling to the goal
+        stripGoal.current = null;
+        const target = PANEL_ORDER[i2];
+        if (navPanelOf(getState().tab) !== target) setState({ tab: target });
+      }, 120);
+    });
   };
-  const onPanelTouchEnd = (e: JSX.TargetedTouchEvent<HTMLElement>) => {
-    const st = swipeStart.current; swipeStart.current = null;
-    if (!st || !st.ok || blocked) return;
-    const t = e.changedTouches && e.changedTouches[0];
-    if (!t) return;
-    const dx = t.clientX - st.x;
-    const dy = t.clientY - st.y;
-    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const next = panelSwipeTarget(s.tab, dx < 0 ? 1 : -1);
-    if (next && next !== s.tab) setState({ tab: next });
-  };
-  const onPanelTouchCancel = () => { swipeStart.current = null; };
+  // A hand on the strip is the driver's own scroll: any programmatic goal is off.
+  const onStripGrab = () => { stripGoal.current = null; };
+  useEffect(() => {
+    if (barPanelRef.current !== activePanel) { barPanelRef.current = activePanel; setBarPanel(activePanel); }
+    const el = pagesRef.current; if (!el || typeof el.scrollTo !== 'function') return;
+    const w = el.clientWidth || 0; if (!w) return;
+    const idx = PANEL_ORDER.indexOf(activePanel);
+    if (Math.abs(el.scrollLeft - idx * w) > 2) {
+      stripGoal.current = idx;
+      el.scrollTo({ left: idx * w, behavior: !stripPlaced.current || prefersReducedMotion() ? 'auto' : 'smooth' });
+    }
+    stripPlaced.current = true;
+  }, [activePanel]);
+  // A rotated or resized phone changes the page width under the strip: re-seat it on the
+  // current panel, instantly, so the snap points line up again.
+  useEffect(() => {
+    const f = () => {
+      const el = pagesRef.current; if (!el || typeof el.scrollTo !== 'function') return;
+      const w = el.clientWidth || 0; if (!w) return;
+      el.scrollTo({ left: PANEL_ORDER.indexOf(navPanelOf(getState().tab)) * w, behavior: 'auto' });
+    };
+    window.addEventListener('resize', f);
+    return () => window.removeEventListener('resize', f);
+  }, []);
   if (showsDrivingView(s)) {
     return (
       <div class="app">
@@ -5222,33 +5272,57 @@ export function App() {
     <div class={fresh ? 'app is-demo' : 'app'}>
       {disclaimer && <Disclaimer tz={s.config.timeZone} needsTz={!s.tzChosen} compact={s.disclaimerAcked} onClose={(tz) => { unlockAudio(); if (tz) chooseTimeZone(tz); acknowledgeDisclaimer(); setDisclaimer(false); }} />}
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
-      <main inert={blocked} class={s.tab === 'now' ? 'has-dock' : undefined} onTouchStart={onPanelTouchStart} onTouchEnd={onPanelTouchEnd} onTouchCancel={onPanelTouchCancel}>
-        {s.nowOverride !== null && (
-          <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. Anything you change while it is up is thrown away when you go back to the real clock. <button class="mini" onClick={() => useRealClock()}>Use real clock</button></p>
-        )}
-        {s.themeNotice && (
-          <div class="card warn">
-            <div class="row">
-              <span class="small">Switched to the <b>Day</b> theme — it is the new default. The header switch or Settings will put it back to Night.</span>
-              <button class="mini" onClick={() => setState({ themeNotice: false })}>Got it</button>
-            </div>
-          </div>
-        )}
-        {s.tab !== 'now' && <Notices ev={ev} now={now} s={s} />}
-        <TabBoundary key={s.tab} tab={s.tab}>
-          {s.tab === 'now' && <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />}
-          {s.tab === 'log' && <LogTab s={s} now={now} ev={ev} />}
-          {s.tab === 'plan' && <PlanTab ev={ev} />}
-          {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
-          {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
-          {s.tab === 'history' && <HistoryTab s={s} now={now} />}
-          {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
-          {s.tab === 'load' && <LoadTab s={s} now={now} ev={ev} />}
-          {s.tab === 'settings' && <SettingsTab s={s} now={now} ev={ev} />}
-        </TabBoundary>
+      {/* The four panels side by side in the snap strip. Every page stays mounted and
+          keeps its own scroll position; the pages off the settled panel are inert and
+          aria-hidden so nothing in them can be focused or read as current. The global
+          notices ride at the top of each page, as they rode at the top of the one
+          scroller before; the planning sub-screens stay inside the Plan page. */}
+      <main ref={pagesRef} class="pages" inert={blocked} onScroll={onPagesScroll} onPointerDown={onStripGrab} onTouchStart={onStripGrab} onWheel={onStripGrab}>
+        <section class={`page page-now has-dock${activePanel === 'now' ? ' is-active' : ''}`} inert={activePanel !== 'now'} aria-hidden={activePanel !== 'now'}>
+          {warnbox}
+          {themeNoticeCard}
+          <TabBoundary key="now" tab="now">
+            <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
+          </TabBoundary>
+        </section>
+        <section class={`page page-plan${activePanel === 'plan' ? ' is-active' : ''}`} inert={activePanel !== 'plan'} aria-hidden={activePanel !== 'plan'}>
+          {warnbox}
+          {themeNoticeCard}
+          <Notices ev={ev} now={now} s={s} />
+          <TabBoundary key={planFamily ? s.tab : 'plan'} tab={planFamily ? s.tab : 'plan'}>
+            {planFamily ? (
+              <>
+                {s.tab === 'plan' && <PlanTab ev={ev} />}
+                {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
+                {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
+                {s.tab === 'history' && <HistoryTab s={s} now={now} />}
+                {s.tab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
+                {s.tab === 'load' && <LoadTab s={s} now={now} ev={ev} />}
+              </>
+            ) : (
+              <PlanTab ev={ev} />
+            )}
+          </TabBoundary>
+        </section>
+        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
+          {warnbox}
+          {themeNoticeCard}
+          <Notices ev={ev} now={now} s={s} />
+          <TabBoundary key="log" tab="log">
+            <LogTab s={s} now={now} ev={ev} />
+          </TabBoundary>
+        </section>
+        <section class={`page page-settings${activePanel === 'settings' ? ' is-active' : ''}`} inert={activePanel !== 'settings'} aria-hidden={activePanel !== 'settings'}>
+          {warnbox}
+          {themeNoticeCard}
+          <Notices ev={ev} now={now} s={s} />
+          <TabBoundary key="settings" tab="settings">
+            <SettingsTab s={s} now={now} ev={ev} />
+          </TabBoundary>
+        </section>
       </main>
       <nav class="tabs" inert={blocked}>{tabs.map(([k, l, icon]) => {
-        const on = navOf(s.tab) === k;
+        const on = barPanel === k;
         return <button key={k} class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setState({ tab: k })}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}

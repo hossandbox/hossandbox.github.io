@@ -64,6 +64,12 @@ const type = async (label, value) => { const i = typeof label === 'string' ? inp
 const attr = (n, k) => n.attributes[k] ?? n.attributes[k.toLowerCase()] ?? n[k];
 const sheet = () => all((n) => /\bsheet\b/.test(cls(n)) && n.localName === 'div')[0];
 const sheetText = () => sheet()?.textContent ?? '';
+// Panel strip: every page stays mounted, and pages carry their own steppers and text
+// boxes — a tree-wide first match can land on another page's control (on a phone that
+// page is inert, off-screen; only the harness's global search could confuse them).
+// Pins that work inside a sheet scope their finds to it.
+const inSheet = (n) => { const sh = sheet(); let p = n; while (p) { if (p === sh) return true; p = p.parentNode; } return false; };
+const sheetButton = (re) => all((n) => n.localName === 'button' && re.test(n.textContent.trim()) && inSheet(n))[0];
 const goBtn = () => all((n) => n.localName === 'button' && /\bed-go\b/.test(cls(n)))[0];
 const clockTap = () => all((n) => n.localName === 'button' && /\bed-clock-tap\b/.test(cls(n)))[0];
 const liveRow = () => all((n) => n.localName === 'button' && /\bentry\b/.test(cls(n)) && /\blive\b/.test(cls(n)))[0];
@@ -85,7 +91,7 @@ await pin('1b. current entry → The times are wrong: the same when-step and key
   await seed(day()); fire(liveRow(), 'click'); await sleep(60);
   await click(/^The times are wrongChange when it started or how long$/);
   if (!/When did it really start\?/.test(sheetText()) || !button(/^− 1 hour$/) || !button(/^\+15$/)) return 'not the when-step with its keys';
-  await click(/^−5$/); // T-25
+  await click(sheetButton(/^−5$/)); // T-25 — the sheet's own −5, not a page's
   await click(/^Next: check it$/);
   if (!/Check the change/.test(sheetText())) return 'no check step: ' + sheetText().slice(0, 120);
   await click(goBtn());
@@ -153,7 +159,7 @@ await pin('2b. three digits ("641") land on Done; a time that is no time ("2561"
 });
 await pin('2c. every typed time box in the editor, fix-start and load panels summons the number pad', async () => {
   const bad = [];
-  const scan = (where) => { for (const n of all((x) => x.localName === 'input' && ['text', 'number'].includes(attr(x, 'type')))) if (attr(n, 'inputMode') !== 'numeric') bad.push(`${where}:${n.attributes['aria-label']}`); };
+  const scan = (where) => { for (const n of all((x) => x.localName === 'input' && ['text', 'number'].includes(attr(x, 'type')) && inSheet(x))) if (attr(n, 'inputMode') !== 'numeric') bad.push(`${where}:${n.attributes['aria-label']}`); };
   await seed(day()); openSheet({ kind: 'since' }); await sleep(50); fire(clockTap(), 'click'); await sleep(40); scan('since');
   openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); fire(clockTap(), 'click'); await sleep(40); scan('when');
   openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);

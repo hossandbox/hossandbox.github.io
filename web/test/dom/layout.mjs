@@ -5,13 +5,24 @@
 //
 // What this lane asserts, at 412x915 and 360x640, on Now / Log / Split / More:
 //   (a) no horizontal overflow — the document's scrollWidth never exceeds its clientWidth,
-//       the shell's neither, no element reaches past the viewport's right or left edge, and
-//       a programmatic sideways scroll moves nothing;
+//       the shell's neither, no element OF THE SCREEN IN VIEW reaches past the viewport's
+//       right or left edge, and a programmatic sideways scroll moves nothing but the
+//       panel strip (which is supposed to move — see below);
 //   (b) the document itself never scrolls (that scroll is what makes a phone browser hide
-//       and show its chrome and drag the fixed panels with it): the shell is the one
-//       scroller, its COMPUTED height is the viewport's, and the header (top slot), the tab
-//       bar (bottom slot) and — on Now — the status dock sit at the same pixels before and
-//       after the content is scrolled.
+//       and show its chrome and drag the fixed panels with it): the shell's COMPUTED
+//       height is the viewport's, the active strip page is the vertical scroller, and
+//       the header (top slot), the tab bar (bottom slot) and — on Now — the status dock
+//       sit at the same pixels before and after the content is scrolled.
+//
+// Panel strip (2026-11-18): the four panels now sit side by side in a scroll-snap strip
+// (The Daily Number's mechanism), each page its own vertical scroller. Patch 19's
+// sideways invariants are re-aimed, not dropped: elements on the strip's OTHER pages
+// are supposed to sit outside the viewport (the strip clips them), so the side-edge
+// scan reads the active page and the shell chrome only; a sideways scroll may move
+// the strip — never the document, the shell or the visual viewport; and "the content
+// scrolled" now means the ACTIVE PAGE scrolled under the panels. The sideways probe
+// restores the strip's seat inside the same task, before the app's own settle timer
+// (120ms) can read the probe offset as a page change.
 // The stable-unit rule itself (.app { height: 100vh; height: 100dvh }) is pinned in SOURCE by
 // the smoke suite; this lane checks what the browser computed from it.
 //
@@ -93,14 +104,26 @@ for (const [W, H] of SIZES) {
       if (tab === 'Split') { await tap('nav.tabs button', 'Plan'); await page.waitForTimeout(100); await tap('main button', 'Plan a sleeper split'); }
       else await tap('nav.tabs button', tab);
       await page.waitForTimeout(250);
+      // a tab tap now ANIMATES the strip to the page (smooth scroll): measure at rest,
+      // not mid-flight — wait for the strip to seat on the active page's snap point.
+      await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {});
       const m = await page.evaluate(async () => {
         const de = document.documentElement, body = document.body;
         const app = document.querySelector('.app'), header = document.querySelector('header.top'), nav = document.querySelector('nav.tabs'), dock = document.querySelector('.dock'), main = document.querySelector('main');
+        const page = document.querySelector('.page.is-active');
         const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top * 100) / 100, bottom: Math.round(r.bottom * 100) / 100, left: Math.round(r.left * 100) / 100, right: Math.round(r.right * 100) / 100 }; };
         const vw = de.clientWidth, vh = window.innerHeight, innerW = window.innerWidth;
-        // every element reaching past the viewport's side edges (screen-reader-only clips excluded)
+        // every element of the screen in view reaching past the viewport's side edges
+        // (screen-reader-only clips excluded; the strip's other pages are supposed to
+        // sit outside the viewport, clipped by the strip — they are not this screen)
         const wide = [];
         for (const el of document.querySelectorAll('body *')) {
+          const pg = el.closest('.page');
+          if (pg && pg !== page) continue;
+          // the page frame itself is the strip's own box: Chromium seats a snap up to
+          // a pixel off the exact point, which is the strip working, not overflow —
+          // the page's CONTENTS are still scanned below.
+          if (el.classList.contains('page')) continue;
           const r = el.getBoundingClientRect();
           if (r.width === 0 || r.height === 0) continue;
           if (r.right > vw + 0.5 || r.left < -0.5) {
@@ -112,22 +135,28 @@ for (const [W, H] of SIZES) {
         // the scroller: whichever of document / shell actually has overflow to scroll
         const docScrollable = de.scrollHeight - de.clientHeight;
         const before = { header: rect(header), nav: rect(nav), dock: rect(dock) };
-        // try to scroll everything, both axes, the way a thumb would
+        // try to scroll everything, both axes, the way a thumb would. The strip itself
+        // may move sideways — that is its job — so its seat is restored in the same
+        // task, before the app's settle timer can read the probe as a page change.
         window.scrollTo(200, 100000);
         if (app) { app.scrollTop = 100000; app.scrollLeft = 200; }
+        if (page) page.scrollTop = 100000;
         if (main) { main.scrollLeft = 200; }
+        const stripMoved = main ? main.scrollLeft : null;
+        if (main && page) main.scrollLeft = page.offsetLeft;
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const after = { header: rect(header), nav: rect(nav), dock: rect(dock) };
-        const moved = { winX: window.scrollX, winY: window.scrollY, appX: app ? app.scrollLeft : null, appY: app ? app.scrollTop : null, mainX: main ? main.scrollLeft : null, vvX: window.visualViewport ? window.visualViewport.offsetLeft + window.visualViewport.pageLeft : 0 };
+        const moved = { winX: window.scrollX, winY: window.scrollY, appX: app ? app.scrollLeft : null, appY: app ? app.scrollTop : null, pageY: page ? page.scrollTop : null, stripMoved, vvX: window.visualViewport ? window.visualViewport.offsetLeft + window.visualViewport.pageLeft : 0 };
         const out = {
           vw, vh, innerW, docScrollW: de.scrollWidth, docClientW: de.clientWidth, bodyScrollW: body.scrollWidth,
           appScrollW: app ? app.scrollWidth : null, appClientW: app ? app.clientWidth : null,
           appScrollH: app ? app.scrollHeight : null, appClientH: app ? app.clientHeight : null,
           appComputedH: app ? getComputedStyle(app).height : null, appOverflowY: app ? getComputedStyle(app).overflowY : null,
+          pageScrollH: page ? page.scrollHeight : null, pageClientH: page ? page.clientHeight : null, pageOverflowY: page ? getComputedStyle(page).overflowY : null,
           docScrollable, wide: wide.slice(0, 12), wideCount: wide.length, before, after, moved,
           slots: { header: !!header && header.parentElement === app, nav: !!nav && nav.parentElement === app, dockInMain: !dock || (!!main && main.contains(dock)), mainInApp: !!main && main.parentElement === app },
         };
-        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (main) main.scrollLeft = 0;
+        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (page) page.scrollTop = 0; if (main && page) main.scrollLeft = page.offsetLeft;
         return out;
       });
       const tag = `[${W}x${H} ${nowCard} ${tab}]`;
@@ -137,12 +166,12 @@ for (const [W, H] of SIZES) {
       ok(`${tag} (a) the page is not zoomed out to fit something wider (innerWidth == ${W})`, m.innerW === W && m.vw === W, `innerWidth ${m.innerW}, clientWidth ${m.vw}`);
       ok(`${tag} (a) shell scrollWidth <= clientWidth`, m.appScrollW !== null && m.appScrollW <= m.appClientW, `shell ${m.appScrollW}/${m.appClientW}`);
       ok(`${tag} (a) no element reaches past the viewport's side edges`, m.wideCount === 0, m.wide.join(' ; '));
-      ok(`${tag} (a) a sideways scroll moves nothing`, m.moved.winX === 0 && m.moved.appX === 0 && m.moved.mainX === 0, JSON.stringify(m.moved));
+      ok(`${tag} (a) a sideways scroll moves nothing but the strip`, m.moved.winX === 0 && m.moved.appX === 0 && m.moved.vvX === 0, JSON.stringify(m.moved));
       // (b) shell slots + stable height
       ok(`${tag} (b) header, main and tab bar are the shell's own children`, m.slots.header && m.slots.nav && m.slots.mainInApp && m.slots.dockInMain, JSON.stringify(m.slots));
       ok(`${tag} (b) shell computed height == viewport height`, m.appComputedH === `${m.vh}px`, `computed ${m.appComputedH}, viewport ${m.vh}px`);
-      ok(`${tag} (b) the document itself cannot scroll (the shell is the scroller)`, m.docScrollable <= 0 && m.moved.winY === 0 && (m.appOverflowY === 'auto' || m.appOverflowY === 'scroll'), `doc overflow ${m.docScrollable}px, window.scrollY after scroll ${m.moved.winY}, shell overflow-y ${m.appOverflowY}`);
-      ok(`${tag} (b) the content really scrolled under the panels`, m.appScrollH > m.appClientH ? m.moved.appY > 0 : true, `shell ${m.appScrollH}/${m.appClientH}, scrolled ${m.moved.appY}`);
+      ok(`${tag} (b) the document itself cannot scroll (the strip page is the scroller)`, m.docScrollable <= 0 && m.moved.winY === 0 && (m.appOverflowY === 'auto' || m.appOverflowY === 'scroll') && m.pageOverflowY === 'auto', `doc overflow ${m.docScrollable}px, window.scrollY after scroll ${m.moved.winY}, shell overflow-y ${m.appOverflowY}, page overflow-y ${m.pageOverflowY}`);
+      ok(`${tag} (b) the content really scrolled under the panels`, m.pageScrollH > m.pageClientH ? m.moved.pageY > 0 : true, `page ${m.pageScrollH}/${m.pageClientH}, scrolled ${m.moved.pageY}`);
       const same = (a, b) => (!a && !b) || (a && b && a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.right === b.right);
       // The dock is sticky INSIDE the scroller: at a fractional scroll offset the browser reports it a
       // fraction of a pixel off its slot, so for the dock "stays put" means within 1px; the header

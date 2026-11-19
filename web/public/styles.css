@@ -67,6 +67,36 @@ html, body { height: 100%; overflow: hidden; }
 .app { height: 100vh; height: 100dvh; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; background: var(--ground); }
 .mono, .meter-value, .why-time, .entry-len, .daytotals b, .tstep-value, .drive-clock, .clock { font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); }
+/* The panel strip (2026-11-18, The Daily Number's mechanism copied at Lorico's word): the
+   four panels sit side by side in <main class="pages"> and the strip itself scroll-snaps
+   sideways; each page is its own vertical scroller and keeps its scroll position. This
+   replaces the touch-classifying swipe pager — on the Plan panel, four full-width
+   buttons, nearly every real touch started inside a control the old guard yielded to,
+   so a swipe paged exactly once and never again. Native scrolling needs no guard:
+   a drag scrolls, a tap lands, and the browser decides which it was. Each page carries
+   the padding and column layout <main> used to give the one panel it held. */
+main.pages { flex-direction: row; padding: 0; gap: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: none; }
+main.pages::-webkit-scrollbar { display: none; }
+.page { flex: 0 0 100%; width: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: none; scroll-snap-align: start; scroll-snap-stop: always; scrollbar-width: none; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); scroll-padding-top: 12px; }
+.page::-webkit-scrollbar { display: none; }
+.page.has-dock { padding-bottom: calc(61px + env(safe-area-inset-bottom)); }
+/* The dock's sticky offset, inside a page: the base .dock rule's bottom offset was
+   measured against the old shell scroller, whose scrollport ran the full viewport
+   behind the tab bar. A page's scrollport ends at the shell's bottom too, but the
+   page's own has-dock padding (exactly the tab bar's height) already holds the dock's
+   stuck place that far above the page's end — with the old offset kept, the two
+   clearances stack and the dock floats one tab-bar height too high (measured:
+   bottom 793 against the bar's 854 at 412x915). Offset 0 inside a page: the padding
+   does the whole job, and the dock's stuck place and its end-of-page place coincide,
+   as the has-dock note below the base rule requires. */
+.page .dock { bottom: 0; }
+/* Inside a page the header is a sibling, not an overlay: the Split Lab's pinned strip
+   sticks to the page's own top, not a header's height below it. */
+.page .split-now-after { top: 0; }
+/* The timeline track is tap-to-place: a horizontal drag that starts on it must not page
+   the strip (the old pager's data-noswipe guard did this job). Vertical scrolls that
+   start on the track still scroll the page. */
+.taxis-track { touch-action: pan-y; }
 h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 h3 { margin: 12px 0 6px; font-size: 14px; color: var(--muted); }
 p { margin: 8px 0; }

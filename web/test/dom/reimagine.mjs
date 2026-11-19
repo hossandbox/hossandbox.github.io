@@ -120,7 +120,9 @@ for (const theme of ['day', 'night']) for (const width of [412, 360]) {
     ok(`${T} clocks sit directly under the answer card, above the load question`, d.order.mT >= d.order.heroB && d.order.mB <= d.order.loadT, d.order);
     ok(`${T} log graph: status changes are joined by stair-steps and the ruler carries hour labels`, d.steps >= 2 && d.hours.length >= 3, { steps: d.steps, hours: d.hours });
     await tab(page, 'Log');
-    const lg = await page.evaluate(() => [...document.querySelectorAll('main svg.grid .grid-hour')].map((e) => e.textContent));
+    // scoped to the Log page: the strip keeps every panel mounted, and the Now page's
+    // timeline grid is an svg.grid too — first in document order, with a rolling ruler.
+    const lg = await page.evaluate(() => [...document.querySelectorAll('main .page-log svg.grid .grid-hour')].map((e) => e.textContent));
     ok(`${T} Log day graph: the ruler reads like the paper log (M … N …)`, lg[0] === 'M' && lg.includes('N') && lg.includes('6') && lg.includes('18'), lg);
     // ---- More: the explanations fold, the safety line does not
     await tab(page, 'More');

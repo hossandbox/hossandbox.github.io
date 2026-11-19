@@ -72,7 +72,12 @@ const open = async (W, H, saved, opts = {}) => {
   return { ctx, page, errors };
 };
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name + '.png') }); };
-const overflow = (page) => page.evaluate(() => { const de = document.documentElement; const vw = de.clientWidth; let wide = 0; for (const el of document.querySelectorAll('body *')) { const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue; if ((r.right > vw + 0.5 || r.left < -0.5) && !el.classList.contains('vh')) wide++; } return { wide, docW: de.scrollWidth, vw }; });
+// Panel strip (2026-11-18): the four panels sit side by side in a scroll-snap strip, so
+// the other pages' elements are supposed to sit outside the viewport — the overflow
+// question is about the screen in view: the active page and the shell chrome only.
+// (The page frame itself is skipped: Chromium seats a snap up to a pixel off the
+// exact point, which is the strip working, not overflow.)
+const overflow = (page) => page.evaluate(() => { const de = document.documentElement; const vw = de.clientWidth; const active = document.querySelector('.page.is-active'); let wide = 0; for (const el of document.querySelectorAll('body *')) { const pg = el.closest('.page'); if (pg && pg !== active) continue; if (el.classList.contains('page')) continue; const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue; if ((r.right > vw + 0.5 || r.left < -0.5) && !el.classList.contains('vh')) wide++; } return { wide, docW: de.scrollWidth, vw }; });
 
 for (const [W, H] of [[412, 915], [360, 640]]) {
   const tag = `[${W}x${H}]`;

@@ -77,6 +77,10 @@ const v3 = () => {
 const all = (pred, from = root) => { const out = []; const w = (n) => { if (pred(n)) out.push(n); n.childNodes.forEach(w); }; w(from); return out; };
 const cls = (n) => (n.attributes?.class || '').split(/\s+/);
 const byClass = (c, from) => all((n) => n.nodeType === 1 && cls(n).includes(c), from);
+// Panel strip: every page stays mounted, and plan-item rows / screen titles also live
+// on the Now and Recap screens — pins about the Plan hub or a Plan sub-screen scope
+// their searches to the Plan page subtree, as a driver's eye would.
+const planPage = () => byClass('page-plan')[0];
 const fire = (node, type, extra = {}) => { for (const t of [type, type[0].toUpperCase() + type.slice(1)]) { const ev = { type: t, target: node, currentTarget: node, preventDefault() {}, stopPropagation() {}, ...extra }; for (const f of node.listeners[t] ?? []) f.call(node, ev); } };
 const disabled = (n) => n.attributes.disabled !== undefined && n.attributes.disabled !== 'false';
 const buttons = (re) => all((n) => n.localName === 'button' && re.test(n.textContent));
@@ -311,7 +315,7 @@ await pin('M4e. the button rides the No verdict\'s fix line, says "Plan it", and
 await pin('D10a. the Plan hub lists 4 items; the 4th, "Hours coming back", opens tab recap with planReturn plan', async () => {
   WALL = CD(9, 3, 4);
   await mount(driving({ tab: 'plan' }));
-  const items = byClass('plan-item');
+  const items = byClass('plan-item', planPage());
   if (items.length !== 4) return `${items.length} items`;
   const fourth = items[3];
   if (!/Hours coming back/.test(fourth.textContent) || !/When your 70-hour hours return, day by day\./.test(fourth.textContent)) return fourth.textContent;
@@ -322,8 +326,8 @@ await pin('D10a. the Plan hub lists 4 items; the 4th, "Hours coming back", opens
 await pin('D10b. Hours coming back sits under Plan in the tab bar (navOf), title + back to Plan; History too', async () => {
   const cur = () => all((n) => n.localName === 'button' && n.attributes['aria-current'] === 'page')[0]?.textContent.trim();
   const onRecap = cur();
-  const title = all((n) => n.localName === 'h1')[0]?.textContent;
-  const back = all((n) => n.localName === 'button' && cls(n).includes('back'))[0]?.textContent.trim();
+  const title = all((n) => n.localName === 'h1', planPage())[0]?.textContent;
+  const back = all((n) => n.localName === 'button' && cls(n).includes('back'), planPage())[0]?.textContent.trim();
   setState({ tab: 'history', planReturn: 'recap' }); await sleep(60);
   const onHist = cur();
   setState({ tab: 'recap', planReturn: 'plan' }); await sleep(40);
@@ -388,10 +392,10 @@ await pin('D10g. tapping a bar opens that day in History (back returns to Hours 
 
 await pin('D10h. the screen keeps the forecast list, "Fix a day" (the day editor) and the Load + History doors, in that order', async () => {
   setState({ tab: 'recap', planReturn: 'plan' }); await sleep(60);
-  const t = text();
+  const t = planPage()?.textContent ?? '';
   const at = (s) => t.indexOf(s);
   const order = [at('Hours coming back'), at('On duty, day by day'), at('+10h 00m drops'), at('Fix a day'), at('Can I take this load?'), at('Your last 8 days')];
-  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && buttons(/^(set|edit)$/).length > 0) || JSON.stringify(order);
+  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && all((n) => n.localName === 'button' && /^(set|edit)$/.test(n.textContent), planPage()).length > 0) || JSON.stringify(order);
 });
 
 await pin('D10i. More: the Recap row is gone; one plain row "Hours coming back has moved to Plan ›" goes there', async () => {

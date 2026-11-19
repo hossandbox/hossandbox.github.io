@@ -263,13 +263,18 @@ await pin('P3. S11: "Does it pair?" is bad-toned while the plan breaks a limit, 
 });
 await pin('P4. tap a block → its sheet: status toggle (breaks only), 56px −60/−15/+15/+60 steppers, the exact number box; draft only', async () => {
   await seed(lab()); const log0 = logOf();
+  // The toggle lookups scope to the sheet: the Now page's dock carries its own Sleeper /
+  // Off duty status buttons, and every page stays mounted in the strip — a tree-wide
+  // first match would tap the dock, not the sheet (on a phone the dock is on another
+  // page, inert; only the harness's global search could confuse them).
+  const sheetBtn = (re) => { const sh = byClass('sheet')[0]; return sh ? all((n) => n.localName === 'button' && re.test(n.textContent), sh)[0] : undefined; };
   await click(block('b1'));
   if (currentSheet()?.kind !== 'splitblock') return 'no block sheet';
   for (const l of ['−60', '−15', '+15', '+60']) if (!all((n) => n.localName === 'button' && n.textContent === l).length) return 'missing stepper ' + l;
-  if (!button(/^Sleeper$/) || !button(/^Off duty$/)) return 'Break 1 must carry its status toggle';
+  if (!sheetBtn(/^Sleeper$/) || !sheetBtn(/^Off duty$/)) return 'Break 1 must carry its status toggle';
   await click(/^\+15$/); if (getState().split.b1 !== 195) return 'b1 after +15: ' + getState().split.b1;
   await click(/^−60$/); if (getState().split.b1 !== 135) return 'b1 after −60: ' + getState().split.b1;
-  await click(/^Sleeper$/); if (getState().split.b1s !== 'SB') return 'toggle did not set b1s';
+  await click(sheetBtn(/^Sleeper$/)); if (getState().split.b1s !== 'SB') return 'toggle did not set b1s';
   const box = all((n) => n.localName === 'input' && /Break 1, type an exact value/.test(n.attributes['aria-label'] || ''))[0];
   if (!box) return 'no exact box';
   box.value = '200'; fire(box, 'input'); await sleep(40);
@@ -278,7 +283,7 @@ await pin('P4. tap a block → its sheet: status toggle (breaks only), 56px −6
   if (getState().split.b1 !== 200 || !text().includes('your entry was not applied')) return 'an out-of-range entry must be refused, visibly';
   openSheet(null); await sleep(30);
   await click(block('drive'));
-  if (button(/^Sleeper$/)) { openSheet(null); return 'the drive block has no status toggle'; }
+  if (sheetBtn(/^Sleeper$/)) { openSheet(null); return 'the drive block has no status toggle'; }
   openSheet(null); await sleep(30);
   return logOf() === log0 || 'the log moved';
 });

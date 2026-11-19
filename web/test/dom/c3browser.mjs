@@ -78,7 +78,12 @@ const open = async (W, H, saved, path = '/') => {
   return { ctx, page, errors };
 };
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name + '.png'), fullPage: false }); };
-const overflow = (page) => page.evaluate(() => { const de = document.documentElement; const vw = de.clientWidth; let wide = 0; for (const el of document.querySelectorAll('body *')) { const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue; if ((r.right > vw + 0.5 || r.left < -0.5) && !el.classList.contains('vh')) wide++; } return { wide, docW: de.scrollWidth, vw }; });
+// Panel strip (2026-11-18): the four panels sit side by side in a scroll-snap strip, so
+// the other pages' elements are supposed to sit outside the viewport — the overflow
+// question is about the screen in view: the active page and the shell chrome only.
+// (The page frame itself is skipped: Chromium seats a snap up to a pixel off the
+// exact point, which is the strip working, not overflow.)
+const overflow = (page) => page.evaluate(() => { const de = document.documentElement; const vw = de.clientWidth; const active = document.querySelector('.page.is-active'); let wide = 0; for (const el of document.querySelectorAll('body *')) { const pg = el.closest('.page'); if (pg && pg !== active) continue; if (el.classList.contains('page')) continue; const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue; if ((r.right > vw + 0.5 || r.left < -0.5) && !el.classList.contains('vh')) wide++; } return { wide, docW: de.scrollWidth, vw }; });
 const tapText = (page, sel, re) => page.evaluate(([q, src]) => { const r = new RegExp(src); const b = [...document.querySelectorAll(q)].find((x) => r.test(x.textContent.trim())); if (b) b.click(); return !!b; }, [sel, re.source]);
 /** A relaunch opens on Now (the tab is not restored), so the lane walks to the load question. */
 const toLoad = async (page) => { if (!(await page.locator('.flow-head').count())) { await tapText(page, 'nav.tabs button', /Plan$/); await page.waitForTimeout(120); await tapText(page, 'button.plan-item', /Can I take this load\?/); await page.waitForTimeout(250); } };
@@ -167,8 +172,12 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
   {
     const { ctx, page, errors } = await open(W, H, save({ tab: 'now' }));
     await tapText(page, 'nav.tabs button', /Plan$/); await page.waitForTimeout(150);
-    const items = await page.evaluate(() => [...document.querySelectorAll('button.plan-item')].map((b) => b.querySelector('b')?.textContent));
+    // scoped to the Plan page: the strip keeps every panel mounted, and the Now page
+    // carries plan-item-styled shortcuts of its own — the hub is the Plan page's list.
+    const items = await page.evaluate(() => [...document.querySelectorAll('.page-plan button.plan-item')].map((b) => b.querySelector('b')?.textContent));
     ok(`${tag} the Plan hub lists 4 items, Hours coming back 4th`, items.length === 4 && items[3] === 'Hours coming back', JSON.stringify(items));
+    // the tab tap animates the strip: the overflow question is about the screen at rest
+    await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {});
     const ov = await overflow(page);
     ok(`${tag} Plan hub: no horizontal overflow`, ov.wide === 0 && ov.docW <= ov.vw, JSON.stringify(ov));
     await shot(page, `plan-hub-${W}x${H}`);
