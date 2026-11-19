@@ -3129,6 +3129,20 @@ function fromTimeInput(at: number, v: string): number | null {
 }
 
 /**
+ * The phone's own clock picker (patch 19) — the app's ONE type=time input, shared by the
+ * "Exact time" box and the log editor's big clock. A tap opens the phone's picker; where a tap
+ * alone does not (a desktop browser focuses the field instead), showPicker() is asked too,
+ * guarded — it is absent on older engines and throws without a user gesture.
+ */
+function TimePicker({ at, set, name, cls }: { at: number; set: (v: number) => void; name: string; cls?: string }) {
+  return (
+    <input type="time" class={cls} aria-label={name} value={toInput(at).slice(11, 16)}
+      onClick={(e) => { try { (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { /* the tap's own picker stands */ } }}
+      onInput={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null) set(v); }} />
+  );
+}
+
+/**
  * Exact entry for one time (items 2 + 3): a typed box that brings up the phone's NUMBER pad
  * (inputmode numeric — the driver types 0641) and the clock picker patch 19 shipped (the
  * phone's own time picker, a type=time input). Both set the time on the day already chosen.
@@ -3166,7 +3180,7 @@ function TimeEntry({ at, set, name, typing, onDone }: { at: number; set: (v: num
         </div>
       )}
       {typing && note && <div class="warnbox small">{note}</div>}
-      <label class="ed-day">Exact time<input type="time" aria-label={name} value={toInput(at).slice(11, 16)} onInput={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null) set(v); }} /></label>
+      <label class="ed-day">Exact time<TimePicker at={at} set={set} name={name} /></label>
     </>
   );
 }
@@ -3186,11 +3200,17 @@ const KEYS_MINUTES: ClockKeys = [[[-5, '−5', '5 minutes earlier'], [-1, '−1'
  * planner's departure. Day buttons, the big clock — TAP IT to type the exact time (item 2) —
  * the preset keys, the phone's clock picker, and another-day. `say` reads the big clock's time
  * aloud ("Started 06:41"); `name` labels the exact-time boxes.
+ *
+ * `pickerOnly` (feel round, Lorico 2026-11-19 — the log EDIT flow only, for now): the big
+ * clock IS the clock picker. Tapping it opens the phone's time picker directly; the typed
+ * keypad box and the separate "Exact time" field are gone, so the screen offers one way to set
+ * the time, not two. The day buttons, preset keys and another-day stay. Every other caller
+ * (add, fix-start, load, trip) keeps the tap-to-type clock and the exact-time box as before.
  */
-function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true, typeFirst = false }: {
-  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean; typeFirst?: boolean;
+function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true, typeFirst = false, pickerOnly = false }: {
+  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean; typeFirst?: boolean; pickerOnly?: boolean;
 }) {
-  const [typing, setTyping] = useState(typeFirst);
+  const [typing, setTyping] = useState(typeFirst && !pickerOnly);
   const chips = dayChips(now, future);
   const onChip = chips.some((c) => sameDay(c.at, at));
   const pickDate = (v: string) => {
@@ -3204,15 +3224,27 @@ function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true
       <div class="chips ed-days" role="group" aria-label="Day">
         {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
       </div>
+      {pickerOnly ? (
+        <div class="ed-clock">
+          {/* The picker input covers the whole clock face (transparent): a tap anywhere on the
+              big time lands on the input itself, which is what opens a phone's time picker. */}
+          <label class="ed-clock-pick">
+            <output class="mono" aria-live="polite" aria-label={`${say} ${clock(at)}`}>{clock(at, false)}</output>
+            <TimePicker at={at} set={set} name={name} cls="ed-clock-input" />
+          </label>
+          <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · tap the time to pick it</span>
+        </div>
+      ) : (
       <div class="ed-clock">
         <button class="ed-clock-tap" aria-expanded={typing} aria-label={`${say} ${clock(at)}. Tap to type the time`} onClick={() => setTyping(!typing)}>
           <output class="mono" aria-live="polite" aria-label={`${say} ${clock(at)}`}>{clock(at, false)}</output>
         </button>
         <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}{typing ? '' : ' · tap the time to type it'}</span>
       </div>
+      )}
       {extra}
       {keys.map((row, i) => <div key={i} class={`ed-keys ${row.length === 2 ? 'two' : 'four'}`}>{row.map(([d, t, a]) => <button key={d} aria-label={a} onClick={() => set(at + d)}>{t}</button>)}</div>)}
-      <TimeEntry at={at} set={set} name={name} typing={typing} onDone={() => setTyping(false)} />
+      {!pickerOnly && <TimeEntry at={at} set={set} name={name} typing={typing} onDone={() => setTyping(false)} />}
       {anyDay && <label class="ed-day">Another day<input type="date" value={dateInput(at)} class={onChip ? undefined : 'on'} onInput={(e) => pickDate((e.target as HTMLInputElement).value)} /></label>}
     </>
   );
@@ -3470,7 +3502,7 @@ function WhenStep({ k, now }: { k: EdKind; now: number }) {
       {k.kind === 'add' && <StepCount at={2} of={d.fixedLen ? 2 : 3} />}
       <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'when' }) : undefined} />
       <Question>{k.kind === 'edit' ? 'When did it really start?' : 'When did it start?'}</Question>
-      <ClockPick at={d.start} set={set} now={now} future={tentative} say="Started" name="Exact start time" keys={KEYS_HOURS}
+      <ClockPick at={d.start} set={set} now={now} future={tentative} say="Started" name={k.kind === 'edit' ? 'Start time' : 'Exact start time'} keys={KEYS_HOURS} pickerOnly={k.kind === 'edit'}
         extra={d.fixedLen && !tentative ? <button class="wide-btn" onClick={() => set(now - d.len)}>It just ended: started {clock(now - d.len, false)}</button> : undefined} />
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: next })}>{next === 'check' ? 'Next: check it' : 'Next: how long'}</button>
@@ -3513,7 +3545,10 @@ function LongStep({ k, now }: { k: EdKind; now: number }) {
         <button aria-label="15 minutes longer" onClick={() => set(d.len + 15)}>+15</button>
       </div>
       <p class="ed-ends">Ends <button class="ed-ends-tap mono" aria-expanded={typingEnd} aria-label={`Ends ${clock(d.start + d.len)}. Tap to set the day and time it ends`} onClick={() => setTypingEnd(!typingEnd)}>{clock(d.start + d.len)}</button></p>
-      {typingEnd && <ClockPick at={d.start + d.len} set={setEnd} now={now} future={tentative} say="Ended" name="Exact end time" keys={KEYS_HOURS} typeFirst />}
+      {/* Feel round (2026-11-19): in the EDIT flow the end's big clock is the clock picker
+          itself (pickerOnly) — one time field, as on the start step; the add flow keeps its
+          typed box open first, as before. */}
+      {typingEnd && <ClockPick at={d.start + d.len} set={setEnd} now={now} future={tentative} say="Ended" name={k.kind === 'edit' ? 'End time' : 'Exact end time'} keys={KEYS_HOURS} typeFirst pickerOnly={k.kind === 'edit'} />}
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: 'check' })}>Check it</button>
     </>
@@ -5227,7 +5262,14 @@ export function App() {
         if (stripGoal.current !== null && stripGoal.current !== i2) return; // still travelling to the goal
         stripGoal.current = null;
         const target = PANEL_ORDER[i2];
-        if (navPanelOf(getState().tab) !== target) setState({ tab: target });
+        // Feel round 2 (Lorico, 2026-11-19): a swipe that locks onto a NEW panel gets one
+        // short haptic click, here at the settle commit — once per panel change, never during
+        // the drag (this timer only fires after scrolling stops). A bar tap, the back button or
+        // a shortcut moves the store FIRST, so its settle finds the panel already current and
+        // stays silent (a bar tap keeps only its own tap tick); a swipe that springs back to
+        // the same panel changes nothing and stays silent too. Guarded: tapTick no-ops where
+        // navigator.vibrate is absent.
+        if (navPanelOf(getState().tab) !== target) { setState({ tab: target }); tapTick(); }
       }, 120);
     });
   };

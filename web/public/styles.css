@@ -77,7 +77,16 @@ main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); dis
    the padding and column layout <main> used to give the one panel it held. */
 main.pages { flex-direction: row; padding: 0; gap: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: none; }
 main.pages::-webkit-scrollbar { display: none; }
-.page { flex: 0 0 100%; width: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: none; scroll-snap-align: start; scroll-snap-stop: always; scrollbar-width: none; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); scroll-padding-top: 12px; }
+/* Feel round 2 (2026-11-19): a page's overscroll is closed VERTICALLY only. It used to be
+   `overscroll-behavior: none` on both axes (as The Daily Number writes it), and every page is
+   itself a scroll container (overflow-y auto): a horizontal swipe that starts on panel
+   content latches the page first, the page cannot scroll sideways, and overscroll-behavior-x
+   none then forbids handing the gesture up to the strip — so content swipes never paged
+   (reproduced with real touch drags in Chrome: test/dom/diag-swipe-touch.mjs). With x left
+   at auto the sideways scroll chains to the strip; the strip's own overscroll-behavior: none
+   still stops it there, so nothing past the strip (shell, document, the browser's back
+   gesture) ever sees it. Vertical stays none: no pull-to-refresh, no chaining to the shell. */
+.page { flex: 0 0 100%; width: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: auto; overscroll-behavior-y: none; scroll-snap-align: start; scroll-snap-stop: always; scrollbar-width: none; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); scroll-padding-top: 12px; }
 .page::-webkit-scrollbar { display: none; }
 .page.has-dock { padding-bottom: calc(61px + env(safe-area-inset-bottom)); }
 /* The dock's sticky offset, inside a page: the base .dock rule's bottom offset was
@@ -705,6 +714,13 @@ button.rowbtn.moved { min-height: 48px; margin-bottom: var(--s-12); font-weight:
 /* Patch L1 items 2 + 3: the shared clock picker. The big clock is a key now — tap it to type the time. */
 .ed-clock-tap { display: block; width: 100%; background: none; border: 0; box-shadow: none; padding: 0; min-height: 56px; color: inherit; cursor: text; }
 .ed-clock-tap:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-10); }
+/* Feel round (2026-11-19), the log EDIT flow: the big clock is the clock picker itself. The
+   phone's time input lies over the whole clock face, transparent, so a tap anywhere on the big
+   time lands on the input and opens the phone's picker; the visible digits are the output
+   under it. 16px keeps a phone from zooming the page on focus. */
+.ed-clock-pick { position: relative; display: block; min-height: 56px; cursor: pointer; border-radius: var(--r-10); }
+.ed-clock-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 4px; }
+.ed-clock-pick .ed-clock-input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; opacity: 0; font-size: 16px; cursor: pointer; background: none; box-shadow: none; }
 .ed-type { display: flex; gap: var(--s-8); align-items: stretch; }
 .ed-type input { flex: 1; min-width: 0; text-align: center; font-size: 28px; font-weight: 700; letter-spacing: .08em; }
 .ed-type .ed-type-ok { min-height: 56px; min-width: 88px; font-weight: 800; }

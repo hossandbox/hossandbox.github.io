@@ -188,6 +188,109 @@ for (const [W, H] of SIZES) {
     await ctx.close();
   }
 }
+// (c) Feel round 2 (2026-11-19, Lorico's on-device report on the live strip): a horizontal
+// swipe that STARTS ON PANEL CONTENT pages the strip — on every panel, from a Plan row
+// button, a log entry and a settings label alike — and a settle onto a new panel gives one
+// haptic click. Real touch drags through CDP (touchStart, 20 touchMoves, touchEnd): the
+// browser's own gesture detector and compositor scroll latching decide, as under a finger.
+// The cause was `.page { overscroll-behavior: none }`: each page is a vertical scroller, it
+// latched the sideways gesture and, with overscroll-behavior-x none, would not hand it up
+// to the strip (diagnosis: test/dom/diag-swipe-touch.mjs, HANDOFF-FEEL.md).
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => {
+    try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
+    window.__vib = [];
+    Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { window.__vib.push({ p, t: performance.now() }); return true; } });
+  }, JSON.stringify(seedRecord('dial')));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('#root *');
+  await page.waitForTimeout(300);
+  const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
+  if (await ack.count()) await ack.first().click();
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  const cdp = await ctx.newCDPSession(page);
+  const drag = async (x, y, dx, dy) => {
+    const N = 20;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let i = 1; i <= N; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx * i / N, y: y + dy * i / N }] }); await new Promise((r) => setTimeout(r, 10)); }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const seated = () => page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return m && p && Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).then(() => true, () => false);
+  const st = () => page.evaluate(() => ({ active: document.querySelector('.page.is-active')?.className.match(/page-(\w+)/)?.[1], bar: document.querySelector('nav.tabs button.on')?.textContent.trim(), vib: window.__vib.length, top: document.querySelector('.page.is-active')?.scrollTop }));
+  // the first element matching `sel` on the active page whose centre is on screen, between
+  // the header and the tab bar / dock: where a finger on that content would land
+  const spot = (sel) => page.evaluate((q) => {
+    const pg = document.querySelector('.page.is-active');
+    const hb = document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0;
+    const dock = pg.querySelector('.dock'), nav = document.querySelector('nav.tabs');
+    const lim = Math.min(nav.getBoundingClientRect().top, dock ? dock.getBoundingClientRect().top : Infinity);
+    for (const el of pg.querySelectorAll(q)) {
+      const r = el.getBoundingClientRect(); const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+      if (r.width && r.height && y > hb + 8 && y < lim - 8) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && pg.contains(hit) && hit !== pg) return { x, y, hit: `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? '.' + hit.className.split(' ')[0] : ''}`, inControl: !!hit.closest('button, a, input, select, textarea, label') };
+      }
+    }
+    return null;
+  }, sel);
+  const tag = `[${W}x${H} swipe]`;
+  const css = await page.evaluate(() => { const c = getComputedStyle(document.querySelector('.page')); return `${c.overscrollBehaviorX}/${c.overscrollBehaviorY}`; });
+  ok(`${tag} (c) a page hands sideways overscroll up to the strip (overscroll-behavior x auto), and keeps vertical closed (y none)`, css === 'auto/none', css);
+  await seated();
+  // [from-panel, content selector, dx, expected panel, label]
+  const legs = [
+    ['now', '.hero, .card, section', -1, 'plan', 'Now content'],
+    ['plan', 'button.plan-item b, button.plan-item', -1, 'log', 'a Plan row (button)'],
+    ['log', 'button.entry', -1, 'settings', 'a Log entry (button)'],
+    ['settings', 'label, .card', 1, 'log', 'a More/Settings row'],
+    ['log', 'button.entry', 1, 'plan', 'a Log entry, rightward'],
+    ['plan', 'button.plan-item b, button.plan-item', 1, 'now', 'a Plan row, rightward'],
+  ];
+  for (const [from, sel, dir, want, label] of legs) {
+    const b = await st();
+    if (b.active !== from) { ok(`${tag} (c) leg setup on ${from}`, false, `active ${b.active}`); break; }
+    const at = await spot(sel);
+    if (!at) { ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, false, `no on-screen ${sel}`); break; }
+    await drag(at.x, at.y, dir * Math.round(W * 0.7), 0);
+    await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250);
+    const a = await st();
+    ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && a.bar === { now: 'Now', plan: 'Plan', log: 'Log', settings: 'More' }[want], `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
+    ok(`${tag} (c) …and its settle gives exactly one haptic click`, a.vib - b.vib === 1, `vibrate calls +${a.vib - b.vib}`);
+  }
+  // a slightly diagonal swipe (thumbs are not rulers) still pages
+  {
+    const b = await st(); const at = await spot('.hero, .card, section');
+    if (at) { await drag(at.x, at.y, -Math.round(W * 0.7), 40); await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250); }
+    const a = await st();
+    ok(`${tag} (c) a slightly diagonal swipe on Now content still pages to Plan`, b.active === 'now' && a.active === 'plan', `${b.active} → ${a.active}`);
+  }
+  // vertical scrolling is untouched: a vertical drag on Log scrolls the page, never the strip
+  {
+    await page.evaluate(() => [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('Log')).click());
+    await page.waitForTimeout(300); await seated(); await page.waitForTimeout(200);
+    const b = await st(); const at = await spot('button.entry');
+    if (at) { await drag(at.x, at.y, 0, -300); await page.waitForTimeout(500); }
+    const a = await st();
+    ok(`${tag} (c) a vertical drag on Log content scrolls the page and leaves the strip on Log`, b.active === 'log' && a.active === 'log' && a.top > b.top && a.vib === b.vib, `${b.active}/${b.top} → ${a.active}/${a.top}, vibrate +${a.vib - b.vib}`);
+  }
+  // a tab-bar tap glides the strip but gives no settle click (only the bar button's own
+  // pre-existing tap tick, which fires on the click itself — never 120ms+ later at the settle)
+  {
+    const b = await st();
+    const box = await page.evaluate(() => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('More')).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const t0 = await page.evaluate(() => performance.now());
+    await page.touchscreen.tap(box.x, box.y);
+    await page.waitForTimeout(500); await seated(); await page.waitForTimeout(400);
+    const a = await st();
+    const late = await page.evaluate((t) => window.__vib.filter((v) => v.t - t > 100).length, t0);
+    ok(`${tag} (c) a tab-bar tap moves the strip with no settle haptic`, a.active === 'settings' && late === 0 && a.vib - b.vib <= 1, `active ${a.active}; vibrate +${a.vib - b.vib}, ${late} of them after the tap itself`);
+  }
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

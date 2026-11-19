@@ -211,7 +211,9 @@ await pin('L3.9 edit flow: the same end picker moves a three-day Off Duty end ba
   await sleep(60);
   await click(endsTap());
   await click(button(/^Yesterday$/));
-  await typeIn('Exact end time, type the time', '1840');
+  // Feel round (2026-11-19): in the EDIT flow the end's big clock is the clock picker itself
+  // (no typed keypad box) — the time is picked there.
+  await typeIn('End time', '18:40');
   if (currentSheet().draft.len !== 4000) return 'len ' + currentSheet().draft.len + ', want 4000';
   await click(goBtn());
   await click(button(/^Save the change$/));

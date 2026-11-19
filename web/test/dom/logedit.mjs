@@ -126,8 +126,10 @@ await pin('1e. current entry → a break in the middle: the open status is split
 });
 
 /* ================= item 2: tap the time to type it ================= */
-await pin('2a. tapping the displayed time opens a typed box on a NUMERIC keypad; 0641 sets 06:41 on the same day; the preset keys stay', async () => {
-  await seed(day()); openSheet({ kind: 'edit', seg: getState().segments[1], step: 'when', draft: { status: 'D', start: T - 300, len: 280 } }); await sleep(60);
+// Feel round (2026-11-19): the EDIT flow's big clock is now the clock picker itself (pins E1–E5
+// below); the tap-to-type keypad stays on the ADD flow, which is where 2a now pins it.
+await pin('2a. tapping the displayed time opens a typed box on a NUMERIC keypad; 0641 sets 06:41 on the same day; the preset keys stay (add flow)', async () => {
+  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'D', start: T - 300, len: 280 } }); await sleep(60);
   const tap = clockTap();
   if (!tap) return 'the big clock is not a tappable key';
   fire(tap, 'click'); await sleep(60);
@@ -207,6 +209,82 @@ await pin('3c. the trip departure picked on the shared picker is the plan\'s dep
   await click(inSheet(/^\+ 1 hour$/)); await click(inSheet(/^\+15$/));
   await click(goBtn());
   return (S.fromInput(getState().trip.dep) === T + 75 && currentSheet() === null) || 'dep ' + getState().trip.dep;
+});
+
+/* ===== feel round (Lorico 2026-11-19): the log EDIT flow has ONE time field — the clock picker ===== */
+const sheetInputs = () => all((n) => n.localName === 'input' && inSheet(n));
+const oneField = (where) => {
+  const ins = sheetInputs();
+  const times = ins.filter((n) => attr(n, 'type') === 'time');
+  const typed = ins.filter((n) => ['text', 'number'].includes(attr(n, 'type')) || attr(n, 'inputMode') === 'numeric');
+  if (times.length !== 1) return `${where}: ${times.length} time fields`;
+  if (typed.length) return `${where}: a keypad box is still there (${typed.map((n) => n.attributes['aria-label']).join(', ')})`;
+  if (all((n) => n.localName === 'button' && /\bed-clock-tap\b/.test(cls(n)) && inSheet(n)).length) return `${where}: the big clock still opens the keypad`;
+  if (/Exact time/.test(sheetText())) return `${where}: the "Exact time" field is still there`;
+  // the one field IS the big clock: it sits in the clock face, over the big digits
+  const t = times[0], lab = t.parentNode;
+  if (!/\bed-clock-input\b/.test(cls(t)) || lab?.localName !== 'label' || !/\bed-clock-pick\b/.test(cls(lab)) || !/\bed-clock\b/.test(cls(lab.parentNode))) return `${where}: the time field is not the big clock (${cls(t)} in ${lab?.localName}.${cls(lab ?? { attributes: {} })})`;
+  if (!all((n) => n.localName === 'output' && n.parentNode === lab).length) return `${where}: no big digits under the picker`;
+  return true;
+};
+await pin('E1. edit → The times are wrong → "When did it really start?": ONE time field, the big clock, and it is the clock picker (no keypad, no "Exact time")', async () => {
+  await seed(day()); openSheet({ kind: 'edit', seg: getState().segments[1] }); await sleep(60);
+  await click(/^The times are wrongChange when it started or how long$/);
+  if (!/When did it really start\?/.test(sheetText())) return 'not the start step: ' + sheetText().slice(0, 120);
+  const one = oneField('start'); if (one !== true) return one;
+  const t = sheetInputs().find((n) => attr(n, 'type') === 'time');
+  if (t.attributes['aria-label'] !== 'Start time') return 'label: ' + t.attributes['aria-label'];
+  await type(t, '06:41');
+  const want = new Date(T * 60000); want.setHours(6, 41, 0, 0);
+  if (currentSheet().draft.start !== Math.floor(want.getTime() / 60000)) return 'picked 06:41 → ' + hh_mm(currentSheet().draft.start);
+  if (!all((n) => n.localName === 'output' && n.textContent === '06:41' && inSheet(n)).length) return 'the big clock does not read 06:41';
+  return (!!sheetButton(/^− 1 hour$/) && !!sheetButton(/^\+15$/) && !!sheetButton(/^Yesterday$/)) || 'preset keys / day chips gone';
+});
+await pin('E2. edit → the matching end step: tapping Ends shows ONE time field, the big clock as the clock picker; picking 14:04 sets the end', async () => {
+  await seed(day()); const seg = getState().segments[1];
+  openSheet({ kind: 'edit', seg, step: 'long', draft: { status: 'D', start: seg.start, len: seg.end - seg.start } }); await sleep(60);
+  const endTap = all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0];
+  if (!endTap) return 'the end time is not tappable';
+  fire(endTap, 'click'); await sleep(50);
+  const one = oneField('end'); if (one !== true) return one;
+  const t = sheetInputs().find((n) => attr(n, 'type') === 'time');
+  if (t.attributes['aria-label'] !== 'End time') return 'label: ' + t.attributes['aria-label'];
+  await type(t, hh_mm(T - 10));
+  return currentSheet().draft.len === (T - 10) - seg.start || 'len ' + currentSheet().draft.len;
+});
+await pin('E3. the open status too: Log → current row → The times are wrong → pick on the clock → check → save moves the start', async () => {
+  await seed(day()); fire(liveRow(), 'click'); await sleep(60);
+  await click(/^The times are wrong/);
+  const one = oneField('live start'); if (one !== true) return one;
+  await type(sheetInputs().find((n) => attr(n, 'type') === 'time'), hh_mm(T - 25));
+  await click(/^Next: check it$/);
+  await click(goBtn());
+  const s = getState();
+  return (currentSheet() === null && s.current.since === T - 25 && overlaps(s).length === 0) || plain(s);
+});
+await pin('E4. a tap on the edit clock asks the phone for its picker (showPicker, guarded: absent or throwing is harmless)', async () => {
+  await seed(day()); openSheet({ kind: 'edit', seg: getState().segments[1], step: 'when', draft: { status: 'D', start: T - 300, len: 280 } }); await sleep(60);
+  const t = sheetInputs().find((n) => attr(n, 'type') === 'time');
+  if (!t) return 'no picker';
+  let asked = 0;
+  t.showPicker = () => { asked++; };
+  fire(t, 'click'); if (asked !== 1) return 'showPicker asked ' + asked + 'x';
+  t.showPicker = () => { throw new Error('NotAllowedError'); };
+  fire(t, 'click');
+  delete t.showPicker;
+  fire(t, 'click');
+  return currentSheet()?.step === 'when' || 'the sheet moved';
+});
+await pin('E5. scope fence: the ADD flow, fix-start and the load check keep their tap-to-type clock and "Exact time" field, unchanged', async () => {
+  const miss = [];
+  const keeps = (where, label) => { if (!all((n) => n.localName === 'button' && /\bed-clock-tap\b/.test(cls(n)) && inSheet(n)).length) miss.push(where + ': keypad clock'); if (!input(label) || !/Exact time/.test(sheetText())) miss.push(where + ': exact-time field'); };
+  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); keeps('add start', 'Exact start time');
+  openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);
+  fire(all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0], 'click'); await sleep(40);
+  if (!input('Exact end time, type the time') || !input('Exact end time')) miss.push('add end: typed box + exact-time field');
+  openSheet({ kind: 'since' }); await sleep(50); keeps('fix-start', 'Exact start time');
+  await seed(day(), { tab: 'load' }); openSheet({ kind: 'loadtime', field: 'leave' }); await sleep(50); keeps('load leave', 'Exact time');
+  return miss.length === 0 || miss.join('; ');
 });
 
 /* ================= item 4: absorb, never overlap ================= */
@@ -350,7 +428,7 @@ await pin('F1. copy: the new surfaces name no person and carry no officer / insp
 await pin('F2. touch floors: the clock key, the typed box, Done and the end-time key ride rules at the 56/48px floors', async () => {
   const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
   const minH = (re) => { const m = css.match(re); const v = m && /min-height: (\d+)px/.exec(m[0]); return v ? +v[1] : 0; };
-  const floors = [[/\n\.ed-clock-tap \{[^}]*\}/, 56], [/\ninput\.num \{[^}]*\}/, 56], [/\n\.ed-type \.ed-type-ok \{[^}]*\}/, 56], [/\n\.ed-ends-tap \{[^}]*\}/, 48]];
+  const floors = [[/\n\.ed-clock-tap \{[^}]*\}/, 56], [/\ninput\.num \{[^}]*\}/, 56], [/\n\.ed-type \.ed-type-ok \{[^}]*\}/, 56], [/\n\.ed-ends-tap \{[^}]*\}/, 48], [/\n\.ed-clock-pick \{[^}]*\}/, 56]];
   for (const [re, f] of floors) if (minH(re) < f) return `${re} is ${minH(re)}px, floor ${f}`;
   return true;
 });

@@ -180,6 +180,72 @@ await pin('S11. a settle that fires mid-flight (a tab tap\u2019s smooth scroll p
   return getState().tab === 'log' || `after arrival, scroll to 800 gave ${getState().tab}`;
 });
 
+/* ---------------- (h) feel round 2 (2026-11-19): the haptic click on a swipe settle ---------------- */
+// navigator.vibrate stubbed: every call recorded. fire() runs a node's own listeners only (no
+// document capture), so the global button tap tick never runs here — every call these pins
+// see comes from the strip's settle path.
+const vib = [];
+const setVibrate = (f) => Object.defineProperty(globalThis.navigator, 'vibrate', { value: f, configurable: true, writable: true });
+setVibrate((p) => { vib.push(p); return true; });
+// A finger on the strip: the touchstart/pointerdown a real swipe begins with (it clears any
+// programmatic scroll goal the seed's own tab change left behind, exactly as on a phone).
+// (Matched case-blind: preact registers onTouchStart under whichever casing the shim exposes.)
+const grab = () => { const el = strip(); for (const k of Object.keys(el.listeners)) if (/^(touchstart|pointerdown)$/i.test(k)) for (const f of el.listeners[k]) f.call(el, { type: k, target: el, currentTarget: el, preventDefault() {}, stopPropagation() {} }); };
+const tapNav = (label) => { const nav = all((n) => n.localName === 'nav' && (n.attributes.class || '').includes('tabs'))[0]; fire(nav.childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === label), 'click'); };
+await pin('H1. a swipe that settles on a NEW panel gives exactly one short haptic click — none during the drag', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0; grab();
+  // the drag: a run of scroll events closer together than the settle window
+  const el = strip();
+  for (const px of [40, 120, 210, 300, 370]) { el.scrollLeft = px; fire(el, 'scroll'); await sleep(30); }
+  if (vib.length) return `buzzed during the drag: ${JSON.stringify(vib)}`;
+  await scrollStripTo(400); // the snap lands it on Plan and the settle commits
+  if (getState().tab !== 'plan') return `tab=${getState().tab}`;
+  if (vib.length !== 1) return `vibrate calls: ${JSON.stringify(vib)}`;
+  const p = vib[0], ms = Array.isArray(p) ? p.reduce((a, b) => a + b, 0) : p;
+  if (!(ms > 0 && ms <= 30)) return `not a short tick: ${JSON.stringify(p)}`;
+  await sleep(200); // a quiet strip after the commit never buzzes again
+  return vib.length === 1 || `buzzed again at rest: ${JSON.stringify(vib)}`;
+});
+await pin('H2. once per panel change: walking Now → Plan → Log → More gives three clicks, one each', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0;
+  grab(); await scrollStripTo(400); grab(); await scrollStripTo(800); grab(); await scrollStripTo(1200);
+  return (getState().tab === 'settings' && vib.length === 3) || `tab=${getState().tab} vibrate×${vib.length}`;
+});
+await pin('H3. a swipe that springs back to the same panel is silent', async () => {
+  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 800; vib.length = 0; grab();
+  const el = strip(); el.scrollLeft = 900; fire(el, 'scroll'); await sleep(30);
+  await scrollStripTo(800);
+  return (getState().tab === 'log' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
+});
+await pin('H4. a tab-bar tap is not a swipe: its strip scroll and settle add no haptic click', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0;
+  tapNav('Log'); await sleep(60);
+  if (getState().tab !== 'log') return `tab=${getState().tab}`;
+  fire(strip(), 'scroll'); await sleep(220); // the arrival's scroll event and its settle
+  tapNav('Plan'); await sleep(60); fire(strip(), 'scroll'); await sleep(220);
+  return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}: ${JSON.stringify(vib)}`;
+});
+await pin('H5. a programmatic change (restore / back / shortcut) and a settle under an open sheet are silent', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0;
+  await seed({ tab: 'settings', ...segs }); fire(strip(), 'scroll'); await sleep(220);
+  openSheet({ kind: 'status' }); await sleep(60);
+  await scrollStripTo(400);
+  openSheet(null); await sleep(30);
+  return vib.length === 0 || `vibrate×${vib.length}`;
+});
+await pin('H6. no vibration API (iPhone) — or one that throws — the swipe still commits, nothing throws', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0;
+  const nav = globalThis.navigator;
+  delete nav.vibrate;
+  if ('vibrate' in nav) return 'could not remove vibrate for the test';
+  grab(); await scrollStripTo(400);
+  if (getState().tab !== 'plan') return `no-API: tab=${getState().tab}`;
+  setVibrate(() => { throw new Error('blocked'); });
+  grab(); await scrollStripTo(800);
+  setVibrate((p) => { vib.push(p); return true; });
+  return getState().tab === 'log' || `throwing API: tab=${getState().tab}`;
+});
+
 /* ---------------- (c) no bounty / perk text in the built output ---------------- */
 await pin('C1. the built bundle carries no bounty, $5-for, free-paid-version, email-report or bugEmail text', async () => {
   const dir = `${process.cwd()}/dist`;
