@@ -144,12 +144,15 @@ await pin('M7b. a typed departure in the past or past 24h is refused on the shee
   return (refusedPast && refusedFar && getState().loadCheck.leaveIn === before) || `past ${refusedPast} far ${refusedFar} leaveIn ${getState().loadCheck.leaveIn}`;
 });
 
-await pin('M7c. question 3½ "Appointment at the receiver?" offers [No appointment] [Pick a time]; No appointment goes to the answer with none set', async () => {
+// A6 (taste, 2026-11-20): Appointment is now step 3 (before "How long at the receiver?" on step 4).
+await pin('M7c. step 3 "Appointment at the receiver?" offers [No appointment] [Pick a time]; No appointment moves to receiver dwell then answer with none set', async () => {
   await mount(driving({ tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: 300, answered: false } }));
-  await click(/^Next: when you leave/); await click(/^Next: time at the receiver/); await click(/^Next: appointment time/);
+  await click(/^Next: when you leave/); await click(/^Next: appointment time/);
   if (!/Appointment at the receiver\?/.test(text())) return 'no appointment question';
   if (!button(/^No appointment$/) || !button(/^Pick a time$/)) return 'both answers must be offered';
-  await click(/^No appointment$/, 120);
+  await click(/^No appointment$/, 80);
+  if (!/How long at the receiver\?/.test(text())) return 'expected receiver dwell step after No appointment';
+  await click(/^Show me the answer/, 120);
   const lc = getState().loadCheck;
   return (/Verdict/.test(text()) && lc.answered === true && (lc.appt ?? null) === null) || `answer ${/Verdict/.test(text())} appt ${lc.appt}`;
 });
@@ -182,15 +185,19 @@ await pin('M7g. boundary: an appointment exactly at wheels-stop reads "On time �
   return (a.includes('On time — 0m to spare') && l1 === 'Late by 1m — earliest arrival Mon Nov 9, 18:32') || `${a} | ${l1}`;
 });
 
-await pin('M7h. the appointment answer is set through its own big clock (Pick a time) and lands on the answer', async () => {
+// A6 (taste, 2026-11-20): Appointment is step 3 and defaults to computed arrival (18:32) rounded up to the hour (19:00).
+await pin('M7h. the appointment picker defaults to arrival rounded up to the hour (19:00), sets a picked time, and lands on the answer', async () => {
   await mount(driving({ tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: 300, dwell: 120, answered: false } }));
-  await click(/^Next: when you leave/); await click(/^Next: time at the receiver/); await click(/^Next: appointment time/);
+  await click(/^Next: when you leave/); await click(/^Next: appointment time/);
   await click(/^Pick a time$/);
   if (currentSheet()?.field !== 'appt') return 'the appointment clock must open';
-  // starts on the next whole hour after now + 3h (07:00); +1h ×9 → 16:00
-  for (let i = 0; i < 9; i++) await click(/^\+ 1 hour$/, 10);
+  // A6: arrival is Mon Nov 9, 18:32 → default rounds up to Mon Nov 9, 19:00 (not Today 07:00).
+  if (!button(/^Appointment Mon Nov 9, 19:00$/)) return `expected default 19:00, saw ${text().slice(0, 240)}`;
+  // −1h ×3 from 19:00 → 16:00
+  for (let i = 0; i < 3; i++) await click(/^− 1 hour$/, 10);
   await click(/^Appointment Mon Nov 9, 16:00$/);
   if (getState().loadCheck.appt !== CD(9, 16, 0)) return `appt ${getState().loadCheck.appt}`;
+  await click(/^Next: time at the receiver/, 80);
   await click(/^Show me the answer/, 120);
   return text().includes('Late by 2h 32m') || 'answer did not show the appointment line';
 });
@@ -302,10 +309,11 @@ await pin('M4d. one level, shared with the Split Lab: a later load edit retires 
   return (retired && splitOwns && loadOwns) || JSON.stringify({ retired, splitOwns, loadOwns });
 });
 
+// A6 (taste, 2026-11-20): answer screen moved from step 4 to step 5 when Appointment and Receiver became steps 3 and 4.
 await pin('M4e. the button rides the No verdict\'s fix line, says "Plan it", and its tap is the draft replace (source)', async () => {
   const app = readFileSync('src/app.tsx', 'utf8');
   const ok = /\{!best\.feasible && loadFix && <button class="primary wide fixit" onClick=\{\(\) => replaceLoadDraft\(\{ leaveIn: loadFix\.leaveIn, waitOff: true \}\)\}>\{loadFix\.label\}<\/button>\}/.test(app)
-    && /const loadFix = step === 4 && !best\.feasible \? loadFixFor\(lc, now, advice\?\.fix \?\? null\) : null;/.test(app)
+    && /const loadFix = step === 5 && !best\.feasible \? loadFixFor\(lc, now, advice\?\.fix \?\? null\) : null;/.test(app)
     && !/Fix my log/.test(app);
   return ok || 'the No branch must render the Plan it button from loadFixFor and tap replaceLoadDraft';
 });
@@ -601,16 +609,17 @@ await pin('M14d. the address is cleaned with replaceState(history.state, \'\', \
   return (first && first[0] === marker && first[1] === '' && first[2] === './') || JSON.stringify(replaced.slice(0, 2));
 });
 
-await pin('M14e. go=stopped while the launch disclaimer is up waits behind it: the disclaimer shows first, the panel after it closes', async () => {
+// C6 (taste, owner decision 2026-11-20): launch disclaimer modal replaced by non-blocking banner on Now, so go=stopped opens the status panel immediately without a blocking modal.
+await pin('M14e. C6: go=stopped opens the status panel immediately (no blocking launch disclaimer modal) while Now keeps the disclaimer banner', async () => {
   render(null, root); await sleep(20); openSheet(null);
-  setState(driving({ tab: 'now', drivingView: false })); setLaunchNotice(true);
+  setState(driving({ tab: 'now', drivingView: false }));
   globalThis.location = { search: '?go=stopped' };
   render(h(App, {}), root); await sleep(120);
-  const disclaimerFirst = /I understand/.test(text()) && !/What are you doing now\?/.test(text());
-  await click(/I understand/, 120);
-  const after = /What are you doing now\?/.test(text());
-  setLaunchNotice(false); openSheet(null);
-  return (disclaimerFirst && after) || JSON.stringify({ disclaimerFirst, after });
+  const noModal = !/I understand/.test(text());
+  const panelOpen = /What are you doing now\?/.test(text());
+  const hasBanner = /Planning only — your ELD governs/.test(text());
+  openSheet(null);
+  return (noModal && panelOpen && hasBanner) || JSON.stringify({ noModal, panelOpen, hasBanner });
 });
 
 await pin('M14f. offline: the service worker still falls back to index.html on a miss, and its cache prefix is unchanged', async () => {

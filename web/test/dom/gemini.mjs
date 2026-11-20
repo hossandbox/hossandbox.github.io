@@ -77,34 +77,36 @@ await pin('A4. nothing logged, no status: "(0)" and the empty line', async () =>
   return (/Entries on this day \(0\)/.test(t) && /Nothing logged on this day/.test(t)) || t.slice(0, 200);
 });
 
-/* ---------------- B. Load-check step counter ---------------- */
-const counter = () => { const fh = inPage((n) => has(n, 'flow-head'))[0]; return fh ? fh.childNodes.filter((c) => c.localName === 'span').map((c) => c.textContent).join('') : null; };
+/* ---------------- B. Load-check step counter (re-aimed for A6, 2026-11-20) ---------------- */
+// A6: Load check shares Log add's "Step N of 4" counter under the bar (.ed-count), with Appointment on step 3 (Optional) before Receiver dwell on step 4.
+const counter = () => { const c = inPage((n) => has(n, 'ed-count'))[0]; return c ? c.textContent : null; };
 const dots = () => { const d = inPage((n) => has(n, 'flow-dots'))[0]; return d ? d.childNodes.map((c) => cls(c).trim()) : null; };
-await pin('B1. the four screens read 1 of 4, 2 of 4, 3 of 4, 4 of 4 · Optional (never "of 3")', async () => {
+await pin('B1. A6: the four screens read Step 1 of 4, Step 2 of 4, Step 3 of 4 — Optional, Step 4 of 4 (Appointment before Receiver)', async () => {
   await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
   const seen = [counter()];
   await click('Next: when you leave'); seen.push(counter());
-  await click('Next: time at the receiver'); seen.push(counter());
   await click('Next: appointment time'); seen.push(counter());
-  const want = ['1 of 4', '2 of 4', '3 of 4', '4 of 4 · Optional'];
-  const q = /Appointment at the receiver\?/.test(pageText());
-  return (JSON.stringify(seen) === JSON.stringify(want) && q) || `seen ${JSON.stringify(seen)}, appt screen ${q}`;
+  const q3 = /Appointment at the receiver\?/.test(pageText());
+  await click('Next: time at the receiver'); seen.push(counter());
+  const q4 = /How long at the receiver\?/.test(pageText());
+  const want = ['Step 1 of 4', 'Step 2 of 4', 'Step 3 of 4 — Optional', 'Step 4 of 4'];
+  return (JSON.stringify(seen) === JSON.stringify(want) && q3 && q4) || `seen ${JSON.stringify(seen)}, q3 ${q3}, q4 ${q4}`;
 });
-await pin('B2. four dots; the fourth is marked optional; filled up to the screen shown', async () => {
+await pin('B2. A6: four dots; the third (Appointment) is marked optional; filled up to the screen shown', async () => {
   await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
   const d1 = dots();
-  await click('Next: when you leave'); await click('Next: time at the receiver'); await click('Next: appointment time');
+  await click('Next: when you leave'); await click('Next: appointment time'); await click('Next: time at the receiver');
   const d4 = dots();
   const on = (d) => d.filter((c) => c.split(/\s+/).includes('on')).length;
   const opt = (d) => d.map((c, i) => c.split(/\s+/).includes('opt') ? i : -1).filter((i) => i >= 0);
-  return (d1 && d4 && d1.length === 4 && d4.length === 4 && on(d1) === 1 && on(d4) === 4 && JSON.stringify(opt(d1)) === '[3]' && JSON.stringify(opt(d4)) === '[3]') || `d1 ${JSON.stringify(d1)} d4 ${JSON.stringify(d4)}`;
+  return (d1 && d4 && d1.length === 4 && d4.length === 4 && on(d1) === 1 && on(d4) === 4 && JSON.stringify(opt(d1)) === '[2]' && JSON.stringify(opt(d4)) === '[2]') || `d1 ${JSON.stringify(d1)} d4 ${JSON.stringify(d4)}`;
 });
-await pin('B3. Back from the optional screen returns to 3 of 4', async () => {
+await pin('B3. A6: Back from step 4 (receiver) returns to Step 3 of 4 — Optional (appointment)', async () => {
   await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
-  await click('Next: when you leave'); await click('Next: time at the receiver'); await click('Next: appointment time');
+  await click('Next: when you leave'); await click('Next: appointment time'); await click('Next: time at the receiver');
   const back = inPage((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Previous question')[0];
   fire(back, 'click'); await sleep(40);
-  return counter() === '3 of 4' || `counter ${counter()}`;
+  return counter() === 'Step 3 of 4 — Optional' || `counter ${counter()}`;
 });
 
 /* ---------------- G. Compare: long rests ---------------- */
@@ -137,6 +139,7 @@ await pin('G4. splitPairCount counts the planner\'s pairing steps only', async (
   const n = A.splitPairCount(mk([['SB', 'Sleeper 7h — opens a split (long leg, §395.1(g)(1)(ii)(B))'], ['D', 'Drive 300 mi'], ['OFF', 'Off duty 3h — pairs with the 7h rest ending 04:00 (split; clocks recalc from that rest\'s end)'], ['OFF', 'Extend to a full 10-hour reset']]));
   return n === 1 || `got ${n}`;
 });
+// C7 (taste, 2026-11-20): plainStepReason renders "opens a split (long leg, …)" as "starts a sleeper split (7h+ in the sleeper, …)".
 await pin('G5. rendered: load answer → Compare anyway → the Sleeper splits card says "1 long rest", and its schedule shows the extend-to-10h step', async () => {
   await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, answered: true } });
   if (button('Compare anyway')) await click('Compare anyway');
@@ -145,7 +148,7 @@ await pin('G5. rendered: load answer → Compare anyway → the Sleeper splits c
   fire(card, 'click'); await sleep(40);
   const sub = card.textContent;
   const itin = (inPage((n) => n.localName === 'ol' && has(n, 'itin'))[0] || { textContent: '' }).textContent;
-  return (/\b1 long rest\b/.test(sub) && !/\b0 long rests\b/.test(sub) && /Extend to a full 10-hour reset/.test(itin) && /opens a split/.test(itin)) || `card "${sub}" | itin has extend ${/Extend/.test(itin)}`;
+  return (/\b1 long rest\b/.test(sub) && !/\b0 long rests\b/.test(sub) && /Extend to a full 10-hour reset/.test(itin) && /starts a sleeper split/.test(itin)) || `card "${sub}" | itin has extend ${/Extend/.test(itin)}`;
 });
 
 /* ---------------- H. Exceptions this shift ---------------- */
@@ -176,46 +179,47 @@ const typeMiles = async (v) => { const i = milesInput(); i.value = v; fire(i, 'i
 const nextBtn = () => button('Next: when you leave');
 // preact writes `disabled` as a property where the node has one, else as an attribute (the shim)
 const isOff = (b) => b.disabled === true || (b.attributes && 'disabled' in b.attributes && b.attributes.disabled !== 'false');
+// A6 (taste, 2026-11-20): untouched fresh loadCheck defaults to LOAD_DEFAULT_MILES (550) on mount, and step counter reads "Step N of 4".
 await pin('I1. typing -100: inline message, the box keeps -100, Next is disabled, the stored distance is untouched', async () => {
-  await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
+  await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: A.LOAD_DEFAULT_MILES } });
   await typeMiles('-100');
   const msg = inPage((n) => n.attributes && n.attributes.id === 'miles-problem')[0];
   const i = milesInput();
-  return (msg && /at least 1/.test(msg.textContent) && msg.attributes.role === 'alert' && String(i.value) === '-100' && i.attributes['aria-invalid'] === 'true' && isOff(nextBtn()) && getState().loadCheck.miles === 1200) || `msg ${msg && msg.textContent}, value ${i.value}, next disabled ${isOff(nextBtn())}, miles ${getState().loadCheck.miles}`;
+  return (msg && /at least 1/.test(msg.textContent) && msg.attributes.role === 'alert' && String(i.value) === '-100' && i.attributes['aria-invalid'] === 'true' && isOff(nextBtn()) && getState().loadCheck.miles === A.LOAD_DEFAULT_MILES) || `msg ${msg && msg.textContent}, value ${i.value}, next disabled ${isOff(nextBtn())}, miles ${getState().loadCheck.miles}`;
 });
-await pin('I2. Next on an invalid distance does not advance (no silent fall-back to 1200 mi)', async () => {
-  await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
+await pin('I2. Next on an invalid distance does not advance (no silent fall-back)', async () => {
+  await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: A.LOAD_DEFAULT_MILES } });
   await typeMiles('-100');
   // fire() runs the handler even on a disabled node (the shim has no disabled semantics), so this
   // also pins the handler's own guard, not just the attribute.
   fire(nextBtn(), 'click');
   await sleep(40);
-  return (/How far is the load\?/.test(pageText()) && counter() === '1 of 4') || `moved on: ${counter()}`;
+  return (/How far is the load\?/.test(pageText()) && counter() === 'Step 1 of 4') || `moved on: ${counter()}`;
 });
 await pin('I3. 0, empty and 3001 are refused the same way; NaN-ish (empty from the number box) too', async () => {
   const out = [];
   for (const v of ['0', '', '3001', '  ']) {
-    await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
+    await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: A.LOAD_DEFAULT_MILES } });
     await typeMiles(v);
-    out.push(`${JSON.stringify(v)}:${isOff(nextBtn()) && !!inPage((n) => n.attributes && n.attributes.id === 'miles-problem')[0] && getState().loadCheck.miles === 1200}`);
+    out.push(`${JSON.stringify(v)}:${isOff(nextBtn()) && !!inPage((n) => n.attributes && n.attributes.id === 'miles-problem')[0] && getState().loadCheck.miles === A.LOAD_DEFAULT_MILES}`);
   }
   return out.every((x) => x.endsWith(':true')) || out.join(' ');
 });
 await pin('I4. correcting to 650 clears the message, stores 650, Next advances and the check runs on 650', async () => {
-  await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
+  await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: A.LOAD_DEFAULT_MILES } });
   await typeMiles('-100'); await typeMiles('650');
   const msg = inPage((n) => n.attributes && n.attributes.id === 'miles-problem')[0];
   const ok1 = !msg && getState().loadCheck.miles === 650 && !isOff(nextBtn());
   await click('Next: when you leave');
-  return (ok1 && counter() === '2 of 4') || `msg ${!!msg}, miles ${getState().loadCheck.miles}, counter ${counter()}`;
+  return (ok1 && counter() === 'Step 2 of 4') || `msg ${!!msg}, miles ${getState().loadCheck.miles}, counter ${counter()}`;
 });
-await pin('I5. a stepper or chip after a bad value clears it and applies (−100 then +50 → 1250)', async () => {
-  await seed({ ...gemini, tab: 'load', planReturn: 'plan' });
+await pin('I5. a stepper or chip after a bad value clears it and applies (−100 then +50 → 600)', async () => {
+  await seed({ ...gemini, tab: 'load', planReturn: 'plan', loadCheck: { ...DEFAULT_LOADCHECK, miles: A.LOAD_DEFAULT_MILES } });
   await typeMiles('-100');
   const plus = inPage((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Add 50 miles')[0];
   fire(plus, 'click'); await sleep(40);
   const msg = inPage((n) => n.attributes && n.attributes.id === 'miles-problem')[0];
-  return (!msg && getState().loadCheck.miles === 1250 && String(milesInput().value) === '1250' && !isOff(nextBtn())) || `msg ${!!msg}, miles ${getState().loadCheck.miles}, value ${milesInput().value}`;
+  return (!msg && getState().loadCheck.miles === A.LOAD_DEFAULT_MILES + 50 && String(milesInput().value) === String(A.LOAD_DEFAULT_MILES + 50) && !isOff(nextBtn())) || `msg ${!!msg}, miles ${getState().loadCheck.miles}, value ${milesInput().value}`;
 });
 await pin('I6. loadMilesProblem unit: 1 and 3000 pass; 0, -100, "", "abc", 3001 fail', async () => {
   const f = A.loadMilesProblem;

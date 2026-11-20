@@ -78,9 +78,14 @@ const h12 = (min) => { const d = new Date(min * 60000); return (d.getHours() % 1
 const results = () => { for (const [k, n, i] of res) console.log(`${k} ${n}${i ? '  — ' + i : ''}`); console.log(`\n${res.filter((r) => r[0] === 'PASS').length} pass, ${res.filter((r) => r[0] === 'FAIL').length} fail`); };
 process.on('uncaughtException', (e) => { console.log('UNCAUGHT', e.stack); results(); process.exit(1); });
 process.on('unhandledRejection', (e) => { console.log('UNHANDLED', e?.stack ?? e); results(); process.exit(1); });
-  // Delta-17: the consent-Yes path after a BACK-DATED first Driving tap (status sheet "N min ago").
+  // Delta-17 / re-aimed for C1 (taste, 2026-11-20): the read-aloud question no longer fires on a
+  // Driving tap (the moment the truck rolls) — it fires once on Now after the first non-Driving
+  // status tap, and never over the driving view. Pin both: (1) a back-dated Driving tap never pops
+  // the dialog, and (2) after answering Yes on a non-Driving tap on Now, a subsequent back-dated
+  // Driving tap speaks the exact screen drive-left and stop time.
   render(h(App, {}), root); await sleep(150);
-  const sheetD = () => all((n) => n.localName === 'button' && /Driving/.test(n.textContent) && n.parentNode?.attributes?.class === 'big-status')[0];
+  const sheetBtn = (re) => all((n) => n.localName === 'button' && re.test(n.textContent) && n.parentNode?.attributes?.class === 'big-status')[0];
+  const sheetD = () => sheetBtn(/Driving/);
   const cases = [
     { name: '8h-break, 15 ago', ago: 15, mk: (tf) => ({ segments: [{ status: 'OFF', start: tf - 700, end: tf - 60, createdAt: 1 }], current: { status: 'ON', since: tf - 60, createdAt: 2 } }), want: 465 },
     ...[40, 25].map((left) => ({ name: `11h, ${left} left, 30 ago`, ago: 30, want: Math.max(0, left - 30), mk: (tf) => {
@@ -92,17 +97,26 @@ process.on('unhandledRejection', (e) => { console.log('UNHANDLED', e?.stack ?? e
   for (const c of cases) {
     const tf = M(9, 15, 0); setClock(tf);
     setState({ ...base(), speakAlerts: false, speechAsked: false, speakAskOpen: false, ...c.mk(tf) }); await sleep(80); log.length = 0; queue = [];
+    // C1: first Driving tap does NOT pop the read-aloud dialog (never blocks the driving view).
     A.openSheet({ kind: 'status' }); await sleep(60);
-    const ab = button(new RegExp(`^${c.ago} min ago$`)); fire(ab, 'click'); await sleep(40);
+    fire(button(new RegExp(`^${c.ago} min ago$`)), 'click'); await sleep(40);
     fire(sheetD(), 'click'); await sleep(100);
-    ok(`Y. [${c.name}] back-dated first Driving tap: lands back-dated, asks, silent`, getState().current?.status === 'D' && getState().current?.since === tf - c.ago && dialogUp() && log.length === 0, JSON.stringify(log) + ' ' + JSON.stringify(getState().current));
-    log.length = 0; queue = [];
-    await click(/^Yes, say them$/); await sleep(250);
+    ok(`Y. [${c.name}] C1: back-dated Driving tap never pops read-aloud dialog`, getState().current?.status === 'D' && getState().current?.since === tf - c.ago && !dialogUp() && log.length === 0, JSON.stringify(log) + ' ' + JSON.stringify(getState().current));
+    // C1: reset to parked state, tap a non-Driving status (Off Duty) to trigger the once-only ask on Now, answer Yes, then tap back-dated Driving and verify spoken drive-left matches screen.
+    setState({ ...base(), speakAlerts: false, speechAsked: false, speakAskOpen: false, ...c.mk(tf) }); await sleep(80); log.length = 0; queue = [];
+    tapStatus('OFF'); await sleep(80);
+    const askedParked = dialogUp() && log.length === 0;
+    await click(/^Yes, say them$/); await sleep(120);
+    // Restore the exact pre-drive fixture with consent already granted (speakAlerts: true, speechAsked: true) and verify back-dated Driving speaks exact screen drive-left.
+    setState({ ...base(), speakAlerts: true, speechAsked: true, speakAskOpen: false, ...c.mk(tf) }); await sleep(80); log.length = 0; queue = [];
+    A.openSheet({ kind: 'status' }); await sleep(60);
+    fire(button(new RegExp(`^${c.ago} min ago$`)), 'click'); await sleep(40);
+    fire(sheetD(), 'click'); await sleep(200);
     const first = said()[0] ?? '';
     const p = parseDrive(first);
     const spokenLeft = p ? p.left : (first === 'Driving. No driving time left.' ? 0 : NaN);
     const positive = said().some((u) => { const q = parseDrive(u); return q && q.left > 0; });
-    ok(`Y. [${c.name}] Yes speaks screen drive-left`, spokenLeft === screenDur() && screenDur() === c.want && (c.want > 0 || !positive) && (!p || p.stop === screenStop()), `log ${JSON.stringify(log)}; screen ${screenDur()}m stop ${screenStop()}; oracle ${c.want}`);
+    ok(`Y. [${c.name}] C1: non-Driving ask + Yes → back-dated Driving speaks screen drive-left`, askedParked && spokenLeft === screenDur() && screenDur() === c.want && (c.want > 0 || !positive) && (!p || p.stop === screenStop()), `askedParked ${askedParked}; log ${JSON.stringify(log)}; screen ${screenDur()}m stop ${screenStop()}; oracle ${c.want}`);
   }
   render(null, root);
 results(); process.exit(res.some((r) => r[0] === 'FAIL') ? 1 : 0);

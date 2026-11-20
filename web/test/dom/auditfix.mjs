@@ -484,6 +484,140 @@ await section(async () => {
   await p.ctx.close();
 });
 
+/* ---------------- Taste round (2026-11-20): C1, C2, C3, C5, C6, A6, A7, A10 ---------------- */
+await section(async () => {
+  // C6 (owner decision, 2026-11-20): fresh launch shows non-blocking disclaimer banner on Now,
+  // NO blocking modal, and the VERY FIRST tap on a status button works uninterrupted.
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
+  await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
+  await ctx.addInitScript(() => { if (!sessionStorage.getItem('af-c6')) { sessionStorage.setItem('af-c6', '1'); localStorage.clear(); } });
+  const p = await ctx.newPage();
+  p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e)));
+  OPEN.add(ctx);
+  await p.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await p.waitForSelector('#root *'); await wait(p, 300);
+  const c6 = await p.evaluate(() => ({
+    modal: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
+    banner: document.querySelector('details.disclaimer-banner > summary')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+    openBefore: document.querySelector('details.disclaimer-banner')?.open ?? null,
+  }));
+  ok('C6 fresh launch: non-blocking disclaimer banner on Now, no blocking modal', !c6.modal && /Planning only — your ELD governs/.test(c6.banner || '') && c6.openBefore === false, c6);
+  // C1 (taste, 2026-11-20): first Driving tap must NEVER pop the read-aloud dialog; first non-Driving tap on Now pops it once.
+  await p.locator('.status-buttons button', { hasText: 'Driving' }).click({ timeout: 5000 }); await wait(p, 350);
+  const c1Drive = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
+  ok('C6+C1 first tap Driving: works on first tap (no disclaimer modal) and Driving never pops read-aloud dialog', c1Drive.inDrive && !c1Drive.dlg, c1Drive);
+  await tap(p, 'button.drive-stop', /I.?ve stopped/);
+  await tap(p, '.sheet .big-status button', /^Off Duty$/, 350);
+  const c1Parked = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
+  ok('C1 first non-Driving tap on Now: asks "Want the alerts read out loud?" once while parked', !c1Parked.inDrive && c1Parked.dlg, c1Parked);
+  await tap(p, 'button', /^No thanks$/, 250);
+  await p.locator('.status-buttons button', { hasText: 'Sleeper' }).click({ timeout: 5000 }); await wait(p, 250);
+  ok('C1 answered once: subsequent non-Driving tap never re-asks', !/Want the alerts read out loud\?/.test(await p.evaluate(() => document.body.innerText)));
+  // Expand disclaimer banner and confirm full content + terminal zone picker are inside.
+  await tap(p, 'details.disclaimer-banner > summary', null, 200);
+  const c6Body = await p.evaluate(() => document.querySelector('details.disclaimer-banner')?.innerText ?? '');
+  ok('C6 expanding banner reveals full disclaimer (395.34) and home-terminal zone picker', /395\.34/.test(c6Body) && /Where is your home terminal\?/.test(c6Body), c6Body.slice(0, 200));
+  ok('C1/C6 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await ctx.close();
+});
+
+await section(async () => {
+  // C2 + A10 (taste, 2026-11-20): QuickStartSheet opens at scrollTop 0 with grabber visible,
+  // orders Import → type, prints "6h 20m → 6h 00m" on strict adjustment, and ends with 4 status buttons.
+  const p = await open(null);
+  await tap(p, 'button', /Start from my ELD clocks/, 350);
+  const a10 = await p.evaluate(() => {
+    const sh = document.querySelector('.sheet');
+    const imp = [...sh.querySelectorAll('button')].find((b) => /Import from a screenshot/.test(b.textContent));
+    const firstBox = sh.querySelector('input[aria-label="Drive time left, hours"]');
+    const handle = sh.querySelector('.sheet-handle');
+    return {
+      scrollTop: sh.scrollTop,
+      handleTop: handle?.getBoundingClientRect().top ?? null,
+      shTop: sh.getBoundingClientRect().top,
+      impTop: imp?.getBoundingClientRect().top ?? null,
+      boxTop: firstBox?.getBoundingClientRect().top ?? null,
+    };
+  });
+  ok('A10 quick-start sheet: opens at top (scrollTop 0, grabber visible) with Import above manual boxes', a10.scrollTop === 0 && a10.handleTop >= a10.shTop && a10.impTop < a10.boxTop, a10);
+  await p.fill('.sheet input[aria-label="Drive time left, hours"]', '6');
+  await p.fill('.sheet input[aria-label="Drive time left, minutes"]', '20');
+  await p.fill('.sheet input[aria-label="Shift time left, hours"]', '8');
+  await p.fill('.sheet input[aria-label="Shift time left, minutes"]', '0');
+  await p.fill('.sheet input[aria-label="Break due in, hours"]', '3');
+  await p.fill('.sheet input[aria-label="Break due in, minutes"]', '0');
+  await p.fill('.sheet input[aria-label="Cycle time left, hours"]', '50');
+  await p.fill('.sheet input[aria-label="Cycle time left, minutes"]', '0');
+  await tap(p, '.sheet button.primary', /^Set my clocks$/, 350);
+  const c2 = await p.evaluate(() => {
+    const sh = document.querySelector('.sheet');
+    return {
+      txt: sh?.innerText ?? '',
+      btns: [...(sh?.querySelectorAll('.big-status button') ?? [])].map((b) => b.textContent.trim()),
+    };
+  });
+  ok('C2 quick-start result: prints adjusted value "6h 20m → 6h 00m", asks "What are you doing right now?", 4 status buttons (no "See my clocks")', /Drive time left:\s*6h 20m → 6h 00m/.test(c2.txt) && /What are you doing right now\?/.test(c2.txt) && !/See my clocks/.test(c2.txt) && JSON.stringify(c2.btns) === '["Off Duty","Sleeper","Driving","On Duty"]', c2);
+  await tap(p, '.sheet .big-status button', /^On Duty$/, 300);
+  ok('C2 tapping On Duty closes the sheet and sets current status to ON', (await state(p)).current?.status === 'ON' && await p.evaluate(() => !document.querySelector('.sheet')));
+  ok('C2/A10 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+await section(async () => {
+  // C5 (taste, 2026-11-20): Testing card hidden on More until long-press on the build line.
+  const p = await open(DAY);
+  await go(p, 'More');
+  const before = await pageText(p);
+  ok('C5 More: Testing card and Simulated "now" hidden by default', !/Simulated "now"/.test(before) && /Build /.test(before));
+  const bl = p.locator('.page.is-active [data-build-line]');
+  await bl.scrollIntoViewIfNeeded(); await wait(p, 150);
+  const box = await bl.boundingBox();
+  // Short tap (100ms) must NOT unlock it.
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down(); await wait(p, 100); await p.mouse.up(); await wait(p, 200);
+  ok('C5 More: casual short tap on build line keeps Testing hidden', !/Simulated "now"/.test(await pageText(p)));
+  // Long-press (750ms) reveals Testing card.
+  await p.mouse.down(); await wait(p, 750); await p.mouse.up(); await wait(p, 200);
+  ok('C5 More: long-press on build line reveals Testing card ("Simulated \\"now\\" (testing)")', /Simulated "now" \(testing\)/.test(await pageText(p)));
+  ok('C5 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+await section(async () => {
+  // C3 + A6 + A7 (taste, 2026-11-20): hero break wording, load-check order/defaults/counter, trip planner controls.
+  const p = await open(DAY);
+  const heroTxt = await p.evaluate(() => document.querySelector('.page.is-active .limit-plate')?.textContent ?? '');
+  ok('C3 hero break plate reads "30-min break due in …" (never "limited by 8 hours of driving")', /^30-min break due in \d/.test(heroTxt) && !/limited by/.test(heroTxt), heroTxt);
+  await tap(p, 'button.plan-item', /Can I take this load\?/, 600);
+  const s1 = await pageText(p);
+  ok('A6 Load check step 1: defaults to 550 mi and shows "Step 1 of 4" under the bar', /550\s*mi/.test(s1) && /Step 1 of 4/.test(s1), s1.slice(0, 220));
+  await tap(p, 'button.flow-next', /Next: when you leave/, 250);
+  await tap(p, 'button.flow-next', /Next: appointment time/, 250);
+  const s3 = await pageText(p);
+  ok('A6 Load check step 3: asks Appointment BEFORE receiver dwell ("Step 3 of 4 — Optional")', /Step 3 of 4 — Optional/.test(s3) && /Appointment at the receiver\?/.test(s3), s3.slice(0, 220));
+  await tap(p, '.page.is-active button', /^Pick a time$/, 250);
+  const apptBtn = await p.evaluate(() => document.querySelector('.sheet button.ed-go')?.textContent ?? '');
+  ok('A6 Appointment picker defaults to computed arrival rounded up to a future whole hour (:00)', /Appointment [A-Z][a-z]{2} [A-Z][a-z]{2} \d+, \d\d:00$/.test(apptBtn), apptBtn);
+  await closeSheet(p);
+  await tap(p, 'button.flow-next', /Next: time at the receiver/, 250);
+  const s4 = await pageText(p);
+  ok('A6 Load check step 4: asks "How long at the receiver?" ("Step 4 of 4")', /Step 4 of 4/.test(s4) && /How long at the receiver\?/.test(s4), s4.slice(0, 220));
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Plan a run/, 600);
+  const a7 = await p.evaluate(() => {
+    const pg = document.querySelector('.page.is-active');
+    return {
+      sliders: pg.querySelectorAll('input[type=range]').length,
+      departPresets: [...pg.querySelectorAll('[aria-label="Depart"] button')].map((b) => b.textContent.trim()),
+      distPresets: [...pg.querySelectorAll('[aria-label="Distance presets"] button')].map((b) => b.textContent.trim()),
+    };
+  });
+  ok('A7 Plan a run: zero sliders, uses Depart + Distance presets and steppers', a7.sliders === 0 && a7.departPresets.length === 4 && JSON.stringify(a7.distPresets) === '["250","400","550","700","900"]', a7);
+  await tap(p, '[aria-label="Distance presets"] button', /^700$/, 250);
+  ok('A7 tapping 700 preset updates trip miles to 700', (await state(p)).trip?.miles === 700, (await state(p)).trip);
+  ok('C3/A6/A7 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

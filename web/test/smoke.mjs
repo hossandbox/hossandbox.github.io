@@ -191,10 +191,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ];
   setState({ tab: 'log', logResolved: false, nowOverride: T, current: null, tentative: [], segments: overlap });
   hh = out('log/resolved view off');
-  if (!/Show resolved timeline/.test(hh)) throw new Error('resolved-timeline control missing');
+  // C7 (taste, 2026-11-20): "resolved timeline" replaced with plain-language "what the clocks count".
+  if (!/See what the clocks count/.test(hh)) throw new Error('resolved-timeline control missing');
   setState({ logResolved: true });
   hh = out('log/resolved view on');
-  if (!/Resolved timeline \(4\)/.test(hh)) throw new Error('resolved timeline should show the split drive as 4 rows');
+  if (!/What the clocks count \(4\)/.test(hh)) throw new Error('resolved timeline should show the split drive as 4 rows');
   if (!/Driving <b>5h 00m<\/b>/.test(hh)) throw new Error('resolved totals should read 5h of driving');
 
   // nothing logged: every number on screen is an assumption and has to say so
@@ -226,11 +227,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const M = (iso) => Math.floor(new Date(iso).getTime() / 60000);
   const T = M('2026-09-22T17:00:00Z'); // 12:00 America/Chicago
 
-  // (a) every slider offers a numeric box and steppers, not just a drag target
+  // (a) A7 (taste, 2026-11-20): Trip planner replaced sliders with load-check-style presets + steppers + direct numeric entry.
   setState({ tab: 'trip', nowOverride: T, current: null, tentative: [], segments: [], trip: { ...DEFAULT_TRIP } });
-  hh = out('trip/sliders with numeric entry');
-  if (!/class="num"/.test(hh)) throw new Error('sliders must offer direct numeric entry');
-  if (!/aria-label="Decrease Distance by 25 mi"/.test(hh)) throw new Error('slider stepper buttons missing');
+  hh = out('trip/presets and steppers with numeric entry');
+  if (!/aria-label="Distance, miles"/.test(hh)) throw new Error('trip planner must offer direct numeric entry');
+  if (!/aria-label="Take off 50 miles"/.test(hh) || !/aria-label="Add 50 miles"/.test(hh)) throw new Error('trip planner stepper buttons missing');
+  if (/<input[^>]*type="range"[^>]*aria-label="Distance/.test(hh)) throw new Error('A7: Distance slider should be retired in Plan a run');
 
   // (b) violation labels are driver-facing, never enum ids
   // "now" sits after the drive ends: a logged row can only count up to now (round 2, §2.1), and this
@@ -300,7 +302,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/34-hour restart/.test(hh)) throw new Error('the restart comparison must be offered');
   if (!/10-hour resets/.test(hh) || !/Sleeper splits/.test(hh)) throw new Error('the other two strategies must remain');
   if (!/three ways to rest/.test(hh)) throw new Error('the itinerary heading should no longer say two ways');
-  if (!/34-hour restart — resets the 60\/70 cycle/.test(hh)) throw new Error('the restart plan must actually take a 34-hour restart');
+  // C7 (taste, 2026-11-20): plainStepReason renders "34-hour restart — resets your 60/70-hour week".
+  if (!/34-hour restart — resets your 60\/70-hour week/.test(hh)) throw new Error('the restart plan must actually take a 34-hour restart');
 
   // (d) the time-zone picker exists, and an invalid zone is refused rather than crashing every tab
   setState({ tab: 'settings', nowOverride: T, config: { ...getState().config, timeZone: 'America/Chicago' } });
@@ -354,7 +357,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     trip: { ...DEFAULT_TRIP, dep: toInput(T + 180), miles: 3000, pre: 0, until: 'OFF', view: 'restart34' },
   });
   hh = out('trip/restart explanation');
-  if (!/also satisfies the daily reset/.test(hh)) throw new Error('the restart also satisfies the 10-hour daily reset and the note must say so');
+  // C7 (taste, 2026-11-20): plain-language restart note says "also gives you a fresh 11- and 14-hour day (§395.3(a)(1))".
+  if (!/also gives you a fresh 11- and 14-hour day/.test(hh)) throw new Error('the restart also satisfies the 10-hour daily reset and the note must say so');
   if (/does nothing for the 11\/14/.test(hh)) throw new Error('the old misleading restart wording is still present');
 
   // (c) a terminal zone that differs from the device zone must be labelled, and must not cry wolf
@@ -384,10 +388,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     trip: { ...DEFAULT_TRIP, dep: toInput(T + 60), miles: 550, pre: 0, stopMile: 0, stopMin: 0 },
   });
   hh = out('trip/stepper increments');
-  if (!/aria-label="Increase Distance by 25 mi"/.test(hh)) throw new Error('the +/− buttons must name their increment for assistive tech');
-  if (!/aria-label="Decrease Distance by 25 mi"/.test(hh)) throw new Error('the −/+ buttons must name their increment for assistive tech');
-  if (!/>\+25<\/button>/.test(hh)) throw new Error('the increment should be visible on the button, not just in its accessible name');
-  if (!/>−25<\/button>/.test(hh)) throw new Error('the minus button should show its increment too');
+  // A7 (taste, 2026-11-20): Plan a run reuses Load-check's ±50/±10 mile steppers with spoken labels instead of the ±25 slider steppers.
+  if (!/aria-label="Add 50 miles"/.test(hh)) throw new Error('the +/− buttons must name their increment for assistive tech');
+  if (!/aria-label="Take off 50 miles"/.test(hh)) throw new Error('the −/+ buttons must name their increment for assistive tech');
+  if (!/>\+50<\/button>/.test(hh)) throw new Error('the increment should be visible on the button, not just in its accessible name');
+  if (!/>−50<\/button>/.test(hh)) throw new Error('the minus button should show its increment too');
 
   // (b) the day-roll example is concrete, and matches the reviewer's own case
   const laOnChicago = terminalMidnightOnDevice('America/Los_Angeles', 'America/Chicago', T);
@@ -803,16 +808,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     { status: 'D', start: t - 94, end: t - 34 },   // 1h 00m driving
     { status: 'OFF', start: t - 34, end: t },      // 34-minute break — qualifies
   ] });
+  // C3 (taste, 2026-11-20): hero break phrasing simplified to "30-min break due in X" (vs "30-min break due" when 0).
   const bx = out('now/after a qualifying break');
-  if (!/limited by 8 hours of driving \(30-min break in 8h 00m\)/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break, not claim one is due');
-  if (/30-min break due/.test(bx)) throw new Error('the label still says a break is due after the driver took one');
+  if (!/30-min break due in 8h 00m/.test(bx)) throw new Error('after a qualifying break the label must count down to the NEXT break');
+  if (/30-min break due</.test(bx)) throw new Error('the label must say due in 8h 00m, not due now');
 
-  // Approaching 8 hours with no break: the label must still say "break" (round-3 finding — the first
-  // fix dropped the word until the counter hit zero, the moment the driver most needs it).
+  // Approaching 8 hours with no break: the label must still say "break" and the time left.
   setState({ segments: [{ status: 'D', start: t - 465, end: t }] });
   const ax = out('now/break 15 min away');
-  if (!/limited by 8 hours of driving \(30-min break in 15m\)/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
-  if (/30-min break due/.test(ax)) throw new Error('a break 15 min away is not yet due');
+  if (!/30-min break due in 15m/.test(ax)) throw new Error('15 min from the 8-hour limit the label must name the break and the time left');
+  if (/30-min break due</.test(ax)) throw new Error('a break 15 min away is due in 15m, not due now');
 
   // The other half: once the counter has genuinely run out, it must still say so.
   setState({ segments: [{ status: 'D', start: t - 500, end: t }] });
@@ -824,16 +829,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/30-min break due · <b>drive again at/.test(out('log/break genuinely due'))) throw new Error('away from Now, the header must still say the break is due');
   setState({ tab: 'now' });
 
-  // Startup disclaimer — never an ELD, never a legal log.
-  // (patch 7.1 renamed the app: the pins in this file that quoted the disclaimer now quote
-  // "Split Decision is a planning scratchpad" — the invariants they guard are unchanged.)
+  // C6 (taste, owner decision 2026-11-20): launch disclaimer modal replaced with a non-blocking banner on Now
+  // ("Planning only — your ELD governs") that keeps the full disclaimer content without setting the screen inert.
   const dx = out('startup disclaimer');
-  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('the startup disclaimer must appear at launch');
+  if (!/Planning only — your ELD governs/.test(dx)) throw new Error('C6: the non-blocking disclaimer banner must appear on Now');
+  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('C6: the disclaimer banner must keep the planning-scratchpad copy');
   if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
   if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
-  // While the dialog is open nothing behind it can take focus or be read as current (round-3 finding).
+  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(dx)) throw new Error('C6: launch disclaimer must not render a blocking modal dialog');
   for (const tag of ['header', 'main', 'nav']) {
-    if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`<${tag}> must be inert while the disclaimer is open`);
+    if (new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`C6: <${tag}> must NOT be inert on launch (non-blocking banner)`);
   }
 
   // First-run: the terminal zone is asked for, not silently inherited from the phone (round-3 item 3).
@@ -1051,7 +1056,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
       { status: 'D', start: H(-0.5), end: T, createdAt: 3 }
     ] });
   const html = render(h(App, {}));
-  const pc = html.match(/Personal conveyance \(OFF\)<\/span><span class="muted">([^<]*)</);
+  // C7 (taste, 2026-11-20): displaySegLabel drops the "(OFF)" suffix on screen ("Personal conveyance").
+  const pc = html.match(/Personal conveyance<\/span><span class="muted">([^<]*)</);
   if (!pc) throw new Error('the resolved timeline must still label the personal-conveyance row');
   if (!/· 30m$/.test(pc[1])) throw new Error(`personal conveyance must show only its own 30m — folding the plain off duty that followed into it overstates PC time on the driver's own log (got "${pc[1]}")`);
   if (!/<span>Off Duty<\/span><span class="muted">[^<]*· 2h 00m/.test(html)) throw new Error('the plain off-duty row that followed personal conveyance must be its own row (2h 00m)');
@@ -1398,13 +1404,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/How far is the load\?/.test(h) || !/1 of 4/.test(h)) throw new Error('an unanswered load check must open on question 1');
   if (/Verdict|How it goes/.test(h)) throw new Error('question 1 must not show the answer yet');
   if (!/aria-label="Add 50 miles"/.test(h) || !/aria-label="Take off 10 miles"/.test(h)) throw new Error('the miles steppers need spoken labels');
-  if (!/<b>1200<\/b> mi/.test(h)) throw new Error('the big number must show the current miles');
+  // A6 (taste, 2026-11-20): untouched fresh loadCheck defaults to 550 mi (middle preset) and answer lists 4 Change rows (incl. Appointment).
+  if (!/<b>550<\/b> mi/.test(h)) throw new Error('A6: the big number must show the middle-preset default miles (550)');
   // 2. once answered it opens on the answer, with each answer changeable
   setState({ loadCheck: { ...DL, miles: 300, dwell: 60, answered: true } });
   h = out('load/answer');
   if (!/Yes, it’s legal/.test(h)) throw new Error('300 mi on a fresh 10-hour rest is legal');
   if (!/Load distance<\/span><b>300 mi<\/b>/.test(h) || !/At the receiver<\/span><b>1h 00m on duty<\/b>/.test(h) || !/Leaving<\/span><b>now<\/b>/.test(h)) throw new Error('the answer must list what it was asked');
-  if ((h.match(/>Change</g) || []).length !== 3) throw new Error('each of the three answers needs its own Change');
+  if ((h.match(/>Change</g) || []).length !== 4) throw new Error('A6: each of the four answers needs its own Change');
   if (!/Unloaded by/.test(h) || !/How it goes/.test(h)) throw new Error('the answer must keep the unload time and the plan');
   // 3. waiting to leave is planned as what he said, and said back to him
   setState({ loadCheck: { ...gs().loadCheck, leaveIn: 60, waitOff: false } });
@@ -1986,7 +1993,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/<path class="dial-fill"/.test(h) || !/<circle class="dial-cap"/.test(h)) throw new Error('the dial shows what is left');
   // 3h30 driven: the 30-minute break binds first (4h30 left of 8h), so the dial is the break's
   if (!/class="dial-center"><div class="hero-label">You can drive<\/div><div class="hero-value good">4h 30m<\/div>/.test(h)) throw new Error('the number sits in the middle of the dial');
-  if (!/<span class="limit-plate">limited by 8 hours of driving \(30-min break in 4h 30m\)<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
+  // C3 (taste, 2026-11-20): hero break plate reads "30-min break due in 4h 30m".
+  if (!/<span class="limit-plate">30-min break due in 4h 30m<\/span>/.test(h)) throw new Error('the binding limit is named on the plate under the dial');
   if (!/<text class="dial-scale"[^>]*>8h<\/text>/.test(h)) throw new Error('the dial is scaled to the limit that binds (the break: 8h)');
   // the RENDERED arc must be the driver's real share (4h30 left of the 8h break rule), not just "a fill":
   // a dial wired to a constant reads full while the driver runs out. The share is a literal here on
@@ -2066,7 +2074,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const after = evaluate(all(gs(), M(14)), { asOf: M(14), config: gs().config }).shift;
   if (after.breakRemaining !== 330 || after.driveUsed !== 330) throw new Error(`the break must split the drive: the 8 hours restart at 11:30, 2h30 driven since (330m left, got ${after.breakRemaining}); 5h30 driven in all (got ${after.driveUsed})`);
   let h = out('log/break row');
-  if (!/30-min break \(OFF\)/.test(h)) throw new Error('the Log shows the break by name');
+  // C7 (taste, 2026-11-20): displaySegLabel renders "30-min break · off duty" instead of "30-min break (OFF)".
+  if (!/30-min break · off duty/.test(h)) throw new Error('the Log shows the break by name');
   // 7. the add panel offers every break button, with its length and how it is logged (since the editor
   //    redesign the four statuses come first, as most entries are not breaks; inside a drive, breaks lead)
   openSheet({ kind: 'add' });
@@ -2111,7 +2120,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const pc = gs().segments.find((x) => x.note === 'PC');
   if (!pc || sl(pc.status, pc.note) !== 'Personal conveyance (OFF)') throw new Error('the row reads as personal conveyance');
   if (evaluate(all(gs(), M(20)), { asOf: M(20), config: gs().config }).shift.driveUsed !== 240) throw new Error('personal conveyance is off duty: it uses no driving time');
-  if (!/Personal conveyance \(OFF\)/.test(out('log/pc row'))) throw new Error('the Log shows it by name');
+  // C7 (taste, 2026-11-20): displaySegLabel renders "Personal conveyance" without "(OFF)".
+  if (!/Personal conveyance/.test(out('log/pc row'))) throw new Error('the Log shows it by name');
   // 3. an edit that moves a labelled row out of its status drops the label
   if (saveEntry(pc, { status: 'D', start: pc.start, end: pc.end }, M(20)) !== null) throw new Error('setup: the edit saves');
   const moved = gs().segments.find((x) => x.start === M(18) && x.end === M(18.5));
@@ -2240,7 +2250,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet({ kind: 'add', step: 'check', draft: { status: 'OFF', note: breakNote('30-min break'), start: M(14), len: 30, fixedLen: true } });
   h = out('editor/check');
   const th = txt(h);
-  if (!/Check and add/.test(h) || !/What Off [Dd]uty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/Driving [^<]* would be split around it/.test(th) || /This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go ed-absorb">Change the others and add it<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
+  // C7 (taste, 2026-11-20): displaySegLabel renders "30-min break · off duty" instead of "30-min break (OFF)".
+  if (!/Check and add/.test(h) || !/What Off [Dd]uty|What 30-min break · off duty/.test(th) || !/class="grid-mark"/.test(h) || !/Driving [^<]* would be split around it/.test(th) || /This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go ed-absorb">Change the others and add it<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
   // ^ Patch L1 item 4a (sanctioned): an entry that runs into another now saves only through the one explicit absorb confirmation — the button was "Add to my log".
   // a drive logged as two touching rows is still one drive to the driver: the warning names all of it
   const keep = gs().segments;
@@ -2361,8 +2372,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!s4.includes(`Next pair (optional): your ${clock(t(6, 17))}–${clock(NOW)} rest (7h 00m off duty) can also be the first half of your next split. It needs a later rest with 7h+ in a row in the sleeper.`)) throw new Error('Split Lab must describe the possible next pair as optional');
   // with no pair in use, the pending leg still says its time counts against the 14, with the same
   // numbers — patch 7 changed only the label ("Period A" was internal shorthand drivers never used)
+  // C7 (taste, 2026-11-20): pending leg reads "First half of a split logged" (matching Now's tag) and still says it counts against your 14-hour window.
   const loneLab = show(fri, 'split');
-  if (!/First break logged: 7h 00m ending/.test(loneLab) || !/counts against your 14/.test(loneLab)) throw new Error('with no pair in use, the pending leg must still say it counts against your 14');
+  if (!/First half of a split logged: 7h 00m ending/.test(loneLab) || !/counts against your 14/.test(loneLab)) throw new Error('with no pair in use, the pending leg must still say it counts against your 14');
   // 4. a plain 395.1(g) pair (scenario 3: 3h off + 7h sleeper) cites the regulation, not FAQ 22
   s4 = show(thu.slice(0, 3), 'now', t(5, 20), t(5, 13), 'SB');
   const reg = `${clock(t(5, 6))}–${clock(t(5, 9))} off duty (3h 00m) + ${clock(t(5, 13))}–${clock(t(5, 20))} sleeper (7h 00m) — split pair (49 CFR 395.1(g))`;
@@ -2598,21 +2610,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: true })).disclaimerAcked !== true) throw new Error('patch 7: an acknowledged save must stay acknowledged');
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: 'yes' })).disclaimerAcked !== false) throw new Error('patch 7: a damaged flag must read as not acknowledged');
 
-  // 3. full box until the first "I understand", compact after — and the zone question, with the
-  //    corrected time-zone sentence, rides in BOTH sizes while the zone is unconfirmed
+  // 3. C6 (taste, owner decision 2026-11-20): non-blocking disclaimer banner on Now replaces the
+  //    every-launch full/compact modal; keeps the ELD-governs/395.34 content and terminal zone ask.
   ss({ segments: [], tentative: [], current: null, tab: 'now', disclaimerAcked: false, tzChosen: true, nowOverride: null });
-  setLaunchNotice(true);
-  let h = out('patch 7/disclaimer full');
-  if (!/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('patch 7: the first launch must show the full disclaimer');
-  if (/when it and this app disagree/.test(h)) throw new Error('patch 7: the full disclaimer must not carry the compact wording');
-  ss({ disclaimerAcked: true });
-  h = out('patch 7/disclaimer compact');
-  if (!/<b>Planning only — not a log, not an ELD\.<\/b>/.test(h)) throw new Error('patch 7: later launches must show the compact disclaimer');
-  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('patch 7: the compact disclaimer must still name the ELD as the record');
-  if (/395\.34|It sends nothing anywhere/.test(h)) throw new Error('patch 7: the compact disclaimer must be compact — the full text stays in the first box only');
+  let h = out('patch 7/disclaimer banner');
+  if (!/Planning only — your ELD governs/.test(h) || !/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('C6: Now must show the non-blocking disclaimer banner with full planning-only/ELD-governs content');
+  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('C6: the disclaimer banner must name the ELD as governing');
+  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(h)) throw new Error('C6: no blocking launch disclaimer modal');
   ss({ tzChosen: false });
-  h = out('patch 7/disclaimer compact, zone unconfirmed');
-  if (!/Where is your home terminal\?/.test(h)) throw new Error('patch 7: the compact disclaimer must still ask the terminal zone');
+  h = out('patch 7/disclaimer banner, zone unconfirmed');
+  if (!/Where is your home terminal\?/.test(h)) throw new Error('C6: the disclaimer banner must still offer the terminal zone picker when unconfirmed');
   if (!/Clock times on screen are shown in your/.test(h)) throw new Error('patch 7: the zone section must say clock times ride the phone zone');
   if (/Every clock here is worked out in your/.test(h)) throw new Error('patch 7: the stale worked-out-in-your-terminal sentence must be gone');
   ss({ tzChosen: true });
@@ -2624,17 +2631,21 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Four quick questions, get a yes or no/.test(h)) throw new Error('patch 7 (D16 audit: four questions): Now must offer the load question as a prominent plan-item entry');
 
   // 5. the simulated clock banners every screen while set — and is gone when it is not
+  //    C5 (taste, 2026-11-20): Testing card on More is hidden until long-press on the build line
+  //    (or while a simulated clock is already active so it can always be cleared).
   ss({ nowOverride: now + 120 });
   h = out('patch 7/sim banner on');
   if (!/Simulated clock\.<\/b>/.test(h) || !/Use real clock/.test(h)) throw new Error('patch 7: a set simulated clock must banner the screen');
+  ss({ tab: 'settings' });
+  h = out('patch 7/settings testing card while sim active');
+  const headsActive = [...h.matchAll(/<h2>(.*?)<\/h2>/g)].map((m) => m[1]);
+  if (headsActive[headsActive.length - 1] !== 'Testing') throw new Error(`C5: Testing must still appear last in More while a simulated clock is active (saw ${headsActive.join(' | ')})`);
   ss({ nowOverride: null });
   h = out('patch 7/sim banner off');
   if (/Simulated clock\.<\/b>/.test(h)) throw new Error('patch 7: no banner may show on the real clock');
   if (!(app.indexOf('Simulated "now" (testing)') > app.indexOf('title="Testing"'))) throw new Error('patch 7: the simulated-clock setting must live in the Testing card, below the rest of More');
-  ss({ tab: 'settings' });
-  h = out('patch 7/settings testing card');
-  const heads = [...h.matchAll(/<h2>(.*?)<\/h2>/g)].map((m) => m[1]);
-  if (heads[heads.length - 1] !== 'Testing') throw new Error(`patch 7: Testing must be the last card in More (saw ${heads.join(' | ')})`);
+  const headsHidden = [...h.matchAll(/<h2>(.*?)<\/h2>/g)].map((m) => m[1]);
+  if (headsHidden.includes('Testing')) throw new Error(`C5: Testing card must be hidden by default on More until build-line long-press (saw ${headsHidden.join(' | ')})`);
 
   // 6. two zones in play reads as a notice, not a footnote
   const otherZone = dtz === 'America/New_York' ? 'America/Chicago' : 'America/New_York';
@@ -2661,7 +2672,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
       { status: 'D', start: t0 + 510, end: t0 + 780 },
     ] });
   h = out('patch 7/split words');
-  if (!/First break logged:/.test(h)) throw new Error('patch 7: the pending leg must read "First break logged"');
+  // C7 (taste, 2026-11-20): pending leg reads "First half of a split logged".
+  if (!/First half of a split logged:/.test(h)) throw new Error('patch 7 (C7): the pending leg must read "First half of a split logged"');
   if (!/Clocks count from:/.test(h)) throw new Error('patch 7: the plan anchor line must read "Clocks count from"');
   if (/Period A logged|interpretations considered/.test(h)) throw new Error('patch 7: internal terms must not reach the driver');
   if (/Period A logged|interpretations considered/.test(app)) throw new Error('patch 7: the sources must not carry the old driver-facing terms');
@@ -2707,8 +2719,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (/Plan a split/.test(h)) throw new Error('patch 13: Now must not render the removed Plan a split shortcut');
   if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h)) throw new Error('patch 7.1: Now must keep the prominent load entry');
 
-  // (b) the verdict screen carries the reset, wired to clear the draft and restart the questions
-  if (!/setState\(\{ loadCheck: \{ \.\.\.DEFAULT_LOADCHECK \} \}\); setStep\(1\)/.test(app)) throw new Error('patch 7.1: Check another load must reset the draft to the defaults and return to question 1');
+  // (b) A6 (taste, 2026-11-20): Check another load resets to FRESH_LOADCHECK (550 mi middle preset) and returns to question 1.
+  if (!/setState\(\{ loadCheck: \{ \.\.\.FRESH_LOADCHECK \} \}\); setStep\(1\)/.test(app)) throw new Error('patch 7.1 (A6): Check another load must reset the draft to FRESH_LOADCHECK and return to question 1');
   const L = (d, hh, m = 0) => Math.floor(Date.UTC(2026, 9, d, hh + 5, m) / 60000); // Oct d, CDT
   ss({ nowOverride: L(12, 10), historyAcknowledged: true, tentative: [], current: { status: 'ON', since: L(12, 9) },
     segments: [{ status: 'OFF', start: L(11, 20), end: L(12, 9) }],
@@ -2728,8 +2740,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (lc.miles !== 1200 || lc.dwell !== 120 || lc.dwellOff !== false || lc.leaveIn !== 0 || lc.waitOff !== false || lc.answered !== false)
     throw new Error('patch 7.1: the reset must restore the default load draft');
   h = out('patch 7.1/after reset');
-  if (!/How far is the load\?/.test(h) || !/1 of 4/.test(h)) throw new Error('patch 7.1: after the reset the flow must open on question 1');
-  if (!/<b>1200<\/b> mi/.test(h)) throw new Error('patch 7.1: question 1 must show the default miles after the reset');
+  if (!/How far is the load\?/.test(h) || !/Step 1 of 4/.test(h)) throw new Error('patch 7.1 (A6): after the reset the flow must open on Step 1 of 4');
+  // A6 (taste, 2026-11-20): untouched stock draft renders at middle preset (550 mi).
+  if (!/<b>550<\/b> mi/.test(h)) throw new Error('patch 7.1 (A6): question 1 must show the middle-preset default miles (550) after the reset');
   if (/Verdict|Check another load/.test(h)) throw new Error('patch 7.1: question 1 must not show the verdict or its reset');
 
   // (d) the rename (added at Lorico's direction mid-build): every surface a driver sees says
@@ -3045,7 +3058,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   //     as numeric boxes, and the wiring runs through the tested store path
   if (!/openSheet\(\{ kind: 'quickstart' \}\)/.test(app)) throw new Error('patch 8: the DEMO banner must offer the quick start');
   const sheetBody = app.slice(app.indexOf('function QuickStartSheet'), app.indexOf('function StatusSheet'));
-  if (!/applyEldSeed\(getState\(\), clocks, now\)/.test(sheetBody)) throw new Error('patch 8: the panel must seed through the tested store path');
+  // C2 (taste, 2026-11-20): QuickStartSheet calls applyEldSeed(cur, clocks, now) to compute actual adjusted clocks before ending with status buttons.
+  if (!/applyEldSeed\(cur, clocks, now\)/.test(sheetBody)) throw new Error('patch 8: the panel must seed through the tested store path');
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, seededAt: null, nowOverride: null, tab: 'now', config: { ...CFG8 } });
   h = out('patch 8/demo entry');
   if (!/Start from my ELD clocks/.test(h)) throw new Error('patch 8: a fresh install must offer the quick start');
@@ -3054,7 +3068,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   for (const label of ['Drive time left', 'Shift time left', 'Break due in', 'Cycle time left'])
     if (!h.includes(label)) throw new Error(`patch 8: the panel must ask for the ${label} clock`);
   if ((h.match(/inputmode="numeric"/g) || []).length < 8) throw new Error('patch 8: every clock needs hours and minutes boxes on the numeric keypad');
-  if (!/Type the four clocks your ELD shows/.test(h)) throw new Error('patch 8: the panel must say what to type, in driver words');
+  // A10 (taste, 2026-11-20): intro copy now names Import → Say → type in that order.
+  if (!/type the four clocks your ELD shows/i.test(h)) throw new Error('patch 8 (A10): the panel must say what to type, in driver words');
   openSheet(null);
 
   // leave the store as the other sections expect to find it
@@ -3390,8 +3405,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!(driftBody.lastIndexOf('Your ELD says:') < driftBody.indexOf('It fits as Driving'))
       || !(driftBody.lastIndexOf('Your ELD says:') < driftBody.indexOf('Add the missing driving')))
     throw new Error('patch 9.2: the missing verdict must state the ELD number before the fill is offered');
-  if (!/clocks as read/.test(qsBody) || !/dur\(done\.clocks\[f\.key\]\)/.test(qsBody))
-    throw new Error('patch 9.2: the quick-start result must state the four clocks as read');
+  // C2 (taste, 2026-11-20): quick-start result echoes each clock and prints "typed → actual" when adjusted by strict reading.
+  if (!/The four clocks:/.test(qsBody) || !/done\.clocks\[f\.key\]/.test(qsBody) || !/done\.actual\[f\.key\]/.test(qsBody) || !/→/.test(qsBody))
+    throw new Error('patch 9.2 (C2): the quick-start result must state the four clocks and any strict-reading adjustment');
 
   // (o) F2: the trailing stretch's clip at now, pinned. With no live status the record
   //     ends at 10:30 and now is 12:00; the gap is 140 but only the 90 minutes up to now
@@ -5636,11 +5652,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (ask17({ speakAlerts: false, speechAsked: false }, true) !== false) throw new Error('patch 17: a simulated clock never raises the question');
   if (ask17({ speakAlerts: false, speechAsked: true }, false) !== false) throw new Error('patch 17: an answered question is never asked again');
 
+  // C1 (taste, 2026-11-20): read-aloud question fires once on Now after the first non-Driving status tap, never on Driving.
   const now17 = nowMin();
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: { status: 'ON', since: now17 - 30, createdAt: 1 }, historyAcknowledged: true, speakAlerts: false, speechAsked: false, speakAskOpen: false });
   tap17('D');
   if (getState().current?.status !== 'D') throw new Error('patch 17: the Driving tap itself must still land');
-  if (getState().speakAskOpen !== true) throw new Error('patch 17: the first real Driving tap must raise the D7-A question');
+  if (getState().speakAskOpen !== false) throw new Error('C1: a Driving tap must NEVER raise the read-aloud question');
+  if (said17().length !== 0) throw new Error('patch 17: an un-asked Driving tap must not speak');
+  tap17('OFF');
+  if (getState().speakAskOpen !== true) throw new Error('C1: the first real non-Driving tap must raise the read-aloud question');
   if (said17().length !== 0) throw new Error('patch 17: the tap that raises the question must not itself speak');
   // "No thanks": remembered, never re-asked, and the taps stay silent.
   setState({ speakAlerts: false, speechAsked: true, speakAskOpen: false });
@@ -5706,16 +5726,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
   const saidF = () => spokenF.filter((x) => x !== '«cancel»');
 
-  // F3 (Verify-17 §9, mutation M6): the question is due on a Driving tap ONLY. On a
-  // fresh record the first Off Duty, Sleeper and On Duty taps never open it and never
-  // speak; the next Driving tap does.
+  // F3 re-aimed for C1 (taste, 2026-11-20): the read-aloud question NEVER fires on Driving;
+  // a Driving tap lands silently without opening it, and the next non-Driving tap on Now opens it once.
   const tF = nowMin();
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: { status: 'ON', since: tF - 30, createdAt: 1 }, historyAcknowledged: true, speakAlerts: false, speechAsked: false, speakAskOpen: false });
-  tapF('OFF'); tapF('SB'); tapF('ON');
-  if (getState().speakAskOpen !== false || getState().speechAsked !== false) throw new Error('patch 17 fix: a non-Driving first tap must never open the D7-A question');
-  if (saidF().length !== 0) throw new Error('patch 17 fix: non-Driving first taps must not speak');
   tapF('D');
-  if (getState().speakAskOpen !== true) throw new Error('patch 17 fix: the next Driving tap must open the D7-A question');
+  if (getState().speakAskOpen !== false || getState().speechAsked !== false) throw new Error('C1: a Driving tap must never open the read-aloud question');
+  if (saidF().length !== 0) throw new Error('C1: un-asked Driving tap must not speak');
+  tapF('OFF');
+  if (getState().speakAskOpen !== true) throw new Error('C1: the first non-Driving tap on Now must open the read-aloud question');
   if (saidF().length !== 0) throw new Error('patch 17 fix: the asking tap itself must not speak');
 
   // F1 (Verify-17 §3): a back-dated Driving tap speaks the SCREEN's numbers — the
@@ -6147,5 +6166,138 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`capstone C2: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, split: { ...DS2 }, drivingView: true });
   console.log('capstone C2 (scrubber rails in source; one-bar Split strip, S4 ✕ form, S11 tone, Fine-tune, .trust, M4): OK');
+}
+
+/* ============================================================ taste round (2026-11-20) */
+{
+  const A = await import('../src/app.tsx');
+  const S = await import('../src/store.ts');
+  const { evaluate } = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const T = (day, hh, mm = 0) => Math.floor(new Date(2026, 10, day, hh, mm).getTime() / 60000);
+  const nowT = T(20, 14, 0);
+
+  // C1: SpeakAskDialog never renders over the driving view even if speakAskOpen were set.
+  setState({
+    ...S.INITIAL_STATE, tab: 'now', nowOverride: nowT, drivingView: true,
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true,
+    segments: [{ status: 'OFF', start: nowT - 700, end: nowT - 60 }],
+    current: { status: 'D', since: nowT - 60 },
+    speakAlerts: false, speechAsked: false, speakAskOpen: true,
+  });
+  need(!/Want the alerts read out loud\?/.test(render(h(App, {}))), 'C1: driving view must never render the read-aloud modal');
+  setState({ speakAskOpen: false, drivingView: false });
+
+  // C2: eldActualClocks reflects strict-reading adjustments (e.g. driveLeft 6h 20m vs breakDueIn 3h 00m → 5h driven → driveLeft 6h 00m).
+  const typedClocks = { driveLeft: 380, windowLeft: 480, breakDueIn: 180, cycleLeft: 3000 };
+  const seedRes = S.applyEldSeed(getState(), typedClocks, nowT);
+  const seededState = { ...getState(), ...seedRes.patch, current: null };
+  const evSeed = evaluate(S.allSegments(seededState, nowT), { asOf: nowT, config: seededState.config });
+  const gotClocks = A.eldActualClocks(typedClocks, evSeed, false);
+  need(gotClocks.driveLeft === 360 && gotClocks.breakDueIn === 180 && seedRes.notes.length > 0, `C2: eldActualClocks must report strict-adjusted driveLeft=360 (got ${JSON.stringify(gotClocks)}, notes=${JSON.stringify(seedRes.notes)})`);
+  const qsSrc = (await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8'));
+  const qsDoneSrc = qsSrc.slice(qsSrc.indexOf('if (done) {'), qsSrc.indexOf('return (\n    <Sheet title="Start from my ELD clocks" focusKey="qs-form">'));
+  need(/What are you doing right now\?/.test(qsDoneSrc) && /class="big-status"/.test(qsDoneSrc) && !/See my clocks/.test(qsDoneSrc), 'C2: QuickStartSheet done screen ends with the four status buttons, not "See my clocks"');
+
+  // C3: hero break wording uses "30-min break due in …" consistently everywhere (Dial, Timeline, DrivingView, shareText, PreviewCard).
+  const brkState = {
+    ...S.INITIAL_STATE, tab: 'now', nowOverride: nowT, drivingView: false,
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true,
+    segments: [{ status: 'OFF', start: nowT - 900, end: nowT - 300 }, { status: 'D', start: nowT - 300, end: nowT }],
+    current: { status: 'ON', since: nowT },
+  };
+  for (const card of ['dial', 'timeline']) {
+    setState({ ...brkState, nowCard: card });
+    const html = pageOut(render(h(App, {})), 'page-now');
+    need(/<span class="limit-plate">30-min break due in 3h 00m<\/span>/.test(html), `C3 (${card}): hero plate must read "30-min break due in 3h 00m"`);
+    need(!/limited by 8 hours of driving|limited by 30-min break/.test(html), `C3 (${card}): old break phrasing must be gone`);
+  }
+  setState({ ...brkState, drivingView: true, current: { status: 'D', since: nowT } });
+  const drvHtml = render(h(App, {}));
+  need(/class="drive-why">30-min break due in 3h 00m<\/div>/.test(drvHtml), 'C3 (driving view): drive-why must read "30-min break due in 3h 00m"');
+  const brkEv = evaluate(S.allSegments({ ...brkState, current: { status: 'ON', since: nowT } }, nowT), { asOf: nowT, config: brkState.config });
+  need(/^I can drive 3h 00m\.[\s\S]*\n30-min break due in 3h 00m /.test(A.shareText(brkEv, null)), `C3 (shareText): must use plain break phrasing (got ${A.shareText(brkEv, null)})`);
+  need(!/limited by \{bindingLabel\(pev\)\}/.test(qsSrc), 'C3 (PreviewCard): must use bindingSentence(pev), not "limited by {bindingLabel(pev)}"');
+
+  // C4: draftFor prefers the most recent unlogged gap (no overlap), else ends at current.since, else falls back to now-60.
+  const sWithGap = {
+    segments: [
+      { status: 'OFF', start: nowT - 700, end: nowT - 300, createdAt: 1 },
+      // 90-min gap: nowT - 300 .. nowT - 210
+      { status: 'D', start: nowT - 210, end: nowT - 30, createdAt: 2 },
+    ],
+    current: { status: 'ON', since: nowT - 30, createdAt: 3 },
+  };
+  const dGap = A.draftFor({ status: 'ON' }, undefined, nowT, undefined, undefined, sWithGap);
+  need(dGap.start === nowT - 270 && dGap.len === 60, `C4 (gap): expected start=${nowT - 270} len=60 inside gap, got ${JSON.stringify(dGap)}`);
+  const dGapBreak = A.draftFor({ status: 'OFF', minutes: 30 }, undefined, nowT, undefined, undefined, sWithGap);
+  need(dGapBreak.start === nowT - 240 && dGapBreak.len === 30, `C4 (gap 30m break): expected start=${nowT - 240} len=30, got ${JSON.stringify(dGapBreak)}`);
+  const sNoGap = {
+    segments: [
+      { status: 'OFF', start: nowT - 700, end: nowT - 210, createdAt: 1 },
+      { status: 'D', start: nowT - 210, end: nowT - 30, createdAt: 2 },
+    ],
+    current: { status: 'ON', since: nowT - 30, createdAt: 3 },
+  };
+  const dCur = A.draftFor({ status: 'ON' }, undefined, nowT, undefined, undefined, sNoGap);
+  need(dCur.start === nowT - 90 && dCur.len === 60, `C4 (no gap, current): expected end at current.since (${nowT - 30}), got ${JSON.stringify(dCur)}`);
+  const sEmpty = { segments: [], current: null };
+  const dFallback = A.draftFor({ status: 'ON' }, undefined, nowT, undefined, undefined, sEmpty);
+  need(dFallback.len === 60 && dFallback.start <= nowT - 60, `C4 (empty fallback): expected sensible now-60 fallback, got ${JSON.stringify(dFallback)}`);
+
+  // C5: Testing card hidden by default on More; revealed after build-line long-press unlock (or when sim clock is active).
+  A.setTestingUnlocked(false);
+  setState({ ...S.INITIAL_STATE, tab: 'settings', nowOverride: null, historyAcknowledged: true, disclaimerAcked: true, tzChosen: true });
+  const moreHidden = pageOut(render(h(App, {})), 'page-settings');
+  need(!/<h2>Testing<\/h2>/.test(moreHidden) && /data-build-line/.test(moreHidden), 'C5: Testing card must be hidden by default and build line must carry data-build-line');
+  A.setTestingUnlocked(true);
+  const moreShown = pageOut(render(h(App, {})), 'page-settings');
+  need(/<h2>Testing<\/h2>/.test(moreShown) && /Simulated &quot;now&quot; \(testing\)/.test(moreShown), 'C5: Testing card must appear once unlocked via build-line long-press');
+  A.setTestingUnlocked(false);
+  need(A.TESTING_LONG_PRESS_MS >= 400, `C5: TESTING_LONG_PRESS_MS must be a deliberate long-press (>=400ms), got ${A.TESTING_LONG_PRESS_MS}`);
+
+  // C6: Fresh launch renders non-blocking DisclaimerBanner on Now with no modal and no inert shell chrome.
+  setState({ ...S.INITIAL_STATE, tab: 'now', nowOverride: null, disclaimerAcked: false, tzChosen: false, historyAcknowledged: false });
+  const freshHtml = render(h(App, {}));
+  need(/class="disclaimer-banner"/.test(freshHtml) && /Planning only — your ELD governs\./.test(freshHtml) && /395\.34/.test(freshHtml), 'C6: DisclaimerBanner with planning-only/ELD-governs/395.34 content must render on Now');
+  need(!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(freshHtml), 'C6: no blocking launch disclaimer dialog');
+  need(!/<header[^>]*\binert\b/.test(freshHtml) && !/<nav[^>]*\binert\b/.test(freshHtml), 'C6: header/nav must not be inert on launch');
+
+  // C7: Plain-language labels and trip-step reasons.
+  need(A.displaySegLabel('OFF', S.breakNote('30-min break')) === '30-min break · off duty', `C7: displaySegLabel break (got ${A.displaySegLabel('OFF', S.breakNote('30-min break'))})`);
+  need(A.displaySegLabel('OFF', 'PC') === 'Personal conveyance' && A.displaySegLabel('ON', 'YM') === 'Yard move', 'C7: displaySegLabel PC/YM');
+  need(A.plainStepReason('10-hour reset (11/14 exhausted)') === '10-hour break (out of daily hours)', 'C7: plainStepReason 10h reset');
+  need(A.plainStepReason('Sleeper 7h — opens a split (long leg, §395.1(g)(1)(ii)(B))') === 'Sleeper 7h — starts a sleeper split (7h+ in the sleeper, §395.1(g))', 'C7: plainStepReason long leg');
+  need(/doesn't count against your 14-hour window \(FMCSA FAQ 22\)/.test(A.plainStepReason('Off duty 2h — pairs with sleeper reset (FMCSA FAQ 22) — excluded from the 14')), 'C7: plainStepReason FAQ 22');
+  need(/completes your split — clocks count from when that rest ended/.test(A.plainStepReason('Off duty 3h — pairs with the 7h rest ending 04:00 (split; clocks recalc from that rest\'s end)')), 'C7: plainStepReason recalc');
+  need(!/Resolved timeline|Show resolved timeline|Split leg pending|Break 1 only pays off once Break 2 is done|excluded from your 14/.test(qsSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), 'C7: retired jargon phrases must not remain in app.tsx code/copy');
+
+  // A6: ceilHour + defaultApptTime (arrival rounded up to the hour, never past) + middle preset 550 mi.
+  need(A.ceilHour(T(20, 18, 32)) === T(20, 19, 0) && A.ceilHour(T(20, 19, 0)) === T(20, 19, 0), 'A6: ceilHour rounds up non-zero minutes and keeps exact hours');
+  const lcState = { ...S.INITIAL_STATE, tab: 'load', nowOverride: nowT, historyAcknowledged: true, segments: [{ status: 'OFF', start: nowT - 660, end: nowT }], current: { status: 'ON', since: nowT }, loadCheck: { ...S.DEFAULT_LOADCHECK, miles: 300, leaveIn: 0, answered: false } };
+  const apptDef = A.defaultApptTime(lcState, nowT);
+  need(apptDef > nowT && new Date(apptDef * 60000).getMinutes() === 0, `A6: defaultApptTime must be in the future on a whole hour (got ${clockFull(apptDef)})`);
+  need(A.LOAD_DEFAULT_MILES === 550 && A.FRESH_LOADCHECK.miles === 550, 'A6: fresh load check defaults to middle preset 550 mi');
+
+  // A7: Plan a run uses presets + steppers + numeric entry, zero range sliders.
+  setState({ ...S.INITIAL_STATE, tab: 'trip', nowOverride: nowT, historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, trip: { ...DEFAULT_TRIP } });
+  const tripHtml = pageOut(render(h(App, {})), 'page-plan');
+  need(!/<input[^>]*type="range"/.test(tripHtml), 'A7: Plan a run must have no range sliders');
+  need(/aria-label="Depart"/.test(tripHtml) && /aria-label="Distance presets"/.test(tripHtml) && /aria-label="Pre-trip or loading length"/.test(tripHtml) && /aria-label="Stop length"/.test(tripHtml), 'A7: Plan a run must render Depart, Distance, Pre-trip, and Stop preset groups');
+
+  // A10: QuickStartSheet orders Import → Say → type and puts data-first at the top (not on Set my clocks).
+  A.openSheet({ kind: 'quickstart' });
+  const qsHtml = render(h(App, {}));
+  const iImp = qsHtml.indexOf('Import from a screenshot');
+  const iType = qsHtml.indexOf('Or type the four clocks');
+  const iBox = qsHtml.indexOf('Drive time left, hours');
+  need(iImp > 0 && iType > iImp && iBox > iType, `A10: QuickStartSheet must order Import (${iImp}) → type heading (${iType}) → h/m boxes (${iBox})`);
+  need(/<p class="small" tabindex="-1" data-first="true">/.test(qsHtml) && !/data-first="true"[^>]*>Set my clocks/.test(qsHtml), 'A10: focus must start at top of QuickStartSheet so grabber/top padding stay visible');
+  A.openSheet(null);
+
+  if (bad.length) throw new Error(`taste round: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
+  console.log('taste round (C1–C7, A6, A7, A10): OK');
 }
 console.log('OK');

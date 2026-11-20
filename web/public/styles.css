@@ -1150,3 +1150,27 @@ details.help > p { margin: 0 4px 8px; padding: 10px 12px; border-radius: var(--r
 @media (max-height: 760px) {
   .page .split-now-after { position: relative; } /* relative, not static: it stays the containing block of its screen-reader line */
 }
+
+/* ===================================================================================
+   TASTE ROUND (2026-11-20) — C5, C6, A6, A7, A10 presentation polish.
+   Existing tokens only; no palette changes.
+   =================================================================================== */
+/* C6: non-blocking disclaimer banner on Now — never intercepts the first tap. */
+details.disclaimer-banner { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r-12); padding: 0 var(--s-12); font-size: 14px; }
+details.disclaimer-banner > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); cursor: pointer; list-style: none; color: var(--text); }
+details.disclaimer-banner > summary::-webkit-details-marker { display: none; }
+.disclaimer-more { font-size: 13px; font-weight: 700; color: var(--link); flex-shrink: 0; }
+.disclaimer-body { padding: 0 0 var(--s-10); border-top: 1px solid var(--line); margin-top: 2px; }
+.disclaimer-tz { margin-top: var(--s-8); padding-top: var(--s-8); border-top: 1px solid var(--line); }
+/* C5: prevent mobile text-selection callout during the build-line long-press. */
+.build-line { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: default; }
+/* A6: optional bar segment inside Log-add's .ed-bar when shared by Load check. */
+.ed-bar span.opt:not(.on) { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); }
+/* A7: trip planner fields using load-check presets + steppers instead of sliders. */
+.trip-field { display: flex; flex-direction: column; gap: var(--s-8); padding: var(--s-10) 0; border-top: 1px solid var(--line); }
+.trip-field:first-of-type { border-top: 0; padding-top: 0; }
+.trip-field-head, .trip-sub-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); font-size: 15px; font-weight: 700; color: var(--text); }
+.trip-sub-head { margin-top: var(--s-6); font-size: 14px; color: var(--muted); }
+.trip-sub-head b { color: var(--text); }
+/* A10: quick-start read-out list (scroll target after import or voice entry). */
+.qs-result { scroll-margin-top: 12px; }
