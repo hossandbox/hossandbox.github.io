@@ -830,16 +830,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/30-min break due · <b>drive again at/.test(out('log/break genuinely due'))) throw new Error('away from Now, the header must still say the break is due');
   setState({ tab: 'now' });
 
-  // C6 (taste, owner decision 2026-11-20): launch disclaimer modal replaced with a non-blocking banner on Now
-  // ("Planning only — your ELD governs") that keeps the full disclaimer content without setting the screen inert.
+  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer moved from .disclaimer-banner on Now into TopBar's details.disclaimer-line with Details toggle.
   const dx = out('startup disclaimer');
-  if (!/Planning only — your ELD governs/.test(dx)) throw new Error('C6: the non-blocking disclaimer banner must appear on Now');
-  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('C6: the disclaimer banner must keep the planning-scratchpad copy');
+  if (/class="disclaimer-banner"/.test(dx)) throw new Error('C6: .disclaimer-banner must not render on Now after header consolidation');
+  if (!/<details class="disclaimer-line"[^>]*>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>/.test(dx)) throw new Error('C6: TopBar disclaimer-line must show "Planning only — not a log, not an ELD" with Details toggle');
+  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('C6: the header disclaimer must keep the planning-scratchpad copy');
   if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
   if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
   if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(dx)) throw new Error('C6: launch disclaimer must not render a blocking modal dialog');
   for (const tag of ['header', 'main', 'nav']) {
-    if (new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`C6: <${tag}> must NOT be inert on launch (non-blocking banner)`);
+    if (new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`C6: <${tag}> must NOT be inert on launch (non-blocking header disclaimer)`);
   }
 
   // First-run: the terminal zone is asked for, not silently inherited from the phone (round-3 item 3).
@@ -2609,16 +2609,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: true })).disclaimerAcked !== true) throw new Error('patch 7: an acknowledged save must stay acknowledged');
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: 'yes' })).disclaimerAcked !== false) throw new Error('patch 7: a damaged flag must read as not acknowledged');
 
-  // 3. C6 (taste, owner decision 2026-11-20): non-blocking disclaimer banner on Now replaces the
-  //    every-launch full/compact modal; keeps the ELD-governs/395.34 content and terminal zone ask.
+  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer now rides TopBar's details.disclaimer-line with Details toggle instead of a separate Now banner.
   ss({ segments: [], tentative: [], current: null, tab: 'now', disclaimerAcked: false, tzChosen: true, nowOverride: null });
-  let h = out('patch 7/disclaimer banner');
-  if (!/Planning only — your ELD governs/.test(h) || !/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('C6: Now must show the non-blocking disclaimer banner with full planning-only/ELD-governs content');
-  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('C6: the disclaimer banner must name the ELD as governing');
+  let h = out('patch 7/header disclaimer');
+  if (/class="disclaimer-banner"/.test(h)) throw new Error('C6: .disclaimer-banner must be removed from Now');
+  if (!/<details class="disclaimer-line"[^>]*>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>/.test(h) || !/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('C6: header disclaimer line must carry Details toggle and full planning-only/395.34 content');
+  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('C6: the header disclaimer must name the ELD as governing');
   if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(h)) throw new Error('C6: no blocking launch disclaimer modal');
   ss({ tzChosen: false });
-  h = out('patch 7/disclaimer banner, zone unconfirmed');
-  if (!/Where is your home terminal\?/.test(h)) throw new Error('C6: the disclaimer banner must still offer the terminal zone picker when unconfirmed');
+  h = out('patch 7/header disclaimer, zone unconfirmed');
+  if (!/Where is your home terminal\?/.test(h)) throw new Error('C6: the header disclaimer must still offer the terminal zone picker when unconfirmed');
   if (!/Clock times on screen are shown in your/.test(h)) throw new Error('patch 7: the zone section must say clock times ride the phone zone');
   if (/Every clock here is worked out in your/.test(h)) throw new Error('patch 7: the stale worked-out-in-your-terminal sentence must be gone');
   ss({ tzChosen: true });
@@ -6263,10 +6263,19 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   A.setTestingUnlocked(false);
   need(A.TESTING_LONG_PRESS_MS >= 400, `C5: TESTING_LONG_PRESS_MS must be a deliberate long-press (>=400ms), got ${A.TESTING_LONG_PRESS_MS}`);
 
-  // C6: Fresh launch renders non-blocking DisclaimerBanner on Now with no modal and no inert shell chrome.
+  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer consolidated into TopBar's details.disclaimer-line with Details toggle; .disclaimer-banner removed from Now.
   setState({ ...S.INITIAL_STATE, tab: 'now', nowOverride: null, disclaimerAcked: false, tzChosen: false, historyAcknowledged: false });
   const freshHtml = render(h(App, {}));
-  need(/class="disclaimer-banner"/.test(freshHtml) && /Planning only — your ELD governs\./.test(freshHtml) && /395\.34/.test(freshHtml), 'C6: DisclaimerBanner with planning-only/ELD-governs/395.34 content must render on Now');
+  const freshNow = pageOut(freshHtml, 'page-now');
+  const freshHeader = (freshHtml.match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
+  need(!/disclaimer-banner/.test(freshHtml) && !/disclaimer-banner/.test(freshNow), 'C6: no .disclaimer-banner may render on Now');
+  need(/<details class="disclaimer-line"[^>]*>[\s\S]*?<summary>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>[\s\S]*?<\/summary>/.test(freshHeader), 'C6: TopBar disclaimer-line must show "Planning only — not a log, not an ELD" with Details toggle');
+  need(/Split Decision is a planning scratchpad/.test(freshHeader) && /not FMCSA-registered/.test(freshHeader) && /when it and this app disagree, the ELD governs/.test(freshHeader) && /49 CFR 395\.34/.test(freshHeader) && /49 CFR part 395/.test(freshHeader), 'C6: TopBar disclaimer body must preserve full disclaimer copy');
+  need(/class="disclaimer-tz"/.test(freshHeader) && /Where is your home terminal\?/.test(freshHeader) && /Save terminal zone/.test(freshHeader), 'C6: TopBar disclaimer must show home-terminal zone picker when tzChosen is false');
+  setState({ tzChosen: true });
+  const tzDoneHeader = (render(h(App, {})).match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
+  need(!/Where is your home terminal\?/.test(tzDoneHeader) && /49 CFR 395\.34/.test(tzDoneHeader), 'C6: once zone is confirmed, picker disappears while disclaimer body remains');
+  setState({ tzChosen: false });
   need(!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(freshHtml), 'C6: no blocking launch disclaimer dialog');
   need(!/<header[^>]*\binert\b/.test(freshHtml) && !/<nav[^>]*\binert\b/.test(freshHtml), 'C6: header/nav must not be inert on launch');
 

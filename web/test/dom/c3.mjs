@@ -610,17 +610,19 @@ await pin('M14d. the address is cleaned with replaceState(history.state, \'\', \
   return (first && first[0] === marker && first[1] === '' && first[2] === './') || JSON.stringify(replaced.slice(0, 2));
 });
 
-// C6 (taste, owner decision 2026-11-20): launch disclaimer modal replaced by non-blocking banner on Now, so go=stopped opens the status panel immediately without a blocking modal.
-await pin('M14e. C6: go=stopped opens the status panel immediately (no blocking launch disclaimer modal) while Now keeps the disclaimer banner', async () => {
+// Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer now rides TopBar's details.disclaimer-line with Details toggle (no .disclaimer-banner on Now); go=stopped still opens immediately with no blocking modal.
+await pin('M14e. C6: go=stopped opens the status panel immediately (no blocking launch disclaimer modal) while TopBar keeps the consolidated disclaimer line', async () => {
   render(null, root); await sleep(20); openSheet(null);
   setState(driving({ tab: 'now', drivingView: false }));
   globalThis.location = { search: '?go=stopped' };
   render(h(App, {}), root); await sleep(120);
   const noModal = !/I understand/.test(text());
   const panelOpen = /What are you doing now\?/.test(text());
-  const hasBanner = /Planning only — your ELD governs/.test(text());
+  const noBanner = !root.querySelector('.disclaimer-banner');
+  const hdrLine = root.querySelector('header.top')?.querySelector('details.disclaimer-line');
+  const hasHeaderDisclaimer = !!hdrLine && /Planning only — not a log, not an ELD/.test(hdrLine.textContent) && hdrLine.querySelector('.disclaimer-more')?.textContent === 'Details';
   openSheet(null);
-  return (noModal && panelOpen && hasBanner) || JSON.stringify({ noModal, panelOpen, hasBanner });
+  return (noModal && panelOpen && noBanner && hasHeaderDisclaimer) || JSON.stringify({ noModal, panelOpen, noBanner, hasHeaderDisclaimer });
 });
 
 await pin('M14f. offline: the service worker still falls back to index.html on a miss, and its cache prefix is unchanged', async () => {

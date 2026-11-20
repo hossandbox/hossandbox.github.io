@@ -489,8 +489,7 @@ await section(async () => {
 
 /* ---------------- Taste round (2026-11-20): C1, C2, C3, C5, C6, A6, A7, A10 ---------------- */
 await section(async () => {
-  // C6 (owner decision, 2026-11-20): fresh launch shows non-blocking disclaimer banner on Now,
-  // NO blocking modal, and the VERY FIRST tap on a status button works uninterrupted.
+  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer consolidated from .disclaimer-banner on Now into TopBar's details.disclaimer-line with Details toggle.
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
   await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
   await ctx.addInitScript(() => { if (!sessionStorage.getItem('af-c6')) { sessionStorage.setItem('af-c6', '1'); localStorage.clear(); } });
@@ -501,10 +500,13 @@ await section(async () => {
   await p.waitForSelector('#root *'); await wait(p, 300);
   const c6 = await p.evaluate(() => ({
     modal: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
-    banner: document.querySelector('details.disclaimer-banner > summary')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
-    openBefore: document.querySelector('details.disclaimer-banner')?.open ?? null,
+    oldBanner: !!document.querySelector('.disclaimer-banner'),
+    lineText: document.querySelector('header.top details.disclaimer-line > summary .disclaimer-text')?.textContent?.trim() ?? null,
+    moreText: document.querySelector('header.top details.disclaimer-line > summary .disclaimer-more')?.textContent?.trim() ?? null,
+    openBefore: document.querySelector('header.top details.disclaimer-line')?.open ?? null,
+    topHBefore: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 0,
   }));
-  ok('C6 fresh launch: non-blocking disclaimer banner on Now, no blocking modal', !c6.modal && /Planning only — your ELD governs/.test(c6.banner || '') && c6.openBefore === false, c6);
+  ok('C6 fresh launch: no .disclaimer-banner on Now, no blocking modal, TopBar shows "Planning only — not a log, not an ELD" + Details collapsed', !c6.modal && !c6.oldBanner && c6.lineText === 'Planning only — not a log, not an ELD' && c6.moreText === 'Details' && c6.openBefore === false, c6);
   // C1 (taste, 2026-11-20): first Driving tap must NEVER pop the read-aloud dialog; first non-Driving tap on Now pops it once.
   await p.locator('.status-buttons button', { hasText: 'Driving' }).click({ timeout: 5000 }); await wait(p, 350);
   const c1Drive = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
@@ -516,10 +518,38 @@ await section(async () => {
   await tap(p, 'button', /^No thanks$/, 250);
   await p.locator('.status-buttons button', { hasText: 'Sleeper' }).click({ timeout: 5000 }); await wait(p, 250);
   ok('C1 answered once: subsequent non-Driving tap never re-asks', !/Want the alerts read out loud\?/.test(await p.evaluate(() => document.body.innerText)));
-  // Expand disclaimer banner and confirm full content + terminal zone picker are inside.
-  await tap(p, 'details.disclaimer-banner > summary', null, 200);
-  const c6Body = await p.evaluate(() => document.querySelector('details.disclaimer-banner')?.innerText ?? '');
-  ok('C6 expanding banner reveals full disclaimer (395.34) and home-terminal zone picker', /395\.34/.test(c6Body) && /Where is your home terminal\?/.test(c6Body), c6Body.slice(0, 200));
+  // Expand TopBar disclaimer Details and confirm full copy, unconfirmed zone picker, --top-h resize, and clean phone layout (no overflow/overlap).
+  await tap(p, 'header.top details.disclaimer-line > summary', null, 250);
+  const c6Expanded = await p.evaluate(() => {
+    const d = document.querySelector('header.top details.disclaimer-line');
+    const hdr = document.querySelector('header.top').getBoundingClientRect();
+    const body = d?.querySelector('.disclaimer-body')?.getBoundingClientRect();
+    const nav = document.querySelector('nav.tabs').getBoundingClientRect();
+    const text = d?.innerText ?? '';
+    return {
+      open: d?.open ?? false,
+      text,
+      hasSaveBtn: !!d?.querySelector('.disclaimer-tz button'),
+      topHAfter: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 0,
+      hdrBottom: Math.round(hdr.bottom),
+      navTop: Math.round(nav.top),
+      bodyRight: body ? Math.round(body.right) : 0,
+      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      vw: document.documentElement.clientWidth,
+    };
+  });
+  ok('C6 expanding header Details reveals full disclaimer (planning scratchpad, ELD governs, 395.34, 49 CFR part 395)', c6Expanded.open && /Split Decision is a planning scratchpad/.test(c6Expanded.text) && /when it and this app disagree, the ELD governs/.test(c6Expanded.text) && /49 CFR 395\.34/.test(c6Expanded.text) && /49 CFR part 395/.test(c6Expanded.text), c6Expanded.text.slice(0, 220));
+  ok('C6 with zone unconfirmed, expanding header Details reveals home-terminal zone picker and Save button', /Where is your home terminal\?/.test(c6Expanded.text) && c6Expanded.hasSaveBtn, c6Expanded.text.slice(0, 220));
+  ok('C6 expanded header updates --top-h and lays out cleanly with no clipping, overflow, or nav overlap', c6Expanded.topHAfter > c6.topHBefore && !c6Expanded.over && c6Expanded.hdrBottom < c6Expanded.navTop && c6Expanded.bodyRight <= c6Expanded.vw, c6Expanded);
+  // Narrow phone (360×740): collapsed summary fits cleanly and expanded disclaimer+picker stays inside viewport with no overflow/overlap.
+  await p.setViewportSize({ width: 360, height: 740 }); await wait(p, 250);
+  const c6Narrow = await p.evaluate(() => {
+    const hdr = document.querySelector('header.top').getBoundingClientRect();
+    const body = document.querySelector('header.top details.disclaimer-line .disclaimer-body').getBoundingClientRect();
+    const nav = document.querySelector('nav.tabs').getBoundingClientRect();
+    return { hdrBottom: Math.round(hdr.bottom), navTop: Math.round(nav.top), bodyRight: Math.round(body.right), vw: document.documentElement.clientWidth, over: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  });
+  ok('C6 expanded header at 360×740: no horizontal overflow, no clipping, clears nav bar', !c6Narrow.over && c6Narrow.bodyRight <= c6Narrow.vw && c6Narrow.hdrBottom < c6Narrow.navTop, c6Narrow);
   ok('C1/C6 no page errors', p.errors.length === 0, p.errors.join(' | '));
   await ctx.close();
 });

@@ -1040,7 +1040,7 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
         : again && again.off !== null && status !== 'D' && <div class="compact">{ev.binding === 'BREAK_30' ? '30-min break due' : ev.binding === 'CYCLE' ? `Out of ${ev.cycle.limit / 60}-hour hours` : 'Out of hours'} · <b>drive again at {clock(again.off)}</b></div>)}
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
       {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
-      <div class="disclaimer-line">Planning only — not a log, not an ELD</div>
+      <HeaderDisclaimer s={s} />
     </header>
   );
 }
@@ -2071,7 +2071,6 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
   }, [snap]);
   return (
     <>
-      <DisclaimerBanner s={s} />
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {snap && !preview && <span class="pv-snapmark" aria-hidden="true" />}
       <CardSwitchCtx.Provider value={<NowCardSwitch value={s.nowCard} />}>
@@ -5577,13 +5576,12 @@ function ConfirmSheet({ s, now, what }: { s: State; now: number; what: 'startove
 /* ============================================================ App */
 
 /**
- * Disclaimer banner on Now (C6 — owner decision, Lorico, 2026-11-20).
+ * Header disclaimer expander (C6 — owner decision, Lorico, 2026-11-20; consolidated 2026-11-20).
  *
- * Replaces the standing every-launch blocking disclaimer modal: the modal taxed the first tap
- * on every status change made by opening the app. The owner explicitly approved replacing it
- * with a non-blocking banner on Now ("Planning only — your ELD governs") that never intercepts
- * the first tap while keeping the full planning-only / ELD-governs / 49 CFR 395.34 content
- * (and the home-terminal zone picker until confirmed) one tap away inside the expandable banner.
+ * Replaces the standing every-launch blocking disclaimer modal and consolidates the formerly
+ * stacked Now banner into TopBar's single planning-only line with a Details toggle: never
+ * intercepts the first tap while keeping the full planning-only / ELD-governs / 49 CFR 395.34
+ * content (and the home-terminal zone picker until confirmed) one tap away.
  */
 /**
  * Kept exported for compatibility (capstone C1, decision C1-A): records disclaimer acknowledgement
@@ -5598,16 +5596,16 @@ export function acknowledgeDisclaimer() {
       }));
 }
 
-/** C6 (taste): non-blocking disclaimer banner on Now. Never intercepts the first tap. */
-function DisclaimerBanner({ s }: { s: State }) {
+/** C6 consolidated (Lorico, 2026-11-20): single header disclaimer line with Details expander. Never intercepts the first tap. */
+function HeaderDisclaimer({ s }: { s: State }) {
   const needsTz = !s.tzChosen;
   const tz = s.config.timeZone;
   const [choice, setChoice] = useState(tz);
   useEffect(() => { setChoice(tz); }, [tz]);
   return (
-    <details class="disclaimer-banner" role="note" aria-label="Planning disclaimer">
+    <details class="disclaimer-line" role="note" aria-label="Planning disclaimer">
       <summary>
-        <span><b>Planning only — your ELD governs.</b> <span class="muted">Not a log or an ELD.</span></span>
+        <span class="disclaimer-text">Planning only — not a log, not an ELD</span>
         <span class="disclaimer-more">Details</span>
       </summary>
       <div class="disclaimer-body">
@@ -5668,7 +5666,7 @@ declare const __BUILD__: string;
 
 /**
  * C6 (owner decision, Lorico, 2026-11-20): the blocking every-launch modal is retired and
- * replaced by the non-blocking DisclaimerBanner on Now. `launchNotice` / `setLaunchNotice`
+ * replaced by the non-blocking header disclaimer expander (consolidated 2026-11-20). `launchNotice` / `setLaunchNotice`
  * stay exported as no-op compatibility state so test harnesses that import `setLaunchNotice`
  * continue to load cleanly.
  */
@@ -5881,7 +5879,7 @@ export function App() {
   ) : null;
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
-  // C6 (taste): no launch disclaimer modal — the non-blocking DisclaimerBanner sits on Now.
+  // C6 (taste, consolidated 2026-11-20): no launch disclaimer modal — the non-blocking expander sits in TopBar.
   // Behind an open sheet, nothing else can take focus or be read as current.
   const blocked = sheet !== null;
   // Panel strip: the bar lights the strip's nearest snapped panel while it scrolls
