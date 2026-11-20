@@ -3220,11 +3220,12 @@ const KEYS_MINUTES: ClockKeys = [[[-5, '−5', '5 minutes earlier'], [-1, '−1'
  * the preset keys, the phone's clock picker, and another-day. `say` reads the big clock's time
  * aloud ("Started 06:41"); `name` labels the exact-time boxes.
  *
- * `pickerOnly` (feel round, Lorico 2026-11-19 — the log EDIT flow only, for now): the big
+ * `pickerOnly` (feel round, Lorico 2026-11-19 — the log EDIT flow; extended to the log ADD
+ * flow's start and end steps by owner amendment B, 2026-11-20): the big
  * clock IS the clock picker. Tapping it opens the phone's time picker directly; the typed
  * keypad box and the separate "Exact time" field are gone, so the screen offers one way to set
  * the time, not two. The day buttons, preset keys and another-day stay. Every other caller
- * (add, fix-start, load, trip) keeps the tap-to-type clock and the exact-time box as before.
+ * (fix-start, load, trip) keeps the tap-to-type clock and the exact-time box as before.
  */
 function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true, typeFirst = false, pickerOnly = false }: {
   at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean; typeFirst?: boolean; pickerOnly?: boolean;
@@ -3521,53 +3522,43 @@ function WhenStep({ k, now }: { k: EdKind; now: number }) {
       {k.kind === 'add' && <StepCount at={2} of={d.fixedLen ? 2 : 3} />}
       <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'when' }) : undefined} />
       <Question>{k.kind === 'edit' ? 'When did it really start?' : 'When did it start?'}</Question>
-      <ClockPick at={d.start} set={set} now={now} future={tentative} say="Started" name={k.kind === 'edit' ? 'Start time' : 'Exact start time'} keys={KEYS_HOURS} pickerOnly={k.kind === 'edit'}
+      <ClockPick at={d.start} set={set} now={now} future={tentative} say="Started" name="Start time" keys={KEYS_HOURS} pickerOnly
         extra={d.fixedLen && !tentative ? <button class="wide-btn" onClick={() => set(now - d.len)}>It just ended: started {clock(now - d.len, false)}</button> : undefined} />
       {problem && <div class="warnbox small">{problem}</div>}
-      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: next })}>{next === 'check' ? 'Next: check it' : 'Next: how long'}</button>
+      <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: next })}>{next === 'check' ? 'Next: check it' : 'Next: when it ended'}</button>
     </>
   );
 }
 
-const LENGTHS: [number, string][] = [[15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [120, '2 hours'], [600, '10 hours']];
-
 function LongStep({ k, now }: { k: EdKind; now: number }) {
   const d = k.draft!;
   const tentative = k.kind === 'edit' && !!k.seg.tentative;
-  const set = (len: number) => openSheet({ ...k, draft: { ...d, len: Math.max(5, len), fixedLen: false } });
-  // Item 2/3: the end time is a time too — tap it to type it, or use the clock picker. An exact
-  // end is taken as given (no 5-minute floor), as long as it is after the start.
+  // Item 2/3: the end time is a time too. An exact end is taken as given (no 5-minute floor), as
+  // long as it is after the start; an end at or before the start is ignored (nothing moves).
   // Patch L3 (field report 2026-11-17): the end is picked on the SAME clock picker as the
   // start, day included — a status can end on a later day than it began (Off Duty from
   // Saturday 00:00 to Monday 18:40 could not be said at all when the end was a time of day
-  // on the start's day). The typed box starts open, as it did when the end had a picker of
-  // its own; the day chips and the "Another day" date sit alongside it.
-  const [typingEnd, setTypingEnd] = useState(false);
+  // on the start's day); the day chips and the "Another day" date sit alongside it.
   const setEnd = (end: number) => { if (end > d.start) openSheet({ ...k, draft: { ...d, len: end - d.start, fixedLen: false } }); };
   const sinceStart = now - d.start;
   const problem = draftProblem(d, now, tentative);
+  // Owner amendment B (Lorico, 2026-11-20): the driver says when it ENDED, on the same clock
+  // picker as the start — the duration presets are gone and the length is derived from
+  // start → end (read out under the clock). "Until now" stays as an end-time shortcut.
+  // EDIT-FIX (Lorico, 2026-11-20): the edit flow's end step is this same step ("When did it
+  // really end?"), so Add and Edit feel identical. A what-if (tentative) row may end in the
+  // future and has no "Until now".
+  const add = k.kind === 'add';
+  const end = d.start + d.len;
   return (
     <>
-      {k.kind === 'add' && <StepCount at={3} of={3} />}
-      <Context d={d} onChange={k.kind === 'add' ? () => openSheet({ ...k, step: 'what', resume: 'long' }) : undefined} />
+      {add && <StepCount at={3} of={3} />}
+      <Context d={d} onChange={add ? () => openSheet({ ...k, step: 'what', resume: 'long' }) : undefined} />
       <p class="ed-from">From <b class="mono">{clock(d.start)}</b></p>
-      <Question>{k.kind === 'edit' ? 'How long did it really last?' : 'How long did it last?'}</Question>
-      <div class="ed-len" role="group" aria-label="Length">
-        {LENGTHS.map(([m, l]) => <button key={m} class={d.len === m ? 'on' : undefined} aria-pressed={d.len === m} disabled={!tentative && d.start + m > now} onClick={() => set(m)}>{l}</button>)}
-        {!tentative && sinceStart >= 5 && <button class={`all${d.len === sinceStart ? ' on' : ''}`} aria-pressed={d.len === sinceStart} onClick={() => set(sinceStart)}>Until now · {dur(sinceStart)}</button>}
-      </div>
-      <div class="ed-fine">
-        <button aria-label="15 minutes shorter" onClick={() => set(d.len - 15)}>−15</button>
-        <button aria-label="5 minutes shorter" onClick={() => set(d.len - 5)}>−5</button>
-        <output class="mono" aria-live="polite">{dur(d.len)}</output>
-        <button aria-label="5 minutes longer" onClick={() => set(d.len + 5)}>+5</button>
-        <button aria-label="15 minutes longer" onClick={() => set(d.len + 15)}>+15</button>
-      </div>
-      <p class="ed-ends">Ends <button class="ed-ends-tap mono" aria-expanded={typingEnd} aria-label={`Ends ${clock(d.start + d.len)}. Tap to set the day and time it ends`} onClick={() => setTypingEnd(!typingEnd)}>{clock(d.start + d.len)}</button></p>
-      {/* Feel round (2026-11-19): in the EDIT flow the end's big clock is the clock picker
-          itself (pickerOnly) — one time field, as on the start step; the add flow keeps its
-          typed box open first, as before. */}
-      {typingEnd && <ClockPick at={d.start + d.len} set={setEnd} now={now} future={tentative} say="Ended" name={k.kind === 'edit' ? 'End time' : 'Exact end time'} keys={KEYS_HOURS} typeFirst pickerOnly={k.kind === 'edit'} />}
+      <Question>{add ? 'When did it end?' : 'When did it really end?'}</Question>
+      <ClockPick at={end} set={setEnd} now={now} future={tentative} say="Ended" name="End time" keys={KEYS_HOURS} pickerOnly
+        extra={!tentative && sinceStart >= 5 && end !== now ? <button class="wide-btn" onClick={() => setEnd(now)}>Until now: ended {clock(now, false)}</button> : undefined} />
+      <p class="ed-ends">Lasted <output class="mono" aria-live="polite">{dur(d.len)}</output></p>
       {problem && <div class="warnbox small">{problem}</div>}
       <button class="primary wide ed-go" disabled={!!problem} onClick={() => openSheet({ ...k, step: 'check' })}>Check it</button>
     </>
@@ -5179,6 +5170,19 @@ export function App() {
   // longer than the settle window mid-flight, and committing the panel it happens to
   // be passing would fight the very tap that sent it there.
   const stripGoal = useRef<number | null>(null);
+  // Haptic timing (Lorico, 2026-11-20: "The haptic feedback should happen only when the
+  // screen locks into place. Both the swiping and the tapping."). lockedPanel is the panel
+  // the strip last locked onto; tapGoal is the panel index a tab-bar tap sent it gliding
+  // to (null when no tap glide is pending). The settle commit ticks once when it locks
+  // onto a panel other than lockedPanel — for a swipe, or for a tab tap's glide.
+  const lockedPanel = useRef<State['tab']>(navPanelOf(s.tab));
+  const tapGoal = useRef<number | null>(null);
+  // Pass-through ticks (owner amendment A, 2026-11-20): while a tab tap's SMOOTH glide crosses
+  // panels on its way to the goal, one tick as the strip passes each intermediate panel
+  // (Now→More: Plan, Log, then the lock tick at More = 3). `next` is the next intermediate
+  // panel index still to pass, `dir` the travel direction. null = no tap glide in flight.
+  // Swipes never set it (they keep the one-tick-at-settle rule).
+  const tapPass = useRef<{ next: number; dir: number; goal: number } | null>(null);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
   // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
@@ -5324,6 +5328,16 @@ export function App() {
       const idx = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w)));
       const panel = PANEL_ORDER[idx];
       if (panel !== barPanelRef.current) { barPanelRef.current = panel; setBarPanel(panel); }
+      // Amendment A: a tap glide ticks as it reaches each panel between its start and goal
+      // (the goal itself ticks at the lock, below). Reaching = the strip's left edge arrives at
+      // that panel's offset (1px slack), so a glide ticks where the panel is fully on screen.
+      const pass = tapPass.current;
+      if (pass && tapGoal.current === pass.goal && !launchNotice && currentSheet() === null) {
+        while (pass.next !== pass.goal && (pass.dir > 0 ? el.scrollLeft >= pass.next * w - 1 : el.scrollLeft <= pass.next * w + 1)) {
+          tapTick();
+          pass.next += pass.dir;
+        }
+      }
       if (stripSettle.current) clearTimeout(stripSettle.current);
       stripSettle.current = setTimeout(() => {
         stripSettle.current = null;
@@ -5334,27 +5348,51 @@ export function App() {
         if (stripGoal.current !== null && stripGoal.current !== i2) return; // still travelling to the goal
         stripGoal.current = null;
         const target = PANEL_ORDER[i2];
-        // Feel round 2 (Lorico, 2026-11-19): a swipe that locks onto a NEW panel gets one
-        // short haptic click, here at the settle commit — once per panel change, never during
-        // the drag (this timer only fires after scrolling stops). A bar tap, the back button or
-        // a shortcut moves the store FIRST, so its settle finds the panel already current and
-        // stays silent (a bar tap keeps only its own tap tick); a swipe that springs back to
-        // the same panel changes nothing and stays silent too. Guarded: tapTick no-ops where
-        // navigator.vibrate is absent.
-        if (navPanelOf(getState().tab) !== target) { setState({ tab: target }); tapTick(); }
+        // The haptic click lives HERE, at the lock (feel round 2, 2026-11-19; haptic timing,
+        // 2026-11-20): one short tick when the strip locks onto a panel other than the one it
+        // was locked on before — never during a drag (this timer only fires after scrolling
+        // stops). Two ways in: a swipe (the store still names the old panel, so this commit
+        // moves it), or a tab-bar tap's glide arriving at the panel the tap sent it to (the
+        // tab buttons carry data-haptic, so the tap itself is silent). A swipe that springs
+        // back, a tap on the active tab, and a back-button / shortcut / restore glide (no
+        // tapGoal) stay silent. Guarded: tapTick no-ops where navigator.vibrate is absent.
+        const swiped = navPanelOf(getState().tab) !== target;
+        const tapped = tapGoal.current === i2;
+        tapGoal.current = null;
+        tapPass.current = null;
+        if (swiped) setState({ tab: target });
+        if ((swiped || tapped) && target !== lockedPanel.current) tapTick();
+        lockedPanel.current = target;
       }, 120);
     });
   };
   // A hand on the strip is the driver's own scroll: any programmatic goal is off.
-  const onStripGrab = () => { stripGoal.current = null; };
+  // A grab also ends a tap glide's pass-through ticks (the swipe's own settle rule takes over).
+  const onStripGrab = () => { stripGoal.current = null; tapPass.current = null; };
   useEffect(() => {
     if (barPanelRef.current !== activePanel) { barPanelRef.current = activePanel; setBarPanel(activePanel); }
     const el = pagesRef.current; if (!el || typeof el.scrollTo !== 'function') return;
     const w = el.clientWidth || 0; if (!w) return;
     const idx = PANEL_ORDER.indexOf(activePanel);
-    if (Math.abs(el.scrollLeft - idx * w) > 2) {
+    const moving = Math.abs(el.scrollLeft - idx * w) > 2;
+    // Only a tab tap's glide ticks at its lock (tapGoal names this very panel); any other
+    // store-driven move (back button, shortcut, restore, an in-panel button, a swipe's own
+    // commit) takes its panel as the lock reference right away, silently — so a settle swallowed under a sheet can never
+    // leave a stale reference behind. A tap that needs no glide (already resting there,
+    // no settle on its way) locks now, silently: nothing moved.
+    if (tapGoal.current !== idx || (!moving && stripSettle.current === null)) { lockedPanel.current = activePanel; tapGoal.current = null; }
+    tapPass.current = null;
+    if (moving) {
       stripGoal.current = idx;
-      el.scrollTo({ left: idx * w, behavior: !stripPlaced.current || prefersReducedMotion() ? 'auto' : 'smooth' });
+      const smooth = stripPlaced.current && !prefersReducedMotion();
+      // Amendment A: only a tab tap's SMOOTH glide passes panels on screen; an instant jump
+      // (reduced motion, first placement) shows nothing passing, so it keeps the lock tick only.
+      if (smooth && tapGoal.current === idx) {
+        const dir = idx * w > el.scrollLeft ? 1 : -1;
+        const next = dir > 0 ? Math.floor((el.scrollLeft + 1) / w) + 1 : Math.ceil((el.scrollLeft - 1) / w) - 1;
+        tapPass.current = { next, dir, goal: idx };
+      }
+      el.scrollTo({ left: idx * w, behavior: smooth ? 'smooth' : 'auto' });
     }
     stripPlaced.current = true;
   }, [activePanel]);
@@ -5437,7 +5475,9 @@ export function App() {
       </main>
       <nav class="tabs" inert={blocked}>{tabs.map(([k, l, icon]) => {
         const on = barPanel === k;
-        return <button key={k} class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setState({ tab: k })}><Icon d={icon} /> {l}</button>;
+        // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
+        // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
+        return <button key={k} data-haptic="lock" class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!disclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!disclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}

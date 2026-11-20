@@ -217,13 +217,145 @@ await pin('H3. a swipe that springs back to the same panel is silent', async () 
   await scrollStripTo(800);
   return (getState().tab === 'log' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
 });
-await pin('H4. a tab-bar tap is not a swipe: its strip scroll and settle add no haptic click', async () => {
-  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0;
-  tapNav('Log'); await sleep(60);
+// A real click: the document's capture listeners first (the app's global button tap tick lives
+// there), then the node's own. The shim's closest() is a stub, so the clicked node is given a
+// real one for the duration — it walks up to the nearest <button>, as a browser's would.
+const realClick = (node) => {
+  const had = Object.prototype.hasOwnProperty.call(node, 'closest'), prev = node.closest;
+  node.closest = (sel) => { if (sel !== 'button') return null; let n = node; while (n) { if (n.localName === 'button') return n; n = n.parentNode; } return null; };
+  try { for (const f of document.listeners.click ?? []) f({ type: 'click', target: node, currentTarget: document, preventDefault() {}, stopPropagation() {} }); fire(node, 'click'); }
+  finally { if (had) node.closest = prev; else delete node.closest; }
+};
+const navBtn = (label) => all((n) => n.localName === 'nav' && (n.attributes.class || '').includes('tabs'))[0].childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === label);
+await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Now → Log ticks once passing Plan and once at the lock (haptic timing + amendment A, 2026-11-20)', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); }; // a smooth glide: travels, lands later
+  realClick(navBtn('Log'));
+  el.scrollTo = applyingScrollTo(el);
   if (getState().tab !== 'log') return `tab=${getState().tab}`;
-  fire(strip(), 'scroll'); await sleep(220); // the arrival's scroll event and its settle
-  tapNav('Plan'); await sleep(60); fire(strip(), 'scroll'); await sleep(220);
-  return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}: ${JSON.stringify(vib)}`;
+  if (vib.length) return `ticked on the tap itself: ${JSON.stringify(vib)}`;
+  await sleep(60);
+  // mid-glide: scroll events closer together than the settle window, then the arrival
+  el.scrollLeft = 200; fire(el, 'scroll'); await sleep(30);
+  if (vib.length) return `ticked before reaching Plan: ${JSON.stringify(vib)}`;
+  el.scrollLeft = 500; fire(el, 'scroll'); await sleep(30);
+  if (vib.length !== 1) return `passing Plan: vibrate×${vib.length}, want 1`;
+  el.scrollLeft = 700; fire(el, 'scroll'); await sleep(30);
+  if (vib.length !== 1) return `between Plan and Log: vibrate×${vib.length}, want still 1`;
+  await scrollStripTo(800); await sleep(60);
+  if (vib.length !== 2) return `at the lock: vibrate×${vib.length} ${JSON.stringify(vib)}, want exactly 2 (Plan pass + Log lock)`;
+  await sleep(200);
+  if (vib.length !== 2) return `ticked again at rest: ${JSON.stringify(vib)}`;
+  // a second tap, Log → Plan (next door, nothing passed): one more tick, at the lock only
+  el.scrollTo = (opts) => { scrollCalls.push(opts); };
+  realClick(navBtn('Plan'));
+  el.scrollTo = applyingScrollTo(el);
+  if (vib.length !== 2) return `second tap ticked at tap time: ${JSON.stringify(vib)}`;
+  el.scrollLeft = 600; fire(el, 'scroll'); await sleep(30);
+  if (vib.length !== 2) return `second tap ticked mid-glide: ${JSON.stringify(vib)}`;
+  await scrollStripTo(400); await sleep(60);
+  return (getState().tab === 'plan' && vib.length === 3) || `tab=${getState().tab} vibrate×${vib.length}: ${JSON.stringify(vib)}`;
+});
+// Amendment A (Lorico 2026-11-20): a tab tap's glide ticks as it passes each panel, plus the lock.
+// glideTap: tap `label` with a travelling (smooth) scrollTo, then walk the strip through `path`
+// in scroll events closer together than the settle window, recording the tick count after
+// each step; the last px is the arrival and is left to settle.
+const glideTap = async (label, path) => {
+  const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); };
+  vib.length = 0;
+  realClick(navBtn(label));
+  const atPress = vib.length;
+  await sleep(60); // the store → strip effect sends the glide on its way (travelling, not landed)
+  el.scrollTo = applyingScrollTo(el);
+  if (vib.length !== atPress) return { atPress: vib.length, seen: [], beforeLock: -1, total: vib.length };
+  const seen = [];
+  for (const px of path.slice(0, -1)) { el.scrollLeft = px; fire(el, 'scroll'); await sleep(30); seen.push(vib.length); }
+  el.scrollLeft = path[path.length - 1]; fire(el, 'scroll'); await sleep(30);
+  const beforeLock = vib.length;
+  await sleep(220);
+  return { atPress, seen, beforeLock, total: vib.length };
+};
+await pin('H10. amendment A: a Now → More tab tap yields exactly 3 ticks — passing Plan, passing Log, the lock at More — none at press', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
+  const r = await glideTap('More', [150, 350, 420, 600, 790, 810, 1000, 1150, 1200]);
+  const want = [0, 0, 1, 1, 1, 2, 2, 2];
+  if (r.atPress !== 0) return `ticked at press: ${r.atPress}`;
+  if (JSON.stringify(r.seen) !== JSON.stringify(want)) return `ticks along the glide ${JSON.stringify(r.seen)}, want ${JSON.stringify(want)}`;
+  if (r.beforeLock !== 2) return `ticked on arrival before the lock: ${r.beforeLock}`;
+  if (getState().tab !== 'settings') return `tab=${getState().tab}`;
+  if (r.total !== 3) return `total ${r.total}, want 3`;
+  await sleep(200);
+  return vib.length === 3 || `ticked again at rest: ${vib.length}`;
+});
+await pin('H11. amendment A: a Now → Plan tab tap (one panel over) yields exactly 1 tick, at the lock', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
+  const r = await glideTap('Plan', [100, 250, 390, 400]);
+  return (r.atPress === 0 && r.seen.every((n) => n === 0) && r.beforeLock === 0 && r.total === 1 && getState().tab === 'plan')
+    || `press=${r.atPress} glide=${JSON.stringify(r.seen)} beforeLock=${r.beforeLock} total=${r.total} tab=${getState().tab}`;
+});
+await pin('H12. amendment A, backwards: More → Now ticks at Log, at Plan, and at the lock (3); a fast glide that skips past two panels in one frame still counts each', async () => {
+  await seed({ tab: 'settings', ...segs }); strip().scrollLeft = 1200; fire(strip(), 'scroll'); await sleep(220);
+  const r = await glideTap('Now', [1000, 790, 600, 390, 0]);
+  if (!(r.atPress === 0 && JSON.stringify(r.seen) === '[0,1,1,2]' && r.total === 3 && getState().tab === 'now')) return `back: press=${r.atPress} glide=${JSON.stringify(r.seen)} total=${r.total} tab=${getState().tab}`;
+  const r2 = await glideTap('More', [900, 1200]); // Plan and Log both passed between two frames
+  return (r2.atPress === 0 && JSON.stringify(r2.seen) === '[2]' && r2.total === 3 && getState().tab === 'settings') || `skip: press=${r2.atPress} glide=${JSON.stringify(r2.seen)} total=${r2.total}`;
+});
+await pin('H13. amendment A leaves swipes alone: a fling from Now across Plan to Log is ONE tick at settle; a reduced-motion tap (instant jump, nothing seen passing) is one tick at the lock', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  grab(); const el = strip();
+  for (const px of [100, 300, 420, 600, 790]) { el.scrollLeft = px; fire(el, 'scroll'); await sleep(30); }
+  if (vib.length) return `swipe ticked mid-fling: ${vib.length}`;
+  await scrollStripTo(800);
+  if (getState().tab !== 'log' || vib.length !== 1) return `swipe: tab=${getState().tab} vibrate×${vib.length}, want 1`;
+  // reduced motion: the tap jumps (behavior auto) straight to the goal
+  const mm = globalThis.matchMedia;
+  globalThis.matchMedia = (q) => ({ matches: /reduce/.test(q) ? true : mm(q).matches, addEventListener() {}, removeEventListener() {} });
+  try {
+    vib.length = 0; scrollCalls.length = 0;
+    el.scrollTo = applyingScrollTo(el);
+    realClick(navBtn('Now')); await sleep(60);
+    if (!scrollCalls.length || scrollCalls[scrollCalls.length - 1].behavior !== 'auto') return `reduced motion did not jump: ${JSON.stringify(scrollCalls)}`;
+    fire(el, 'scroll'); await sleep(30);
+    const beforeLock = vib.length; await sleep(220);
+    return (beforeLock === 0 && vib.length === 1 && getState().tab === 'now') || `reduced-motion tap: beforeLock=${beforeLock} total=${vib.length}`;
+  } finally { globalThis.matchMedia = mm; }
+});
+await pin('H7. a tap on the tab of the panel already showing never ticks — not on the tap, not later', async () => {
+  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 800; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  realClick(navBtn('Log')); await sleep(60);
+  fire(strip(), 'scroll'); await sleep(220);
+  if (getState().tab !== 'log' || vib.length) return `tab=${getState().tab} vibrate×${vib.length}`;
+  // and from a planning sub-screen, Plan's tab (same panel: back to the Plan menu) is silent too
+  await seed({ tab: 'split', ...segs }); fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  realClick(navBtn('Plan')); await sleep(60); fire(strip(), 'scroll'); await sleep(220);
+  return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
+});
+await pin('H8. a tab tap whose glide the driver grabs and swipes back to where it started is silent; one swiped on to a third panel ticks once', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); };
+  realClick(navBtn('Log')); el.scrollTo = applyingScrollTo(el); await sleep(60);
+  el.scrollLeft = 300; fire(el, 'scroll'); await sleep(30);
+  grab(); await scrollStripTo(0); await sleep(60);
+  if (getState().tab !== 'now' || vib.length) return `back to start: tab=${getState().tab} vibrate×${vib.length}`;
+  el.scrollTo = (opts) => { scrollCalls.push(opts); };
+  realClick(navBtn('Log')); el.scrollTo = applyingScrollTo(el); await sleep(60);
+  el.scrollLeft = 300; fire(el, 'scroll'); await sleep(30);
+  grab(); await scrollStripTo(400); await sleep(60);
+  return (getState().tab === 'plan' && vib.length === 1) || `swiped on to Plan: tab=${getState().tab} vibrate×${vib.length}`;
+});
+await pin('H9. every other button keeps its instant click tick (the global handler is untouched); only the four tab buttons opt out', async () => {
+  await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
+  const btns = all((n) => n.localName === 'button' && n.attributes['data-haptic'] == null && !n.attributes.disabled && !(n.parentNode && n.parentNode.localName === 'nav'));
+  if (btns.length < 3) return `only ${btns.length} plain buttons found`;
+  const b = btns.find((x) => /Exceptions this shift/.test(x.textContent)) ?? btns[0];
+  vib.length = 0;
+  realClick(b);
+  const got = vib.slice(); openSheet(null); await sleep(60);
+  if (got.length !== 1 || got[0] !== 12) return `plain button "${b.textContent.trim().slice(0, 30)}": ${JSON.stringify(got)}, want [12] at the click`;
+  // the tab buttons are the only new opt-out: each carries data-haptic, nothing else changed
+  const tabs = all((n) => n.localName === 'nav' && (n.attributes.class || '').includes('tabs'))[0].childNodes.filter((n) => n.localName === 'button');
+  if (tabs.length !== 4 || !tabs.every((t) => t.attributes['data-haptic'] === 'lock')) return `tab buttons: ${tabs.map((t) => t.attributes['data-haptic']).join(',')}`;
+  return true;
 });
 await pin('H5. a programmatic change (restore / back / shortcut) and a settle under an open sheet are silent', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 0; vib.length = 0;

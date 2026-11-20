@@ -190,13 +190,17 @@ const scaleInfo = (page) => page.evaluate(() => {
   return {
     wide: q('button.wide').map(minH), rowbtn: q('button.rowbtn:not(.moved)').map(minH), rowbtnMoved: q('button.rowbtn.moved').map(minH), lever: q('.lever').map(minH),
     edlen: q('.ed-len button').map(minH), steps4: q('.steps4 button').map(minH),
-    fields: q('label input:not([type=checkbox]):not([type=range]):not([type=hidden]), label select').map(minH),
+    // The picker-only clock's time input is a transparent overlay (min-height 0 by design) filling its
+    // label.ed-clock-pick: the touch target is the label, measured as it renders under clockPick.
+    fields: q('label input:not([type=checkbox]):not([type=range]):not([type=hidden]):not(.ed-clock-input), label select').map(minH),
+    clockPick: q('label.ed-clock-pick').map((el) => Math.min(el.getBoundingClientRect().height, ...[...el.querySelectorAll('input.ed-clock-input')].map((i) => i.getBoundingClientRect().height))),
     fine: q('.ed-fine button, .ed-fine output, .tstep-value').map(minH),
+    edfine: q('.ed-fine').length, sheetLen: q('.sheet .ed-len, .sheet .ed-ends-tap').length, endQ: /When did it really end\?/.test(document.querySelector('.sheet')?.textContent ?? ''),
     checks: q('label.check input').map((el) => { const r = el.getBoundingClientRect(); return { w: r.width, h: r.height }; }),
     ranges,
   };
 });
-const acc = { wide: [], rowbtn: [], rowbtnMoved: [], lever: [], edlen: [], steps4: [], fields: [], fine: [], checks: [], ranges: [] };
+const acc = { wide: [], rowbtn: [], rowbtnMoved: [], lever: [], edlen: [], steps4: [], fields: [], clockPick: [], fine: [], checks: [], ranges: [] };
 const sweep = async (name, steps) => {
   const { ctx, page, errors } = await open(save('day', 'ON'));
   for (const st of steps) { try { await st(page); } catch { /* scene step failed; pins below report what was found */ } }
@@ -205,6 +209,7 @@ const sweep = async (name, steps) => {
   await noOverflow(page, `sweep/${name}`);
   ok(`sweep/${name}: no page errors`, errors.length === 0, errors.join('; ').slice(0, 200));
   await ctx.close();
+  return s;
 };
 await sweep('now', []);
 await sweep('status-sheet', [click('button.dock-more')]);
@@ -213,6 +218,10 @@ await sweep('log-edit', [tab('Log'), click('button.entry')]);
 await sweep('log-edit2', [tab('Log'), click('button.entry'), click('.sheet button.act')]);
 await sweep('log-add2', [tab('Log'), click('button.addbtn'), click('.sheet button.opt')]);
 await sweep('log-add3', [tab('Log'), click('button.addbtn'), click('.sheet button.opt'), click('.sheet button.ed-go')]);
+// Owner amendment B (2026-11-20): the add flow's step 3 is the end clock picker. EDIT-FIX
+// (2026-11-20): the EDIT flow's end step is the same picker, so the length choices (.ed-len) and the
+// stepper (.ed-fine) are retired everywhere; this sweep now pins the edit end step's picker.
+const editLong = await sweep('log-edit-long', [tab('Log'), click((p) => p.locator('button.entry:not(.live)')), click((p) => p.locator('.sheet button', { hasText: 'The times are wrong' })), click('.sheet button.ed-go')]);
 await sweep('plan-1', [tab('Plan'), planItem(0)]);
 await sweep('plan-2', [tab('Plan'), planItem(1)]);
 await sweep('plan-3', [tab('Plan'), planItem(2)]);
@@ -231,9 +240,11 @@ scalePin('rowbtnMoved', 56, 'recap rows (.rowbtn.moved, designed 56)');
 // Levers are computed from the driver's situation and may not be on offer under a test
 // seed; when one is, it must sit at 64 like every row — and its rule is source-pinned below.
 if (acc.lever.length) scalePin('lever', 64, 'rows (.lever, when on offer)');
-scalePin('edlen', 64, 'length choices (.ed-len)');
+ok('EDIT-FIX: the length choices (.ed-len) and stepper (.ed-fine) are retired on every swept screen', acc.edlen.length === 0 && editLong.edfine === 0 && editLong.sheetLen === 0, `ed-len ${acc.edlen.length}, ed-fine ${editLong.edfine}, ed-len/Ends-tap in the sheet ${editLong.sheetLen}`);
+ok('EDIT-FIX: the edit end step carries ONE picker-only clock at the 56 floor', editLong.endQ && editLong.clockPick.length === 1 && editLong.clockPick[0] >= 56, `end question ${editLong.endQ}, clockPick ${JSON.stringify(editLong.clockPick)}`);
 scalePin('steps4', 64, 'stepper rows (.steps4)');
 scalePin('fields', 56, 'fields (label input/select)');
+scalePin('clockPick', 56, 'picker-only clocks (label.ed-clock-pick, input filling it)');
 scalePin('fine', 56, 'fine steppers + readouts (.ed-fine/.tstep-value)');
 ok('checkbox: a settings checkbox exists', acc.checks.length >= 1, `found ${acc.checks.length}`);
 ok('checkbox: hit box is the 56x48 slide switch', acc.checks.length >= 1 && acc.checks.every((c) => Math.abs(c.w - 56) <= 1 && Math.abs(c.h - 48) <= 1), acc.checks.slice(0, 4).map((c) => `${Math.round(c.w)}x${Math.round(c.h)}`).join(', '));

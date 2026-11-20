@@ -176,15 +176,15 @@ await pin('L3.8 the reported dead end, now sayable: Off Duty from Sat 00:00 ends
   render(h(App), root); await sleep(60);
   openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: at(14, 0, 0), len: 60, fixedLen: false } });
   await sleep(60);
-  // The steppers still work before the picker opens.
-  await click(all((n) => n.localName === 'button' && n.attributes['aria-label'] === '15 minutes longer')[0]);
-  if (currentSheet().draft.len !== 75) return 'stepper: len ' + currentSheet().draft.len;
-  await click(endsTap());
-  if (!input('Exact end time, type the time')) return 'the typed end box is not there when the end opens';
+  // Owner amendment B (2026-11-20): the add flow's end step IS the end clock picker (no
+  // preset/stepper screen, no "Ends" tap) — its hour keys move the end.
+  await click(all((n) => n.localName === 'button' && n.attributes['aria-label'] === '15 minutes later')[0]);
+  if (currentSheet().draft.len !== 75) return 'end key +15: len ' + currentSheet().draft.len;
+  if (!input('End time')) return 'the end clock picker is not on the add end step';
   if (!button(/^Yesterday$/)) return 'no Yesterday day chip on the end picker';
   await click(button(/^Yesterday$/));
   if (currentSheet().draft.len !== 2955) return 'chip: len ' + currentSheet().draft.len + ', want 2955 (Mon 01:15)';
-  await typeIn('Exact end time, type the time', '1840');
+  await typeIn('End time', '18:40');
   if (currentSheet().draft.len !== 4000) return 'typed: len ' + currentSheet().draft.len + ', want 4000';
   if (!root.textContent.includes('66h 40m')) return 'the length on screen does not read 66h 40m';
   await click(goBtn());
@@ -209,10 +209,12 @@ await pin('L3.9 edit flow: the same end picker moves a three-day Off Duty end ba
   const off = segAt(at(14, 0, 0));
   openSheet({ kind: 'edit', seg: off, step: 'long', draft: { status: 'OFF', start: off.start, len: off.end - off.start } });
   await sleep(60);
-  await click(endsTap());
+  // EDIT-FIX (Lorico, 2026-11-20): the edit end step IS the end clock picker, as in the add
+  // flow — no "Ends" tap to reveal it, no length presets.
+  if (endsTap()) return 'the edit end picker still hides behind an "Ends" tap';
+  if (!/When did it really end\?/.test(root.textContent) || /How long did it really last\?/.test(root.textContent)) return 'the edit end step does not ask when it ended';
+  if (!input('End time')) return 'the end clock picker is not shown directly on the edit end step';
   await click(button(/^Yesterday$/));
-  // Feel round (2026-11-19): in the EDIT flow the end's big clock is the clock picker itself
-  // (no typed keypad box) — the time is picked there.
   await typeIn('End time', '18:40');
   if (currentSheet().draft.len !== 4000) return 'len ' + currentSheet().draft.len + ', want 4000';
   await click(goBtn());
@@ -233,11 +235,10 @@ await pin('L3.10 an end beyond the chips: the "Another day" date carries Wed 20:
   render(h(App), root); await sleep(60);
   openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: at(11, 20, 0), len: 60, fixedLen: false } });
   await sleep(60);
-  await click(endsTap());
   const date = all((n) => n.localName === 'input' && n.attributes.type === 'date')[0];
   if (!date) return 'no date input on the end picker';
   date.value = '2026-11-13'; fire(date, 'input'); await sleep(50);
-  await typeIn('Exact end time, type the time', '0730');
+  await typeIn('End time', '07:30');
   if (currentSheet().draft.len !== 2130) return 'len ' + currentSheet().draft.len + ', want 2130 (35h 30m)';
   return true;
 });

@@ -2222,14 +2222,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   let h = out('editor/when');
   if (!/When did it start\?/.test(h) || !/Step 2 of 3/.test(h) || !/<button class="on" aria-pressed="true">Today<\/button>/.test(h)) throw new Error('step 2 asks when, on today');
   if (!h.includes(`aria-label="Started ${ck(d.start)}">${ck(d.start, false)}</output>`)) throw new Error('step 2 shows the start time big');
-  if (!/aria-label="1 hour earlier"/.test(h) || !/aria-label="5 minutes later"/.test(h) || !/<button class="primary wide ed-go">Next: how long<\/button>/.test(h)) throw new Error('hour and minute keys, then Next');
+  if (!/aria-label="1 hour earlier"/.test(h) || !/aria-label="5 minutes later"/.test(h) || !/<button class="primary wide ed-go">Next: when it ended<\/button>/.test(h)) throw new Error('hour and minute keys, then Next');
+  // ^ Owner amendment B (2026-11-20, sanctioned): the add flow's third step asks when it ENDED, so its Next says so (was "Next: how long").
   if (/It just ended/.test(h)) throw new Error('"It just ended" is for a break, whose length is known');
   openSheet({ kind: 'add', step: 'when', draft: { ...brk, start: NOW - 10 } });
   h = out('editor/when break');
   if (!/Step 2 of 2/.test(h) || !/It just ended: started/.test(h) || !/would still be going/.test(h) || !/<button class="primary wide ed-go" disabled>Next: check it<\/button>/.test(h)) throw new Error('a break skips the length, and a start it cannot use holds Next');
   openSheet({ kind: 'add', step: 'long', draft: { ...d, start: NOW - 60, len: 60 } });
   h = out('editor/long');
-  if (!/How long did it last\?/.test(h) || !/<button class="on" aria-pressed="true">1 hour<\/button>/.test(h) || !/<button aria-pressed="false" disabled>2 hours<\/button>/.test(h) || !/<button class="all on" aria-pressed="true">Until now · 1h 00m<\/button>/.test(h)) throw new Error('step 3: lengths, those past now held, and Until now');
+  // Owner amendment B (2026-11-20, sanctioned): step 3 of the add flow is the END on the clock picker — the
+  // duration presets are gone, the length is derived from start → end, and "Until now" is an end shortcut.
+  if (!/When did it end\?/.test(h) || /How long did it last\?/.test(h) || /aria-label="Length"/.test(h) || />1 hour<\/button>/.test(h) || !h.includes(`aria-label="Ended ${ck(NOW)}">${ck(NOW, false)}</output>`) || !/Lasted <output class="mono" aria-live="polite">1h 00m<\/output>/.test(h) || /Until now/.test(h)) throw new Error('step 3: the end on the clock picker, the length derived, no presets');
+  openSheet({ kind: 'add', step: 'long', draft: { ...d, start: NOW - 60, len: 30 } });
+  h = out('editor/long until-now');
+  if (!h.includes(`Until now: ended ${ck(NOW, false)}`) || !/Lasted <output class="mono" aria-live="polite">30m<\/output>/.test(h)) throw new Error('step 3: an end short of now offers "Until now"');
   openSheet({ kind: 'add', step: 'check', draft: { status: 'OFF', note: breakNote('30-min break'), start: M(14), len: 30, fixedLen: true } });
   h = out('editor/check');
   const th = txt(h);

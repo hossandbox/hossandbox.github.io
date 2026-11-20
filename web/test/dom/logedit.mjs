@@ -127,9 +127,10 @@ await pin('1e. current entry → a break in the middle: the open status is split
 
 /* ================= item 2: tap the time to type it ================= */
 // Feel round (2026-11-19): the EDIT flow's big clock is now the clock picker itself (pins E1–E5
-// below); the tap-to-type keypad stays on the ADD flow, which is where 2a now pins it.
-await pin('2a. tapping the displayed time opens a typed box on a NUMERIC keypad; 0641 sets 06:41 on the same day; the preset keys stay (add flow)', async () => {
-  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'D', start: T - 300, len: 280 } }); await sleep(60);
+// below). Owner amendment B (2026-11-20) gave the ADD flow the same picker (pins E5–E7), so the
+// tap-to-type keypad is pinned here on "Fix the start time", where it still lives.
+await pin('2a. tapping the displayed time opens a typed box on a NUMERIC keypad; 0641 sets 06:41 on the same day; the preset keys stay (fix-start)', async () => {
+  await seed(day()); openSheet({ kind: 'since' }); await sleep(60);
   const tap = clockTap();
   if (!tap) return 'the big clock is not a tappable key';
   fire(tap, 'click'); await sleep(60);
@@ -138,10 +139,9 @@ await pin('2a. tapping the displayed time opens a typed box on a NUMERIC keypad;
   if (attr(box, 'inputMode') !== 'numeric') return 'inputmode: ' + attr(box, 'inputMode');
   if (attr(box, 'type') !== 'text') return 'type: ' + attr(box, 'type') + ' (a number box drops the leading 0)';
   await type(box, '0641');
-  const k = currentSheet();
   const want = new Date(T * 60000); want.setHours(6, 41, 0, 0);
-  if (k.draft.start !== Math.floor(want.getTime() / 60000)) return `start ${hh_mm(k.draft.start)}`;
-  return (!!button(/^− 1 hour$/) && !!button(/^\+ 1 hour$/) && !!button(/^−15$/) && !!button(/^\+5$/) && !!button(/^\+15$/)) || 'preset keys gone';
+  if (!goBtn().textContent.includes(clock(Math.floor(want.getTime() / 60000)))) return 'typed 0641 → ' + goBtn().textContent;
+  return (!!sheetButton(/^−5$/) && !!sheetButton(/^−1$/) && !!sheetButton(/^\+1$/) && !!sheetButton(/^\+5$/)) || 'preset keys gone';
 });
 await pin('2b. three digits ("641") land on Done; a time that is no time ("2561") is refused with its reason, nothing guessed', async () => {
   await seed(day()); openSheet({ kind: 'since' }); await sleep(60);
@@ -163,14 +163,7 @@ await pin('2c. every typed time box in the editor, fix-start and load panels sum
   const bad = [];
   const scan = (where) => { for (const n of all((x) => x.localName === 'input' && ['text', 'number'].includes(attr(x, 'type')) && inSheet(x))) if (attr(n, 'inputMode') !== 'numeric') bad.push(`${where}:${n.attributes['aria-label']}`); };
   await seed(day()); openSheet({ kind: 'since' }); await sleep(50); fire(clockTap(), 'click'); await sleep(40); scan('since');
-  openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); fire(clockTap(), 'click'); await sleep(40); scan('when');
-  openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);
-  const endTap = all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0];
-  if (!endTap) return 'the end time is not tappable';
-  fire(endTap, 'click'); await sleep(40); scan('long');
-  if (!input('Exact end time, type the time')) return 'no typed end box';
-  await type('Exact end time, type the time', hhmm(T - 10));
-  if (currentSheet().draft.len !== 50) return 'typed end → len ' + currentSheet().draft.len;
+  // (the log add + edit flows have no typed box any more — amendment B; E5–E7 pin their picker)
   await seed(day(), { tab: 'load' }); openSheet({ kind: 'loadtime', field: 'leave' }); await sleep(50);
   if (!clockTap()) return 'load: no tappable clock';
   fire(clockTap(), 'click'); await sleep(40); scan('load');
@@ -178,13 +171,13 @@ await pin('2c. every typed time box in the editor, fix-start and load panels sum
 });
 
 /* ================= item 3: one clock picker everywhere ================= */
-await pin('3a. the same clock picker (tap-to-type clock + the time picker) at every time field: editor start + end, fix-start, load leave + appointment, trip departure', async () => {
+await pin('3a. the same clock picker (the time picker; tap-to-type clock where the keypad stays) at every time field: editor start + end, fix-start, load leave + appointment, trip departure', async () => {
   const miss = [];
   const has = (where, timeLabel, tap = true) => { if (tap && !clockTap()) miss.push(where + ': clock key'); const t = input(timeLabel); if (!t || attr(t, 'type') !== 'time') miss.push(where + ': time picker'); };
-  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); has('editor start', 'Exact start time');
+  // amendment B: the add flow's start + end are the picker-only clock (no tap-to-type key)
+  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); has('editor start', 'Start time', false);
   openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);
-  const endTap = all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0]; if (endTap) { fire(endTap, 'click'); await sleep(40); }
-  has('editor end', 'Exact end time', false);
+  has('editor end', 'End time', false);
   openSheet({ kind: 'since' }); await sleep(50); has('fix-start', 'Exact start time');
   await seed(day(), { tab: 'load' }); openSheet({ kind: 'loadtime', field: 'leave' }); await sleep(50); has('load leave', 'Exact time');
   openSheet({ kind: 'loadtime', field: 'appt' }); await sleep(50); has('load appt', 'Exact time');
@@ -240,17 +233,28 @@ await pin('E1. edit → The times are wrong → "When did it really start?": ONE
   if (!all((n) => n.localName === 'output' && n.textContent === '06:41' && inSheet(n)).length) return 'the big clock does not read 06:41';
   return (!!sheetButton(/^− 1 hour$/) && !!sheetButton(/^\+15$/) && !!sheetButton(/^Yesterday$/)) || 'preset keys / day chips gone';
 });
-await pin('E2. edit → the matching end step: tapping Ends shows ONE time field, the big clock as the clock picker; picking 14:04 sets the end', async () => {
+// EDIT-FIX (Lorico, 2026-11-20): the edit end step is the add flow's end step — no "Ends …" tap,
+// no length presets, no stepper; the end on the clock picker straight away, length derived.
+const noPresets = (where) => {
+  const t = sheetText();
+  if (/How long did it (really )?last\?/.test(t)) return `${where}: the "How long did it last?" screen is still there`;
+  if (all((n) => /\b(ed-len|ed-fine)\b/.test(cls(n)) && inSheet(n)).length || sheetButton(/^(15 min|30 min|45 min|1 hour|2 hours|10 hours)$/) || all((n) => n.attributes['aria-label'] === 'Length' && inSheet(n)).length) return `${where}: the duration presets / stepper are still there`;
+  if (all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)) && inSheet(n)).length) return `${where}: the end picker still hides behind an "Ends …" tap`;
+  return true;
+};
+await pin('E2. EDIT-FIX: edit → the end step is "When did it really end?": ONE time field = the end clock picker shown directly (no "Ends" tap, no presets), showing the end; picking sets the end, length derived', async () => {
   await seed(day()); const seg = getState().segments[1];
   openSheet({ kind: 'edit', seg, step: 'long', draft: { status: 'D', start: seg.start, len: seg.end - seg.start } }); await sleep(60);
-  const endTap = all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0];
-  if (!endTap) return 'the end time is not tappable';
-  fire(endTap, 'click'); await sleep(50);
+  if (!/When did it really end\?/.test(sheetText())) return 'not the end question: ' + sheetText().slice(0, 160);
+  const np = noPresets('edit end'); if (np !== true) return np;
   const one = oneField('end'); if (one !== true) return one;
   const t = sheetInputs().find((n) => attr(n, 'type') === 'time');
   if (t.attributes['aria-label'] !== 'End time') return 'label: ' + t.attributes['aria-label'];
+  if (attr(t, 'value') !== hh_mm(seg.end)) return 'the end picker shows ' + attr(t, 'value') + ', not the end ' + hh_mm(seg.end);
+  if (!all((n) => n.localName === 'output' && n.textContent === hh_mm(seg.end) && inSheet(n)).length) return 'the big clock does not read the end time';
   await type(t, hh_mm(T - 10));
-  return currentSheet().draft.len === (T - 10) - seg.start || 'len ' + currentSheet().draft.len;
+  if (currentSheet().draft.len !== (T - 10) - seg.start) return 'len ' + currentSheet().draft.len;
+  return (/Lasted/.test(sheetText()) && sheetText().includes(S.dur((T - 10) - seg.start))) || 'the derived length is not read out: ' + sheetText().slice(-160);
 });
 await pin('E3. the open status too: Log → current row → The times are wrong → pick on the clock → check → save moves the start', async () => {
   await seed(day()); fire(liveRow(), 'click'); await sleep(60);
@@ -275,16 +279,131 @@ await pin('E4. a tap on the edit clock asks the phone for its picker (showPicker
   fire(t, 'click');
   return currentSheet()?.step === 'when' || 'the sheet moved';
 });
-await pin('E5. scope fence: the ADD flow, fix-start and the load check keep their tap-to-type clock and "Exact time" field, unchanged', async () => {
+await pin('E5. scope fence (re-aimed by amendment B, 2026-11-20): the ADD flow\'s start and end are the clock picker; fix-start, the load check and the trip departure keep their tap-to-type clock and "Exact time" field, unchanged', async () => {
   const miss = [];
   const keeps = (where, label) => { if (!all((n) => n.localName === 'button' && /\bed-clock-tap\b/.test(cls(n)) && inSheet(n)).length) miss.push(where + ': keypad clock'); if (!input(label) || !/Exact time/.test(sheetText())) miss.push(where + ': exact-time field'); };
-  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50); keeps('add start', 'Exact start time');
+  await seed(day()); openSheet({ kind: 'add', step: 'when', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);
+  let one = oneField('add start'); if (one !== true) miss.push(one);
   openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 60, len: 30 } }); await sleep(50);
-  fire(all((n) => n.localName === 'button' && /\bed-ends-tap\b/.test(cls(n)))[0], 'click'); await sleep(40);
-  if (!input('Exact end time, type the time') || !input('Exact end time')) miss.push('add end: typed box + exact-time field');
+  one = oneField('add end'); if (one !== true) miss.push(one);
+  // EDIT-FIX kept the add end step as it was: its own question, its step count, its Change link
+  if (!/When did it end\?/.test(sheetText()) || /really/.test(sheetText()) || !/Step 3 of 3/.test(sheetText()) || !sheetButton(/^Change$/)) miss.push('add end: no longer the add step (' + sheetText().slice(0, 120) + ')');
   openSheet({ kind: 'since' }); await sleep(50); keeps('fix-start', 'Exact start time');
   await seed(day(), { tab: 'load' }); openSheet({ kind: 'loadtime', field: 'leave' }); await sleep(50); keeps('load leave', 'Exact time');
+  await seed(day(), { tab: 'trip' }); await sleep(30);
+  const dep = all((n) => n.localName === 'button' && /\btrip-dep\b/.test(cls(n)))[0];
+  if (!dep) miss.push('trip: no departure key'); else { fire(dep, 'click'); await sleep(60); keeps('trip departure', 'Exact departure time'); }
   return miss.length === 0 || miss.join('; ');
+});
+// Amendment B, driven through the real Log controls: "Add a break or something I forgot" → a
+// status → "When did it start?" (the clock picker) → "When did it end?" (the clock picker
+// showing the END time; no 15/30/45/1h/2h preset screen; the length derived start → end) →
+// check → saved. Two different statuses.
+const addFlow = async (statusRe, startHM, endHM, want) => {
+  await seed(day(), { segments: [{ status: 'OFF', start: T - 900, end: T - 300, createdAt: 1 }], current: { status: 'D', since: T - 300, createdAt: 2 } });
+  const add = all((n) => n.localName === 'button' && /\baddbtn\b/.test(cls(n)))[0];
+  if (!add) return 'no add button on the Log';
+  fire(add, 'click'); await sleep(60);
+  if (currentSheet()?.kind !== 'add') return 'the add flow did not open';
+  await click(sheetButton(statusRe));
+  if (!/When did it start\?/.test(sheetText())) return 'not the start step: ' + sheetText().slice(0, 120);
+  let one = oneField('start'); if (one !== true) return one;
+  const st = sheetInputs().find((n) => attr(n, 'type') === 'time');
+  if (st.attributes['aria-label'] !== 'Start time') return 'start label: ' + st.attributes['aria-label'];
+  await type(st, startHM);
+  if (hh_mm(currentSheet().draft.start) !== startHM) return 'picked start ' + startHM + ' → ' + hh_mm(currentSheet().draft.start);
+  await click(goBtn());
+  const t = sheetText();
+  if (currentSheet()?.step !== 'long') return 'step ' + currentSheet()?.step;
+  if (!/When did it end\?/.test(t)) return 'the end step does not ask when it ended: ' + t.slice(0, 160);
+  if (/How long did it last\?/.test(t)) return 'the preset-only "How long did it last?" screen is still there';
+  if (all((n) => /\bed-len\b/.test(cls(n)) && inSheet(n)).length || sheetButton(/^(15 min|30 min|45 min|1 hour|2 hours)$/)) return 'the duration presets are still there';
+  one = oneField('end'); if (one !== true) return one;
+  const en = sheetInputs().find((n) => attr(n, 'type') === 'time');
+  if (en.attributes['aria-label'] !== 'End time') return 'end label: ' + en.attributes['aria-label'];
+  const d0 = currentSheet().draft;
+  if (attr(en, 'value') !== hh_mm(d0.start + d0.len)) return 'the end picker shows ' + attr(en, 'value') + ', not the end ' + hh_mm(d0.start + d0.len);
+  if (!all((n) => n.localName === 'output' && n.textContent === hh_mm(d0.start + d0.len) && inSheet(n)).length) return 'the big clock does not read the end time';
+  await type(en, endHM);
+  const d = currentSheet().draft;
+  if (hh_mm(d.start + d.len) !== endHM || d.len !== want) return `picked end ${endHM} → end ${hh_mm(d.start + d.len)}, len ${d.len} (want ${want})`;
+  if (!/Lasted/.test(sheetText()) || !sheetText().includes(S.dur ? S.dur(want) : '')) return 'the derived length is not read out: ' + sheetText().slice(-160);
+  await click(goBtn());
+  if (!/Check and add/.test(sheetText())) return 'no check step';
+  await click(goBtn());
+  return true;
+};
+await pin('E6. amendment B, Driving: Log → Add → Driving → start on the clock picker → end on the clock picker (end time shown, no preset screen, length derived) → saved', async () => {
+  const startHM = hh_mm(T - 600), endHM = hh_mm(T - 540);
+  const r = await addFlow(/^Driving/, startHM, endHM, 60); if (r !== true) return r;
+  const s = getState();
+  return (s.segments.some((x) => x.status === 'D' && x.start === T - 600 && x.end === T - 540) && overlaps(s).length === 0) || plain(s);
+});
+await pin('E7. amendment B, On duty: the same add flow — start and end both on the clock picker, 45-minute length derived from the two times → saved', async () => {
+  const startHM = hh_mm(T - 500), endHM = hh_mm(T - 455);
+  const r = await addFlow(/^On duty/, startHM, endHM, 45); if (r !== true) return r;
+  const s = getState();
+  return (s.segments.some((x) => x.status === 'ON' && x.start === T - 500 && x.end === T - 455) && overlaps(s).length === 0) || plain(s);
+});
+await pin('E8. amendment B: on the add end step the hour keys move the END, "Until now" sets the end to now, and an end before the start is refused (nothing moves)', async () => {
+  await seed(day()); openSheet({ kind: 'add', step: 'long', draft: { status: 'OFF', start: T - 120, len: 30 } }); await sleep(50);
+  await click(sheetButton(/^\+15$/));
+  if (currentSheet().draft.len !== 45) return '+15 → len ' + currentSheet().draft.len;
+  await click(sheetButton(/^Until now/));
+  if (currentSheet().draft.len !== 120) return 'Until now → len ' + currentSheet().draft.len;
+  await type(sheetInputs().find((n) => attr(n, 'type') === 'time'), hh_mm(T - 130));
+  return currentSheet().draft.len === 120 || 'an end before the start moved the draft: len ' + currentSheet().draft.len;
+});
+
+await pin('E9. EDIT-FIX end to end: Log row → The times are wrong → start on the picker → "Next: when it ended" → end on the picker (no presets) → Check it → Save → the record carries the picked start and end', async () => {
+  await seed(day());
+  // the Driving row on the Log, tapped as the driver would
+  const row = all((n) => n.localName === 'button' && /\bentry\b/.test(cls(n)) && !/\blive\b/.test(cls(n)) && /Driving/.test(n.textContent))[0];
+  if (!row) return 'no Driving row on the Log';
+  fire(row, 'click'); await sleep(60);
+  if (currentSheet()?.kind !== 'edit') return 'the edit panel did not open';
+  await click(/^The times are wrongChange when it started or how long$/);
+  await type(sheetInputs().find((n) => attr(n, 'type') === 'time'), hh_mm(T - 290));
+  const next = goBtn(); if (next.textContent.trim() !== 'Next: when it ended') return 'start step Next reads: ' + next.textContent;
+  await click(next);
+  if (currentSheet()?.step !== 'long' || !/When did it really end\?/.test(sheetText())) return 'not the end step: ' + sheetText().slice(0, 160);
+  const np = noPresets('edit end'); if (np !== true) return np;
+  const one = oneField('end'); if (one !== true) return one;
+  await type(sheetInputs().find((n) => attr(n, 'type') === 'time'), hh_mm(T - 40));
+  const d = currentSheet().draft;
+  if (d.start !== T - 290 || d.start + d.len !== T - 40) return `draft ${hh_mm(d.start)}→${hh_mm(d.start + d.len)}`;
+  if (!sheetText().includes(S.dur(250))) return 'Lasted does not read 4h 10m';
+  await click(goBtn());
+  if (!/Check the change/.test(sheetText())) return 'no check step';
+  await click(goBtn());
+  const s = getState();
+  return (currentSheet() === null && s.segments.some((x) => x.status === 'D' && x.start === T - 290 && x.end === T - 40) && overlaps(s).length === 0) || plain(s);
+});
+await pin('E10. EDIT-FIX: the edit end step behaves as the add one — hour keys move the END, "Until now" sets it to now, an end at or before the start is ignored (nothing moves, as in add); a what-if gets no "Until now"', async () => {
+  await seed(day()); const seg = getState().segments[1]; // D [T-300, T-20)
+  openSheet({ kind: 'edit', seg, step: 'long', draft: { status: 'D', start: seg.start, len: 200 } }); await sleep(50);
+  await click(sheetButton(/^\+15$/));
+  if (currentSheet().draft.len !== 215) return '+15 → len ' + currentSheet().draft.len;
+  await click(sheetButton(/^Until now/));
+  if (currentSheet().draft.len !== 300) return 'Until now → len ' + currentSheet().draft.len;
+  if (sheetButton(/^Until now/)) return '"Until now" still offered when the end is now (add hides it)';
+  const t = () => sheetInputs().find((n) => attr(n, 'type') === 'time');
+  await type(t(), hh_mm(T - 310));
+  if (currentSheet().draft.len !== 300) return 'an end before the start moved the draft: len ' + currentSheet().draft.len;
+  await type(t(), hh_mm(T - 300));
+  if (currentSheet().draft.len !== 300) return 'an end AT the start moved the draft: len ' + currentSheet().draft.len;
+  // the add flow, same inputs, same answers
+  openSheet({ kind: 'add', step: 'long', draft: { status: 'D', start: T - 300, len: 300 } }); await sleep(50);
+  await type(t(), hh_mm(T - 310));
+  if (currentSheet().draft.len !== 300) return 'add: an end before the start moved the draft';
+  // a what-if: no "Until now", a future end is allowed
+  const wi = { status: 'D', start: T + 60, end: T + 120, createdAt: 9, tentative: true };
+  await seed(day(), { tentative: [wi] });
+  openSheet({ kind: 'edit', seg: getState().tentative[0], step: 'long', draft: { status: 'D', start: T + 60, len: 60 } }); await sleep(50);
+  if (!/When did it really end\?/.test(sheetText())) return 'what-if: not the end step';
+  if (sheetButton(/^Until now/)) return 'what-if: "Until now" offered';
+  await type(t(), hh_mm(T + 150));
+  return currentSheet().draft.len === 90 || 'what-if future end: len ' + currentSheet().draft.len;
 });
 
 /* ================= item 4: absorb, never overlap ================= */

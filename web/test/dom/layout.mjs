@@ -201,7 +201,7 @@ for (const [W, H] of SIZES) {
   await ctx.addInitScript((save) => {
     try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
     window.__vib = [];
-    Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { window.__vib.push({ p, t: performance.now() }); return true; } });
+    Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { const m = document.querySelector('main.pages'); window.__vib.push({ p, t: performance.now(), sl: m ? m.scrollLeft : -1, w: m ? m.clientWidth : 0 }); return true; } });
   }, JSON.stringify(seedRecord('dial')));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
@@ -276,8 +276,10 @@ for (const [W, H] of SIZES) {
     const a = await st();
     ok(`${tag} (c) a vertical drag on Log content scrolls the page and leaves the strip on Log`, b.active === 'log' && a.active === 'log' && a.top > b.top && a.vib === b.vib, `${b.active}/${b.top} → ${a.active}/${a.top}, vibrate +${a.vib - b.vib}`);
   }
-  // a tab-bar tap glides the strip but gives no settle click (only the bar button's own
-  // pre-existing tap tick, which fires on the click itself — never 120ms+ later at the settle)
+  // a tab-bar tap glides the strip and ticks ONCE, when it locks onto the new panel — never on
+  // the tap itself (haptic timing, 2026-11-20: "The haptic feedback should happen only when the
+  // screen locks into place. Both the swiping and the tapping."). A tap on the tab of the panel
+  // already showing never ticks at all.
   {
     const b = await st();
     const box = await page.evaluate(() => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('More')).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
@@ -285,8 +287,41 @@ for (const [W, H] of SIZES) {
     await page.touchscreen.tap(box.x, box.y);
     await page.waitForTimeout(500); await seated(); await page.waitForTimeout(400);
     const a = await st();
+    const early = await page.evaluate((t) => window.__vib.filter((v) => v.t >= t && v.t - t <= 100).length, t0);
     const late = await page.evaluate((t) => window.__vib.filter((v) => v.t - t > 100).length, t0);
-    ok(`${tag} (c) a tab-bar tap moves the strip with no settle haptic`, a.active === 'settings' && late === 0 && a.vib - b.vib <= 1, `active ${a.active}; vibrate +${a.vib - b.vib}, ${late} of them after the tap itself`);
+    ok(`${tag} (c) a tab-bar tap to another panel: no tick on the tap, exactly one when the strip locks on`, a.active === 'settings' && early === 0 && late === 1 && a.vib - b.vib === 1, `active ${a.active}; vibrate +${a.vib - b.vib} (${early} within 100ms of the tap, ${late} after)`);
+    const b2 = await st();
+    await page.touchscreen.tap(box.x, box.y);
+    await page.waitForTimeout(500); await seated(); await page.waitForTimeout(400);
+    const a2 = await st();
+    ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'settings' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
+  }
+  // Owner amendment A (2026-11-20): a tab tap's glide ticks as the strip passes each panel on
+  // the way, plus once at the lock — More → Now and Now → More are 3 ticks each (none at press),
+  // and each pass tick lands where the strip has reached that panel; Now → Plan is exactly 1.
+  {
+    const tabBox = (label) => page.evaluate((l) => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l)).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, label);
+    const glide = async (label, want) => {
+      const box = await tabBox(label);
+      const n0 = await page.evaluate(() => window.__vib.length);
+      const t0 = await page.evaluate(() => performance.now());
+      await page.touchscreen.tap(box.x, box.y);
+      await page.waitForTimeout(700); await seated(); await page.waitForTimeout(400);
+      const got = await page.evaluate((n) => window.__vib.slice(n), n0);
+      const a = await st();
+      const early = got.filter((v) => v.t - t0 <= 100).length;
+      return { a, got, early, t0 };
+    };
+    const where = (g) => g.got.map((v) => `${Math.round(v.t - g.t0)}ms@${(v.sl / (v.w || 1)).toFixed(2)}`).join(' ');
+    const g1 = await glide('Now');
+    const pos1 = g1.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A: a More → Now tab tap ticks 3 times — passing Log, passing Plan, the lock on Now — none at press`, g1.a.active === 'now' && g1.got.length === 3 && g1.early === 0 && pos1[0] <= 2.01 && pos1[0] > 1.5 && pos1[1] <= 1.01 && pos1[1] > 0.5 && pos1[2] <= 0.01, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} within 100ms of the tap: ${where(g1)}`);
+    const g2 = await glide('More');
+    const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A: a Now → More tab tap ticks exactly 3 times — Plan, Log, the lock on More — none at press`, g2.a.active === 'settings' && g2.got.length === 3 && g2.early === 0 && pos2[0] >= 0.99 && pos2[0] < 1.5 && pos2[1] >= 1.99 && pos2[1] < 2.5 && pos2[2] >= 2.99, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} within 100ms of the tap: ${where(g2)}`);
+    await glide('Now');
+    const g3 = await glide('Plan');
+    ok(`${tag} (c) amendment A: a Now → Plan tab tap ticks exactly once, at the lock`, g3.a.active === 'plan' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) >= 0.99, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
   }
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
