@@ -280,7 +280,8 @@ await pin('M4b. the tap\'s draft is the fix line\'s input: after it, the Load sc
   if (!fix) return 'no fix computed';
   const f = A.loadFixFor(getState().loadCheck, WALL, fix);
   A.replaceLoadDraft({ leaveIn: f.leaveIn, waitOff: true }); await sleep(120);
-  const promised = fix.plan.arrival > fix.plan.driveEnd ? `Unloaded by ${clockFull(fix.plan.arrival)}` : `There by ${clockFull(fix.plan.driveEnd)}`;
+  // D17 (label patch, 2026-11-20): load answer relabelled "Unloaded by" to "Could be unloaded by (if they take you on arrival)".
+  const promised = fix.plan.arrival > fix.plan.driveEnd ? `Could be unloaded by (if they take you on arrival) ${clockFull(fix.plan.arrival)}` : `There by ${clockFull(fix.plan.driveEnd)}`;
   return (/Yes, it’s legal/.test(text()) && text().includes(promised)) || `promised ${promised}; screen ${text().slice(0, 200)}`;
 });
 

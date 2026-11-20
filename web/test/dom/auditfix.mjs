@@ -627,6 +627,43 @@ await section(async () => {
   await p.ctx.close();
 });
 
+await section(async () => {
+  // D17 (label patch, 2026-11-20): load-check answer shows "Could be unloaded by (if they take you on arrival)"
+  // instead of bare "Unloaded by", with zero horizontal overflow or clipping at 412x915 and 360x640.
+  const NEW_LABEL = 'Could be unloaded by (if they take you on arrival)';
+  for (const [W, H] of [[412, 915], [360, 640]]) {
+    const p = await open({
+      ...DAY,
+      loadCheck: { miles: 550, leaveIn: 60, waitOff: false, dwell: 120, dwellOff: false, appt: N + 60 * 17, answered: true },
+    }, W, H);
+    await go(p, 'Plan');
+    await tap(p, '.page-plan button.plan-item', /Can I take this load\?/, 600);
+    const m = await p.evaluate(() => {
+      const pg = document.querySelector('.page.is-active');
+      const vw = document.documentElement.clientWidth;
+      const verdictSub = pg?.querySelector('.verdict-sub')?.textContent?.trim() ?? '';
+      const statLabels = [...(pg?.querySelectorAll('.clocks .stat-label') ?? [])].map((e) => e.textContent?.trim() ?? '');
+      const checkEls = [...(pg?.querySelectorAll('.verdict, .verdict-sub, .clocks, .clocks .stat, .clocks .stat-label, .clocks .stat-value') ?? [])];
+      const clipped = checkEls.filter((el) => {
+        const r = el.getBoundingClientRect();
+        return el.scrollWidth > el.clientWidth + 1 || r.right > vw + 0.5 || r.left < -0.5;
+      }).map((el) => ({ cls: el.className, sw: el.scrollWidth, cw: el.clientWidth, right: Math.round(el.getBoundingClientRect().right), vw }));
+      return {
+        verdictSub, statLabels,
+        pageText: pg?.innerText ?? '',
+        docW: document.documentElement.scrollWidth, vw,
+        clipped,
+      };
+    });
+    ok(`D17 [${W}x${H}] verdict-sub leads with "${NEW_LABEL}"`, m.verdictSub.startsWith(`${NEW_LABEL} `), m.verdictSub);
+    ok(`D17 [${W}x${H}] Stat label reads "${NEW_LABEL}"`, m.statLabels.includes(NEW_LABEL), m.statLabels);
+    ok(`D17 [${W}x${H}] no bare "Unloaded by" remains on load-check answer`, !/Unloaded by/.test(m.pageText), m.pageText.slice(0, 300));
+    ok(`D17 [${W}x${H}] no horizontal overflow or clipping in verdict-sub / Stat cards`, m.docW <= m.vw && m.clipped.length === 0, { docW: m.docW, vw: m.vw, clipped: m.clipped });
+    ok(`D17 [${W}x${H}] no page errors`, p.errors.length === 0, p.errors.join(' | '));
+    await p.ctx.close();
+  }
+});
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

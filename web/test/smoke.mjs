@@ -621,7 +621,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     ], historyAcknowledged: true, tab: 'load', loadCheck: { ...DEFAULT_LOADCHECK, miles: 200, dwell: 120, answered: true } });
   hh = out('load/arrive vs unload');
   if (!/Arrive — wheels stop/.test(hh)) throw new Error('the card must distinguish wheels-stop from unloading');
-  if (!/Unloaded by/.test(hh)) throw new Error('unloading completion needs its own label');
+  // D17 (label patch, 2026-11-20): "Unloaded by" relabelled to "Could be unloaded by (if they take you on arrival)".
+  if (!/Could be unloaded by \(if they take you on arrival\)/.test(hh)) throw new Error('unloading completion needs its own label');
   if (!/Cycle left after unloading/.test(hh)) throw new Error('the cycle figure must say which event it belongs to');
 
   // (5) a what-if must not be reported as a violation already committed
@@ -1412,7 +1413,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/Yes, it’s legal/.test(h)) throw new Error('300 mi on a fresh 10-hour rest is legal');
   if (!/Load distance<\/span><b>300 mi<\/b>/.test(h) || !/At the receiver<\/span><b>1h 00m on duty<\/b>/.test(h) || !/Leaving<\/span><b>now<\/b>/.test(h)) throw new Error('the answer must list what it was asked');
   if ((h.match(/>Change</g) || []).length !== 4) throw new Error('A6: each of the four answers needs its own Change');
-  if (!/Unloaded by/.test(h) || !/How it goes/.test(h)) throw new Error('the answer must keep the unload time and the plan');
+  // D17 (label patch, 2026-11-20): "Unloaded by" relabelled to "Could be unloaded by (if they take you on arrival)".
+  if (!/Could be unloaded by \(if they take you on arrival\)/.test(h) || !/How it goes/.test(h)) throw new Error('the answer must keep the unload time and the plan');
   // 3. waiting to leave is planned as what he said, and said back to him
   setState({ loadCheck: { ...gs().loadCheck, leaveIn: 60, waitOff: false } });
   h = out('load/leave in an hour, on duty');
@@ -6335,5 +6337,32 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`declutter: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
   console.log('declutter (load check absent on Now, present on Plan): OK');
+}
+// --- D17 load-check label patch (Lorico, 2026-11-20): "Unloaded by" -> "Could be unloaded by (if they take you on arrival)"
+{
+  const S = await import('../src/store.ts');
+  const nowT = Math.floor(Date.UTC(2026, 10, 20, 18, 0) / 60000);
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const baseRec = {
+    ...S.INITIAL_STATE, nowOverride: nowT, drivingView: false,
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true,
+    segments: [{ status: 'OFF', start: nowT - 700, end: nowT - 60 }],
+    current: { status: 'ON', since: nowT - 60 },
+    tab: 'load', planReturn: 'plan',
+  };
+  const NEW_LABEL = 'Could be unloaded by (if they take you on arrival)';
+  setState({ ...baseRec, loadCheck: { ...S.DEFAULT_LOADCHECK, miles: 550, leaveIn: 60, dwell: 120, dwellOff: false, appt: nowT + 60 * 17, answered: true } });
+  const ansHtml = pageOut(render(h(App, {})), 'page-plan');
+  need(new RegExp(`<div class="verdict-sub">${NEW_LABEL.replace(/[()]/g, '\\$&')} `).test(ansHtml), 'D17: verdict-sub must lead with "Could be unloaded by (if they take you on arrival) <time>"');
+  need(new RegExp(`<div class="stat-label">${NEW_LABEL.replace(/[()]/g, '\\$&')}<\\/div>`).test(ansHtml), 'D17: Stat label must read "Could be unloaded by (if they take you on arrival)"');
+  need(!/Unloaded by/.test(ansHtml), 'D17: load-check answer must no longer show a bare "Unloaded by" label');
+  // dwell === 0 keeps the "There by" branch and omits the unload Stat unchanged.
+  setState({ ...baseRec, loadCheck: { ...S.DEFAULT_LOADCHECK, miles: 300, leaveIn: 0, dwell: 0, dwellOff: false, answered: true } });
+  const noDwellHtml = pageOut(render(h(App, {})), 'page-plan');
+  need(/<div class="verdict-sub">There by /.test(noDwellHtml) && !noDwellHtml.includes(NEW_LABEL) && !/Unloaded by/.test(noDwellHtml), 'D17: zero-dwell load answer must keep "There by" and omit unload label');
+  if (bad.length) throw new Error(`D17 label patch: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
+  console.log('D17 load-check label patch: OK');
 }
 console.log('OK');

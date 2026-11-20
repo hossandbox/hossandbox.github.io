@@ -5104,7 +5104,8 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         {/* The Yes names the rest plan it stands on (patch 16, P12): display only — the strategy
             and its plan are the ones already computed above, nothing new is worked out. */}
         {best.feasible && <div class="verdict-plan">{strategyKey === 'split' ? 'using a sleeper split — log the rests exactly as shown' : strategyKey === 'restart34' ? 'using a 34-hour restart' : 'using 10-hour breaks'}</div>}
-        <div class="verdict-sub">{best.arrival > best.driveEnd ? `Unloaded by ${clockFull(best.arrival)}` : `There by ${clockFull(best.driveEnd)}`}</div>
+        {/* D17 (label patch, 2026-11-20): presentation-only relabel; appointment-wait modelling stays held. */}
+        <div class="verdict-sub">{best.arrival > best.driveEnd ? `Could be unloaded by (if they take you on arrival) ${clockFull(best.arrival)}` : `There by ${clockFull(best.driveEnd)}`}</div>
         {best.feasible && advice?.latest != null && <div class="verdict-sub">Leave by {clockFull(advice.latest)} at the latest.</div>}
         {!best.feasible && advice?.fix && <div class="verdict-sub">+{dur(advice.fix.minutes)} off duty before you leave → legal, {advice.fix.plan.arrival > advice.fix.plan.driveEnd ? `unloaded by ${clockFull(advice.fix.plan.arrival)}` : `there by ${clockFull(advice.fix.plan.driveEnd)}`}.</div>}
         {/* M4 (load side): the fix line's one tap. It edits the load DRAFT only — the departure
@@ -5136,7 +5137,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       {hist !== 'known' && <p class="warnbox small">This verdict rests on an incomplete basis: nothing behind your current status is logged, so it assumes you started from zero. It is not a statement about your real day — add your duty on the <b>Log</b> tab, or confirm that the record starts here.</p>}
       <div class="clocks">
         <Stat label="Arrive — wheels stop" value={clockFull(best.driveEnd)} />
-        {best.arrival > best.driveEnd && <Stat label="Unloaded by" value={clockFull(best.arrival)} />}
+        {best.arrival > best.driveEnd && <Stat label="Could be unloaded by (if they take you on arrival)" value={clockFull(best.arrival)} />}
         <Stat label={`Cycle left after ${best.arrival > best.driveEnd ? 'unloading' : 'arrival'}`} value={dur(best.cycleRemainingAtArrival)} />
       </div>
       <ul class="answers">
