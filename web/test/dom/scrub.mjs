@@ -236,8 +236,12 @@ const strip = () => byClass('split-now-after')[0];
 const pairCard = () => all((n) => n.localName === 'section' && cls(n).includes('card') && /^Does it pair\?/.test(n.textContent))[0];
 const block = (k) => all((n) => n.localName === 'button' && n.attributes['data-block'] === k)[0];
 const logOf = () => JSON.stringify({ segments: getState().segments, current: getState().current, tentative: getState().tentative });
-await pin('P1. default draft on the standard seed: the strip REPLACES the pair sentence with the ✕ form (C5-A), verbatim', async () => {
+// D14 (audit-fix): SplitTab auto-fits an untouched DEFAULT_SPLIT on arrival so it opens clean; pin both D14's fitted clean opening and C5-A's verbatim ✕ replacement when a plan runs over.
+await pin('P1. Split strip: opens fitted on the standard seed (D14), and an overrunning plan REPLACES the pair sentence with the ✕ form (C5-A), verbatim', async () => {
   await seed(lab());
+  const clean = strip()?.textContent ?? '';
+  if (/✕/.test(clean) || getState().split.drive >= DEFAULT_SPLIT.drive) return `D14: expected fitted clean opening, got drive=${getState().split.drive}, strip "${clean.slice(0, 120)}"`;
+  await seed(lab(DEFAULT_SPLIT));
   const t = strip()?.textContent ?? '';
   const want = '✕ Pairs, but this plan runs over: 14-hour window by 2h 54m · 11-hour driving by 1h 54m';
   return t.startsWith(want) || `strip "${t.slice(0, 140)}"`;
@@ -261,25 +265,29 @@ await pin('P3. S11: "Does it pair?" is bad-toned while the plan breaks a limit, 
   if (!/^Your 14 ends .* with this pair · \d+h \d\dm drive after/.test(t)) return 'clean strip: ' + t.slice(0, 120);
   return cls(pairCard()).includes('good') || 'card ' + pairCard()?.attributes.class;
 });
-await pin('P4. tap a block → its sheet: status toggle (breaks only), 56px −60/−15/+15/+60 steppers, the exact number box; draft only', async () => {
+// D5/A4 (audit-fix): Break 1 status toggle uses STATUS_LABEL ("Off Duty") and exact entry uses hours + minutes boxes instead of raw minutes.
+await pin('P4. tap a block → its sheet: status toggle (breaks only), 56px −60/−15/+15/+60 steppers, the exact hours+minutes boxes; draft only', async () => {
   await seed(lab()); const log0 = logOf();
   // The toggle lookups scope to the sheet: the Now page's dock carries its own Sleeper /
-  // Off duty status buttons, and every page stays mounted in the strip — a tree-wide
+  // Off Duty status buttons, and every page stays mounted in the strip — a tree-wide
   // first match would tap the dock, not the sheet (on a phone the dock is on another
   // page, inert; only the harness's global search could confuse them).
   const sheetBtn = (re) => { const sh = byClass('sheet')[0]; return sh ? all((n) => n.localName === 'button' && re.test(n.textContent), sh)[0] : undefined; };
   await click(block('b1'));
   if (currentSheet()?.kind !== 'splitblock') return 'no block sheet';
   for (const l of ['−60', '−15', '+15', '+60']) if (!all((n) => n.localName === 'button' && n.textContent === l).length) return 'missing stepper ' + l;
-  if (!sheetBtn(/^Sleeper$/) || !sheetBtn(/^Off duty$/)) return 'Break 1 must carry its status toggle';
+  if (!sheetBtn(/^Sleeper$/) || !sheetBtn(/^Off Duty$/)) return 'Break 1 must carry its status toggle';
   await click(/^\+15$/); if (getState().split.b1 !== 195) return 'b1 after +15: ' + getState().split.b1;
   await click(/^−60$/); if (getState().split.b1 !== 135) return 'b1 after −60: ' + getState().split.b1;
   await click(sheetBtn(/^Sleeper$/)); if (getState().split.b1s !== 'SB') return 'toggle did not set b1s';
-  const box = all((n) => n.localName === 'input' && /Break 1, type an exact value/.test(n.attributes['aria-label'] || ''))[0];
-  if (!box) return 'no exact box';
-  box.value = '200'; fire(box, 'input'); await sleep(40);
-  if (getState().split.b1 !== 200) return 'exact 200 → ' + getState().split.b1;
-  box.value = '9999'; fire(box, 'input'); await sleep(40);
+  const sh = byClass('sheet')[0];
+  const hBox = all((n) => n.localName === 'input' && n.attributes['aria-label'] === 'Break 1, hours', sh)[0];
+  const mBox = all((n) => n.localName === 'input' && n.attributes['aria-label'] === 'Break 1, minutes', sh)[0];
+  if (!hBox || !mBox) return 'no exact hours/minutes boxes';
+  hBox.value = '3'; fire(hBox, 'input'); await sleep(40);
+  mBox.value = '20'; fire(mBox, 'input'); await sleep(40);
+  if (getState().split.b1 !== 200) return 'exact 3h 20m → ' + getState().split.b1;
+  hBox.value = '99'; fire(hBox, 'input'); await sleep(40);
   if (getState().split.b1 !== 200 || !text().includes('your entry was not applied')) return 'an out-of-range entry must be refused, visibly';
   openSheet(null); await sleep(30);
   await click(block('drive'));
@@ -315,22 +323,26 @@ await pin('M4b. the checklist fixes: short break, sleeper 7h, total 10h — each
   await click(/^Make Break 2 sleeper, 7h$/); if (getState().split.b2s !== 'SB' || getState().split.b2 !== 420) return 'sleeper7: ' + JSON.stringify(getState().split);
   return true;
 });
-await pin('U1. one-level draft undo, shared: example split → Undo restores; a fix after the example owns the slot (one level); a stepper retires it', async () => {
+// D14 (audit-fix): "Try an example split" renamed to "Start over with an example" and loads fittedExample (already clean); verify one-level shared undo across example + fix + stepper.
+await pin('U1. one-level draft undo, shared: example split → Undo restores; a fix and the example share the one-level slot; a stepper retires it', async () => {
   const mine = { b1: 60, b1s: 'OFF', dwell: 15, drive: 120, b2: 240, b2s: 'OFF' };
   await seed(lab(mine)); A.clearSplitDraftUndo();
-  await click(/^Try an example split$/);
-  if (JSON.stringify(getState().split) !== JSON.stringify(DEFAULT_SPLIT)) return 'example not loaded';
+  const s0 = getState();
+  const fitted = A.fittedExample(s0, T, E.evaluate(allSegments(s0, T), { asOf: T, config: NY }));
+  await click(/^Start over with an example$/);
+  if (JSON.stringify(getState().split) !== JSON.stringify(fitted)) return 'example not loaded: ' + JSON.stringify(getState().split);
   await click(/^Undo$/);
   if (JSON.stringify(getState().split) !== JSON.stringify(mine)) return 'undo did not restore the draft';
   if (button(/^Undo$/)) return 'one level: the undo must be spent';
-  await click(/^Try an example split$/);
-  await click(block('drive')); await click(/^Shorten the drive to /); openSheet(null); await sleep(30);
+  // A checklist fix followed by "Start over with an example" shares the single undo slot (one level).
+  await click(/^Make the shorter break 2h$/);
   const afterFix = JSON.stringify(getState().split);
+  if (afterFix === JSON.stringify(mine)) return 'setup: the fix changed nothing';
+  await click(/^Start over with an example$/);
   await click(/^Undo$/);
-  if (JSON.stringify(getState().split) !== JSON.stringify(DEFAULT_SPLIT)) return 'undo after a fix must restore the pre-fix draft (the example)';
+  if (JSON.stringify(getState().split) !== afterFix) return 'undo must restore the pre-example (post-fix) draft, one level only';
   if (button(/^Undo$/)) return 'only one level';
-  if (afterFix === JSON.stringify(DEFAULT_SPLIT)) return 'setup: the fix changed nothing';
-  await click(/^Try an example split$/); await click(block('b2')); await click(/^\+15$/); openSheet(null); await sleep(30);
+  await click(/^Start over with an example$/); await click(block('b2')); await click(/^\+15$/); openSheet(null); await sleep(30);
   return !button(/^Undo$/) || 'an ordinary edit must retire the undo (N2)';
 });
 

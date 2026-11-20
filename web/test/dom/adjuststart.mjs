@@ -235,9 +235,12 @@ await pin('C1. Now shows the current status with "Fix the start time", and it op
   fire(b, 'click'); await sleep(60);
   return (currentSheet()?.kind === 'since' && /When did it really start\?/.test(text())) || 'editor not open';
 });
-await pin('C2. editor: typing 27 minutes ago (7 earlier) and applying moves the start exactly, and the panel shows the resulting since time', async () => {
+// D6 (audit-fix): typed minutes-ago input removed from SinceSheet in favour of ClockPick; drive the picker's nudge keys (−5, −1, −1) to move the start 7 minutes earlier.
+await pin('C2. editor: nudging 7 minutes earlier on the picker and applying moves the start exactly, and the panel shows the resulting since time', async () => {
   await seed(fieldDay()); openSheet({ kind: 'since' }); await sleep(60);
-  await type('Started this many minutes ago', '27');
+  const inSheet = (n) => { for (let p = n; p; p = p.parentNode) if (p.attributes?.class === 'sheet') return true; return false; };
+  const nudge = async (re) => { const b = all((n) => n.localName === 'button' && re.test(n.textContent) && inSheet(n))[0]; if (!b) throw new Error('no picker key ' + re); fire(b, 'click'); await sleep(50); };
+  await nudge(/^−5$/); await nudge(/^−1$/); await nudge(/^−1$/);
   const go = button(/^Set start to /);
   if (!go || !go.textContent.includes(clock(T - 27)) || disabled(go)) return 'apply button: ' + (go && go.textContent);
   fire(go, 'click'); await sleep(60);
@@ -247,34 +250,37 @@ await pin('C2. editor: typing 27 minutes ago (7 earlier) and applying moves the 
   const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
   return (panel.includes(`On Duty since ${clock(T - 27)}`) && !/When did it really start\?/.test(panel)) || 'the panel does not show the resulting since time: ' + panel;
 });
-await pin('C3. editor: decimal minutes ("7.5") are refused — the reason shows, apply is disabled, nothing changes', async () => {
+// D6 (audit-fix): typed decimal-minutes refusal left SinceSheet with typed entry (still pinned in A11/B3); re-aim to the picker's own refusal at now (not in the past) — reason shown, apply disabled, forced click saves nothing.
+await pin('C3. editor: setting start to now (not in the past) is refused — the reason shows, apply is disabled, nothing changes', async () => {
   await seed(fieldDay()); const s0 = getState(); openSheet({ kind: 'since' }); await sleep(60);
-  await type('Started this many minutes ago', '7.5');
-  if (!/Whole minutes only/.test(text())) return 'no reason shown';
+  await type('Start time', hhmm(T));
+  if (!/not in the past yet/.test(text())) return 'no reason shown';
   const go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
   if (!go || !disabled(go)) return 'apply must be disabled';
   fire(go, 'click'); await sleep(60); // even a forced click must not land
   return getState() === s0 || 'state changed: ' + plain(getState());
 });
-await pin('C4. editor: the exact time-of-day entry sets the start to that minute', async () => {
+// D6 (audit-fix): "Exact start time" replaced by ClockPick's "Start time" picker; set the picker to the exact minute.
+await pin('C4. editor: the clock picker sets the start to that exact minute', async () => {
   await seed(fieldDay()); openSheet({ kind: 'since' }); await sleep(60);
-  await type('Exact start time', hhmm(T - 25));
+  await type('Start time', hhmm(T - 25));
   await click(/^Set start to /);
   return getState().current.since === T - 25 || plain(getState());
 });
+// D6/P1 (audit-fix): drive via ClockPick's "Start time" picker instead of removed typed inputs, and expect P1's "Change the others and set start to …" button label (retired "Absorb").
 await pin('C5. editor: refusals show their reason before the button — a future time, and a time that would erase the status being left', async () => {
   await seed(fieldDay()); const s0 = getState(); openSheet({ kind: 'since' }); await sleep(60);
-  await type('Exact start time', hhmm(T + 3));
+  await type('Start time', hhmm(T + 3));
   if (!/not in the past yet/.test(text())) return 'future: no reason';
   let go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
   if (!disabled(go)) return 'future: apply enabled';
-  await type('Started this many minutes ago', '300');
-  // Patch L1 item 4b (sanctioned): a start at the status being left's start is no longer a flat
-  // refusal. The reason still shows before the button — as the absorb warning naming the entry —
-  // and the only way to apply is the one explicit "Absorb and …" confirmation; nothing changes before it.
+  await type('Start time', hhmm(T - 300));
+  // Patch L1 item 4b (sanctioned) + audit-fix P1: a start at the status being left's start is no
+  // longer a flat refusal. The reason still shows before the button — as the warning naming the
+  // entry — and the only way to apply is the one explicit confirmation; nothing changes before it.
   if (!/runs into another entry/.test(text()) || !new RegExp(`your Driving ${clock(T - 300)} → ${clock(T - 20)} would be taken in whole`).test(text())) return 'erase: no absorb warning';
   go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
-  if (!go || !/\bed-absorb\b/.test(go.attributes.class ?? '') || !/^Absorb and set start to /.test(go.textContent)) return 'erase: the button must be the absorb confirmation, got ' + (go && go.textContent);
+  if (!go || !/\bed-absorb\b/.test(go.attributes.class ?? '') || !/^Change the others and set start to /.test(go.textContent)) return 'erase: the button must be the absorb confirmation, got ' + (go && go.textContent);
   return getState() === s0 || 'state changed';
 });
 await pin('C6. the status panel links to the editor for the status the driver is already in', async () => {
@@ -282,38 +288,43 @@ await pin('C6. the status panel links to the editor for the status the driver is
   await click(/^Still On Duty\? Fix its start time$/);
   return currentSheet()?.kind === 'since' || 'not opened';
 });
+// D6 (audit-fix): drive the time on Yesterday via ClockPick's "Start time" picker instead of the removed "Exact start time" box.
 await pin('C7. yesterday: a status that started yesterday is edited on its own day (day buttons, as the Log editor does)', async () => {
   await seed({ segments: [{ status: 'D', start: T - 1500, end: T - 1200, createdAt: 1 }], current: { status: 'SB', since: T - 1200, createdAt: 2 } });
   openSheet({ kind: 'since' }); await sleep(60);
   const y = button(/^Yesterday$/);
   if (!y || y.attributes['aria-pressed'] !== 'true') return 'the start\'s own day must be the selected day';
-  await type('Exact start time', hhmm(T - 1210));
+  await type('Start time', hhmm(T - 1210));
   await click(/^Set start to /);
   return (getState().current.since === T - 1210 && getState().segments[0].end === T - 1210) || plain(getState());
 });
 
 /* ---------------- fences ---------------- */
+// D6/D7 (audit-fix): SinceSheet dropped input.num and Exact start time for ClockPick (.ed-clock-pick / .ed-day-pick); hold the 48/56px floors on the picker classes and keep the StatusSheet input.num check.
 await pin('F1. touch floors (patch 6): every new control rides a class whose rule holds 48px general / 56px primary', async () => {
   const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
-  const minH = (re) => { const m = css.match(re); const v = m && /min-height: (\d+)px/.exec(m[0]); return v ? +v[1] : 0; };
-  const floors = [[/\nbutton \{[^}]*\}/, 48], [/\nbutton\.wide \{[^}]*\}/, 56], [/\ninput\.num \{[^}]*\}/, 56], [/\nbutton\.rowbtn \{[^}]*\}/, 48], [/\n\.ed-keys button \{[^}]*\}/, 56], [/\n\.ed-day input \{[^}]*\}/, 48], [/\n\.ed-days button \{[^}]*\}/, 48]];
+  const minH = (re) => { const m = css.match(re); const v = m && /min-height:\s*(?:var\(--ctl,\s*)?(\d+)px/.exec(m[0]); return v ? +v[1] : 0; };
+  const floors = [[/\nbutton \{[^}]*\}/, 48], [/\nbutton\.wide \{[^}]*\}/, 56], [/\ninput\.num \{[^}]*\}/, 56], [/\nbutton\.rowbtn \{[^}]*\}/, 48], [/\n\.ed-keys button \{[^}]*\}/, 56], [/\n\.ed-clock-pick \{[^}]*\}/, 56], [/\n\.ed-day-pick \{[^}]*\}/, 56], [/\n\.ed-days button \{[^}]*\}/, 48]];
   for (const [re, f] of floors) if (minH(re) < f) return `${re} is ${minH(re)}px, floor ${f}`;
   await seed(fieldDay()); openSheet({ kind: 'since' }); await sleep(60);
   const go = all((n) => n.localName === 'button' && /\bed-go\b/.test(n.attributes.class ?? ''))[0];
   if (!go || !/\bprimary\b/.test(go.attributes.class) || !/\bwide\b/.test(go.attributes.class)) return 'the apply button must be a primary wide key';
-  for (const label of ['Started this many minutes ago']) if (!/\bnum\b/.test(input(label)?.attributes.class ?? '')) return 'the minutes box must be an input.num';
-  if (input('Exact start time')?.parentNode?.attributes?.class !== 'ed-day') return 'the time box must sit in an .ed-day label';
+  const pick = input('Start time');
+  if (!pick || !/\bed-clock-input\b/.test(pick.attributes.class ?? '') || !/\bed-clock-pick\b/.test(pick.parentNode?.attributes?.class ?? '')) return 'the start picker must sit in an .ed-clock-pick label';
+  const dayPick = all((n) => n.localName === 'input' && /\bed-day-input\b/.test(n.attributes.class ?? ''))[0];
+  if (!dayPick || !/\bed-day-pick\b/.test(dayPick.parentNode?.attributes?.class ?? '') || dayPick.parentNode?.parentNode?.attributes?.class !== 'ed-day') return 'the date picker must sit in .ed-day-pick inside .ed-day';
   openSheet({ kind: 'status' }); await sleep(60);
   if (!/\bnum\b/.test(input('Started this many minutes ago')?.attributes.class ?? '')) return 'status panel: the minutes box must be an input.num';
   return true;
 });
+// D6 (audit-fix): drive SinceSheet's refusal, absorb warning, and applied confirmation via ClockPick's "Start time" picker instead of the removed minutes-ago box.
 await pin('F2. copy: the new surfaces carry no officer / inspection / "proof" language and name no person', async () => {
   let copy = '';
   await seed(fieldDay()); copy += text();
   openSheet({ kind: 'since' }); await sleep(60); copy += text();
-  await type('Started this many minutes ago', '7.5'); copy += text();
-  await type('Started this many minutes ago', '300'); copy += text();
-  await type('Started this many minutes ago', '27'); await click(/^Set start to /); copy += text();
+  await type('Start time', hhmm(T + 3)); copy += text();
+  await type('Start time', hhmm(T - 300)); copy += text();
+  await type('Start time', hhmm(T - 27)); await click(/^Set start to /); copy += text();
   await seed(drivingDay()); openSheet({ kind: 'status' }); await sleep(60); copy += text();
   await type('Started this many minutes ago', '7.5'); copy += text();
   await type('Started this many minutes ago', '300'); copy += text();

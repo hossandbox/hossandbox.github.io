@@ -347,28 +347,30 @@ await pin('D10c. the phone\'s Back from Hours coming back lands on Plan (History
   return (r === 'plan' && hst === 'now') || `recap→${r} history→${hst}`;
 });
 
-await pin('D10d. V3: the one sentence reads "70 hours: 0m left · +10h 00m back at 23:00 (midnight Eastern)"', async () => {
+// A5 (audit-fix): Recap header now uses nextBackSentence ("next back: +<dur> at <Ddd Mon N> <HH:MM> (midnight Eastern)").
+await pin('D10d. V3: the one sentence reads "70 hours: 0m left · next back: +10h 00m at Tue Nov 10 23:00 (midnight Eastern)"', async () => {
   WALL = CD(9, 6, 0);
   await mount(mk({ segments: v3(), current: { status: 'ON', since: CD(9, 5) }, tab: 'recap', planReturn: 'plan', drivingView: false }));
   const p = byClass('hours-back')[0]?.textContent;
   // Oracle, independent of the engine's forecast: the next 00:00 on the New York clock after now,
-  // read on the phone's clock (time only when it is today, else with the weekday).
+  // labelled by its carrier day in app words and read on the phone's clock.
   let roll = WALL + 1;
   const nyHM = (m) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(m * 60000));
+  const nyIso = (m) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(m * 60000));
   while (nyHM(roll) !== '00:00') roll++;
-  const sameDay = new Date(roll * 60000).toDateString() === new Date(WALL * 60000).toDateString();
-  const want = `70 hours: 0m left · +10h 00m back at ${clock(roll, !sameDay)} (midnight Eastern)`;
+  const want = `70 hours: 0m left · next back: +10h 00m at ${A.isoDayWords(nyIso(roll))} ${clock(roll, false)} (midnight Eastern)`;
   const chicago = new Intl.DateTimeFormat().resolvedOptions().timeZone === 'America/Chicago';
-  if (chicago && want !== '70 hours: 0m left · +10h 00m back at 23:00 (midnight Eastern)') return `oracle drifted from the audit: ${want}`;
+  if (chicago && want !== '70 hours: 0m left · next back: +10h 00m at Tue Nov 10 23:00 (midnight Eastern)') return `oracle drifted from the audit: ${want}`;
   return p === want || `${p} | want ${want}`;
 });
 
-await pin('D10e. the week strip: 8 bars, one per carrier day, labelled by day ("Mon", "Sun", "2 days ago"…), never "D-3"', async () => {
+// A5 (audit-fix): week-strip bar labels unified to "Ddd N" ("Mon 9", "Sun 8", "Sat 7"…) — no "N days ago", never "D-3".
+await pin('D10e. the week strip: 8 bars, one per carrier day, labelled "Ddd N" ("Mon 9", "Sun 8", "Sat 7"…), never "D-3"', async () => {
   const bars = byClass('wk-day');
   const labels = bars.map((b) => byClass('wk-label', b)[0]?.textContent);
   const days = E.evaluate(allSegments(getState(), WALL), { asOf: WALL, config: getState().config }).cycle.days;
   const want = days.map((d, i) => A.weekLabel(d.label, days.length - 1 - i));
-  return (bars.length === 8 && JSON.stringify(labels) === JSON.stringify(want) && labels[7] === 'Mon' && labels[6] === 'Sun' && labels[5] === '2 days ago' && !labels.some((l) => /D-\d/.test(l))) || JSON.stringify(labels);
+  return (bars.length === 8 && JSON.stringify(labels) === JSON.stringify(want) && labels[7] === 'Mon 9' && labels[6] === 'Sun 8' && labels[5] === 'Sat 7' && labels.every((l) => /^[A-Z][a-z]{2} \d{1,2}$/.test(l)) && !labels.some((l) => /D-\d|days ago/.test(l))) || JSON.stringify(labels);
 });
 
 await pin('D10f. the strip\'s hatched minutes equal ev.cycle.forecast[0].dropsOff (one source), on the oldest day only', async () => {
@@ -390,21 +392,21 @@ await pin('D10g. tapping a bar opens that day in History (back returns to Hours 
   return (getState().tab === 'history' && getState().planReturn === 'recap' && focus && want && focus.textContent.startsWith(want.label) && text().includes(foot)) || `${getState().tab} ${focus ? focus.textContent.slice(0, 40) : 'no focus'} want ${want?.label}`;
 });
 
+// A5 (audit-fix): forecast rows read "+<dur> back" (was "+<dur> drops") and day-editor buttons are capitalised ("Set"/"Edit").
 await pin('D10h. the screen keeps the forecast list, "Fix a day" (the day editor) and the Load + History doors, in that order', async () => {
   setState({ tab: 'recap', planReturn: 'plan' }); await sleep(60);
   const t = planPage()?.textContent ?? '';
   const at = (s) => t.indexOf(s);
-  const order = [at('Hours coming back'), at('On duty, day by day'), at('+10h 00m drops'), at('Fix a day'), at('Can I take this load?'), at('Your last 8 days')];
-  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && all((n) => n.localName === 'button' && /^(set|edit)$/.test(n.textContent), planPage()).length > 0) || JSON.stringify(order);
+  const order = [at('Hours coming back'), at('On duty, day by day'), at('+10h 00m back'), at('Fix a day'), at('Can I take this load?'), at('Your last 8 days')];
+  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && all((n) => n.localName === 'button' && /^(Set|Edit)$/.test(n.textContent), planPage()).length > 0) || JSON.stringify(order);
 });
 
-await pin('D10i. More: the Recap row is gone; one plain row "Hours coming back has moved to Plan ›" goes there', async () => {
+// D18 (audit-fix): both the old Recap row and the one-release "Hours coming back has moved to Plan ›" migration banner are retired from More.
+await pin('D10i. More: the old Recap row and the one-release "has moved to Plan" migration row are both gone', async () => {
   setState({ tab: 'settings' }); await sleep(60);
   if (/Hours coming back, day by day/.test(text())) return 'the old Recap row is still there';
-  const b = button(/^Hours coming back has moved to Plan ›$/);
-  if (!b) return 'no pointer row';
-  await click(b, 60);
-  return (getState().tab === 'recap') || getState().tab;
+  if (/Hours coming back has moved to Plan/.test(text())) return 'the retired migration row is still there';
+  return true;
 });
 
 await pin('D10j. RestHero points to the new place: "See Hours coming back under Plan"', async () => {
