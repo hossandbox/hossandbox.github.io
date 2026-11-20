@@ -192,7 +192,10 @@ const scaleInfo = (page) => page.evaluate(() => {
     edlen: q('.ed-len button').map(minH), steps4: q('.steps4 button').map(minH),
     // The picker-only clock's time input is a transparent overlay (min-height 0 by design) filling its
     // label.ed-clock-pick: the touch target is the label, measured as it renders under clockPick.
-    fields: q('label input:not([type=checkbox]):not([type=range]):not([type=hidden]):not(.ed-clock-input), label select').map(minH),
+    fields: q('label input:not([type=checkbox]):not([type=range]):not([type=hidden]):not(.ed-clock-input):not(.ed-day-input), label select').map(minH),
+    // D7 (audit, 2026-11-20): "Another day" is a transparent date input over the app's own words, the same
+    // overlay pattern; its touch target is span.ed-day-pick, measured as it renders.
+    dayPick: q('label .ed-day-pick').map((el) => el.getBoundingClientRect().height),
     clockPick: q('label.ed-clock-pick').map((el) => Math.min(el.getBoundingClientRect().height, ...[...el.querySelectorAll('input.ed-clock-input')].map((i) => i.getBoundingClientRect().height))),
     fine: q('.ed-fine button, .ed-fine output, .tstep-value').map(minH),
     edfine: q('.ed-fine').length, sheetLen: q('.sheet .ed-len, .sheet .ed-ends-tap').length, endQ: /When did it really end\?/.test(document.querySelector('.sheet')?.textContent ?? ''),
@@ -200,7 +203,7 @@ const scaleInfo = (page) => page.evaluate(() => {
     ranges,
   };
 });
-const acc = { wide: [], rowbtn: [], rowbtnMoved: [], lever: [], edlen: [], steps4: [], fields: [], clockPick: [], fine: [], checks: [], ranges: [] };
+const acc = { wide: [], rowbtn: [], rowbtnMoved: [], dayPick: [], lever: [], edlen: [], steps4: [], fields: [], clockPick: [], fine: [], checks: [], ranges: [] };
 const sweep = async (name, steps) => {
   const { ctx, page, errors } = await open(save('day', 'ON'));
   for (const st of steps) { try { await st(page); } catch { /* scene step failed; pins below report what was found */ } }
@@ -234,9 +237,8 @@ const scalePin = (key, floor, label) => {
 };
 scalePin('wide', 64, 'commit keys (.wide)');
 scalePin('rowbtn', 64, 'rows (.rowbtn)');
-// Fable's own CSS deliberately keeps the recap ".moved" row at the 56 standard (tactile.css
-// names button.rowbtn.moved in the --ctl group) — pinned at its designed floor, not 64.
-scalePin('rowbtnMoved', 56, 'recap rows (.rowbtn.moved, designed 56)');
+// D18 (audit, 2026-11-20): the one-release "Hours coming back has moved to Plan ›" row is retired.
+ok('D18: the recap "moved" row (.rowbtn.moved) is gone from every swept screen', acc.rowbtnMoved.length === 0, `found ${acc.rowbtnMoved.length}`);
 // Levers are computed from the driver's situation and may not be on offer under a test
 // seed; when one is, it must sit at 64 like every row — and its rule is source-pinned below.
 if (acc.lever.length) scalePin('lever', 64, 'rows (.lever, when on offer)');
@@ -245,6 +247,7 @@ ok('EDIT-FIX: the edit end step carries ONE picker-only clock at the 56 floor', 
 scalePin('steps4', 64, 'stepper rows (.steps4)');
 scalePin('fields', 56, 'fields (label input/select)');
 scalePin('clockPick', 56, 'picker-only clocks (label.ed-clock-pick, input filling it)');
+scalePin('dayPick', 56, '"Another day" pickers (span.ed-day-pick, the date input filling it)');
 scalePin('fine', 56, 'fine steppers + readouts (.ed-fine/.tstep-value)');
 ok('checkbox: a settings checkbox exists', acc.checks.length >= 1, `found ${acc.checks.length}`);
 ok('checkbox: hit box is the 56x48 slide switch', acc.checks.length >= 1 && acc.checks.every((c) => Math.abs(c.w - 56) <= 1 && Math.abs(c.h - 48) <= 1), acc.checks.slice(0, 4).map((c) => `${Math.round(c.w)}x${Math.round(c.h)}`).join(', '));

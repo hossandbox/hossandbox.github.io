@@ -1,0 +1,492 @@
+// Audit-fix lane (2026-11-20): pins the fixes for the first-time-user UX audit (AUDIT.md), in a
+// REAL browser (layout, stickiness, hit boxes and native dialogs cannot be read from the DOM
+// shim). Each pin is named by its audit id. Run with TZ=America/Chicago against a built dist:
+//   TZ=America/Chicago node test/dom/auditfix.mjs [--root dist]
+// The browser is not a package dependency (same as layout.mjs): HOS_BROWSER / HOS_PLAYWRIGHT.
+// A missing browser is a FAILURE of this lane (exit 2), never a silent pass.
+import { createServer } from 'node:http';
+import { readFileSync, statSync, existsSync } from 'node:fs';
+import { join, normalize, extname, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+
+const arg = (k, d) => { const i = process.argv.indexOf(k); return i < 0 ? d : process.argv[i + 1]; };
+const ROOT = resolve(arg('--root', 'dist')) + '/';
+const PW = process.env.HOS_PLAYWRIGHT || '/home/hatch/workspace/hos-patch/p18-scratch/';
+const CHROME = process.env.HOS_BROWSER || '/home/hatch/workspace/hos-patch/p18-scratch/chrome-headless-shell-linux64/chrome-headless-shell';
+let chromium;
+try { ({ chromium } = createRequire(PW.endsWith('/') ? PW : PW + '/')('playwright-core')); } catch (e) { console.log(`AUDITFIX LANE CANNOT RUN: playwright-core not found under ${PW} (${e.code || e.message})`); process.exit(2); }
+if (!existsSync(CHROME)) { console.log(`AUDITFIX LANE CANNOT RUN: no browser at ${CHROME}`); process.exit(2); }
+if (!existsSync(join(ROOT, 'app.js'))) { console.log(`AUDITFIX LANE CANNOT RUN: no built app under ${ROOT} (build first)`); process.exit(2); }
+if (process.env.TZ !== 'America/Chicago') { console.log('AUDITFIX LANE CANNOT RUN: set TZ=America/Chicago (the pins read wall-clock times)'); process.exit(2); }
+
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.map': 'application/json', '.woff2': 'font/woff2' };
+const server = createServer((req, res) => {
+  let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (p === '/') p = '/index.html';
+  const file = normalize(join(ROOT, p));
+  if (!file.startsWith(ROOT) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404); return res.end('not found'); }
+  res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+  res.end(readFileSync(file));
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const ORIGIN = `http://localhost:${server.address().port}`;
+
+// A fixed wall clock: Fri Nov 20 2026, 23:00 Chicago. Every page runs on it (Date is replaced
+// before the app loads), so the seeds below are deterministic.
+const NOW_MS = new Date(2026, 10, 20, 23, 0).getTime();
+const N = Math.floor(NOW_MS / 60000);
+const base = { historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, themeChosen: true, theme: 'day', nowCard: 'dial', nowCardAsked: true, speechAsked: true, speakAsked: true };
+// A working day: On Duty for 20 min after a drive, so the dock is up (not the driving view).
+const DAY = { ...base, segments: [
+  { status: 'OFF', start: N - 1000, end: N - 400, createdAt: 1 },
+  { status: 'ON', start: N - 400, end: N - 370, createdAt: 2 },
+  { status: 'D', start: N - 370, end: N - 20, createdAt: 3 },
+], current: { status: 'ON', since: N - 20, createdAt: 4 } };
+// The audit's D8 record: Off Duty 08:00→18:00 (exactly 10h), On Duty 18:00→18:50, Driving 18:50→22:50,
+// a long shift before the rest, now Off Duty since 22:50.
+const D8 = { ...base, segments: [
+  { status: 'OFF', start: N - 2400, end: N - 1400, createdAt: 1 },
+  { status: 'ON', start: N - 1400, end: N - 1370, createdAt: 2 },
+  { status: 'D', start: N - 1370, end: N - 900, createdAt: 3 },
+  { status: 'OFF', start: N - 900, end: N - 300, createdAt: 4 },
+  { status: 'ON', start: N - 300, end: N - 250, createdAt: 5 },
+  { status: 'D', start: N - 250, end: N - 10, createdAt: 6 },
+], current: { status: 'OFF', since: N - 10, createdAt: 7 } };
+// Rows the ELD quick start would have built (note "ELD clocks").
+const ELD = { ...base, seededAt: N - 30, segments: [
+  { status: 'OFF', start: N - 900, end: N - 300, note: 'ELD clocks', createdAt: 1 },
+  { status: 'D', start: N - 300, end: N - 30, note: 'ELD clocks', createdAt: 1 },
+], current: { status: 'OFF', since: N - 30, createdAt: 2 } };
+
+const res = []; const ok = (name, cond, info = '') => res.push({ pass: !!cond, name, info: typeof info === 'string' ? info : JSON.stringify(info) });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] });
+
+const OPEN = new Set();
+/** One audit section: a throw (a control that is not there) is a FAIL of that section, never a crash of the lane. */
+async function section(f) {
+  try { await f(); } catch (e) { ok(`section threw: ${String(e && e.message || e).split('\n')[0]}`, false, String(e && e.stack || e).split('\n').slice(0, 3).join(' | ')); }
+  finally { for (const c of OPEN) { await c.close().catch(() => {}); } OPEN.clear(); }
+}
+async function open(seed, W = 412, H = 915) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
+  await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
+  await ctx.addInitScript((s) => { if (!sessionStorage.getItem('af-seeded')) { sessionStorage.setItem('af-seeded', '1'); localStorage.clear(); if (s) localStorage.setItem('hos-sandbox-v1', s); } }, seed ? JSON.stringify(seed) : null);
+  const page = await ctx.newPage();
+  page.errors = []; page.dialogs = 0;
+  page.on('pageerror', (e) => page.errors.push(String(e)));
+  page.on('dialog', (d) => { page.dialogs++; d.dismiss().catch(() => {}); });
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('#root *');
+  await page.waitForTimeout(300);
+  const ack = page.locator('button', { hasText: 'I understand' });
+  if (await ack.count()) { await ack.first().click(); await page.waitForTimeout(300); }
+  page.ctx = ctx; OPEN.add(ctx);
+  return page;
+}
+const wait = (p, ms = 250) => p.waitForTimeout(ms);
+/** DOM click on the first visible-in-tree element matching sel whose text matches. */
+const tap = async (p, sel, text, ms = 300) => {
+  await p.evaluate(([q, t]) => {
+    const re = t ? new RegExp(t) : null;
+    const b = [...document.querySelectorAll(q)].find((x) => !re || re.test(x.textContent.replace(/\s+/g, ' ').trim()) || re.test(x.getAttribute('aria-label') || ''));
+    if (!b) throw new Error(`no ${q} matching ${t}`);
+    b.click();
+  }, [sel, text ? text.source ?? text : null]);
+  await wait(p, ms);
+};
+const go = async (p, tab) => { await tap(p, 'nav.tabs button', new RegExp(tab), 900); };
+const sheetText = (p) => p.evaluate(() => document.querySelector('.sheet')?.innerText ?? '');
+const pageText = (p) => p.evaluate(() => document.querySelector('.page.is-active')?.innerText ?? document.body.innerText);
+const rect = (p, sel) => p.evaluate((q) => { const e = document.querySelector(q); if (!e) return null; const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width, h: r.height }; }, sel);
+const state = (p) => p.evaluate(() => JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}'));
+const closeSheet = async (p) => { await p.keyboard.press('Escape'); await wait(p, 200); };
+
+/* ---------------- D1: the first-run hero at its real height ---------------- */
+await section(async () => {
+  const p = await open(null);
+  const m = await p.evaluate(() => {
+    const h = document.querySelector('.hero'); if (!h) return null;
+    const r = h.getBoundingClientRect();
+    const kids = [...h.children].map((c) => c.getBoundingClientRect().bottom);
+    return { h: r.height, bottom: r.bottom, maxKid: Math.max(...kids), demo: document.querySelector('.app.is-demo') !== null, flexShrink: getComputedStyle(h).flexShrink };
+  });
+  ok('D1 empty log (demo): the hero renders at its real height, not a 30px sliver', m && m.demo && m.h > 300, m);
+  ok('D1 empty log: every hero child sits inside the hero box (nothing painted over it)', m && m.maxKid <= m.bottom + 1, m);
+  ok('D1 .page children never shrink (flex-shrink 0)', m && m.flexShrink === '0', m);
+  ok('D1 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+/* ---------------- D2 / D3: status-tap undo on screen for all four statuses ---------------- */
+for (const [label, st] of [['Off Duty', 'OFF'], ['Sleeper', 'SB']]) await section(async () => {
+  const p = await open(DAY);
+  await p.evaluate(() => { const pg = document.querySelector('.page.is-active'); if (pg) pg.scrollTop = 0; });
+  await p.locator('.status-buttons button', { hasText: label }).click({ timeout: 5000 }); await wait(p, 300);
+  const chip = await rect(p, '.status-undo'); const nav = await rect(p, 'nav.tabs');
+  const txt = await p.evaluate(() => document.querySelector('.status-undo')?.textContent ?? '');
+  ok(`D2 ${label} tap: the undo chip is on screen, above the tab bar, with the page at the top`, chip && chip.top >= 0 && chip.bottom <= nav.top + 0.5, { chip, nav });
+  ok(`D2 ${label} tap: the chip names the tap ("${label} since HH:MM")`, new RegExp(`^${label} since \\d\\d:\\d\\d\\.`).test(txt), txt);
+  ok(`D2 ${label} tap: the chip rides the sticky dock (inside .dock)`, await p.evaluate(() => !!document.querySelector('.dock > .status-undo')));
+  await p.locator('.status-undo button', { hasText: 'Undo' }).click({ timeout: 5000 }); await wait(p, 300);
+  ok(`D2 ${label} tap: Undo restores On Duty`, (await state(p)).current?.status === 'ON', (await state(p)).current);
+  await p.ctx.close();
+});
+await section(async () => {
+  // On Duty: from Off Duty
+  const p = await open({ ...DAY, segments: DAY.segments.slice(0, 1), current: { status: 'OFF', since: N - 400, createdAt: 2 } });
+  await p.locator('.status-buttons button', { hasText: 'On Duty' }).click({ timeout: 5000 }); await wait(p, 300);
+  const chip = await rect(p, '.status-undo'); const nav = await rect(p, 'nav.tabs');
+  ok('D2 On Duty tap: the undo chip is on screen above the tab bar', chip && chip.top >= 0 && chip.bottom <= nav.top + 0.5, { chip, nav });
+  await p.locator('.status-undo button', { hasText: 'Undo' }).click({ timeout: 5000 }); await wait(p, 300);
+  ok('D2 On Duty tap: Undo restores Off Duty', (await state(p)).current?.status === 'OFF');
+  await p.ctx.close();
+});
+await section(async () => {
+  const p = await open(DAY);
+  await p.locator('.status-buttons button', { hasText: 'Driving' }).click({ timeout: 5000 }); await wait(p, 400);
+  const dlg = await p.locator('button', { hasText: /^(Not now|No thanks|No)$/ });
+  if (await dlg.count()) { await dlg.first().click(); await wait(p, 200); }
+  const inDrive = await p.evaluate(() => !!document.querySelector('main.drive'));
+  const chip = await rect(p, '.drive-undo'); const stop = await rect(p, 'button.drive-stop');
+  const txt = await p.evaluate(() => document.querySelector('.drive-undo')?.textContent ?? '');
+  ok('D3 Driving tap: the driving view shows an undo chip on screen, above "I\'ve stopped"', inDrive && chip && chip.top >= 0 && chip.bottom <= stop.top, { inDrive, chip, stop });
+  ok('D3 Driving tap: the chip reads "Driving since HH:MM."', /^Driving since \d\d:\d\d\./.test(txt), txt);
+  await p.locator('.drive-undo button', { hasText: 'Undo' }).click({ timeout: 5000 }); await wait(p, 400);
+  ok('D3 Driving undo: back to On Duty and the normal Now (dock showing)', (await state(p)).current?.status === 'ON' && await p.evaluate(() => !document.querySelector('main.drive') && !!document.querySelector('.dock')));
+  ok('D2/D3 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+/* ---------------- D4 / D5: the status sheet asks when first; one order everywhere ---------------- */
+await section(async () => {
+  const p = await open(DAY);
+  const ORDER = ['Off Duty', 'Sleeper', 'Driving', 'On Duty'];
+  const dock = await p.evaluate(() => [...document.querySelectorAll('.status-buttons button')].map((b) => b.textContent.trim()));
+  ok('D5 dock order: Off Duty · Sleeper · Driving · On Duty', JSON.stringify(dock) === JSON.stringify(ORDER), dock);
+  await tap(p, 'button.dock-more');
+  const m = await p.evaluate(() => {
+    const sh = document.querySelector('.sheet');
+    const h3 = [...sh.querySelectorAll('h3')].find((x) => /When did it start\?/.test(x.textContent));
+    const box = sh.querySelector('input[aria-label="Started this many minutes ago"]');
+    const first = sh.querySelector('.big-status button');
+    return { when: h3?.getBoundingClientRect().top, box: box?.getBoundingClientRect().top, status: first?.getBoundingClientRect().top, order: [...sh.querySelectorAll('.big-status button')].map((b) => b.textContent.trim()), focus: document.activeElement?.textContent };
+  });
+  ok('D4 status sheet: "When did it start?" and the minutes box sit ABOVE the status buttons', m.when < m.status && m.box < m.status, m);
+  ok('D4 status sheet: focus lands on "When did it start?"', /When did it start\?/.test(m.focus || ''), m.focus);
+  ok('D5 status sheet order: Off Duty · Sleeper · Driving · On Duty', JSON.stringify(m.order) === JSON.stringify(ORDER), m.order);
+  // D4: the typed minutes are honoured by the status tap
+  await p.fill('.sheet input[aria-label="Started this many minutes ago"]', '7'); await wait(p, 100);
+  await tap(p, '.sheet .big-status button', /^Off Duty$/);
+  ok('D4 a typed "7 min ago" then a status tap commits at now − 7', (await state(p)).current?.since === N - 7, (await state(p)).current);
+  await go(p, 'Log');
+  await tap(p, 'button.addbtn');
+  const what = await p.evaluate(() => [...document.querySelectorAll('.sheet button.opt b')].slice(0, 4).map((b) => b.textContent.trim()));
+  ok('D5 Log add order and names: Off Duty · Sleeper · Driving · On Duty', JSON.stringify(what) === JSON.stringify(ORDER), what);
+  await p.ctx.close();
+});
+
+/* ---------------- D19: End my day asks Off Duty or Sleeper; one control once closed ---------------- */
+await section(async () => {
+  const p = await open(DAY);
+  await tap(p, 'button.wide', /^End my day$/);
+  const ask = await p.evaluate(() => [...document.querySelectorAll('.endday-ask button')].map((b) => b.textContent.trim()));
+  ok('D19 End my day asks first: [Off Duty] [Sleeper] [Not yet]; nothing closed yet', JSON.stringify(ask) === '["Off Duty","Sleeper","Not yet"]' && (await state(p)).current?.status === 'ON', ask);
+  await tap(p, '.endday-ask button', /^Sleeper$/);
+  const st = await state(p);
+  const t = await pageText(p);
+  ok('D19 "Sleeper" closes the day IN the sleeper', st.current?.status === 'SB' && st.dayCloses?.length === 1, { cur: st.current, closes: st.dayCloses });
+  ok('D19 closed: ONE row (Day closed · HH:MM · Sleeper · Reopen), no second "Closed the day at … Undo" row', /Day closed · \d\d:\d\d · Sleeper/.test(t) && !/Closed the day at/.test(t) && /Reopen/.test(t), t.slice(t.indexOf('Day closed') - 40, t.indexOf('Day closed') + 80));
+  await tap(p, 'button.mini', /^Reopen$/);
+  ok('D19 Reopen brings End my day back', /End my day/.test(await pageText(p)));
+  await p.ctx.close();
+});
+
+/* ---------------- D6 / D7: one clock behaviour; no 12-hour field; date in the app's words ---------------- */
+const pickerOnly = (p) => p.evaluate(() => {
+  const sh = document.querySelector('.sheet'); if (!sh) return null;
+  const pick = sh.querySelector('.ed-clock-pick input[type=time]');
+  const txt = sh.innerText;
+  return {
+    picker: !!pick, keypadBox: !!sh.querySelector('.ed-type, input[placeholder="0641"]'), tapToType: !!sh.querySelector('.ed-clock-tap'),
+    exactTime: /Exact time|Exact start time|Exact departure time/.test(txt), typeCaption: /tap the time to type it/.test(txt), pickCaption: /tap the time to pick it/.test(txt),
+    ampm: /\b\d{1,2}:\d\d\s?(AM|PM)\b/.test(txt), timeInputs: sh.querySelectorAll('input[type=time]').length, minutesAgo: /Or minutes ago/.test(txt),
+    day: sh.querySelector('.ed-day-val')?.textContent ?? null,
+  };
+});
+await section(async () => {
+  const p = await open(DAY);
+  await tap(p, 'button.rowbtn', /Fix the start time/);
+  const fs = await pickerOnly(p);
+  ok('D6 Fix the start time: the big clock IS the picker (no keypad, no tap-to-type, one time input)', fs && fs.picker && !fs.keypadBox && !fs.tapToType && fs.timeInputs === 1 && fs.pickCaption && !fs.typeCaption, fs);
+  ok('D6 Fix the start time: no "Exact time" row, no "Or minutes ago" box', fs && !fs.exactTime && !fs.minutesAgo, fs);
+  ok('D7 Fix the start time: no 12-hour AM/PM text; "Another day" reads like "Fri Nov 20"', fs && !fs.ampm && /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}$/.test(fs.day || ''), fs);
+  await closeSheet(p);
+  // load check: leave time and appointment
+  await tap(p, 'button.plan-item', /Can I take this load\?/, 700);
+  await tap(p, 'button.flow-next', null);
+  await tap(p, 'button.pick-time', /Pick a time/);
+  const lv = await pickerOnly(p);
+  ok('D6 load check "leave" time: the same picker clock, no keypad, no "Exact time"', lv && lv.picker && !lv.keypadBox && !lv.tapToType && !lv.exactTime && lv.timeInputs === 1, lv);
+  await closeSheet(p);
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Plan a run/, 700);
+  await tap(p, 'button.trip-dep', null);
+  const tr = await pickerOnly(p);
+  ok('D6 trip departure: the same picker clock, no keypad, no "Exact time"', tr && tr.picker && !tr.keypadBox && !tr.tapToType && !tr.exactTime, tr);
+  ok('D7 trip departure: "Another day" in the app\'s words', tr && /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}$/.test(tr.day || ''), tr);
+  await closeSheet(p);
+  // P4: the trip planner names the tab by its name
+  const trip = await pageText(p);
+  ok('P4 trip planner: "under More", never "in Settings"', /under More/.test(trip) && !/in Settings/.test(trip), trip.match(/[^.]*speed[^.]*\./i)?.[0]);
+  ok('D6/D7/P4 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+/* ---------------- D8 (+A1, P1, D9, D10, D12-adjacent, A2, A3): the audit's edit, disclosed ---------------- */
+await section(async () => {
+  const p = await open(D8);
+  await go(p, 'Log');
+  await p.locator('.page.is-active button.entry', { hasText: 'On Duty' }).first().click({ timeout: 5000 }); await wait(p);
+  const menu = await sheetText(p);
+  ok('D9 edit menu: says only the last change can be undone (no "Every change can be undone")', /only the last one/.test(menu) && !/Every change can be undone/.test(menu), menu.slice(-120));
+  ok('A2 edit menu: no step counter on the menu', !/Step \d of \d/.test(menu));
+  await tap(p, '.sheet button.act', /The times are wrong/);
+  const when = await sheetText(p);
+  ok('A3 edit start step: the context keeps the original times ("On Duty · was Fri 18:00 → 18:50")', /On Duty · was Fri 18:00 → 18:50/.test(when), when.slice(0, 160));
+  ok('A2 edit start step: "Step 1 of 3"', /Step 1 of 3/.test(when));
+  await tap(p, '.sheet button', /^15 minutes earlier$/, 200);
+  await tap(p, '.sheet button.ed-go', /Next: when it ended/);
+  const endS = await sheetText(p);
+  ok('A2 edit end step: "Step 2 of 3" and "Next: check it"', /Step 2 of 3/.test(endS) && /Next: check it/.test(endS), endS.slice(0, 120));
+  ok('A3 edit end step: the context keeps the original times', /was Fri 18:00 → 18:50/.test(endS), endS.slice(0, 160));
+  await tap(p, '.sheet button.ed-go', /Next: check it/, 500);
+  const chk = await sheetText(p);
+  ok('A2 edit check: "Step 3 of 3 — Check"; rows What / Starts / Ends', /Step 3 of 3 — Check/.test(chk) && /\nStarts\n/.test(chk) && /\nEnds\n/.test(chk) && !/\nLength\n/.test(chk), chk.slice(0, 260));
+  ok('D8 check: the edited row ends where it always did ("Ends 18:50 · 1h 05m" — end fixed, length absorbed the nudge)', /Ends\n18:50 · 1h 05m/.test(chk), chk);
+  ok('D8 check lists the knock-on row: Off Duty 08:00 → 18:00 becomes 08:00 → 17:45 (the end-fixed edit runs into the break, not the drive)', /This runs into another entry/.test(chk) && /your Off Duty Fri 08:00 → Fri 18:00 would become Fri 08:00 → Fri 17:45/.test(chk) && !/would become Fri 18:35/.test(chk), chk);
+  ok('D8 check says the 10-hour break stops being a reset (10h 00m → 9h 45m)', /Your 10h 00m break \(Fri 08:00 → Fri 18:00\) would become 9h 45m — under 10 hours, so it would no longer reset/.test(chk), chk);
+  ok('D8 check says a violation appears (14-hour window)', /A violation would appear: 14-hour window/.test(chk), chk);
+  ok('D8 check says what it does to drive time now (→ out of hours)', /Drive time left now: 4h 00m → none — out of hours/.test(chk), chk);
+  ok('D12 check: one overlap warning (the absorb list), not two', !/This takes over part of your/.test(chk) && /This runs into another entry/.test(chk), chk);
+  ok('P1 check: no "Absorb" anywhere; the button reads "Change the others and save"', !/absorb/i.test(chk) && /Change the others and save/.test(chk), chk);
+  ok('D9 check: "Undo is on the Log until your next change." once, no "You can undo it from the Log"', (chk.match(/Undo is on the Log until your next change\./g) || []).length === 1 && !/You can undo it from the Log/.test(chk), chk.slice(-200));
+  const a1 = await p.evaluate(() => {
+    const sh = document.querySelector('.sheet'); const go = sh.querySelector('button.ed-go');
+    const boxes = [...sh.querySelectorAll('.warnbox')]; const last = boxes[boxes.length - 1];
+    sh.scrollTop = 0;
+    return { pos: getComputedStyle(go).position, goTop: go.getBoundingClientRect().top + sh.scrollTop, lastBottom: last.getBoundingClientRect().bottom + sh.scrollTop, overlapAtTop: (() => { const g = go.getBoundingClientRect(); return boxes.some((b) => { const r = b.getBoundingClientRect(); return r.bottom > g.top && r.top < g.bottom; }); })() };
+  });
+  ok('A1 the confirm button is not sticky over the warnings it confirms (static, below the last warning, overlapping none)', a1.pos === 'static' && a1.goTop >= a1.lastBottom && !a1.overlapAtTop, a1);
+  await tap(p, '.sheet button.ed-go', /Change the others and save/, 500);
+  const st = await state(p);
+  const drv = st.segments.find((x) => x.status === 'D' && x.end === N - 10);
+  ok('D8 what was disclosed is what was saved: Driving unchanged, still starts 18:50 (the end-fixed edit never reached it)', drv && drv.start === N - 250, drv);
+  const onRow = st.segments.find((x) => x.status === 'ON' && x.end === N - 250);
+  ok('D8 the edited row saved with its end fixed: On Duty 17:45 → 18:50', !!onRow && onRow.start === N - 315, onRow);
+  const undoRow = await p.evaluate(() => document.querySelector('.page.is-active .row.undo')?.textContent ?? '');
+  ok('D10 the undo line leads with the NEW times and says the old ones as "was"', /^Changed to On Duty Fri 17:45 → Fri 18:50 · was Fri 18:00 → Fri 18:50\./.test(undoRow), undoRow);
+  ok('D8 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+await section(async () => {
+  // D8 negative: an edit that moves nothing else and breaks nothing shows no knock-on box
+  const p = await open(D8);
+  await go(p, 'Log');
+  await p.locator('.page.is-active button.entry', { hasText: 'Driving' }).first().click({ timeout: 5000 }); await wait(p);
+  await tap(p, '.sheet button.act', /The times are wrong/);
+  await tap(p, '.sheet button.ed-go', /Next: when it ended/);
+  await tap(p, '.sheet button', /^15 minutes earlier$/, 200);
+  await tap(p, '.sheet button.ed-go', /Next: check it/, 500);
+  const chk = await sheetText(p);
+  ok('D8 an edit that only shortens a row discloses the knock-on (live status start) and the drive-time change, and raises no violation line', !/A violation would appear/.test(chk) && /Drive time left now:/.test(chk), chk);
+  await p.ctx.close();
+});
+await section(async () => {
+  // D8 on Fix the start time: the same disclosure, and A1 there
+  const p = await open(D8);
+  await tap(p, 'button.rowbtn', /Fix the start time/);
+  for (let i = 0; i < 5; i++) await tap(p, '.sheet button', /^5 minutes earlier$/, 60);
+  const t = await sheetText(p);
+  ok('D8 Fix the start time discloses what it does to the hours (drive time now)', /Drive time left now:/.test(t), t.slice(-400));
+  ok('D8 Fix the start time names the row before it that moves', /It also moves another entry:[\s\S]*your Driving Fri 18:50 → Fri 22:50 would become Fri 18:50 → Fri 22:25 \(25m shorter\)/.test(t), t.slice(-500));
+  await p.ctx.close();
+});
+
+/* ---------------- A2 (add flow), D12 (add check) ---------------- */
+await section(async () => {
+  const p = await open(DAY);
+  await go(p, 'Log');
+  await tap(p, 'button.addbtn');
+  ok('A2 add step 1: "Step 1 of 4"', /Step 1 of 4/.test(await sheetText(p)));
+  await tap(p, '.sheet button.opt', /^On Duty/);
+  const w = await sheetText(p);
+  ok('A2 add step 2: "Step 2 of 4" and "Next: when it ended"', /Step 2 of 4/.test(w) && /Next: when it ended/.test(w));
+  await tap(p, '.sheet button.ed-go', /Next: when it ended/);
+  const l = await sheetText(p);
+  ok('A2 add step 3: "Step 3 of 4" and "Next: check it"', /Step 3 of 4/.test(l) && /Next: check it/.test(l));
+  await tap(p, '.sheet button.ed-go', /Next: check it/, 500);
+  const c = await sheetText(p);
+  ok('A2 add check: "Step 4 of 4 — Check"', /Step 4 of 4 — Check/.test(c), c.slice(0, 120));
+  ok('D12 add check over other rows: the per-row absorb list only, not the general overlap sentence too', /This runs into/.test(c) && !/This takes over part of your/.test(c) && !/This goes inside your/.test(c), c);
+  await p.ctx.close();
+});
+
+/* ---------------- D11: ELD quick-start rows are marked ---------------- */
+await section(async () => {
+  const p = await open(ELD);
+  await go(p, 'Log');
+  const m = await p.evaluate(() => {
+    const rows = [...document.querySelectorAll('.page.is-active button.entry:not(.live)')];
+    return { tags: rows.map((r) => r.querySelector('.eld-tag')?.textContent ?? null), dots: rows.map((r) => r.querySelector('.dot')?.classList.contains('eld-dot')), dashed: [...document.querySelectorAll('.page.is-active svg.grid line.s-D, .page.is-active svg.grid line.s-OFF')].map((l) => l.getAttribute('stroke-dasharray')) };
+  });
+  ok('D11 every ELD-built row carries "Estimate from your ELD clocks" and the hollow dot', m.tags.length >= 2 && m.tags.every((t) => t === 'Estimate from your ELD clocks') && m.dots.every(Boolean), m);
+  ok('D11 the day grid draws ELD-built rows dotted', m.dashed.length > 0 && m.dashed.some((d) => d === '2 2'), m.dashed);
+  await p.ctx.close();
+});
+
+/* ---------------- P2: a deleted row's hole is said, not blank ---------------- */
+await section(async () => {
+  const p = await open(D8);
+  await go(p, 'Log');
+  await p.locator('.page.is-active button.entry', { hasText: 'On Duty' }).first().click({ timeout: 5000 }); await wait(p);
+  await tap(p, '.sheet button.act', /It never happened/, 400);
+  const m = await p.evaluate(() => {
+    const pg = document.querySelector('.page.is-active');
+    const g = pg.querySelector('.gap-row');
+    return { gap: g?.innerText.replace(/\s+/g, ' ') ?? null, isButton: g?.tagName === 'BUTTON', title: (pg.textContent.match(/Entries on this day \((\d+)\)/) || [])[1], rows: pg.querySelectorAll('button.entry').length };
+  });
+  ok('P2 the hole reads "No entry 18:00 → 18:50 · 50m" and says how the clocks treat it', m.gap && /No entry Fri 18:00 → Fri 18:50/.test(m.gap) && /count unlogged time as off duty/.test(m.gap) && /50m/.test(m.gap), m);
+  ok('P2 the hole is not a button and is not counted as an entry', !m.isButton && String(m.rows) === m.title, m);
+  await p.ctx.close();
+});
+
+/* ---------------- Plan: D13, D14, D15, A4, P3 ---------------- */
+// 8h of driving already in this shift: the stock example's 5h drive would run over the 11.
+const SPLIT = { ...base, segments: [
+  { status: 'OFF', start: N - 1200, end: N - 540, createdAt: 1 },
+  { status: 'ON', start: N - 540, end: N - 510, createdAt: 2 },
+  { status: 'D', start: N - 510, end: N - 30, createdAt: 3 },
+], current: { status: 'ON', since: N - 30, createdAt: 4 } };
+await section(async () => {
+  const p = await open(SPLIT);
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Plan a sleeper split/, 900);
+  const line = await p.evaluate(() => document.querySelector('.sna-line')?.textContent ?? '');
+  const st = await state(p);
+  ok('D14 the split planner opens on a plan that does not run over (no ✕)', !/✕/.test(line), line);
+  ok('D14 the example was fitted: drive shortened from the stock 5h', st.split && st.split.drive < 300 && st.split.b1 === 180 && st.split.b2 === 420, st.split);
+  const btns = await p.evaluate(() => [...document.querySelectorAll('.page.is-active button')].map((b) => b.textContent.trim()));
+  ok('D14 "Start over with an example" (no "Try an example split")', btns.includes('Start over with an example') && !btns.includes('Try an example split'));
+  // P3: one Drive tile when the two agree
+  const tiles = await p.evaluate(() => [...document.querySelectorAll('.page.is-active .clocks .stat')].map((s) => s.innerText.replace(/\s+/g, ' ')));
+  const left = tiles.find((t) => /^Drive left/i.test(t)), nowT = tiles.find((t) => /^Drive now/i.test(t));
+  ok('P3 "Drive now" shows only when it differs from "Drive left"', left && (!nowT || left.split(' ').slice(2, 4).join(' ') !== nowT.split(' ').slice(2, 4).join(' ')), tiles);
+  // A4: block sheet exact length as hours + minutes
+  await tap(p, 'button.pblock-drive', null);
+  const ex = await p.evaluate(() => { const sh = document.querySelector('.sheet'); return { h: !!sh.querySelector('input[aria-label$=", hours"]'), m: !!sh.querySelector('input[aria-label$=", minutes"]'), raw: /Exact length · min/.test(sh.innerText) }; });
+  ok('A4 block sheet: exact length is hours + minutes boxes, no raw-minutes box', ex.h && ex.m && !ex.raw, ex);
+  await p.fill('.sheet input[aria-label$=", hours"]', '2'); await p.fill('.sheet input[aria-label$=", minutes"]', '15'); await wait(p, 200);
+  ok('A4 typing 2 h 15 m sets the drive to 135 minutes', (await state(p)).split.drive === 135, (await state(p)).split);
+  await p.fill('.sheet input[aria-label$=", minutes"]', '75'); await wait(p, 200);
+  ok('A4 75 minutes is refused, visibly; the old value stands', (await state(p)).split.drive === 135 && /Minutes go 0 to 59/.test(await sheetText(p)));
+  await closeSheet(p);
+  const fine = await p.evaluate(() => [...document.querySelectorAll('.page.is-active details.fine input[type=number]')].map((i) => i.getAttribute('aria-label')));
+  ok('A4 Fine-tune: every minutes slider is typed as hours + minutes', fine.length === 8 && fine.every((a) => /, (hours|minutes)$/.test(a)), fine);
+  // D13
+  await tap(p, '.page.is-active button.primary', /^Put plan on log as what-if$/, 400);
+  const d13 = await p.evaluate(() => ({ chip: [...document.querySelectorAll('.page.is-active .row.undo')].map((r) => r.textContent).join('|'), btn: [...document.querySelectorAll('.page.is-active button.primary')].map((b) => [b.textContent.trim(), b.disabled]) }));
+  ok('D13 putting the plan on the log answers back: an undo row + "Plan is on your log ✓"', /Plan added to your log as what-if\./.test(d13.chip) && d13.btn.some(([t, d]) => t === 'Plan is on your log ✓' && d), d13);
+  ok('D13 the what-if rows are on the record', (await state(p)).tentative.length === 4);
+  ok('Plan lane no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+/* ---------------- D15 on the audit's shape: a 12px on-duty block between two wide blocks ---------------- */
+await section(async () => {
+  const p = await open(DAY);
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Plan a sleeper split/, 900);
+  const hit = await p.evaluate(() => {
+    const b = document.querySelector('button.pblock-dwell'); if (!b) return null;
+    const r = b.getBoundingClientRect(); const cy = r.top + r.height / 2;
+    let n = 0; for (let x = Math.floor(r.left) - 40; x <= Math.ceil(r.right) + 40; x++) if (document.elementFromPoint(x, cy)?.closest('button.pblock')?.dataset.block === 'dwell') n++;
+    const nb = ['b1', 'drive'].map((k) => document.querySelector(`button.pblock-${k}`)?.classList.contains('short'));
+    return { w: r.width, short: b.classList.contains('short'), hitWidth: n, neighboursShort: nb };
+  });
+  ok('D15 setup: the on-duty block is drawn narrow (short) between two wide blocks', hit && hit.short && hit.w < 20 && hit.neighboursShort.every((x) => !x), hit);
+  ok('D15 the narrow on-duty block takes taps across ≥ 44px', hit && hit.hitWidth >= 44, hit);
+  const lab = await p.evaluate(() => { const l = document.querySelector('button.pblock-drive .pblock-in'); return l ? getComputedStyle(l).zIndex : null; });
+  ok('D15 block labels sit above the 14-hour markers (z-index above the marker\'s 3)', Number(lab) > 3, lab);
+  await p.ctx.close();
+});
+
+/* ---------------- A5: Recap ---------------- */
+await section(async () => {
+  const p = await open(D8);
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Hours coming back/, 900);
+  const t = await pageText(p);
+  const bars = await p.evaluate(() => [...document.querySelectorAll('.page.is-active .wk-label')].map((b) => b.textContent));
+  ok('A5 Recap lists no "+0m" days', !/\+0m/.test(t), t.slice(0, 400));
+  ok('A5 Recap: no "D-7", no ISO dates, no "engine", "Set"/"Edit" capitalised', !/\bD-\d/.test(t) && !/\d{4}-\d\d-\d\d/.test(t) && !/engine/.test(t) && !/\b(set|edit)\b(?! a past)/.test(t.replace(/“Set”/g, '')), t.match(/D-\d|\d{4}-\d\d-\d\d|engine/g));
+  ok('A5 every bar is labelled "Ddd N" (one style)', bars.length >= 7 && bars.every((b) => /^[A-Z][a-z]{2} \d{1,2}$/.test(b)), bars);
+  ok('A5 the header names the next day that gives hours back (or says none do)', /next back: \+\d+h? ?\d*m? at [A-Z][a-z]{2} [A-Z][a-z]{2} \d+|nothing comes back/.test(t), t.match(/hours: [^\n]*/)?.[0]);
+  await p.ctx.close();
+});
+
+/* ---------------- D16, D18, A8, A9 ---------------- */
+await section(async () => {
+  const p = await open(DAY);
+  const now = await pageText(p);
+  ok('D16 Now: "Four quick questions" (the flow has four screens)', /Four quick questions, get a yes or no\./.test(now) && !/three questions/.test(now));
+  await go(p, 'More');
+  const more = await pageText(p);
+  ok('D18 More: no migration banner, no changelog line, no filler', !/has moved to Plan/.test(more) && !/Moved here from/.test(more) && !/Your HOS what-if planner/.test(more), more.slice(0, 200));
+  ok('A8 More → Rules: a button to "Exceptions this shift", not directions', !/scroll to the bottom/.test(more) && await p.evaluate(() => [...document.querySelectorAll('.page.is-active button.rowbtn')].some((b) => /Exceptions this shift/.test(b.textContent))));
+  await tap(p, '.page.is-active button.rowbtn', /Exceptions this shift/);
+  ok('A8 the button opens the Exceptions sheet', await p.evaluate(() => !!document.querySelector('.sheet')) && /Adverse|16-hour/.test(await sheetText(p)));
+  await closeSheet(p);
+  await tap(p, '.page.is-active button.danger', /^Erase all data$/);
+  const er = await sheetText(p);
+  ok('A9 Erase opens the app\'s own sheet: can\'t be undone, Export a copy first, Keep my data', /can't be undone/.test(er) && /Export a copy first/.test(er) && /Keep my data/.test(er) && p.dialogs === 0, { er, dialogs: p.dialogs });
+  await tap(p, '.sheet button', /^Keep my data$/);
+  ok('A9 "Keep my data" keeps it', (await state(p)).segments.length === 3);
+  await tap(p, '.page.is-active button.danger', /^Start over/);
+  const so = await sheetText(p);
+  ok('A9 Start over opens the app\'s own sheet (no native confirm)', /Start over\?/.test(so) && /Keep my log/.test(so) && p.dialogs === 0, { so, dialogs: p.dialogs });
+  await tap(p, '.sheet button.danger', /^Start over$/, 600);
+  const st = await state(p);
+  ok('A9 "Start over" does what it always did (fresh 10h rest, on duty from now)', st.segments.length === 1 && st.segments[0].status === 'OFF' && st.segments[0].end - st.segments[0].start === 600 && st.current?.status === 'ON');
+  await go(p, 'More');
+  await tap(p, '.page.is-active button.danger', /^Erase all data$/);
+  await tap(p, '.sheet button.danger', /^Erase everything$/, 500);
+  const st2 = await state(p);
+  ok('A9 "Erase everything" erases, with no native dialog anywhere', st2.segments.length === 0 && st2.current === null && p.dialogs === 0, { segs: st2.segments.length, cur: st2.current, dialogs: p.dialogs });
+  ok('More lane no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await p.ctx.close();
+});
+
+/* ---------------- A11 + P5 at 360×740 ---------------- */
+await section(async () => {
+  const p = await open(DAY, 360, 740);
+  const m = await p.evaluate(() => {
+    const r = (q) => { const e = document.querySelector(q); return e ? e.getBoundingClientRect() : null; };
+    const mon = document.querySelector('.hero-stop .sd-mon');
+    return { pill: r('header.top .pill')?.height, pillWs: getComputedStyle(document.querySelector('header.top .pill')).whiteSpace, dock: r('.dock')?.height, more: r('button.dock-more')?.width, moreName: document.querySelector('button.dock-more')?.textContent, mon: mon ? getComputedStyle(mon).display : 'absent', over: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  });
+  ok('A11 360px: the header pill stays one line (nowrap, ≤ 44px)', m.pill <= 44 && m.pillWs === 'nowrap', m);
+  ok('A11 360px: the dock is one row (< 120px tall) with a compact 44px "…" key that keeps its full name', m.dock < 120 && m.more <= 48 && /PC, yard move, or started earlier/.test(m.moreName), m);
+  ok('A11 360px: the stop date drops the month ("FRI 20")', m.mon === 'none', m);
+  ok('A11 360px: no horizontal overflow', !m.over, m);
+  await tap(p, 'button.rowbtn', /Fix the start time/);
+  const chips = await p.evaluate(() => [...document.querySelectorAll('.sheet .ed-days button')].map((b) => ({ t: b.textContent, fits: b.scrollWidth <= b.clientWidth + 0.5, top: Math.round(b.getBoundingClientRect().top) })));
+  ok('P5 360px: every day chip holds its word ("Yesterday" included) on one row', chips.length === 4 && chips.every((c) => c.fits) && Math.max(...chips.map((c) => c.top)) - Math.min(...chips.map((c) => c.top)) <= 3, chips);
+  await closeSheet(p);
+  await go(p, 'Plan'); await tap(p, 'main button.plan-item', /Plan a sleeper split/, 900);
+  const sp = await p.evaluate(() => ({ pos: getComputedStyle(document.querySelector('.page.is-active .split-now-after')).position, over: document.documentElement.scrollWidth > document.documentElement.clientWidth, iw: innerWidth }));
+  ok('A11 360×740: the Split plan strip scrolls with the page (not sticky) and nothing widens the page', sp.pos === 'relative' && !sp.over && sp.iw === 360, sp);
+  await p.ctx.close();
+});
+
+await browser.close(); server.close();
+for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
+const fails = res.filter((r) => !r.pass).length;
+console.log(`\n${res.length - fails} pass, ${fails} fail`);
+console.log(fails ? 'AUDITFIX FAIL' : 'AUDITFIX OK');
+process.exit(fails ? 1 : 0);

@@ -149,10 +149,14 @@ await pin('G5. rendered: load answer → Compare anyway → the Sleeper splits c
 });
 
 /* ---------------- H. Exceptions this shift ---------------- */
-await pin('H1. More → Rules no longer promises a Now "section"; it names the row and where it is', async () => {
+await pin('H1. More → Rules no longer promises a Now "section" (re-aimed by audit A8, 2026-11-20: the copy became a button that opens the sheet itself)', async () => {
   await seed({ ...gemini, tab: 'settings' });
   const t = pageText();
-  return (/scroll to the bottom and tap the "Exceptions this shift" row, just above the status buttons/.test(t) && !/under "Exceptions this shift"/.test(t)) || (t.match(/Adverse-conditions[^.]*\.[^.]*\./) || ['(copy missing)'])[0];
+  const row = inPage((n) => n.localName === 'button' && has(n, 'rowbtn') && n.textContent.includes('Exceptions this shift'))[0];
+  if (!row || /under "Exceptions this shift"/.test(t) || /scroll to the bottom/.test(t)) return `row ${!!row}`;
+  fire(row, 'click'); await sleep(40);
+  const all2 = root.textContent;
+  return (/Adverse driving conditions/.test(all2) && /16-hour short-haul day/.test(all2)) || 'the button did not open the exceptions sheet';
 });
 await pin('H2. the row the copy points to is on Now, after the content and before the status dock, and opens the two exception toggles', async () => {
   await seed({ ...gemini, tab: 'now' });

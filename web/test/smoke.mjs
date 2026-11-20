@@ -772,7 +772,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     segments: [{ status: 'ON', start: M('2026-09-16T06:00:00Z'), end: M('2026-09-16T10:00:00Z') }] });
   hh = out('recap/one day logged');
   const badges = (hh.match(/not logged — counted as 0h/g) || []).length;
-  const setButtons = (hh.match(/>set</g) || []).length;
+  const setButtons = (hh.match(/>Set</g) || []).length; // A5 (audit): capitalised
   if (badges < 7) throw new Error(`expected 7 counted-zero days, saw ${badges}`);
   if (setButtons < 7) throw new Error(`days before the record must keep their set button (saw ${setButtons})`);
 
@@ -1372,7 +1372,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/End is after now/.test(saveEntry(day[2], { status: 'D', start: L(12, 6, 30), end: L(12, 11) }, T) ?? '')) throw new Error('an end after now must be refused');
   if (saveEntry(day[2], { status: 'D', start: L(12, 6, 30), end: L(12, 9, 45) }, T) !== null) throw new Error('a valid edit must save');
   if (!gs().segments.some((x) => x.status === 'D' && x.end === L(12, 9, 45))) throw new Error('the edit must change the entry');
-  if (!/^Edited Driving/.test(currentUndo()?.label ?? '')) throw new Error('an edit must be undo-able');
+  // D10 (audit): the undo line leads with the new times
+  if (!/^Changed to Driving/.test(currentUndo()?.label ?? '')) throw new Error('an edit must be undo-able');
   const before = gs().segments.length;
   deleteEntry(gs().segments.find((x) => x.status === 'D' && x.end === L(12, 9, 45)));
   if (gs().segments.length !== before - 1 || !/^Deleted Driving/.test(currentUndo()?.label ?? '')) throw new Error('delete must remove the entry and offer undo');
@@ -1655,7 +1656,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (saveEntry(plan, { status: 'SB', start: T + 60, end: T + 525 }, T) !== null) throw new Error('editing a what-if into the future must be allowed');
   const edited = gs().tentative[0];
   if (gs().tentative.length !== 1 || edited.end !== T + 525 || !edited.tentative || edited.note !== 'Break 1') throw new Error('the edit must change the what-if and keep it a what-if');
-  if (!/^Edited Sleeper/.test(currentUndo()?.label ?? '') || !undoLast() || gs().tentative[0].end !== T + 540) throw new Error('a what-if edit is undo-able');
+  if (!/^Changed to Sleeper/.test(currentUndo()?.label ?? '') || !undoLast() || gs().tentative[0].end !== T + 540) throw new Error('a what-if edit is undo-able');
   // logged rows keep the rule
   if (!/End is after now/.test(saveEntry(gs().segments[0], { status: 'OFF', start: T - 700, end: T + 5 }, T) ?? '')) throw new Error('logged rows still stop at now');
   // the row says what it is to a screen reader
@@ -2220,14 +2221,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }], segments: [{ status: 'OFF', start: M(-12), end: M(8), createdAt: 1 }, { status: 'D', start: M(8), end: M(16), createdAt: 2 }] });
   openSheet({ kind: 'add', step: 'when', draft: d });
   let h = out('editor/when');
-  if (!/When did it start\?/.test(h) || !/Step 2 of 3/.test(h) || !/<button class="on" aria-pressed="true">Today<\/button>/.test(h)) throw new Error('step 2 asks when, on today');
+  if (!/When did it start\?/.test(h) || !/Step 2 of 4/.test(h) || !/<button class="on" aria-pressed="true">Today<\/button>/.test(h)) throw new Error('step 2 asks when, on today');
   if (!h.includes(`aria-label="Started ${ck(d.start)}">${ck(d.start, false)}</output>`)) throw new Error('step 2 shows the start time big');
   if (!/aria-label="1 hour earlier"/.test(h) || !/aria-label="5 minutes later"/.test(h) || !/<button class="primary wide ed-go">Next: when it ended<\/button>/.test(h)) throw new Error('hour and minute keys, then Next');
   // ^ Owner amendment B (2026-11-20, sanctioned): the add flow's third step asks when it ENDED, so its Next says so (was "Next: how long").
   if (/It just ended/.test(h)) throw new Error('"It just ended" is for a break, whose length is known');
   openSheet({ kind: 'add', step: 'when', draft: { ...brk, start: NOW - 10 } });
   h = out('editor/when break');
-  if (!/Step 2 of 2/.test(h) || !/It just ended: started/.test(h) || !/would still be going/.test(h) || !/<button class="primary wide ed-go" disabled>Next: check it<\/button>/.test(h)) throw new Error('a break skips the length, and a start it cannot use holds Next');
+  if (!/Step 2 of 3/.test(h) || !/It just ended: started/.test(h) || !/would still be going/.test(h) || !/<button class="primary wide ed-go" disabled>Next: check it<\/button>/.test(h)) throw new Error('a break skips the length, and a start it cannot use holds Next');
   openSheet({ kind: 'add', step: 'long', draft: { ...d, start: NOW - 60, len: 60 } });
   h = out('editor/long');
   // Owner amendment B (2026-11-20, sanctioned): step 3 of the add flow is the END on the clock picker — the
@@ -2239,12 +2240,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet({ kind: 'add', step: 'check', draft: { status: 'OFF', note: breakNote('30-min break'), start: M(14), len: 30, fixedLen: true } });
   h = out('editor/check');
   const th = txt(h);
-  if (!/Check and add/.test(h) || !/What Off duty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go ed-absorb">Absorb and add to my log<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
+  if (!/Check and add/.test(h) || !/What Off [Dd]uty|What 30-min break \(OFF\)/.test(th) || !/class="grid-mark"/.test(h) || !/Driving [^<]* would be split around it/.test(th) || /This goes inside your Driving/.test(h) || !/Long enough for the 30-minute break rule/.test(h) || !/<button class="primary wide ed-go ed-absorb">Change the others and add it<\/button>/.test(h)) throw new Error(`step 4 shows the entry, the day with it, the overlap and the rule (got ${th.slice(0, 300)})`);
   // ^ Patch L1 item 4a (sanctioned): an entry that runs into another now saves only through the one explicit absorb confirmation — the button was "Add to my log".
   // a drive logged as two touching rows is still one drive to the driver: the warning names all of it
   const keep = gs().segments;
   setState({ segments: [keep[0], { status: 'D', start: M(8), end: M(12), createdAt: 2 }, { status: 'D', start: M(12), end: M(16), createdAt: 3 }] });
-  if (!out('editor/check two rows').includes(`This goes inside your Driving from ${ck(M(8))} to now.`)) throw new Error('the check joins touching rows of one drive');
+  // D12 (audit): AbsorbNote replaces the duplicate overlapNote box when absorbed rows exist; the check grid still joins the two touching Driving rows into one drive split in two around the break.
+  const h2 = out('editor/check two rows');
+  const panel2 = h2.slice(h2.indexOf('role="dialog"'));
+  if (/This goes inside your Driving/.test(h2) || !/would be split around it/.test(txt(h2)) || (panel2.match(/class="s-D"/g) || []).length !== 2) throw new Error('the check joins touching rows of one drive (D12: single AbsorbNote warning)');
   setState({ segments: keep });
   // the picture is the day with the entry in: the drive drawn in two pieces around the break
   const panel = h.slice(h.indexOf('role="dialog"'));
@@ -2290,7 +2294,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   openSheet(null);
   setState({ tab: 'settings' });
   if (!/Start over: fresh 10-hour rest ending now/.test(out('settings/start over'))) throw new Error('"Start over" is under More');
-  if (!/startOver\(now\); setState\(\{ tab: 'log' \}\)/.test(src)) throw new Error('after starting over, the Log (with its Undo) is shown');
+  // A9 (audit): Start over goes through the in-app ConfirmSheet, which closes itself before switching to Log.
+  if (!/startOver\(now\); openSheet\(null\); setState\(\{ tab: 'log' \}\)/.test(src)) throw new Error('after starting over, the Log (with its Undo) is shown');
   setLaunchNotice(true);
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], tentative: [], current: null, breakPresets: [{ name: '30-min break', minutes: 30, status: 'OFF' }] });
   console.log('log editor (one question per screen): OK');
@@ -2543,7 +2548,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   minH(/\.slider-row \.mini \{[^}]*\}/, 56, 'the slider steppers');
   minH(/\.tstep-row button \{[^}]*\}/, 56, 'the time steppers');
   minH(/\.brk-len button \{[^}]*\}/, 56, 'the break-length steppers');
-  minH(/input\.num \{[^}]*\}/, 56, 'the slider number field');
+  // A4 (audit): .dur-boxes input.num sits above the base rule; anchor to \ninput.num like \nbutton above.
+  minH(/\ninput\.num \{[^}]*\}/, 56, 'the slider number field');
   minH(/input\.hrs \{[^}]*\}/, 56, 'the recap hour fields');
   // the slider's own touch strip
   const range = rule(/\.slider input\[type=range\] \{[^}]*\}/);
@@ -2615,7 +2621,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setLaunchNotice(false);
   ss({ tab: 'now', current: { status: 'ON', since: now - 60 } });
   h = out('patch 7/now load entry');
-  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Answer three questions, get a yes or no/.test(h)) throw new Error('patch 7: Now must offer the load question as a prominent plan-item entry');
+  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Four quick questions, get a yes or no/.test(h)) throw new Error('patch 7 (D16 audit: four questions): Now must offer the load question as a prominent plan-item entry');
 
   // 5. the simulated clock banners every screen while set — and is gone when it is not
   ss({ nowOverride: now + 120 });
@@ -2741,7 +2747,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   ss({ tab: 'settings', nowOverride: null });
   h = out('patch 7.1/about name');
   if (!/Split Decision — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: About must open with the launch lockup');
-  if (!/Your HOS what-if planner\./.test(h)) throw new Error('patch 7.1: About must carry the voice line');
+  if (/Your HOS what-if planner\./.test(h)) throw new Error('D18 (audit): the About filler line is retired');
   if (/what-if machine/.test(h)) throw new Error('patch 7.1: the retired "machine" line must not render');
   if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: no rendered surface may carry the old name');
   ss({ tab: 'now', disclaimerAcked: true });
@@ -4550,7 +4556,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const seed = (over) => ss({ segments: [], tentative: [], current: null, dayCloses: [], historyAcknowledged: true, tab: 'now', nowOverride: null, config: { ...CFG }, ...over });
 
   // the wiring is in the source: the button and the Reopen action call the two actions
-  if (!/onClick=\{\(\) => endDay\(now\)\}>End my day</.test(app)) throw new Error('patch 13: Now must wire its End my day button to endDay');
+  if (!/onClick=\{\(\) => setEndAsk\(true\)\}>End my day</.test(app) || !/endDay\(now, 'OFF'\)/.test(app) || !/endDay\(now, 'SB'\)/.test(app)) throw new Error('patch 13 (D19 audit): End my day asks Off Duty or Sleeper, each wired to endDay');
   if (!/onClick=\{\(\) => reopenDay\(now\)\}>Reopen</.test(app)) throw new Error('patch 13: the closed state must wire Reopen to reopenDay');
 
   // (a) the demo clock has no day to close: the control simply does not appear (the demo state
@@ -4833,11 +4839,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // with exactly the default draft
   if (!/class="split-now-after"/.test(splitBody)) throw new Error('patch 14: the Split screen must render its now-vs-after line in the split strip');
   if (!/\.split-now-after\s*\{[^}]*position:\s*sticky;/.test(css)) throw new Error('patch 14: the now-vs-after line must be sticky');
-  if (!splitBody.includes('onClick={() => setSplit({ ...DEFAULT_SPLIT })}>Try an example split</button>'))
+  if (!splitBody.includes('onClick={() => setSplit(fittedExample(s, now, ev))}>Start over with an example</button>'))
     throw new Error('patch 14: the example button must load DEFAULT_SPLIT through setSplit');
   if (!/onChange=\{\(v\) => setSplit\(\{ b2: v \}\)\}/.test(splitBody)) throw new Error('patch 14: the Break 2 slider must still write through setSplit');
   const whatIf = splitBody.slice(splitBody.indexOf('<Card title="What if…'));
-  if (!(whatIf.indexOf('Try an example split') >= 0 && whatIf.indexOf('Try an example split') < whatIf.indexOf('Break 1: Off duty')))
+  if (!(whatIf.indexOf('Start over with an example') >= 0 && whatIf.indexOf('Start over with an example') < whatIf.indexOf('Break 1: Off duty')))
     throw new Error('patch 14: the example button must sit in the What-if card, above the Break 1 toggle');
 
   // a deterministic day: 10h rest, then 6h driving, evaluated at noon Chicago time
@@ -5035,7 +5041,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   //     the driver gets the replace-confirm and the "edit" wording, not a silent "set".
   ss({ segments: [], tentative: [], current: { status: 'D', since: yStart + 1080, createdAt: 5 }, nowOverride: now1, config: cfg, historyAcknowledged: true, tab: 'recap' });
   const recapHtml = out('patch 15/recap day held by the live status');
-  if ((recapHtml.match(/>edit</g) || []).length !== 1) throw new Error('patch 15 #1: the day the live status runs through must offer "edit" (the live status counts as data on that day)');
+  if ((recapHtml.match(/>Edit</g) || []).length !== 1) throw new Error('patch 15 #1: the day the live status runs through must offer "edit" (the live status counts as data on that day)');
 
   // #4: a status tap at or before the open status's start must be refused — it used to
   //     replace the open status outright and the logged driving vanished.
@@ -5530,7 +5536,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!(h16.indexOf('Last 24 hours') >= 0 && h16.indexOf('Last 24 hours') < h16.indexOf('End my day'))) throw new Error('patch 16: End my day must sit below the grid');
   endDay16(L16(12, 18, 42));
   h16 = out('16/now just closed');
-  if (!h16.includes(`Closed the day at ${clock(L16(12, 18, 42), false)}`) || !/>Undo</.test(h16)) throw new Error('patch 16: right after a close, the slot must offer the undo');
+  if (h16.includes('Closed the day at') || !h16.includes(`Day closed · ${clock(L16(12, 18, 42), false)}`) || !/>Reopen</.test(h16) || undoNow16()?.label !== 'Closed the day') throw new Error('patch 16 (D19 audit): right after a close, Now shows ONE row (Day closed · Reopen); the close stays undoable through the slot');
   if (!undoLast16()) throw new Error('patch 16: the close undo must work from the slot');
   h16 = out('16/now close undone');
   if (!/<button class="wide">End my day<\/button>/.test(h16)) throw new Error('patch 16: undoing the close must bring the button back');
