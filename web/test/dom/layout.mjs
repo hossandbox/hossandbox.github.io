@@ -291,6 +291,102 @@ for (const [W, H] of SIZES) {
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 }
+// (d) Gemini round (2026-11-19): Gemini's live-site breakdown, the layout items, in Gemini's own
+// state — DEMO, then one status tap: Off Duty for 1h59 with nothing behind it ("History incomplete").
+//   D  the Log's live row keeps its duration on the title's line, right-aligned (it wrapped under
+//      the dot: the live row had a 2-column grid for 4 children); A rides along (count = rows).
+//   F  the meter's segments are whole (the tile rounds to the bar — a fixed 12px tile left a cut
+//      sliver at the right end), and nothing on a Timeline axis track reaches past either end
+//      (the 70-hr cap hung 1.5px out, its run-past arrow 2px).
+//   E  the "History incomplete" banner holds its button inside its border on Plan, the load
+//      check and More (Gemini saw it overflow on Plan; not reproduced at any size — a guard).
+//   C  content scrolled into view lands clear of the fixed bars: the pages' scroll padding now
+//      covers the tab bar (and on Now the status dock), so scrollIntoView / focus no longer park
+//      a target behind them; and at the end of the scroll everything clears (guard).
+const geminiSeed = (nowCard) => ({ segments: [], current: { status: 'OFF', since: nowMinute - 119, createdAt: 1 }, historyAcknowledged: false, disclaimerAcked: true, tzChosen: true, themeChosen: true, theme: 'day', nowCard, nowCardAsked: true });
+for (const [W, H] of SIZES) {
+  for (const nowCard of ['dial', 'timeline']) {
+    const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+    await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(geminiSeed(nowCard)));
+    const page = await ctx.newPage();
+    const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+    await page.waitForSelector('#root *');
+    await page.waitForTimeout(300);
+    const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
+    if (await ack.count()) await ack.first().click();
+    await page.evaluate(() => document.fonts && document.fonts.ready);
+    const tag = `[${W}x${H} ${nowCard} gemini]`;
+    const tap = (sel, text) => page.evaluate(([q, t]) => { const b = [...document.querySelectorAll(q)].find((x) => x.textContent.includes(t)); if (!b) throw new Error('no ' + q + ' with ' + t); b.click(); }, [sel, text]);
+    const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {}); };
+    // ---- Now
+    const now = await page.evaluate(async () => {
+      const two = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const pg = document.querySelector('.page.is-active');
+      const dock = pg.querySelector('.dock');
+      const meters = [...pg.querySelectorAll('.meter-bar')].map((b) => { const a = getComputedStyle(b, '::after'); return { repeat: a.backgroundRepeat, size: a.backgroundSize, img: a.backgroundImage.slice(0, 26) }; });
+      const over = [];
+      for (const t of pg.querySelectorAll('.taxis-track:not(.taxis-track-head)')) {
+        const tb = t.getBoundingClientRect();
+        for (const c of t.querySelectorAll('*')) { const r = c.getBoundingClientRect(); if (!r.width) continue; if (r.right - tb.right > 0.05 || tb.left - r.left > 0.05) over.push(`${c.className} ${(r.left - tb.left).toFixed(2)}..${(r.right - tb.right).toFixed(2)}`); }
+      }
+      const arrows = pg.querySelectorAll('.taxis-arrow').length;
+      // C: scroll the Last-24h card into view at the bottom edge — the browser honours scroll-padding
+      const card = [...pg.querySelectorAll('.card')].find((c) => /Last 24 hours/i.test(c.textContent));
+      card.scrollIntoView({ block: 'end' }); await two();
+      const intoView = { cardBottom: card.getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top };
+      pg.scrollTop = 1e6; await two();
+      const rest = [...pg.querySelectorAll('.now-rest > *')].filter((e) => !e.classList.contains('dock') && e.getBoundingClientRect().height > 0);
+      const atEnd = { lastBottom: rest[rest.length - 1].getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top, lastText: rest[rest.length - 1].textContent.slice(0, 30) };
+      pg.scrollTop = 0; await two();
+      return { meters, over, arrows, intoView, atEnd, dockH: getComputedStyle(document.documentElement).getPropertyValue('--dock-h') };
+    });
+    if (nowCard === 'dial') {
+      ok(`${tag} (d) F: every meter's segment tile rounds to the bar (whole segments, no cut sliver)`, now.meters.length === 4 && now.meters.every((m) => m.repeat === 'round' && /^12px/.test(m.size)), JSON.stringify(now.meters[0]));
+    } else {
+      ok(`${tag} (d) F: nothing on a Timeline axis track reaches past either end (cap, walls, run-past arrow)`, now.over.length === 0 && now.arrows > 0, `${now.arrows} arrow(s); ${now.over.join(' ; ')}`);
+    }
+    ok(`${tag} (d) C: the Last-24h card scrolled into view (block end) lands clear of the status dock`, now.intoView.cardBottom <= now.intoView.dockTop + 0.5, `card bottom ${now.intoView.cardBottom.toFixed(1)}, dock top ${now.intoView.dockTop.toFixed(1)} (--dock-h ${now.dockH})`);
+    ok(`${tag} (d) C: at the end of Now's scroll the last row ("Exceptions this shift") clears the dock`, now.atEnd.lastBottom <= now.atEnd.dockTop && /Exceptions this shift/.test(now.atEnd.lastText), `${now.atEnd.lastText} bottom ${now.atEnd.lastBottom.toFixed(1)}, dock top ${now.atEnd.dockTop.toFixed(1)}`);
+    if (nowCard === 'dial') {
+      // ---- E: the banner on Plan / the load check / More
+      const banner = () => page.evaluate(() => { const pg = document.querySelector('.page.is-active'); const box = [...pg.querySelectorAll('.warnbox')].find((b) => b.textContent.includes('History incomplete')); if (!box) return null; const btn = box.querySelector('button'); const cs = getComputedStyle(box); return +(btn.getBoundingClientRect().bottom - (box.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth))).toFixed(1); });
+      await tap('nav.tabs button', 'Plan'); await settle();
+      const eHub = await banner();
+      await tap('.page.is-active button', 'Can I take this load?'); await settle();
+      const eLoad = await banner();
+      // ---- C: the load check's step 2 Next, scrolled into view, clears the tab bar
+      await tap('.page.is-active button', 'Next: when you leave'); await page.waitForTimeout(250);
+      const step2 = await page.evaluate(async () => {
+        const two = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const pg = document.querySelector('.page.is-active'); const nav = document.querySelector('nav.tabs'); const next = pg.querySelector('button.flow-next');
+        next.scrollIntoView({ block: 'end' }); await two();
+        const a = { bottom: next.getBoundingClientRect().bottom, navTop: nav.getBoundingClientRect().top };
+        pg.scrollTop = 1e6; await two();
+        const b = { bottom: next.getBoundingClientRect().bottom, navTop: nav.getBoundingClientRect().top };
+        pg.scrollTop = 0; await two();
+        return { a, b, head: pg.querySelector('.flow-head').textContent };
+      });
+      ok(`${tag} (d) C: load step 2's Next scrolled into view lands clear of the tab bar`, step2.a.bottom <= step2.a.navTop + 0.5, `next bottom ${step2.a.bottom.toFixed(1)}, bar top ${step2.a.navTop.toFixed(1)}`);
+      ok(`${tag} (d) C: …and at the end of the scroll it clears the bar`, step2.b.bottom <= step2.b.navTop, `next bottom ${step2.b.bottom.toFixed(1)}, bar top ${step2.b.navTop.toFixed(1)}`);
+      await tap('nav.tabs button', 'More'); await settle();
+      const eMore = await banner();
+      ok(`${tag} (d) E: the "History incomplete" button sits inside its banner on Plan, the load check and More`, [eHub, eLoad, eMore].every((x) => x !== null && x <= 0), `plan ${eHub}, load ${eLoad}, more ${eMore} (px past the inner bottom edge)`);
+      // ---- D (+A): the Log's live row
+      await tap('nav.tabs button', 'Log'); await settle();
+      const log = await page.evaluate(() => {
+        const pg = document.querySelector('.page.is-active');
+        const live = pg.querySelector('.entry.live'); if (!live) return null;
+        const len = live.querySelector('.entry-len').getBoundingClientRect(), name = live.querySelector('b').getBoundingClientRect(), row = live.getBoundingClientRect(), ico = live.querySelector('svg').getBoundingClientRect();
+        return { sameLine: len.top < name.bottom && len.bottom > name.top, rightOfTitle: len.left >= name.right, chevronLast: ico.left >= len.right && ico.right <= row.right + 0.5, lenLines: Math.round(len.height / parseFloat(getComputedStyle(live.querySelector('.entry-len')).lineHeight || '20')), title: (pg.textContent.match(/Entries on this day \(\d+\)/) || [''])[0], rows: pg.querySelectorAll('.entry').length };
+      });
+      ok(`${tag} (d) D: the live row's duration stays on the title's line, right of it, before the chevron`, log && log.sameLine && log.rightOfTitle && log.chevronLast, JSON.stringify(log));
+      ok(`${tag} (d) A: the Log title counts the live row it draws`, log && log.title === `Entries on this day (${log.rows})` && log.rows === 1, JSON.stringify(log && { title: log.title, rows: log.rows }));
+    }
+    ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

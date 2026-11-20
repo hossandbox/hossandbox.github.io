@@ -1394,7 +1394,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 1. a new question starts at question 1, one thing on screen
   setState({ tab: 'load' });
   let h = out('load/question 1');
-  if (!/How far is the load\?/.test(h) || !/1 of 3/.test(h)) throw new Error('an unanswered load check must open on question 1');
+  if (!/How far is the load\?/.test(h) || !/1 of 4/.test(h)) throw new Error('an unanswered load check must open on question 1');
   if (/Verdict|How it goes/.test(h)) throw new Error('question 1 must not show the answer yet');
   if (!/aria-label="Add 50 miles"/.test(h) || !/aria-label="Take off 10 miles"/.test(h)) throw new Error('the miles steppers need spoken labels');
   if (!/<b>1200<\/b> mi/.test(h)) throw new Error('the big number must show the current miles');
@@ -2716,7 +2716,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (lc.miles !== 1200 || lc.dwell !== 120 || lc.dwellOff !== false || lc.leaveIn !== 0 || lc.waitOff !== false || lc.answered !== false)
     throw new Error('patch 7.1: the reset must restore the default load draft');
   h = out('patch 7.1/after reset');
-  if (!/How far is the load\?/.test(h) || !/1 of 3/.test(h)) throw new Error('patch 7.1: after the reset the flow must open on question 1');
+  if (!/How far is the load\?/.test(h) || !/1 of 4/.test(h)) throw new Error('patch 7.1: after the reset the flow must open on question 1');
   if (!/<b>1200<\/b> mi/.test(h)) throw new Error('patch 7.1: question 1 must show the default miles after the reset');
   if (/Verdict|Check another load/.test(h)) throw new Error('patch 7.1: question 1 must not show the verdict or its reset');
 

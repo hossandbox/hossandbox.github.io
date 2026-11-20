@@ -1271,6 +1271,7 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
   const grid: number[] = [];
   for (let m = Math.ceil(from / step) * step; m <= to; m += step) grid.push(m);
   const pct = (m: number) => Math.max(0, Math.min(100, ((m - from) / span) * 100));
+  const inTrack = (p: number) => `clamp(1.5px, ${p}%, calc(100% - 1.5px))`;
   const hourLabel = (m: number) => new Intl.DateTimeFormat('en-US', { hour: '2-digit', hourCycle: 'h23' }).format(new Date(m * 60000));
   const wallPct = wall != null && wall > from ? pct(wall) : null;
   const ghostWallPct = ghostWall != null && ghostWall > from ? pct(ghostWall) : null;
@@ -1295,12 +1296,14 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
                 <span class={`taxis-bar faded ${l.basis === 'estimate' ? 'basis-estimate' : l.basis === 'demo' ? 'basis-demo' : ''} ${l.tone === 'outline' ? 'outline' : ''}`} style={{ left: `${wallPct}%`, width: `${pct(l.end) - wallPct}%` }} />
               </>
             : <span class={`taxis-bar ${l.basis === 'estimate' ? 'basis-estimate' : l.basis === 'demo' ? 'basis-demo' : ''} ${l.tone === 'outline' ? 'outline' : ''}`} style={{ width: `${pct(l.end)}%` }} />}
-          <span class="taxis-cap" style={{ left: `${pct(l.end)}%` }} />
+          {/* Gemini round, item F: the 3px cap/wall is centred on its x, so at 0% or 100% half
+              of it hung outside the track; clamp the centre 1.5px inside either end. */}
+          <span class="taxis-cap" style={{ left: inTrack(pct(l.end)) }} />
           {l.end > to && <span class="taxis-arrow">→</span>}
         </>
       )}
-      {ghostWallPct !== null && <span class="taxis-wall ghost" style={{ left: `${ghostWallPct}%` }} />}
-      {wallPct !== null && <span class="taxis-wall" style={{ left: `${wallPct}%` }} />}
+      {ghostWallPct !== null && <span class="taxis-wall ghost" style={{ left: inTrack(ghostWallPct) }} />}
+      {wallPct !== null && <span class="taxis-wall" style={{ left: inTrack(wallPct) }} />}
       {l?.bracket && <span class="taxis-bracket" title={l.bracket}>[</span>}
     </span>
   );
@@ -1679,8 +1682,20 @@ function SplitPairChip({ ev }: { ev: FullEvaluation }) {
 
 /** The four statuses, always at the bottom of Now, within thumb reach. */
 function StatusDock({ s }: { s: State }) {
+  // Gemini round, item C: the dock measures ITSELF into --dock-h (the header's --top-h pattern),
+  // so Now's scroll-padding keeps anything scrolled into view (focus, scrollIntoView) clear of it.
+  const dockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      document.documentElement.style.setProperty('--dock-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div class="dock">
+    <div class="dock" ref={dockRef}>
       <div class="status-buttons">{(['OFF', 'SB', 'D', 'ON'] as DutyStatus[]).map((st) => {
         const on = s.current?.status === st && !s.current?.note;
         // Capstone C3 (M13): a dock key that changes the status answers with the 20ms status
@@ -2975,6 +2990,10 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const dayTotals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
   for (const x of resolved) if (!x.tentative) dayTotals[x.status] += Math.max(0, Math.min(x.end, day.end, now) - Math.max(x.start, day.start));
   const dayRows = [...s.segments, ...s.tentative].filter((x) => x.end > day.start && x.start < day.end).sort((a, b) => b.start - a.start);
+  // Gemini round, item A: the open entry is a row of this list whenever it is drawn (same gate
+  // as the row below), so the title counts it too — "Entries on this day (0)" sat over a live row.
+  const liveRow = !!(s.current && s.current.since < day.end && back === 0);
+  const entryCount = dayRows.length + (liveRow ? 1 : 0);
 
   return (
     <>
@@ -3005,7 +3024,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           <button class="mini" onClick={() => { undoLast(); }}>Undo</button>
         </div>
       )}
-      <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Entries on this day (${dayRows.length})`}>
+      <Card title={showResolved ? `Resolved timeline (${resolved.length})` : `Entries on this day (${entryCount})`}>
         <div class="row">
           <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Back to entries' : 'Show resolved timeline'}</button>
         </div>
@@ -3023,7 +3042,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
           </>
         ) : (
           <>
-            {s.current && s.current.since < day.end && (back === 0) && (
+            {liveRow && s.current && (
               /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
               <button class="entry live" aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} onClick={() => openSheet({ kind: 'edit', seg: liveSeg(s, now)!, live: true })}>
                 <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
@@ -4163,6 +4182,31 @@ export function earliestStrategy(both: Record<TripStrategy, TripPlan>): TripStra
   return TRIP_STRATEGIES.reduce<TripStrategy>((a, k) => (both[k].arrival < both[a].arrival ? k : a), TRIP_STRATEGIES[0]);
 }
 
+/**
+ * Gemini round, item G: the compare card's "N long rests". It counted single plan steps of 10h+,
+ * but the planner builds a 10-hour reset out of two touching steps when a split it opened cannot
+ * pair — "Sleeper 7h — opens a split" then "Extend to a full 10-hour reset" (3h) — so the Sleeper
+ * splits card said "0 long rests" over a schedule that rests 10 hours straight. A long rest is now
+ * a RUN of touching off-duty / sleeper steps, 10 hours or more: what the schedule actually does
+ * (§395.3(a)(1) counts sleeper and off-duty together). Display only — the plan is the engine's.
+ */
+export function longRestCount(p: TripPlan): number {
+  let n = 0, run = 0, end: number | null = null;
+  for (const st of p.steps) {
+    const x = st.segment;
+    if (x.status === 'OFF' || x.status === 'SB') {
+      run = end !== null && x.start === end ? run + (x.end - x.start) : x.end - x.start;
+      end = x.end;
+      if (run >= 600 && run - (x.end - x.start) < 600) n++;
+    } else { run = 0; end = null; }
+  }
+  return n;
+}
+/** The completed sleeper-split pairings in a plan: the planner's own pairing step (its reason names the rest it "pairs with"). */
+export function splitPairCount(p: TripPlan): number {
+  return p.steps.filter((st) => (st.segment.status === 'OFF' || st.segment.status === 'SB') && /\bpairs with\b/.test(st.reason)).length;
+}
+
 function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof planTripAll>; from: number; view?: TripStrategy | null; onView?: (v: TripStrategy) => void }) {
   const fallback: TripStrategy = earliestStrategy(both);
   const [local, setLocal] = useState<TripStrategy>(fallback);
@@ -4179,7 +4223,7 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
   // slower; label every plan that shares the earliest arrival instead.
   const earliest = Math.min(...TRIP_STRATEGIES.map((k) => both[k].arrival));
   const [expandSame, setExpandSame] = useState(false);
-  const resets = (p: TripPlan) => p.steps.filter((x) => x.segment.status !== 'D' && x.segment.status !== 'ON' && x.segment.end - x.segment.start >= 600).length;
+  const resets = (p: TripPlan) => longRestCount(p);
   return (
     <>
       {sameArrival && !expandSame ? (
@@ -4194,7 +4238,7 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
           return <button key={k} class={`plancard ${chosen === k ? 'on' : ''} ${p.feasible ? '' : 'bad'}`} onClick={() => pick(k)}>
             <div class="stat-label">{STRATEGY_LABEL[k]}{!sameArrival && p.arrival === earliest ? ' · fastest' : ''}</div>
             <div class="stat-value">{at(p.arrival)}</div>
-            <div class="stat-sub">{dur(p.elapsedMinutes)} · {resets(p)} long rest{resets(p) === 1 ? '' : 's'} · {p.feasible ? 'legal' : 'PROBLEM'}</div>
+            <div class="stat-sub">{dur(p.elapsedMinutes)} · {resets(p)} long rest{resets(p) === 1 ? '' : 's'}{splitPairCount(p) ? ` · ${splitPairCount(p)} split${splitPairCount(p) === 1 ? '' : 's'}` : ''} · {p.feasible ? 'legal' : 'PROBLEM'}</div>
           </button>;
         })}
       </div>
@@ -4479,6 +4523,17 @@ function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave
   );
 }
 
+/** Gemini round, item I: why a typed load distance can't be used, or null when it can (1–3000 whole-ish miles). */
+export function loadMilesProblem(text: string): string | null {
+  const t = text.trim();
+  if (t === '') return 'Type how many miles — at least 1.';
+  const n = Number(t);
+  if (!Number.isFinite(n)) return 'That isn’t a number of miles.';
+  if (Math.round(n) < 1) return 'Miles must be at least 1.';
+  if (Math.round(n) > 3000) return 'This check goes up to 3000 miles.';
+  return null;
+}
+
 function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const lc = s.loadCheck;
   // A draft saved before C3 has no `appt` field in memory until the next parse: read it as none.
@@ -4486,6 +4541,12 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const setLoad = (p: Partial<LoadCheckDraft>) => editLoadDraft(p);
   const draftUndo = loadDraftUndoPending();
   const [step, setStep] = useState(lc.answered ? 4 : 1);
+  // Gemini round, item I: the typed miles as typed. A value the check cannot use (empty, 0,
+  // negative, not a number, past 3000) used to be dropped silently — the box kept showing
+  // "-100" while the check ran on the old distance (1200 mi) after Next. Now the box keeps what
+  // was typed, says why it can't be used, and Next waits for a usable distance.
+  const [milesText, setMilesText] = useState<string | null>(null);
+  const milesProblem = milesText === null ? null : loadMilesProblem(milesText);
   // each question is its own screen: start it at the top, not wherever the last Next button was
   // (Patch 19: the shell is the scroller now — the page itself no longer scrolls — so the
   // shell is what goes back to the top; the window call stays for a runtime where it does.
@@ -4533,18 +4594,26 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   // Back out of the flow returns to wherever the driver entered it from (patch 7.1): Now, the
   // Plan hub, or Recap — not always Plan, which is where it landed before. The label names it.
   const returnLabel = s.planReturn === 'now' ? 'Now' : s.planReturn === 'recap' ? 'Recap' : 'Plan';
-  const head = (n: number, count?: string) => (
-    <>
-      <div class="flow-head">
-        <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n === 3.5 ? 3 : n - 1))}><Icon d={I.back} /></button>
-        <b>Can I take this load?</b>
-        <span class="muted">{count ?? `${n} of 3`}</span>
-      </div>
-      <div class="flow-dots" aria-hidden="true">{[1, 2, 3].map((k) => <span key={k} class={k <= n ? 'on' : ''} />)}</div>
-    </>
-  );
+  // Gemini round, item B: the flow is FOUR screens (three questions, then the optional
+  // appointment), so the counter counts four — it read "3 of 3" and then showed a fourth screen.
+  // The appointment screen (step 3.5) is screen 4 and keeps saying it is optional; its dot is
+  // drawn hollow-dashed (.opt) so the row of dots says the same.
+  const FLOW_SCREENS = 4;
+  const head = (n: number) => {
+    const shown = n === 3.5 ? 4 : n;
+    return (
+      <>
+        <div class="flow-head">
+          <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n === 3.5 ? 3 : n - 1))}><Icon d={I.back} /></button>
+          <b>Can I take this load?</b>
+          <span class="muted">{`${shown} of ${FLOW_SCREENS}`}{n === 3.5 ? ' · Optional' : ''}</span>
+        </div>
+        <div class="flow-dots" aria-hidden="true">{[1, 2, 3, 4].map((k) => <span key={k} class={`${k <= shown ? 'on' : ''}${k === 4 ? ' opt' : ''}`} />)}</div>
+      </>
+    );
+  };
   // Question 3 leads to the optional appointment question ("3½", capstone C3 M7), then the answer.
-  const next = (n: number, label: string) => <button class="primary wide flow-next" onClick={() => { if (n === 3) setLoad({ answered: true }); setStep(n === 3 ? 3.5 : n + 1); }}>{label} <Icon d={I.next} /></button>;
+  const next = (n: number, label: string, blocked = false) => <button class="primary wide flow-next" disabled={blocked} onClick={() => { if (blocked) return; if (n === 3) setLoad({ answered: true }); setStep(n === 3 ? 3.5 : n + 1); }}>{label} <Icon d={I.next} /></button>;
   const chips = <T,>(opts: [T, string][], value: T, set: (v: T) => void) => (
     <div class="chips">{opts.map(([v, l]) => <button key={String(v)} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => set(v)}>{l}</button>)}</div>
   );
@@ -4556,10 +4625,11 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <h1 class="flow-q">How far is the load?</h1>
         <p class="muted">Miles from here to the receiver.</p>
         <div class="bignum"><b>{lc.miles}</b> mi</div>
-        <div class="steps4">{[-50, -10, 10, 50].map((d) => <button key={d} aria-label={`${d > 0 ? 'Add' : 'Take off'} ${Math.abs(d)} miles`} onClick={() => setLoad({ miles: Math.min(3000, Math.max(1, lc.miles + d)) })}>{d > 0 ? `+${d}` : `−${-d}`}</button>)}</div>
-        <label>Or type the miles<input type="number" inputMode="numeric" min={1} max={3000} value={lc.miles} onInput={(e) => { const n = Math.round(Number((e.target as HTMLInputElement).value)); if (n >= 1 && n <= 3000) setLoad({ miles: n }); }} /></label>
-        {chips([[250, '250'], [400, '400'], [550, '550'], [700, '700'], [900, '900']] as [number, string][], lc.miles, (v) => setLoad({ miles: v }))}
-        {next(1, 'Next: when you leave')}
+        <div class="steps4">{[-50, -10, 10, 50].map((d) => <button key={d} aria-label={`${d > 0 ? 'Add' : 'Take off'} ${Math.abs(d)} miles`} onClick={() => { setMilesText(null); setLoad({ miles: Math.min(3000, Math.max(1, lc.miles + d)) }); }}>{d > 0 ? `+${d}` : `−${-d}`}</button>)}</div>
+        <label>Or type the miles<input type="number" inputMode="numeric" min={1} max={3000} step={1} required aria-invalid={milesProblem ? 'true' : undefined} aria-describedby={milesProblem ? 'miles-problem' : undefined} value={milesText ?? String(lc.miles)} onInput={(e) => { const v = (e.target as HTMLInputElement).value; if (loadMilesProblem(v)) setMilesText(v); else { setMilesText(null); setLoad({ miles: Math.round(Number(v)) }); } }} /></label>
+        {milesProblem && <p class="warnbox small" id="miles-problem" role="alert">{milesProblem}</p>}
+        {chips([[250, '250'], [400, '400'], [550, '550'], [700, '700'], [900, '900']] as [number, string][], milesProblem ? NaN : lc.miles, (v) => { setMilesText(null); setLoad({ miles: v }); })}
+        {next(1, 'Next: when you leave', !!milesProblem)}
       </>
     );
   }
@@ -4598,7 +4668,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   if (step === 3.5) {
     return (
       <>
-        {head(3, 'Optional')}
+        {head(3.5)}
         <h1 class="flow-q">Appointment at the receiver?</h1>
         <p class="muted">With a time, the answer says whether you make it.</p>
         <div class="chips">
@@ -4891,7 +4961,9 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <label>Carrier day starts at<select value={c.dayStartHour} onChange={(e) => setC({ dayStartHour: Number((e.target as HTMLSelectElement).value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
         <TimeZoneField value={c.timeZone} onChange={(v) => setC({ timeZone: v })} />
         <label class="check"><input type="checkbox" checked={c.shortHaul} onChange={(e) => setC({ shortHaul: (e.target as HTMLInputElement).checked })} /> Short-haul (§395.1(e)) — no 30-min break rule</label>
-        <p class="muted small">Adverse-conditions and 16-hour-day exceptions are per shift — set them on the Now screen, under "Exceptions this shift".</p>
+        {/* Gemini round, item H: the control is a row, not a section — the last row of the Now
+            screen, just above the status buttons — so the copy says where to scroll. */}
+        <p class="muted small">Adverse-conditions and 16-hour-day exceptions are per shift — set them on the Now screen: scroll to the bottom and tap the "Exceptions this shift" row, just above the status buttons.</p>
       </Card>
       <Card title="Planning">
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
