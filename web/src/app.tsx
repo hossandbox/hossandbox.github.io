@@ -2118,14 +2118,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           (splitting, ending the day) waits below the number it wraps up. */}
       <Notices ev={ev} now={now} s={s} strip />
       {timeline ? <SplitPairChip ev={ev} /> : <SplitPairLine ev={ev} />}
-      {/* The load question is the hook of the whole app, and it sat two taps away behind Plan
-          (3 a.m. review, patch 7). It now rides Now itself, in the same dress the Plan hub and
-          Recap give it, one tap from the screen the app opens on. */}
-      <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'now' })}>
-        <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
-        <span class="plan-text"><b>Can I take this load?</b><span class="muted small">Four quick questions, get a yes or no.</span></span>
-        <Icon d={I.next} />
-      </button>
+      {/* Declutter (Lorico, 2026-11-20): the load check lives on Plan only, not Now. */}
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
       {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
           Only on a real record — on the DEMO clock there is no day to compare, and the DEMO

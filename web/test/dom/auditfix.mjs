@@ -221,8 +221,9 @@ await section(async () => {
   ok('D6 Fix the start time: no "Exact time" row, no "Or minutes ago" box', fs && !fs.exactTime && !fs.minutesAgo, fs);
   ok('D7 Fix the start time: no 12-hour AM/PM text; "Another day" reads like "Fri Nov 20"', fs && !fs.ampm && /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}$/.test(fs.day || ''), fs);
   await closeSheet(p);
-  // load check: leave time and appointment
-  await tap(p, 'button.plan-item', /Can I take this load\?/, 700);
+  // Declutter (Lorico, 2026-11-20): load check entry moved off Now; enter via Plan.
+  await go(p, 'Plan');
+  await tap(p, '.page-plan button.plan-item', /Can I take this load\?/, 700);
   await tap(p, 'button.flow-next', null);
   await tap(p, 'button.pick-time', /Pick a time/);
   const lv = await pickerOnly(p);
@@ -433,8 +434,10 @@ await section(async () => {
 /* ---------------- D16, D18, A8, A9 ---------------- */
 await section(async () => {
   const p = await open(DAY);
-  const now = await pageText(p);
-  ok('D16 Now: "Four quick questions" (the flow has four screens)', /Four quick questions, get a yes or no\./.test(now) && !/three questions/.test(now));
+  // Declutter (Lorico, 2026-11-20): load check entry moved off Now onto Plan; check D16 wording on Plan.
+  await go(p, 'Plan');
+  const plan = await pageText(p);
+  ok('D16 Plan: "Four quick questions" (the flow has four screens)', /Four quick questions, get a yes or no\./.test(plan) && !/three questions/.test(plan));
   await go(p, 'More');
   const more = await pageText(p);
   ok('D18 More: no migration banner, no changelog line, no filler', !/has moved to Plan/.test(more) && !/Moved here from/.test(more) && !/Your HOS what-if planner/.test(more), more.slice(0, 200));
@@ -588,7 +591,13 @@ await section(async () => {
   const p = await open(DAY);
   const heroTxt = await p.evaluate(() => document.querySelector('.page.is-active .limit-plate')?.textContent ?? '');
   ok('C3 hero break plate reads "30-min break due in …" (never "limited by 8 hours of driving")', /^30-min break due in \d/.test(heroTxt) && !/limited by/.test(heroTxt), heroTxt);
-  await tap(p, 'button.plan-item', /Can I take this load\?/, 600);
+  // Declutter (Lorico, 2026-11-20): verify load check is ABSENT on Now and PRESENT on Plan, then enter via Plan.
+  const nowHasLoad = await p.evaluate(() => /Can I take this load\?/.test(document.querySelector('.page-now')?.innerText ?? ''));
+  ok('Declutter: "Can I take this load?" is ABSENT on Now', !nowHasLoad);
+  await go(p, 'Plan');
+  const planHasLoad = await p.evaluate(() => [...document.querySelectorAll('.page-plan button.plan-item')].some((b) => /Can I take this load\?/.test(b.textContent ?? '')));
+  ok('Declutter: "Can I take this load?" is PRESENT on Plan', planHasLoad);
+  await tap(p, '.page-plan button.plan-item', /Can I take this load\?/, 600);
   const s1 = await pageText(p);
   ok('A6 Load check step 1: defaults to 550 mi and shows "Step 1 of 4" under the bar', /550\s*mi/.test(s1) && /Step 1 of 4/.test(s1), s1.slice(0, 220));
   await tap(p, 'button.flow-next', /Next: when you leave/, 250);

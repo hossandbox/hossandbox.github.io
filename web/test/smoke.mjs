@@ -1430,15 +1430,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (saved.tab !== 'now' || saved.loadCheck.miles !== 450 || saved.loadCheck.answered !== true) throw new Error('the load answer must persist; the app must open on Now');
   const old = ps(JSON.stringify({ segments: [], loadCheck: { miles: 333, dwell: 30, dwellOff: true } }));
   if (old.loadCheck.miles !== 333 || old.loadCheck.leaveIn !== 0 || old.loadCheck.answered !== false) throw new Error('a load check saved before the redesign must load with the new fields defaulted');
-  // 5. reachable from Plan, Now and Recap; Recap no longer carries its own copy
+  // 5. reachable from Plan and Recap (removed from Now in declutter); Recap no longer carries its own copy
   setState({ tab: 'plan' });
-  if (!/Can I take this load\?/.test(out('plan/load link'))) throw new Error('Plan must offer the load question');
+  if (!/Can I take this load\?/.test(pageOut(out('plan/load link'), 'page-plan'))) throw new Error('Plan must offer the load question');
   setState({ tab: 'now', current: { status: 'ON', since: L(12, 9), createdAt: 2 } });
-  // patch 7.1: the quick row's smaller duplicate "Take a load?" button is gone — Now offers the
-  // load question through the prominent plan-item entry patch 7 put under the hero. The invariant
-  // this line guards (Now must offer the load question) is unchanged; the patch 7.1 section at
-  // the end of this file pins the duplicate's absence.
-  if (!/Can I take this load\?/.test(out('now/load link'))) throw new Error('Now must offer the load question');
+  // Declutter (Lorico, 2026-11-20): load check entry removed from Now; stays on Plan only.
+  if (/Can I take this load\?/.test(pageOut(out('now/load link'), 'page-now'))) throw new Error('declutter: Now must not offer the load question');
   setState({ tab: 'recap' });
   h = out('recap/load link');
   if (!/Can I take this load\?/.test(h)) throw new Error('Recap must link to the load question');
@@ -2624,11 +2621,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (/Every clock here is worked out in your/.test(h)) throw new Error('patch 7: the stale worked-out-in-your-terminal sentence must be gone');
   ss({ tzChosen: true });
 
-  // 4. Now carries the load question as a full entry, not just the quick row
+  // 4. Declutter (Lorico, 2026-11-20): load check entry removed from Now; prominent plan-item entry stays on Plan.
   setLaunchNotice(false);
   ss({ tab: 'now', current: { status: 'ON', since: now - 60 } });
-  h = out('patch 7/now load entry');
-  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Four quick questions, get a yes or no/.test(h)) throw new Error('patch 7 (D16 audit: four questions): Now must offer the load question as a prominent plan-item entry');
+  h = pageOut(out('patch 7/now load entry'), 'page-now');
+  if (/Can I take this load\?|Four quick questions, get a yes or no/.test(h)) throw new Error('declutter: Now must not offer the load question entry');
+  ss({ tab: 'plan' });
+  h = pageOut(out('patch 7/plan load entry'), 'page-plan');
+  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h) || !/Four quick questions, get a yes or no/.test(h)) throw new Error('declutter (D16 audit: four questions): Plan must offer the load question as a prominent plan-item entry');
+  ss({ tab: 'now' });
 
   // 5. the simulated clock banners every screen while set — and is gone when it is not
   //    C5 (taste, 2026-11-20): Testing card on More is hidden until long-press on the build line
@@ -2717,7 +2718,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // too — the pin that guarded its presence here is deliberately retired and inverted: Now
   // must not render the shortcut at all. The planner itself is untouched (patch 13 section).
   if (/Plan a split/.test(h)) throw new Error('patch 13: Now must not render the removed Plan a split shortcut');
-  if (!/class="plan-item"/.test(h) || !/Can I take this load\?/.test(h)) throw new Error('patch 7.1: Now must keep the prominent load entry');
+  // Declutter (Lorico, 2026-11-20): load check entry removed from Now; inverted to assert absence on Now.
+  if (/Can I take this load\?/.test(pageOut(h, 'page-now'))) throw new Error('declutter: Now must not render the load entry');
 
   // (b) A6 (taste, 2026-11-20): Check another load resets to FRESH_LOADCHECK (550 mi middle preset) and returns to question 1.
   if (!/setState\(\{ loadCheck: \{ \.\.\.FRESH_LOADCHECK \} \}\); setStep\(1\)/.test(app)) throw new Error('patch 7.1 (A6): Check another load must reset the draft to FRESH_LOADCHECK and return to question 1');
@@ -2774,7 +2776,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   //     it on his Pixel against live patch 7: from Now, the load flow's back landed on Plan).
   //     The entry handlers are pinned in the source; the flow is then driven by performing the
   //     same store writes the handlers make — the harness renders to string and cannot click.
-  if (!/setState\(\{ tab: 'load', planReturn: 'now' \}\)/.test(app)) throw new Error("patch 7.1: Now's load door must record Now as the return");
+  // Declutter (Lorico, 2026-11-20): Now-side load door removed; pin its absence while Recap and Plan keep theirs.
+  if (/setState\(\{ tab: 'load', planReturn: 'now' \}\)/.test(app)) throw new Error('declutter: NowTab must not carry a load door');
   if (!/setState\(\{ tab: 'load', planReturn: 'recap' \}\)/.test(app)) throw new Error("patch 7.1: Recap's load door must record Recap as the return");
   if (!/setState\(\{ tab, planReturn: 'plan' \}\)/.test(app)) throw new Error('patch 7.1: the Plan hub doors must record Plan as the return');
   // patch 13 (Lorico, Nov 8 2026), re-scoped by sanction S11 (Lorico, Nov 9 2026, capstone
@@ -2788,6 +2791,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   {
     const bodyOf = (name) => { const a = app.indexOf(`function ${name}(`); const b = app.indexOf('\nfunction ', a + 1); return app.slice(a, b < 0 ? undefined : b); };
     if (/tab:\s*'split'/.test(bodyOf('NowTab'))) throw new Error('patch 13/S11: NowTab must not carry a split door in any property order');
+    if (/tab:\s*'load'/.test(bodyOf('NowTab'))) throw new Error('declutter: NowTab must not carry a load door in any property order');
     const jump = "setState({ tab: 'split', planReturn: 'now' })";
     if ((app.split(jump).length - 1) !== 1) throw new Error('patch 13/S11: the sanctioned LeverSheet split jump must appear exactly once in app.tsx');
     if (!bodyOf('LeverSheet').includes(jump)) throw new Error('patch 13/S11: the one split jump must live inside LeverSheet');
@@ -6299,5 +6303,37 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`taste round: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
   console.log('taste round (C1–C7, A6, A7, A10): OK');
+}
+// --- declutter (Lorico, 2026-11-20): "Can I take this load?" absent on Now, present on Plan
+{
+  const S = await import('../src/store.ts');
+  const nowT = Math.floor(Date.UTC(2026, 10, 20, 18, 0) / 60000);
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const activeRecord = {
+    ...S.INITIAL_STATE, nowOverride: nowT, drivingView: false,
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true,
+    segments: [{ status: 'OFF', start: nowT - 700, end: nowT - 60 }],
+    current: { status: 'ON', since: nowT - 60 },
+  };
+  for (const card of ['dial', 'timeline']) {
+    for (const [label, seed] of [
+      [`fresh/${card}`, { ...S.INITIAL_STATE, tab: 'now', nowOverride: nowT, nowCard: card, disclaimerAcked: true, tzChosen: true }],
+      [`active/${card}`, { ...activeRecord, tab: 'now', nowCard: card }],
+    ]) {
+      setState(seed);
+      const nowHtml = pageOut(render(h(App, {})), 'page-now');
+      need(!/Can I take this load\?/.test(nowHtml) && !/Four quick questions, get a yes or no/.test(nowHtml), `Now (${label}) must not render the load check entry`);
+    }
+  }
+  setState({ ...activeRecord, tab: 'plan' });
+  const planHtml = pageOut(render(h(App, {})), 'page-plan');
+  need(/<button class="plan-item"[\s\S]*?Can I take this load\?[\s\S]*?Four quick questions, get a yes or no\./.test(planHtml), 'Plan must still render the "Can I take this load?" plan-item entry');
+  setState({ ...activeRecord, tab: 'load', planReturn: 'plan', loadCheck: { ...S.DEFAULT_LOADCHECK } });
+  const loadHtml = pageOut(render(h(App, {})), 'page-plan');
+  need(/How far is the load\?/.test(loadHtml), 'Load check wizard must remain intact when opened from Plan');
+  if (bad.length) throw new Error(`declutter: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
+  console.log('declutter (load check absent on Now, present on Plan): OK');
 }
 console.log('OK');
