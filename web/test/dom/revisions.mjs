@@ -568,6 +568,211 @@ await pin('C2. the settings screen offers GitHub as the only report channel', as
   return (/Report a bug \(GitHub\)/.test(txt) && !/Prefer email instead/.test(txt)) || 'bug reports card wrong';
 });
 
+/* ---------------- (l) logpin (2026-11-20): Now-only header disclaimer, Log bug button removed, pinned Log layout ---------------- */
+await pin('L1. logpin: header planning-only disclaimer + Details renders on Now only (absent on Log, Plan, Split, More), and first-run Now surfaces timezone picker', async () => {
+  await seed({ tab: 'now', tzChosen: false, ...segs });
+  const hdr = () => all((n) => n.localName === 'header' && has(n, 'top'))[0];
+  const hasDisc = () => {
+    const h0 = hdr();
+    const d = h0 && all((n) => n.localName === 'details' && has(n, 'disclaimer-line'), h0)[0];
+    return !!d && /Planning only — not a log, not an ELD/.test(d.textContent) && /Details/.test(d.textContent);
+  };
+  if (!hasDisc()) return 'missing disclaimer-line on Now';
+  if (!/Where is your home terminal\?/.test(hdr().textContent)) return 'first-run timezone picker missing on Now';
+  for (const t of ['log', 'plan', 'split', 'settings']) {
+    await seed({ tab: t, tzChosen: false, ...segs });
+    const h0 = hdr();
+    if (all((n) => n.localName === 'details' && has(n, 'disclaimer-line'), h0).length !== 0 || /Planning only — not a log, not an ELD/.test(h0.textContent)) {
+      return `disclaimer-line still present on ${t}`;
+    }
+  }
+  return true;
+});
+await pin('L2. logpin: Log screen has NO "Report a bug (GitHub)" button; More screen keeps its Bug reports card', async () => {
+  await seed({ tab: 'log', ...segs });
+  const ps = pages();
+  const logPg = ps[2], morePg = ps[3];
+  const logHasBug = /Report a bug \(GitHub\)/.test(logPg.textContent);
+  const moreHasBug = /Bug reports/.test(morePg.textContent) && /Report a bug \(GitHub\)/.test(morePg.textContent);
+  return (!logHasBug && moreHasBug) || `logHasBug=${logHasBug} moreHasBug=${moreHasBug}`;
+});
+await pin('L3. logpin: Log splits into .log-pin (.daynav + graph card), .log-scroll (entries), and .log-foot (.addbtn); day nav updates both pinned graph and list', async () => {
+  const twoDays = {
+    segments: [
+      { status: 'OFF', start: T - 1440 - 600, end: T - 1440 - 120 },
+      { status: 'D', start: T - 1440 - 120, end: T - 1440 - 30 },
+      { status: 'OFF', start: T - 900, end: T - 300 },
+      { status: 'D', start: T - 300, end: T - 60 },
+    ],
+    current: { status: 'ON', since: T - 60 },
+  };
+  await seed({ tab: 'log', ...twoDays });
+  const logPg = pages()[2];
+  const pinEl = all((n) => has(n, 'log-pin'), logPg)[0];
+  const scrollEl = all((n) => has(n, 'log-scroll'), logPg)[0];
+  const footEl = all((n) => has(n, 'log-foot'), logPg)[0];
+  if (!pinEl || !scrollEl || !footEl) return `missing regions: pin=${!!pinEl} scroll=${!!scrollEl} foot=${!!footEl}`;
+  const pinHasNavAndGraph = !!all((n) => has(n, 'daynav'), pinEl)[0] && !!all((n) => has(n, 'log-graph-card'), pinEl)[0] && !!all((n) => n.localName === 'svg' && has(n, 'grid'), pinEl)[0] && !!all((n) => has(n, 'daytotals'), pinEl)[0];
+  const scrollHasEntries = all((n) => n.localName === 'button' && has(n, 'entry'), scrollEl).length >= 1;
+  const footHasAdd = !!all((n) => n.localName === 'button' && has(n, 'addbtn'), footEl)[0] && all((n) => n.localName === 'button' && has(n, 'addbtn'), scrollEl).length === 0;
+  if (!pinHasNavAndGraph || !scrollHasEntries || !footHasAdd) return `structure wrong: pin=${pinHasNavAndGraph} scroll=${scrollHasEntries} foot=${footHasAdd}`;
+  const titleBefore = all((n) => has(n, 'daynav-title'), pinEl)[0].textContent;
+  const totalsBefore = all((n) => has(n, 'daytotals'), pinEl)[0].textContent;
+  const entriesBefore = all((n) => n.localName === 'button' && has(n, 'entry'), scrollEl).map((e) => e.textContent).join('|');
+  const prevBtn = all((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Previous day', pinEl)[0];
+  fire(prevBtn, 'click'); await sleep(60);
+  const titleAfter = all((n) => has(n, 'daynav-title'), pinEl)[0].textContent;
+  const totalsAfter = all((n) => has(n, 'daytotals'), pinEl)[0].textContent;
+  const entriesAfter = all((n) => n.localName === 'button' && has(n, 'entry'), scrollEl).map((e) => e.textContent).join('|');
+  if (titleAfter === titleBefore || totalsAfter === totalsBefore || entriesAfter === entriesBefore) {
+    return `Previous day did not update both pinned graph and list: title "${titleBefore}"->"${titleAfter}", totals "${totalsBefore}"->"${totalsAfter}"`;
+  }
+  const nextBtn = all((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Next day', pinEl)[0];
+  fire(nextBtn, 'click'); await sleep(60);
+  const titleBack = all((n) => has(n, 'daynav-title'), pinEl)[0].textContent;
+  return titleBack === titleBefore || `Next day did not restore Today: "${titleBack}" vs "${titleBefore}"`;
+});
+
+/* ---------------- (p) log summary PDF follow-on (2026-11-20) ---------------- */
+const E = await import('../../../engine/src/index.ts');
+const PDF_DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+const dataCard = () => all((n) => n.localName === 'section' && has(n, 'card') && all((h2) => h2.localName === 'h2' && h2.textContent.trim() === 'Data', n).length > 0, pages()[3])[0];
+const daysInput = () => { const c = dataCard(); return c && all((n) => n.localName === 'input' && n.attributes.type === 'number', c)[0]; };
+const pdfBtn = () => { const c = dataCard(); return c && all((n) => n.localName === 'button' && n.textContent.trim() === 'Log summary (PDF)', c)[0]; };
+const reportEl = () => all((n) => n.localName === 'article' && has(n, 'print-report'))[0] ?? null;
+
+await pin('P1. log summary PDF: More Data card has Days field (default 14) and "Log summary (PDF)" button next to Export JSON; no report mounted initially', async () => {
+  A.setPrintReport(null);
+  await seed({ tab: 'settings', ...segs });
+  const c = dataCard();
+  if (!c) return 'no Data card on More';
+  const inp = daysInput();
+  const btn = pdfBtn();
+  const hasExport = /Export JSON/.test(c.textContent);
+  const hasDaysLabel = all((n) => n.localName === 'label' && has(n, 'pdf-days') && /Days/.test(n.textContent), c).length === 1;
+  const val = String(inp?.value ?? inp?.attributes?.value ?? '');
+  return (hasExport && hasDaysLabel && !!inp && val === '14' && !!btn && !reportEl())
+    || `export=${hasExport} label=${hasDaysLabel} val="${val}" btn=${!!btn} rep=${!!reportEl()}`;
+});
+
+await pin('P2. log summary PDF: entering 8 produces 8 day sections and 14 produces 14 (newest-first), each with Grid + engine-matching totals + header/footer disclaimers', async () => {
+  A.setPrintReport(null);
+  let printCalls = 0;
+  const prevPrint = globalThis.print;
+  globalThis.print = () => { printCalls++; };
+  try {
+    const cfg = { ...getState().config, dayStartHour: 0, timeZone: deviceTz };
+    const d0 = E.carrierDayStart(T, cfg);
+    const d1 = E.carrierDayStart(d0 - 1, cfg);
+    const d2 = E.carrierDayStart(d1 - 1, cfg); // intentionally empty -> no-duty day
+    const d3 = E.carrierDayStart(d2 - 1, cfg);
+    const seeded = {
+      tab: 'settings',
+      config: cfg,
+      segments: [
+        { status: 'OFF', start: d3, end: d3 + 480, createdAt: 1 },
+        { status: 'D', start: d3 + 480, end: d3 + 780, createdAt: 2 },
+        { status: 'SB', start: d1, end: d1 + 600, createdAt: 3 },
+        { status: 'ON', start: d1 + 600, end: d1 + 690, createdAt: 4 },
+        { status: 'D', start: d1 + 690, end: d1 + 990, createdAt: 5 },
+        { status: 'OFF', start: d0, end: d0 + 180, createdAt: 6 },
+        { status: 'D', start: d0 + 180, end: d0 + 420, createdAt: 7 },
+      ],
+      current: { status: 'ON', since: d0 + 420, createdAt: 8 },
+    };
+    await seed(seeded);
+    const ev = E.evaluate(S.allSegments(getState(), T), { asOf: T, config: cfg });
+    const expectedDays = A.buildLogSummaryDays(getState(), T, 14);
+    const checkCount = async (want) => {
+      const beforeCalls = printCalls;
+      const inp = daysInput();
+      inp.value = String(want);
+      fire(inp, 'input'); await sleep(30);
+      fire(pdfBtn(), 'click'); await sleep(60);
+      if (printCalls !== beforeCalls + 1) return `window.print not invoked for ${want} days (${beforeCalls}->${printCalls})`;
+      const rep = reportEl();
+      if (!rep) return `no .print-report rendered for ${want} days`;
+      const secs = all((n) => n.localName === 'section' && has(n, 'pr-day'), rep);
+      if (secs.length !== want) return `expected ${want} day sections, got ${secs.length}`;
+      // Section order: newest-first (back = 0 .. want - 1, strictly descending day start)
+      const starts = secs.map((s) => Number(s.attributes['data-day-start']));
+      for (let i = 1; i < starts.length; i++) if (!(starts[i] < starts[i - 1])) return `sections not strictly newest-first at index ${i}`;
+      if (starts[0] !== d0) return `first section is not today (${starts[0]} vs ${d0})`;
+      // Header & footer disclaimers + metadata
+      const head = all((n) => n.localName === 'header' && has(n, 'pr-head'), rep)[0];
+      const foot = all((n) => n.localName === 'footer' && has(n, 'pr-foot'), rep)[0];
+      if (!head || !head.textContent.includes('Split Decision') || !head.textContent.includes(`${want} days`) || !head.textContent.includes('Generated') || !head.textContent.includes(PDF_DISC)) {
+        return `header missing required fields for ${want} days`;
+      }
+      if (!foot || !foot.textContent.includes(PDF_DISC)) return `footer missing disclaimer for ${want} days`;
+      // Every section has an SVG Grid and a .daytotals matching engine evaluation
+      for (let i = 0; i < secs.length; i++) {
+        const sec = secs[i];
+        const svg = all((n) => n.localName === 'svg' && has(n, 'grid'), sec)[0];
+        const tot = all((n) => has(n, 'daytotals'), sec)[0];
+        if (!svg || !tot) return `section ${i} missing svg or daytotals`;
+        const cells = tot.childNodes.filter((c) => c.localName === 'div').map((c) => c.textContent);
+        const exp = expectedDays[i];
+        // Totals labels come from STATUS_LABEL ('On Duty' / 'Off Duty') — the same source the
+        // Log screen's own .daytotals renders from. Sentence-case expectations here were a
+        // test-authoring error in the PDF round (Ada verification, 2026-11-21).
+        const wantCells = [
+          `Driving${S.dur(exp.totals.D)}`,
+          `On Duty${S.dur(exp.totals.ON)}`,
+          `Off Duty${S.dur(exp.totals.OFF)}`,
+          `Sleeper${S.dur(exp.totals.SB)}`,
+        ];
+        if (JSON.stringify(cells) !== JSON.stringify(wantCells)) return `section ${i} totals ${JSON.stringify(cells)} != ${JSON.stringify(wantCells)}`;
+      }
+      // Cross-check engine evaluate().cycle.days onDuty for days after any 34h restart
+      for (const cd of ev.cycle.days) {
+        const exp = expectedDays.find((x) => x.start === cd.start);
+        if (!exp) return `engine cycle day missing on ${cd.label}`;
+        if ((ev.cycle.restartEnd === null || cd.start >= ev.cycle.restartEnd) && exp.totals.D + exp.totals.ON !== cd.onDuty) {
+          return `engine cycle day mismatch on ${cd.label}`;
+        }
+      }
+      // Empty day (d2 = index 2) marked as no-duty day with zero entry rows
+      const emptySec = secs[2];
+      const emptyRows = all((n) => n.localName === 'li' && has(n, 'pr-entry'), emptySec);
+      if (emptyRows.length !== 0 || !/no-duty day/i.test(emptySec.textContent)) return `empty day wrong: rows=${emptyRows.length} text="${emptySec.textContent.slice(0, 120)}"`;
+      return true;
+    };
+    const r8 = await checkCount(8);
+    if (r8 !== true) return r8;
+    const r14 = await checkCount(14);
+    if (r14 !== true) return r14;
+    return true;
+  } finally {
+    globalThis.print = prevPrint;
+    A.setPrintReport(null);
+  }
+});
+
+await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5) show visible alert feedback, render NO report, and do not print', async () => {
+  A.setPrintReport(null);
+  let printCalls = 0;
+  const prevPrint = globalThis.print;
+  globalThis.print = () => { printCalls++; };
+  try {
+    await seed({ tab: 'settings', ...segs });
+    for (const badVal of ['0', '', '500', '14.5']) {
+      const inp = daysInput();
+      inp.value = badVal;
+      fire(inp, 'input'); await sleep(30);
+      fire(pdfBtn(), 'click'); await sleep(50);
+      const alert = all((n) => n.attributes.role === 'alert', dataCard())[0];
+      if (!alert || !alert.textContent.trim()) return `no visible alert for "${badVal}"`;
+      if (reportEl()) return `report unexpectedly rendered for "${badVal}"`;
+      if (printCalls !== 0) return `window.print called for invalid input "${badVal}"`;
+    }
+    return true;
+  } finally {
+    globalThis.print = prevPrint;
+    A.setPrintReport(null);
+  }
+});
+
 let fails = 0;
 for (const [st, name, why] of res) { console.log(`${st} ${name}${why ? ` — ${why}` : ''}`); if (st === 'FAIL') fails++; }
 console.log(`revisions: ${res.length - fails}/${res.length} pins pass`);

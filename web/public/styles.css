@@ -1191,3 +1191,426 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 .trip-sub-head b { color: var(--text); }
 /* A10: quick-start read-out list (scroll target after import or voice entry). */
 .qs-result { scroll-margin-top: 12px; }
+
+/* ===================================================================================
+   LOGPIN ROUND (2026-11-20) — Pinned Log daynav/graph + scrolling list + pinned addbtn.
+   Presentation/layout only; existing tokens only.
+   =================================================================================== */
+.page.page-log {
+  overflow-y: hidden;
+  padding: 0 0 calc(61px + env(safe-area-inset-bottom));
+  gap: 0;
+}
+.page.page-log > .log-pin {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+  padding: var(--s-8) var(--s-12) var(--s-10);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 2;
+}
+.page.page-log > .log-pin > .timehead { margin: 0 2px; }
+.page.page-log > .log-pin > .log-graph-card { padding: var(--s-10) var(--s-12); }
+.page.page-log > .log-pin .daytotals { margin-top: var(--s-8); padding-top: var(--s-6); }
+.page.page-log > .log-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: none;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-12);
+  padding: var(--s-10) var(--s-12) var(--s-16);
+  scroll-padding-top: var(--s-10);
+  scroll-padding-bottom: var(--s-16);
+  position: relative;
+  z-index: 1;
+}
+.page.page-log > .log-scroll::-webkit-scrollbar { display: none; }
+.page.page-log > .log-scroll > * { flex-shrink: 0; }
+.page.page-log > .log-foot {
+  flex: 0 0 auto;
+  padding: var(--s-8) var(--s-12);
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  position: relative;
+  z-index: 2;
+}
+@media (max-width: 380px) {
+  .page.page-log > .log-foot button.addbtn { font-size: 15px; padding: 8px 10px; }
+}
+@media (max-height: 700px) {
+  .page.page-log > .log-pin { gap: var(--s-4); padding: var(--s-4) var(--s-12) var(--s-6); }
+  .page.page-log > .log-pin > .log-graph-card { padding: var(--s-8) var(--s-10); }
+  .page.page-log > .log-pin .daytotals { margin-top: var(--s-4); padding-top: var(--s-4); font-size: 14px; line-height: 1.2; }
+  .page.page-log > .log-pin .daytotals .small { font-size: 12px; line-height: 1.2; }
+  .page.page-log > .log-scroll { padding: var(--s-6) var(--s-12) var(--s-14); gap: var(--s-10); }
+  .page.page-log > .log-scroll > .card { padding: var(--s-10) var(--s-12); }
+  .page.page-log > .log-scroll > .card > h2 { margin-bottom: var(--s-6); }
+  .page.page-log > .log-scroll > .card > .row { margin-top: var(--s-6); }
+  .page.page-log > .log-foot { padding: var(--s-6) var(--s-12); }
+}
+
+/* ===================================================================================
+   LOGPIN FOLLOW-ON (2026-11-20) — Log summary (PDF) controls on More → Data + @media print.
+   Offline-only print stylesheet; on-screen app untouched except the Data card control row.
+   =================================================================================== */
+.pdf-export-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-8);
+  margin-top: var(--s-10);
+}
+.pdf-export-row > label.pdf-days {
+  flex: 0 0 88px;
+  min-width: 0;
+  margin-top: 0;
+}
+.pdf-export-row > label.pdf-days > input.num {
+  text-align: center;
+  font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+  font-weight: 700;
+}
+.pdf-export-row > button.pdf-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pdf-export-row + .warnbox {
+  margin-top: var(--s-8);
+}
+
+/* The printable log summary is hidden on screen so normal layout and scroll geometry are untouched. */
+.print-report {
+  display: none;
+}
+
+@page {
+  size: letter portrait;
+  margin: 0.45in 0.5in;
+}
+
+@media print {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0b1117 !important;
+  }
+  .app.has-print-report {
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+    background: #ffffff !important;
+  }
+  .app.has-print-report > :not(.print-report) {
+    display: none !important;
+  }
+  .app.has-print-report > .print-report {
+    display: block !important;
+    /* Crisp daylight ink palette on paper regardless of whether the driver is in Night mode. */
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel2: #f1f4f7;
+    --screen: #f6f8fa;
+    --line: #c3cbd3;
+    --tick: #7f8c99;
+    --text: #0b1117;
+    --muted: #45525f;
+    --good: #0f7a40;
+    --warn: #8a5200;
+    --bad: #b32020;
+    --sb: #5b3fc4;
+    --accent: #0b5fa8;
+    --tint-warn: #fef6e7;
+    color: var(--text);
+    background: #ffffff;
+    font: 9.5pt/1.38 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print-report .pr-head {
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid #0b1117;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-report .pr-brand-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .print-report .pr-app {
+    font-size: 8.5pt;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #0b5fa8;
+  }
+  .print-report .pr-app-sub {
+    font-weight: 600;
+    color: #45525f;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .print-report .pr-title {
+    margin: 2px 0 0;
+    font-size: 17pt;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #0b1117;
+  }
+  .print-report .pr-count-badge {
+    padding: 4px 10px;
+    border: 1.5px solid #0b5fa8;
+    border-radius: 999px;
+    background: #eef5fc;
+    color: #0b5fa8;
+    font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+    font-size: 9pt;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .print-report .pr-disclaimer {
+    margin: 8px 0 10px;
+    padding: 7px 10px;
+    background: #fef6e7;
+    border: 1px solid #d9b066;
+    border-left: 4px solid #8a5200;
+    border-radius: 6px;
+    font-size: 8.5pt;
+    font-weight: 700;
+    color: #0b1117;
+  }
+  .print-report .pr-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 14px;
+    margin: 0;
+  }
+  .print-report .pr-meta dt {
+    font-size: 7.5pt;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #45525f;
+  }
+  .print-report .pr-meta dd {
+    margin: 1px 0 0;
+    font-size: 9pt;
+    font-weight: 600;
+    color: #0b1117;
+  }
+  .print-report .pr-range-totals {
+    margin-top: 10px;
+    padding: 7px 10px;
+    background: #f6f8fa;
+    border: 1px solid #c3cbd3;
+    border-radius: 8px;
+  }
+  .print-report .pr-range-label {
+    font-size: 7.5pt;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #45525f;
+    margin-bottom: 5px;
+  }
+  .print-report .pr-range-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .print-report .pr-tot {
+    display: flex;
+    flex-direction: column;
+    padding-left: 7px;
+    border-left: 3px solid #c3cbd3;
+  }
+  .print-report .pr-tot span { font-size: 8pt; color: #45525f; }
+  .print-report .pr-tot b { font-size: 10pt; color: #0b1117; }
+  .print-report .pr-tot-D { border-left-color: #0f7a40; }
+  .print-report .pr-tot-ON { border-left-color: #8a5200; }
+  .print-report .pr-tot-OFF { border-left-color: #45525f; }
+  .print-report .pr-tot-SB { border-left-color: #5b3fc4; }
+
+  .print-report .pr-days {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .print-report .pr-day {
+    border: 1px solid #c3cbd3;
+    border-radius: 10px;
+    padding: 9px 11px;
+    background: #ffffff;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-report .pr-day-noduty {
+    background: #fafbfc;
+  }
+  .print-report .pr-day-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .print-report .pr-day-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .print-report .pr-day-head h2 {
+    margin: 0;
+    font-size: 10.5pt;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #0b1117;
+  }
+  .print-report .pr-noduty-tag {
+    padding: 1px 7px;
+    border: 1px solid #c3cbd3;
+    border-radius: 999px;
+    background: #f1f4f7;
+    color: #45525f;
+    font-size: 7.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .print-report .pr-day-sub {
+    font-size: 8pt;
+    color: #45525f;
+    text-align: right;
+  }
+
+  .print-report .pr-day-graph .grid {
+    background: #f6f8fa;
+    border: 1px solid #d5dce3;
+    border-radius: 6px;
+    box-shadow: none;
+    max-height: 116px;
+  }
+  .print-report .s-D, .print-report .s-ON {
+    filter: none !important;
+  }
+  .print-report .grid-step {
+    stroke: #0b1117;
+    opacity: .8;
+  }
+
+  .print-report .pr-day-totals {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #d5dce3;
+    gap: 6px;
+  }
+  .print-report .pr-day-totals > div {
+    padding: 2px 6px;
+    border-left: 3px solid #c3cbd3;
+    text-align: left;
+  }
+  .print-report .pr-day-totals > div.pr-tot-D { border-left-color: #0f7a40; }
+  .print-report .pr-day-totals > div.pr-tot-ON { border-left-color: #8a5200; }
+  .print-report .pr-day-totals > div.pr-tot-OFF { border-left-color: #45525f; }
+  .print-report .pr-day-totals > div.pr-tot-SB { border-left-color: #5b3fc4; }
+  .print-report .pr-day-totals .small { font-size: 8pt; color: #45525f; }
+  .print-report .pr-day-totals b { font-size: 9.5pt; color: #0b1117; }
+
+  .print-report .pr-entries {
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid #e1e6ec;
+  }
+  .print-report .pr-noduty-msg {
+    margin: 2px 0 0;
+    font-size: 8.5pt;
+    font-style: italic;
+    color: #45525f;
+  }
+  .print-report .pr-entry-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .print-report .pr-entry {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr) auto 58px;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    border-top: 1px solid #edf1f5;
+    font-size: 8.5pt;
+  }
+  .print-report .pr-entry:first-child {
+    border-top: 0;
+    padding-top: 1px;
+  }
+  .print-report .pr-entry .dot {
+    width: 8px;
+    height: 8px;
+  }
+  .print-report .pr-entry-label {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    color: #0b1117;
+  }
+  .print-report .pr-live-tag {
+    padding: 0 5px;
+    border: 1px solid #0b5fa8;
+    border-radius: 999px;
+    color: #0b5fa8;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .print-report .pr-entry .eld-tag {
+    margin-top: 0;
+    padding: 0 5px;
+    font-size: 7.5pt;
+  }
+  .print-report .pr-entry-time {
+    color: #45525f;
+    font-size: 8.2pt;
+    white-space: nowrap;
+  }
+  .print-report .pr-entry-len {
+    text-align: right;
+    font-weight: 700;
+    color: #0b1117;
+    white-space: nowrap;
+  }
+
+  .print-report .pr-foot {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #9aa6b2;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-report .pr-foot-disclaimer {
+    margin: 0;
+    font-size: 7.5pt;
+    font-weight: 700;
+    color: #45525f;
+  }
+  .print-report .pr-foot-meta {
+    margin: 2px 0 0;
+    font-size: 7pt;
+    color: #5c6a78;
+  }
+}

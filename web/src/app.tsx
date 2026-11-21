@@ -1051,7 +1051,8 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
         : again && again.off !== null && status !== 'D' && <div class="compact">{ev.binding === 'BREAK_30' ? '30-min break due' : ev.binding === 'CYCLE' ? `Out of ${ev.cycle.limit / 60}-hour hours` : 'Out of hours'} · <b>drive again at {clock(again.off)}</b></div>)}
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
       {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
-      <HeaderDisclaimer s={s} />
+      {/* Logpin (Lorico, 2026-11-20): planning-only disclaimer line + Details toggle shows on Now only. */}
+      {onNow && <HeaderDisclaimer s={s} />}
     </header>
   );
 }
@@ -3207,8 +3208,10 @@ function carrierDay(now: number, back: number, s: State): { start: number; end: 
  * edit panel — the small Edit and × buttons (25×28px) are gone, and delete lives inside the panel,
  * with undo. The resolved timeline and the overlap and violation reports are unchanged.
  */
-function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvaluation; notices?: ComponentChildren }) {
   const [back, setBack] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [back]);
   const undo = useUndo();
   const day = carrierDay(now, back, s);
   const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
@@ -3262,85 +3265,91 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 
   return (
     <>
-      <TimeHead kind="past" />
-      <div class="daynav">
-        <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
-        <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
-        <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
+      <div class="log-pin">
+        <TimeHead kind="past" />
+        <div class="daynav">
+          <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
+          <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
+          <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
+        </div>
+        <section class="card log-graph-card">
+          {/* The resolved timeline, as the clocks read it: drawn raw, a break added inside a drive showed the
+              drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
+          <Grid segments={resolved} from={day.start} to={day.end} tz={s.config.timeZone} />
+          <div class="daytotals">
+            {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
+          </div>
+        </section>
       </div>
-      <section class="card">
-        {/* The resolved timeline, as the clocks read it: drawn raw, a break added inside a drive showed the
-            drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
-        <Grid segments={resolved} from={day.start} to={day.end} tz={s.config.timeZone} />
-        <div class="daytotals">
-          {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
-        </div>
-      </section>
-      {overlaps.length > 0 && (
-        <div class="warnbox">
-          <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks count the day without double-counting, which can be less than the rows below appear to add up to.
-          <ul class="seglist">{overlaps.map((seg, i) => (
-            <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
-          ))}</ul>
-        </div>
-      )}
-      {undo && (
-        <div class="row undo">
-          <span class="muted small">{undo.label}.</span>
-          <button class="mini" onClick={() => { undoLast(); }}>Undo</button>
-        </div>
-      )}
-      <Card title={showResolved ? `What the clocks count (${resolved.length})` : `Entries on this day (${entryCount})`}>
-        <div class="row">
-          <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Back to entries' : 'See what the clocks count'}</button>
-        </div>
-        {showResolved ? (
-          <>
-            <p class="muted small">Oldest first — this is what the clocks actually count across your whole log, with any overlaps settled and your current status included. Read-only; go back to entries to change anything.</p>
-            <ul class="seglist">{resolved.map((seg, i) => (
-              <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
-            ))}
-            {s.current && now <= s.current.since && (
-              <li><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span>{segLabel(s.current.status, s.current.note)}</span><span class="muted">since {clock(s.current.since)} · just started</span></li>
-            )}</ul>
-            <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
-            <p class="muted small">Set your current status on the Now screen to keep this timeline moving.</p>
-          </>
-        ) : (
-          <>
-            {liveRow && s.current && (
-              /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
-              <button class="entry live" aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} onClick={() => openSheet({ kind: 'edit', seg: liveSeg(s, now)!, live: true })}>
-                <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
-                <span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
-                <span class="entry-len">{dur(Math.max(0, now - s.current.since))}</span>
-                <Icon d={I.next} size={18} />
-              </button>
-            )}
-            {listed.map((it, i) => 'g' in it ? <HoleRow key={`h${it.g.start}`} g={it.g} /> : (() => { const seg = it.seg; return (
-              <button key={i} class="entry" aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
-                <span class={seg.note === ELD_SEED_NOTE ? 'dot eld-dot' : 'dot'} style={{ background: STATUS_COLOR[seg.status], color: STATUS_COLOR[seg.status] }} />
-                <span><b>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</b><span class="muted small">{clock(seg.start)} → {clock(seg.end)}</span>
-                  {/* D11 (audit): the quick start's rows say where they came from — an estimate
-                      built from the four ELD clocks, not a day the driver logged. */}
-                  {seg.note === ELD_SEED_NOTE && <span class="eld-tag">Estimate from your ELD clocks</span>}</span>
-                <span class="entry-len">{dur(seg.end - seg.start)}</span>
-                <Icon d={I.next} size={18} />
-              </button>
-            ); })())}
-            {!dayRows.length && !(s.current && back === 0) && <p class="muted">Nothing logged on this day.</p>}
-          </>
+      <div class="log-scroll" ref={scrollRef}>
+        {notices}
+        {overlaps.length > 0 && (
+          <div class="warnbox">
+            <b>These entries overlap.</b> The later entry wins over the time it covers and the earlier one is split — so the clocks count the day without double-counting, which can be less than the rows below appear to add up to.
+            <ul class="seglist">{overlaps.map((seg, i) => (
+              <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
+            ))}</ul>
+          </div>
         )}
-      </Card>
-      <button class="addbtn" onClick={() => openSheet(back === 0 ? { kind: 'add' } : { kind: 'add', day: day.start + 720 })}><Icon d={I.plus} /> Add a break or something I forgot</button>
-      <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
-      {ev.violations.some((v) => v.tentative) && (
-        <Card title="This plan would violate" tone="warn">
-          <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
-          <ViolationList items={ev.violations.filter((v) => v.tentative)} />
+        {undo && (
+          <div class="row undo">
+            <span class="muted small">{undo.label}.</span>
+            <button class="mini" onClick={() => { undoLast(); }}>Undo</button>
+          </div>
+        )}
+        <Card title={showResolved ? `What the clocks count (${resolved.length})` : `Entries on this day (${entryCount})`}>
+          <div class="row">
+            <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Back to entries' : 'See what the clocks count'}</button>
+          </div>
+          {showResolved ? (
+            <>
+              <p class="muted small">Oldest first — this is what the clocks actually count across your whole log, with any overlaps settled and your current status included. Read-only; go back to entries to change anything.</p>
+              <ul class="seglist">{resolved.map((seg, i) => (
+                <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
+              ))}
+              {s.current && now <= s.current.since && (
+                <li><span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} /><span>{segLabel(s.current.status, s.current.note)}</span><span class="muted">since {clock(s.current.since)} · just started</span></li>
+              )}</ul>
+              <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
+              <p class="muted small">Set your current status on the Now screen to keep this timeline moving.</p>
+            </>
+          ) : (
+            <>
+              {liveRow && s.current && (
+                /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
+                <button class="entry live" aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} onClick={() => openSheet({ kind: 'edit', seg: liveSeg(s, now)!, live: true })}>
+                  <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
+                  <span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
+                  <span class="entry-len">{dur(Math.max(0, now - s.current.since))}</span>
+                  <Icon d={I.next} size={18} />
+                </button>
+              )}
+              {listed.map((it, i) => 'g' in it ? <HoleRow key={`h${it.g.start}`} g={it.g} /> : (() => { const seg = it.seg; return (
+                <button key={i} class="entry" aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
+                  <span class={seg.note === ELD_SEED_NOTE ? 'dot eld-dot' : 'dot'} style={{ background: STATUS_COLOR[seg.status], color: STATUS_COLOR[seg.status] }} />
+                  <span><b>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</b><span class="muted small">{clock(seg.start)} → {clock(seg.end)}</span>
+                    {/* D11 (audit): the quick start's rows say where they came from — an estimate
+                        built from the four ELD clocks, not a day the driver logged. */}
+                    {seg.note === ELD_SEED_NOTE && <span class="eld-tag">Estimate from your ELD clocks</span>}</span>
+                  <span class="entry-len">{dur(seg.end - seg.start)}</span>
+                  <Icon d={I.next} size={18} />
+                </button>
+              ); })())}
+              {!dayRows.length && !(s.current && back === 0) && <p class="muted">Nothing logged on this day.</p>}
+            </>
+          )}
         </Card>
-      )}
-      <BugButton s={s} ev={ev} />
+        <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
+        {ev.violations.some((v) => v.tentative) && (
+          <Card title="This plan would violate" tone="warn">
+            <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
+            <ViolationList items={ev.violations.filter((v) => v.tentative)} />
+          </Card>
+        )}
+      </div>
+      <div class="log-foot">
+        <button class="addbtn" onClick={() => openSheet(back === 0 ? { kind: 'add' } : { kind: 'add', day: day.start + 720 })}><Icon d={I.plus} /> Add a break or something I forgot</button>
+      </div>
     </>
   );
 }
@@ -5381,6 +5390,232 @@ function downloadExport(s: State): string {
   return name;
 }
 
+/* ============================================================ Log summary (PDF / print) */
+
+/** Log summary PDF (2026-11-20 follow-on): day-count bounds and mandatory non-ELD disclaimer. */
+export const PDF_DAYS_DEFAULT = 14;
+export const PDF_DAYS_MIN = 1;
+export const PDF_DAYS_MAX = 92;
+export const PDF_DISCLAIMER = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+
+/**
+ * Validate the driver's requested day count for the printable log summary.
+ * Whole numbers 1..92 only; anything else returns a plain error and produces no report.
+ */
+export function parseSummaryDays(raw: string, badInput = false): { ok: true; days: number } | { ok: false; problem: string } {
+  const t = raw.trim();
+  if (badInput || t === '') return { ok: false, problem: `Enter a whole number of days from ${PDF_DAYS_MIN} to ${PDF_DAYS_MAX}.` };
+  if (!/^-?\d+$/.test(t)) return { ok: false, problem: `Whole numbers only (${PDF_DAYS_MIN} to ${PDF_DAYS_MAX} days).` };
+  const n = Number(t);
+  if (!Number.isSafeInteger(n) || n < PDF_DAYS_MIN || n > PDF_DAYS_MAX) {
+    return { ok: false, problem: `Enter between ${PDF_DAYS_MIN} and ${PDF_DAYS_MAX} days.` };
+  }
+  return { ok: true, days: n };
+}
+
+export interface PrintReportRequest {
+  days: number;
+  generatedAt: number;
+  generatedAtMs: number;
+  seq: number;
+}
+let printReportNow: PrintReportRequest | null = null;
+let printReportSeq = 0;
+const printReportSubs = new Set<() => void>();
+export function setPrintReport(req: Omit<PrintReportRequest, 'seq'> | null) {
+  printReportNow = req ? { ...req, seq: ++printReportSeq } : null;
+  printReportSubs.forEach((f) => f());
+}
+export function currentPrintReport(): PrintReportRequest | null { return printReportNow; }
+function usePrintReport(): PrintReportRequest | null {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); printReportSubs.add(f); return () => { printReportSubs.delete(f); }; }, []);
+  return printReportNow;
+}
+
+export interface LogSummaryDay {
+  /** 0 = today, 1 = yesterday, ..., N-1 = oldest carrier day in the chosen range. */
+  back: number;
+  start: number;
+  end: number;
+  dateLabel: string;
+  shortDate: string;
+  gridSegments: Segment[];
+  totals: Record<DutyStatus, number>;
+  rows: Segment[];
+  live: { status: DutyStatus; note?: string; since: number; start: number; end: number; isToday: boolean } | null;
+  noDuty: boolean;
+}
+
+/**
+ * Build the N carrier days ending today (ordered newest-first: Today down to Today − (N − 1))
+ * using the exact carrier-day boundaries (s.config.dayStartHour + s.config.timeZone) and
+ * engine-normalized logged segments that LogTab uses. Never invents entries for empty days.
+ */
+export function buildLogSummaryDays(s: State, now: number, days: number): LogSummaryDay[] {
+  const count = Math.max(PDF_DAYS_MIN, Math.min(PDF_DAYS_MAX, Math.trunc(days)));
+  const resolved = joinDisplayRows(normalize(allSegments(s, now), { merge: false }));
+  const loggedResolved = resolved.filter((x) => !x.tentative);
+  const loggedRows = s.segments.filter((x) => !x.tentative && x.end > x.start);
+  const fullFmt = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: s.config.timeZone });
+  const shortFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: s.config.timeZone });
+
+  const out: LogSummaryDay[] = [];
+  let curStart = carrierDayStart(now, s.config);
+  for (let back = 0; back < count; back++) {
+    const start = curStart;
+    const end = nextCarrierDayStart(start, s.config);
+    const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+    for (const x of loggedResolved) {
+      totals[x.status] += Math.max(0, Math.min(x.end, end, now) - Math.max(x.start, start));
+    }
+    const gridSegments = loggedResolved.filter((x) => x.end > start && x.start < end);
+    const rows = loggedRows.filter((x) => x.end > start && x.start < end).sort((a, b) => a.start - b.start || a.end - b.end);
+    const liveActive = !!(s.current && s.current.since < end && (back === 0 || now > start));
+    const live = liveActive && s.current
+      ? {
+          status: s.current.status,
+          note: s.current.note,
+          since: s.current.since,
+          start: Math.max(s.current.since, start),
+          end: Math.min(Math.max(now, s.current.since), end),
+          isToday: back === 0,
+        }
+      : null;
+    out.push({
+      back,
+      start,
+      end,
+      dateLabel: fullFmt.format(new Date(start * 60000)),
+      shortDate: shortFmt.format(new Date(start * 60000)),
+      gridSegments,
+      totals,
+      rows,
+      live,
+      noDuty: rows.length === 0 && !live,
+    });
+    if (back + 1 < count) curStart = carrierDayStart(curStart - 1, s.config);
+  }
+  return out;
+}
+
+/**
+ * Print-only multi-day log summary. Hidden on screen (display: none) so the normal UI is
+ * untouched; shown only under @media print when window.print() is triggered from More → Data.
+ */
+function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
+  const days = useMemo(() => buildLogSummaryDays(s, req.generatedAt, req.days), [s, req.generatedAt, req.days]);
+  const newest = days[0];
+  const oldest = days[days.length - 1];
+  const rangeLabel = days.length === 1 ? newest.shortDate : `${oldest.shortDate} – ${newest.shortDate}`;
+  const rangeTotals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+  for (const d of days) {
+    rangeTotals.D += d.totals.D;
+    rangeTotals.ON += d.totals.ON;
+    rangeTotals.OFF += d.totals.OFF;
+    rangeTotals.SB += d.totals.SB;
+  }
+  const genStr = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date(req.generatedAtMs));
+  const twoZones = s.config.timeZone !== deviceTz;
+  const dayStartLabel = `${String(s.config.dayStartHour).padStart(2, '0')}:00`;
+
+  return (
+    <article class="print-report" data-print-report data-days={days.length} aria-label="Log summary report">
+      <header class="pr-head">
+        <div class="pr-brand-row">
+          <div>
+            <div class="pr-app">Split Decision <span class="pr-app-sub">— HOS What-If Planner</span></div>
+            <h1 class="pr-title">Log Summary</h1>
+          </div>
+          <div class="pr-count-badge">{days.length} {days.length === 1 ? 'day' : 'days'}</div>
+        </div>
+        <div class="pr-disclaimer" role="note">{PDF_DISCLAIMER}</div>
+        <dl class="pr-meta">
+          <div><dt>Date range</dt><dd>{rangeLabel} ({days.length} {days.length === 1 ? 'carrier day' : 'carrier days'}, newest first)</dd></div>
+          <div><dt>Generated</dt><dd class="mono">{genStr}</dd></div>
+          <div><dt>Carrier day boundary</dt><dd>{dayStartLabel} {s.config.timeZone}{twoZones ? ` · clock times in ${deviceTz}` : ''}</dd></div>
+          <div><dt>Cycle rule</dt><dd>{s.config.cycle === '60/7' ? '60 hr / 7 days' : '70 hr / 8 days'}{s.config.shortHaul ? ' · Short-haul' : ''}</dd></div>
+        </dl>
+        <div class="pr-range-totals" aria-label="Period totals">
+          <div class="pr-range-label">Period totals ({days.length} {days.length === 1 ? 'day' : 'days'})</div>
+          <div class="pr-range-grid">
+            {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => (
+              <div key={k} class={`pr-tot pr-tot-${k}`}>
+                <span>{STATUS_LABEL[k]}</span>
+                <b class="mono">{dur(rangeTotals[k])}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div class="pr-days">
+        {days.map((d) => (
+          <section key={d.start} class={`pr-day${d.noDuty ? ' pr-day-noduty' : ''}`} data-day-index={d.back} data-day-start={d.start}>
+            <div class="pr-day-head">
+              <div class="pr-day-title">
+                <h2>{d.back === 0 ? `Today — ${d.dateLabel}` : d.dateLabel}</h2>
+                {d.noDuty && <span class="pr-noduty-tag">No-duty day</span>}
+              </div>
+              <div class="pr-day-sub">
+                Carrier day from {dayStartLabel} {s.config.timeZone}{twoZones ? ` · ${clock(d.start)} on device` : ''}
+              </div>
+            </div>
+            <div class="pr-day-graph">
+              <Grid segments={d.gridSegments} from={d.start} to={d.end} tz={s.config.timeZone} />
+            </div>
+            <div class="daytotals pr-day-totals">
+              {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => (
+                <div key={k} class={`pr-tot-${k}`}>
+                  <span class="muted small">{STATUS_LABEL[k]}</span>
+                  <b>{dur(d.totals[k])}</b>
+                </div>
+              ))}
+            </div>
+            <div class="pr-entries">
+              {d.noDuty ? (
+                <p class="pr-noduty-msg">No duty entries logged — no-duty day.</p>
+              ) : (
+                <ul class="pr-entry-list">
+                  {d.rows.map((seg, i) => (
+                    <li key={`${seg.start}-${seg.end}-${i}`} class="pr-entry">
+                      <span class={seg.note === ELD_SEED_NOTE ? 'dot eld-dot' : 'dot'} style={{ background: STATUS_COLOR[seg.status], color: STATUS_COLOR[seg.status] }} />
+                      <span class="pr-entry-label">
+                        <b>{segLabel(seg.status, seg.note)}</b>
+                        {seg.note === ELD_SEED_NOTE && <span class="eld-tag">Estimate from your ELD clocks</span>}
+                      </span>
+                      <span class="pr-entry-time mono">{clock(seg.start)} → {clock(seg.end)}</span>
+                      <span class="pr-entry-len mono">{dur(seg.end - seg.start)}</span>
+                    </li>
+                  ))}
+                  {d.live && (
+                    <li class="pr-entry pr-entry-live">
+                      <span class="dot" style={{ background: STATUS_COLOR[d.live.status] }} />
+                      <span class="pr-entry-label">
+                        <b>{segLabel(d.live.status, d.live.note)}</b>
+                        <span class="pr-live-tag">{d.live.isToday ? 'Current' : 'Ongoing'}</span>
+                      </span>
+                      <span class="pr-entry-time mono">since {clock(d.live.since)}{d.live.isToday ? ' · now' : ''}</span>
+                      <span class="pr-entry-len mono">{dur(Math.max(0, d.live.isToday ? req.generatedAt - d.live.since : d.live.end - d.live.start))}</span>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <footer class="pr-foot">
+        <p class="pr-foot-disclaimer">{PDF_DISCLAIMER}</p>
+        <p class="pr-foot-meta">Split Decision — HOS What-If Planner · Generated {genStr}</p>
+      </footer>
+    </article>
+  );
+}
+
 function DrivingAlertsCard({ s }: { s: State }) {
   // Browser features are only known at run time; the pre-rendered page assumes none.
   const [notif, setNotif] = useState<NotifyState>('unsupported');
@@ -5454,7 +5689,36 @@ export function setTestingUnlocked(v: boolean) { testingUnlocked = v; }
 function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
+  const [pdfDaysText, setPdfDaysText] = useState(String(PDF_DAYS_DEFAULT));
+  const [pdfErr, setPdfErr] = useState<string | null>(null);
+  const pdfDaysRef = useRef<HTMLInputElement>(null);
   const [showTesting, setShowTesting] = useState(testingUnlocked);
+  const onPdfDaysInput = (e: Event) => {
+    const el = e.target as HTMLInputElement;
+    const raw = el.value;
+    setPdfDaysText(raw);
+    const parsed = parseSummaryDays(raw, Boolean(el.validity?.badInput));
+    if (!parsed.ok) {
+      setPdfErr(parsed.problem);
+      setPrintReport(null);
+    } else {
+      setPdfErr(null);
+    }
+  };
+  const openPdfSummary = () => {
+    const parsed = parseSummaryDays(pdfDaysText, Boolean(pdfDaysRef.current?.validity?.badInput));
+    if (!parsed.ok) {
+      setPdfErr(parsed.problem);
+      setPrintReport(null);
+      return;
+    }
+    setPdfErr(null);
+    setPrintReport({
+      days: parsed.days,
+      generatedAt: now,
+      generatedAtMs: s.nowOverride !== null ? now * 60000 : Date.now(),
+    });
+  };
   const pressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPress = () => {
     if (pressRef.current !== null) return;
@@ -5530,6 +5794,11 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       </Card>
       <Card title="Data">
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
+        <div class="pdf-export-row">
+          <label class="pdf-days">Days<input ref={pdfDaysRef} type="number" class="num" inputMode="numeric" min={PDF_DAYS_MIN} max={PDF_DAYS_MAX} step={1} value={pdfDaysText} aria-invalid={pdfErr ? 'true' : undefined} onInput={onPdfDaysInput} /></label>
+          <button type="button" class="pdf-btn" onClick={openPdfSummary}>Log summary (PDF)</button>
+        </div>
+        {pdfErr && <div class="warnbox small" role="alert">{pdfErr}</div>}
         {ioNote && <p class="muted small">{ioNote}</p>}
         <button class="danger" onClick={() => openSheet({ kind: 'confirm', what: 'startover' })}>Start over: fresh 10-hour rest ending now</button>
         <p class="muted small">Undo is on the Log until your next change.</p>
@@ -5768,6 +6037,18 @@ export function App() {
   const tapPass = useRef<{ next: number; dir: number; goal: number } | null>(null);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
+  const printReport = usePrintReport();
+  const lastPrintedSeq = useRef(0);
+  useEffect(() => {
+    if (!printReport || printReport.seq === lastPrintedSeq.current) return;
+    lastPrintedSeq.current = printReport.seq;
+    let r1 = 0, r2 = 0;
+    const go = () => {
+      if (typeof window !== 'undefined' && typeof window.print === 'function') window.print();
+    };
+    r1 = rafOf(() => { r2 = rafOf(go); });
+    return () => { cancelRafOf(r1); if (r2) cancelRafOf(r2); };
+  }, [printReport]);
   // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
   // 16's dark-driving rule on top — decision D1-A): an un-chosen default follows the phone, so
   // a phone that flips to dark at sunset takes an un-chosen app with it; a chosen theme never
@@ -6017,7 +6298,7 @@ export function App() {
     );
   }
   return (
-    <div class={fresh ? 'app is-demo' : 'app'}>
+    <div class={`${fresh ? 'app is-demo' : 'app'}${printReport ? ' has-print-report' : ''}`}>
       <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
       {/* The four panels side by side in the snap strip. Every page stays mounted and
           keeps its own scroll position; the pages off the settled panel are inert and
@@ -6052,11 +6333,8 @@ export function App() {
           </TabBoundary>
         </section>
         <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
-          {warnbox}
-          {themeNoticeCard}
-          <Notices ev={ev} now={now} s={s} />
           <TabBoundary key="log" tab="log">
-            <LogTab s={s} now={now} ev={ev} />
+            <LogTab s={s} now={now} ev={ev} notices={<>{warnbox}{themeNoticeCard}<Notices ev={ev} now={now} s={s} /></>} />
           </TabBoundary>
         </section>
         <section class={`page page-settings${activePanel === 'settings' ? ' is-active' : ''}`} inert={activePanel !== 'settings'} aria-hidden={activePanel !== 'settings'}>
@@ -6089,6 +6367,7 @@ export function App() {
       {(sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
       {s.speakAskOpen && <SpeakAskDialog />}
+      {printReport && <LogSummaryReport s={s} req={printReport} />}
     </div>
   );
 }

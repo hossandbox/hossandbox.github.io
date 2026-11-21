@@ -135,28 +135,34 @@ for (const [W, H] of SIZES) {
         // the scroller: whichever of document / shell actually has overflow to scroll
         const docScrollable = de.scrollHeight - de.clientHeight;
         const before = { header: rect(header), nav: rect(nav), dock: rect(dock) };
+        // Re-aimed (2026-11-20 logpin): on Log the vertical scroller is .log-scroll inside non-scrolling .page-log; other pages scroll on .page.
+        const isLog = !!(page && page.classList.contains('page-log'));
+        const scroller = isLog ? (page.querySelector('.log-scroll') || page) : page;
         // try to scroll everything, both axes, the way a thumb would. The strip itself
         // may move sideways — that is its job — so its seat is restored in the same
         // task, before the app's settle timer can read the probe as a page change.
         window.scrollTo(200, 100000);
         if (app) { app.scrollTop = 100000; app.scrollLeft = 200; }
         if (page) page.scrollTop = 100000;
+        if (scroller && scroller !== page) scroller.scrollTop = 100000;
         if (main) { main.scrollLeft = 200; }
         const stripMoved = main ? main.scrollLeft : null;
         if (main && page) main.scrollLeft = page.offsetLeft;
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const after = { header: rect(header), nav: rect(nav), dock: rect(dock) };
-        const moved = { winX: window.scrollX, winY: window.scrollY, appX: app ? app.scrollLeft : null, appY: app ? app.scrollTop : null, pageY: page ? page.scrollTop : null, stripMoved, vvX: window.visualViewport ? window.visualViewport.offsetLeft + window.visualViewport.pageLeft : 0 };
+        const moved = { winX: window.scrollX, winY: window.scrollY, appX: app ? app.scrollLeft : null, appY: app ? app.scrollTop : null, pageY: page ? page.scrollTop : null, scrollerY: scroller ? scroller.scrollTop : null, stripMoved, vvX: window.visualViewport ? window.visualViewport.offsetLeft + window.visualViewport.pageLeft : 0 };
         const out = {
           vw, vh, innerW, docScrollW: de.scrollWidth, docClientW: de.clientWidth, bodyScrollW: body.scrollWidth,
           appScrollW: app ? app.scrollWidth : null, appClientW: app ? app.clientWidth : null,
           appScrollH: app ? app.scrollHeight : null, appClientH: app ? app.clientHeight : null,
           appComputedH: app ? getComputedStyle(app).height : null, appOverflowY: app ? getComputedStyle(app).overflowY : null,
           pageScrollH: page ? page.scrollHeight : null, pageClientH: page ? page.clientHeight : null, pageOverflowY: page ? getComputedStyle(page).overflowY : null,
+          scrollerScrollH: scroller ? scroller.scrollHeight : null, scrollerClientH: scroller ? scroller.clientHeight : null, scrollerOverflowY: scroller ? getComputedStyle(scroller).overflowY : null,
+          isLog,
           docScrollable, wide: wide.slice(0, 12), wideCount: wide.length, before, after, moved,
           slots: { header: !!header && header.parentElement === app, nav: !!nav && nav.parentElement === app, dockInMain: !dock || (!!main && main.contains(dock)), mainInApp: !!main && main.parentElement === app },
         };
-        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (page) page.scrollTop = 0; if (main && page) main.scrollLeft = page.offsetLeft;
+        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (page) page.scrollTop = 0; if (scroller && scroller !== page) scroller.scrollTop = 0; if (main && page) main.scrollLeft = page.offsetLeft;
         return out;
       });
       const tag = `[${W}x${H} ${nowCard} ${tab}]`;
@@ -170,8 +176,9 @@ for (const [W, H] of SIZES) {
       // (b) shell slots + stable height
       ok(`${tag} (b) header, main and tab bar are the shell's own children`, m.slots.header && m.slots.nav && m.slots.mainInApp && m.slots.dockInMain, JSON.stringify(m.slots));
       ok(`${tag} (b) shell computed height == viewport height`, m.appComputedH === `${m.vh}px`, `computed ${m.appComputedH}, viewport ${m.vh}px`);
-      ok(`${tag} (b) the document itself cannot scroll (the strip page is the scroller)`, m.docScrollable <= 0 && m.moved.winY === 0 && (m.appOverflowY === 'auto' || m.appOverflowY === 'scroll') && m.pageOverflowY === 'auto', `doc overflow ${m.docScrollable}px, window.scrollY after scroll ${m.moved.winY}, shell overflow-y ${m.appOverflowY}, page overflow-y ${m.pageOverflowY}`);
-      ok(`${tag} (b) the content really scrolled under the panels`, m.pageScrollH > m.pageClientH ? m.moved.pageY > 0 : true, `page ${m.pageScrollH}/${m.pageClientH}, scrolled ${m.moved.pageY}`);
+      // Re-aimed (2026-11-20 logpin): on Log .page-log has overflow-y:hidden and .log-scroll is the overflow-y:auto scroller; other pages keep overflow-y:auto on .page.
+      ok(`${tag} (b) the document itself cannot scroll (active screen scroller is overflow-y auto)`, m.docScrollable <= 0 && m.moved.winY === 0 && (m.appOverflowY === 'auto' || m.appOverflowY === 'scroll') && m.scrollerOverflowY === 'auto' && (!m.isLog || (m.pageOverflowY === 'hidden' && m.moved.pageY === 0)), `doc overflow ${m.docScrollable}px, window.scrollY ${m.moved.winY}, shell ${m.appOverflowY}, page ${m.pageOverflowY}, scroller ${m.scrollerOverflowY}, pageY ${m.moved.pageY}`);
+      ok(`${tag} (b) the content really scrolled under the panels`, m.scrollerScrollH > m.scrollerClientH ? m.moved.scrollerY > 0 : true, `scroller ${m.scrollerScrollH}/${m.scrollerClientH}, scrolled ${m.moved.scrollerY}`);
       const same = (a, b) => (!a && !b) || (a && b && a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.right === b.right);
       // The dock is sticky INSIDE the scroller: at a fractional scroll offset the browser reports it a
       // fraction of a pixel off its slot, so for the dock "stays put" means within 1px; the header
@@ -219,14 +226,19 @@ for (const [W, H] of SIZES) {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
   const seated = () => page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return m && p && Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).then(() => true, () => false);
-  const st = () => page.evaluate(() => ({ active: document.querySelector('.page.is-active')?.className.match(/page-(\w+)/)?.[1], bar: document.querySelector('nav.tabs button.on')?.textContent.trim(), vib: window.__vib.length, top: document.querySelector('.page.is-active')?.scrollTop }));
+  // Re-aimed (2026-11-20 logpin): Log's vertical scroll lives on .log-scroll inside non-scrolling .page-log.
+  const st = () => page.evaluate(() => {
+    const pg = document.querySelector('.page.is-active');
+    const sc = pg && pg.classList.contains('page-log') ? (pg.querySelector('.log-scroll') || pg) : pg;
+    return { active: pg?.className.match(/page-(\w+)/)?.[1], bar: document.querySelector('nav.tabs button.on')?.textContent.trim(), vib: window.__vib.length, top: sc?.scrollTop, pageTop: pg?.scrollTop };
+  });
   // the first element matching `sel` on the active page whose centre is on screen, between
-  // the header and the tab bar / dock: where a finger on that content would land
+  // the header/pinned top and the tab bar / dock / pinned footer: where a finger on that content would land
   const spot = (sel) => page.evaluate((q) => {
     const pg = document.querySelector('.page.is-active');
-    const hb = document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0;
-    const dock = pg.querySelector('.dock'), nav = document.querySelector('nav.tabs');
-    const lim = Math.min(nav.getBoundingClientRect().top, dock ? dock.getBoundingClientRect().top : Infinity);
+    const hb = Math.max(document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0, pg.querySelector('.log-pin')?.getBoundingClientRect().bottom ?? 0);
+    const dock = pg.querySelector('.dock'), foot = pg.querySelector('.log-foot'), nav = document.querySelector('nav.tabs');
+    const lim = Math.min(nav.getBoundingClientRect().top, dock ? dock.getBoundingClientRect().top : Infinity, foot ? foot.getBoundingClientRect().top : Infinity);
     for (const el of pg.querySelectorAll(q)) {
       const r = el.getBoundingClientRect(); const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
       if (r.width && r.height && y > hb + 8 && y < lim - 8) {
@@ -273,6 +285,11 @@ for (const [W, H] of SIZES) {
   {
     await page.evaluate(() => [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('Log')).click());
     await page.waitForTimeout(300); await seated(); await page.waitForTimeout(200);
+    // Near midnight the seed record's current carrier day is nearly empty (its 30 h span sits
+    // mostly in yesterday), leaving .log-scroll nothing to scroll; step back a day so the drag
+    // always has a genuinely overflowing list (Ada rerun 2026-11-21 ~00:01 CT: top 0 → 0).
+    const overflows = await page.evaluate(() => { const sc = document.querySelector('.page-log .log-scroll'); return !!sc && sc.scrollHeight > sc.clientHeight + 4; });
+    if (!overflows) { await page.click('.page-log button[aria-label="Previous day"]'); await page.waitForTimeout(300); }
     const b = await st(); const at = await spot('button.entry');
     if (at) { await drag(at.x, at.y, 0, -300); await page.waitForTimeout(500); }
     const a = await st();
@@ -700,6 +717,364 @@ for (const [W, H] of SIZES) {
     await ctx.close();
   }
 }
+
+// (f) logpin (2026-11-20, Lorico): pinned Log top block (daynav + graph card), scrolling list
+// strictly between pinned graph and pinned bottom addbtn, day navigation updating both, Now-only
+// header disclaimer with no gap on other screens, and Report a bug removed from Log (kept on More).
+const longLogSeed = () => {
+  // Build 12 segments inside Today's carrier day + 2 segments on Yesterday so Log overflows heavily
+  // and Previous day is enabled at both 412x915 and 360x640.
+  // "Now" is anchored to 20:00 on the displayed carrier day via nowOverride so the fixture is
+  // identical at any wall-clock time: anchored to the real now, the 12 segments straddle
+  // midnight in the small hours and the displayed day comes up nearly empty (Ada rerun
+  // 2026-11-21 ~00:01 CT measured entryCount 1).
+  const d = new Date(nowMinute * 60000);
+  const startOfToday = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime() / 60000);
+  const fakeNow = startOfToday + 1200;
+  const segs = [
+    { status: 'OFF', start: startOfToday - 900, end: startOfToday - 360, createdAt: 1 },
+    { status: 'D', start: startOfToday - 360, end: startOfToday - 60, createdAt: 2 },
+  ];
+  const statuses = ['OFF', 'ON', 'D', 'OFF', 'D', 'ON', 'SB', 'OFF', 'D', 'ON', 'OFF', 'D'];
+  const span = Math.max(120, fakeNow - startOfToday - 20);
+  const step = Math.max(10, Math.floor(span / statuses.length));
+  let cur = Math.min(startOfToday, fakeNow - step * statuses.length - 20);
+  for (let i = 0; i < statuses.length; i++) {
+    segs.push({ status: statuses[i], start: cur, end: cur + step, createdAt: 10 + i });
+    cur += step;
+  }
+  return {
+    segments: segs,
+    current: { status: 'ON', since: cur, createdAt: 99 },
+    nowOverride: fakeNow,
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, themeChosen: true, theme: 'day', nowCard: 'dial', nowCardAsked: true,
+  };
+};
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(longLogSeed()));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('main.pages');
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(200);
+  const tag = `[${W}x${H} logpin]`;
+  const tapNav = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('no tab ' + l); b.click(); }, label);
+  const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
+
+  // Header disclaimer Now-only + no gap on Log, Plan, Split, More
+  const hdrCheck = async (label) => {
+    if (label !== 'Now') { await tapNav(label); await settle(); }
+    return page.evaluate((lbl) => {
+      const hdr = document.querySelector('header.top');
+      const pg = document.querySelector('.page.is-active');
+      const disc = hdr.querySelector('details.disclaimer-line');
+      const hr = hdr.getBoundingClientRect(), pr = pg.getBoundingClientRect();
+      return {
+        lbl,
+        hasDisc: !!disc,
+        discText: disc?.querySelector('.disclaimer-text')?.textContent?.trim() ?? null,
+        discMore: disc?.querySelector('.disclaimer-more')?.textContent?.trim() ?? null,
+        hdrH: Math.round(hr.height * 10) / 10,
+        hdrBottom: Math.round(hr.bottom * 10) / 10,
+        pgTop: Math.round(pr.top * 10) / 10,
+        over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    }, label);
+  };
+  const hNow = await hdrCheck('Now');
+  const hPlan = await hdrCheck('Plan');
+  const hMore = await hdrCheck('More');
+  const hLog = await hdrCheck('Log');
+  ok(`${tag} (f) header disclaimer ("Planning only" + Details) present on Now and absent on Plan/More/Log`,
+    hNow.hasDisc && hNow.discText === 'Planning only — not a log, not an ELD' && hNow.discMore === 'Details'
+    && !hPlan.hasDisc && !hMore.hasDisc && !hLog.hasDisc,
+    JSON.stringify({ now: hNow, plan: hPlan, more: hMore, log: hLog }));
+  ok(`${tag} (f) no leftover gap or overlap when header disclaimer is absent on Plan/More/Log`,
+    [hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && !x.over),
+    JSON.stringify([hPlan, hMore, hLog].map((x) => ({ l: x.lbl, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
+
+  // BugButton absent on Log, present on More
+  const bugCheck = await page.evaluate(() => {
+    const logPg = document.querySelector('section.page-log');
+    const morePg = document.querySelector('section.page-settings');
+    return {
+      logBug: /Report a bug \(GitHub\)/.test(logPg.textContent),
+      moreBug: /Bug reports/.test(morePg.textContent) && /Report a bug \(GitHub\)/.test(morePg.textContent),
+    };
+  });
+  ok(`${tag} (f) Log screen has no "Report a bug (GitHub)" button; More screen keeps it`, !bugCheck.logBug && bugCheck.moreBug, JSON.stringify(bugCheck));
+
+  // Pinned graph + daynav, scrolling middle list, pinned bottom addbtn
+  const geom = await page.evaluate(async () => {
+    const two = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const R = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top * 10) / 10, bottom: Math.round(r.bottom * 10) / 10, left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 }; };
+    const pg = document.querySelector('section.page-log');
+    const pin = pg.querySelector('.log-pin');
+    const daynav = pin.querySelector('.daynav');
+    const graphCard = pin.querySelector('.log-graph-card');
+    const svg = graphCard.querySelector('svg.grid');
+    const totals = graphCard.querySelector('.daytotals');
+    const scroll = pg.querySelector('.log-scroll');
+    const foot = pg.querySelector('.log-foot');
+    const addBtn = foot.querySelector('button.addbtn');
+    const nav = document.querySelector('nav.tabs');
+    const hdr = document.querySelector('header.top');
+    const entries = [...scroll.querySelectorAll('button.entry')];
+    const firstEntry = entries[0];
+    const lastEntry = entries[entries.length - 1];
+
+    scroll.scrollTop = 0; await two();
+    const before = {
+      pin: R(pin), daynav: R(daynav), graphCard: R(graphCard), svg: R(svg), totals: R(totals),
+      scroll: R(scroll), foot: R(foot), addBtn: R(addBtn), nav: R(nav), hdr: R(hdr),
+      firstEntry: R(firstEntry),
+      labelsInsideSvg: [...svg.querySelectorAll('.grid-label, .grid-hour')].every((t) => {
+        const sr = svg.getBoundingClientRect(), tr = t.getBoundingClientRect();
+        return tr.left >= sr.left - 1 && tr.right <= sr.right + 1 && tr.top >= sr.top - 1 && tr.bottom <= sr.bottom + 1;
+      }),
+      scrollH: scroll.scrollHeight, clientH: scroll.clientHeight,
+      pgOverflowY: getComputedStyle(pg).overflowY,
+      scrollOverflowY: getComputedStyle(scroll).overflowY,
+      scrollOverscroll: `${getComputedStyle(scroll).overscrollBehaviorX}/${getComputedStyle(scroll).overscrollBehaviorY}`,
+    };
+
+    // Scroll list to the very bottom
+    pg.scrollTop = 100000;
+    scroll.scrollTop = 100000;
+    await two();
+    const lastCard = scroll.lastElementChild;
+    const after = {
+      pgScrollTop: pg.scrollTop,
+      scrollTop: scroll.scrollTop,
+      pin: R(pin), daynav: R(daynav), graphCard: R(graphCard), svg: R(svg), totals: R(totals),
+      foot: R(foot), addBtn: R(addBtn),
+      lastEntry: R(lastEntry),
+      lastCard: R(lastCard),
+    };
+
+    // Bring last entry into view if violations card pushed it above viewport, verify it can sit fully above addbtn
+    lastEntry.scrollIntoView({ block: 'end' }); await two();
+    const lastEntryIntoView = R(lastEntry);
+    const ab = addBtn.getBoundingClientRect();
+    const addHit = document.elementFromPoint(Math.round(ab.left + ab.width / 2), Math.round(ab.top + ab.height / 2));
+    const addTappable = !!addHit && (addHit === addBtn || addBtn.contains(addHit));
+    return { vw: document.documentElement.clientWidth, vh: window.innerHeight, entryCount: entries.length, before, after, lastEntryIntoView, addTappable };
+  });
+
+  const eq = (a, b) => a && b && a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.right === b.right;
+  ok(`${tag} (f) long log list overflows .log-scroll (${geom.entryCount} entries) while .page-log does not scroll`,
+    geom.entryCount >= 10 && geom.before.scrollH > geom.before.clientH && geom.after.scrollTop > 0
+    && geom.before.pgOverflowY === 'hidden' && geom.after.pgScrollTop === 0 && geom.before.scrollOverflowY === 'auto'
+    && geom.before.scrollOverscroll === 'auto/none',
+    JSON.stringify({ entries: geom.entryCount, scrollH: geom.before.scrollH, clientH: geom.before.clientH, scrollTop: geom.after.scrollTop, pgTop: geom.after.pgScrollTop, pgOv: geom.before.pgOverflowY, scOv: geom.before.scrollOverflowY, ob: geom.before.scrollOverscroll }));
+  ok(`${tag} (f) pinned daynav + graph card bounding box is unchanged when list scrolls to bottom`,
+    eq(geom.before.pin, geom.after.pin) && eq(geom.before.daynav, geom.after.daynav)
+    && eq(geom.before.graphCard, geom.after.graphCard) && eq(geom.before.svg, geom.after.svg) && eq(geom.before.totals, geom.after.totals),
+    JSON.stringify({ pinB: geom.before.pin, pinA: geom.after.pin, svgB: geom.before.svg, svgA: geom.after.svg }));
+  ok(`${tag} (f) pinned graph stays fully inside viewport with unclipped axis labels and clean boundary above scroll list`,
+    geom.before.pin.top >= geom.before.hdr.bottom - 0.5 && geom.before.pin.bottom <= geom.before.scroll.top + 0.5
+    && geom.before.svg.left >= 0 && geom.before.svg.right <= geom.vw && geom.before.svg.h >= 60 && geom.before.labelsInsideSvg
+    && geom.before.firstEntry.top >= geom.before.pin.bottom - 0.5,
+    JSON.stringify({ hdrB: geom.before.hdr.bottom, pin: geom.before.pin, scrollT: geom.before.scroll.top, svg: geom.before.svg, labels: geom.before.labelsInsideSvg, firstEntry: geom.before.firstEntry }));
+  ok(`${tag} (f) pinned bottom addbtn sits directly above tab bar, never moves on scroll, and is fully tappable`,
+    eq(geom.before.foot, geom.after.foot) && eq(geom.before.addBtn, geom.after.addBtn)
+    && Math.abs(geom.before.foot.bottom - geom.before.nav.top) <= 1
+    && geom.before.scroll.bottom <= geom.before.foot.top + 0.5
+    && geom.after.addBtn.bottom <= geom.before.nav.top + 0.5 && geom.after.addBtn.top >= geom.before.foot.top - 0.5
+    && geom.addTappable,
+    JSON.stringify({ foot: geom.after.foot, addBtn: geom.after.addBtn, navT: geom.before.nav.top, scrollB: geom.before.scroll.bottom, tap: geom.addTappable }));
+  ok(`${tag} (f) last log entry and end of list scroll fully into view cleanly above pinned addbtn`,
+    geom.after.lastCard.bottom <= geom.after.foot.top + 0.5
+    && geom.lastEntryIntoView.bottom <= geom.after.foot.top + 0.5 && geom.lastEntryIntoView.top >= geom.before.pin.bottom - 0.5,
+    JSON.stringify({ lastCard: geom.after.lastCard, lastEntry: geom.lastEntryIntoView, footT: geom.after.foot.top, pinB: geom.before.pin.bottom }));
+
+  // Day navigation updates BOTH pinned graph/daynav AND list together
+  const dayBefore = await page.evaluate(() => ({
+    title: document.querySelector('.page-log .daynav-title')?.textContent?.trim(),
+    totals: document.querySelector('.page-log .daytotals')?.textContent?.trim(),
+    entriesTitle: [...document.querySelectorAll('.page-log .log-scroll h2')].find((h) => /Entries on this day/.test(h.textContent))?.textContent?.trim(),
+  }));
+  await page.click('.page-log button[aria-label="Previous day"]');
+  await page.waitForTimeout(150);
+  const dayPrev = await page.evaluate(() => ({
+    title: document.querySelector('.page-log .daynav-title')?.textContent?.trim(),
+    totals: document.querySelector('.page-log .daytotals')?.textContent?.trim(),
+    entriesTitle: [...document.querySelectorAll('.page-log .log-scroll h2')].find((h) => /Entries on this day/.test(h.textContent))?.textContent?.trim(),
+  }));
+  await page.click('.page-log button[aria-label="Next day"]');
+  await page.waitForTimeout(150);
+  const dayBack = await page.evaluate(() => ({
+    title: document.querySelector('.page-log .daynav-title')?.textContent?.trim(),
+    entriesTitle: [...document.querySelectorAll('.page-log .log-scroll h2')].find((h) => /Entries on this day/.test(h.textContent))?.textContent?.trim(),
+  }));
+  ok(`${tag} (f) Previous/Next day updates both pinned daynav+totals and scrolled list together`,
+    dayPrev.title !== dayBefore.title && dayPrev.entriesTitle !== dayBefore.entriesTitle
+    && dayBack.title === dayBefore.title && dayBack.entriesTitle === dayBefore.entriesTitle,
+    JSON.stringify({ dayBefore, dayPrev, dayBack }));
+
+  // Clicking pinned addbtn opens the add sheet
+  await page.click('.page-log .log-foot button.addbtn');
+  await page.waitForTimeout(200);
+  const addSheet = await page.evaluate(() => ({
+    open: !!document.querySelector('.sheet'),
+    text: document.querySelector('.sheet')?.textContent?.slice(0, 120) ?? '',
+  }));
+  ok(`${tag} (f) clicking pinned addbtn opens the add sheet`, addSheet.open && /Step 1 of 4/.test(addSheet.text), JSON.stringify(addSheet));
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// (g) log summary PDF follow-on (2026-11-20, Lorico): More → Data Days field (default 14) +
+// "Log summary (PDF)" button, validation (0 / blank / 500), 8-day & 14-day print-media output
+// with Grid graphs, engine-matching totals, no-duty day handling, header+footer disclaimers,
+// and unchanged normal on-screen UI.
+const pdfSeed = () => {
+  const d = new Date(nowMinute * 60000);
+  const d0 = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).getTime() / 60000);
+  const d1 = d0 - 1440;
+  const d2 = d1 - 1440; // empty no-duty day
+  const d3 = d2 - 1440;
+  return {
+    segments: [
+      { status: 'OFF', start: d3, end: d3 + 480, createdAt: 1 },
+      { status: 'D', start: d3 + 480, end: d3 + 720, createdAt: 2 },
+      { status: 'SB', start: d1, end: d1 + 600, createdAt: 3 },
+      { status: 'ON', start: d1 + 600, end: d1 + 660, createdAt: 4 },
+      { status: 'D', start: d1 + 660, end: d1 + 960, createdAt: 5 },
+      { status: 'OFF', start: d0, end: d0 + 60, createdAt: 6 },
+      { status: 'D', start: d0 + 60, end: d0 + 180, createdAt: 7 },
+    ],
+    current: { status: 'ON', since: d0 + 180, createdAt: 8 },
+    nowOverride: d0 + 300, // 05:00 local -> Today: D 2h, ON 2h, OFF 1h, SB 0m
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, themeChosen: true, theme: 'day', nowCard: 'dial', nowCardAsked: true,
+    config: { cycle: '70/8', dayStartHour: 0, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago', shortHaul: false },
+  };
+};
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => {
+    try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
+    window.__printCalls = 0;
+    window.print = () => { window.__printCalls++; };
+  }, JSON.stringify(pdfSeed()));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('main.pages');
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(200);
+  const tag = `[${W}x${H} pdf]`;
+  await page.evaluate(() => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === 'More'); b.click(); });
+  await page.waitForTimeout(300);
+
+  const init = await page.evaluate(() => {
+    const more = document.querySelector('section.page-settings');
+    const dataCard = [...more.querySelectorAll('section.card')].find((c) => c.querySelector('h2')?.textContent?.trim() === 'Data');
+    const daysInp = dataCard?.querySelector('label.pdf-days input');
+    const pdfBtn = dataCard?.querySelector('button.pdf-btn');
+    return {
+      hasExport: /Export JSON/.test(dataCard?.textContent ?? ''),
+      daysVal: daysInp?.value ?? null,
+      daysH: daysInp ? Math.round(daysInp.getBoundingClientRect().height) : 0,
+      btnText: pdfBtn?.textContent?.trim() ?? null,
+      btnH: pdfBtn ? Math.round(pdfBtn.getBoundingClientRect().height) : 0,
+      hasReport: !!document.querySelector('.print-report'),
+      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok(`${tag} (g) More Data card has Days (default 14, >=56px) and "Log summary (PDF)" with zero overflow and no report initially`,
+    init.hasExport && init.daysVal === '14' && init.daysH >= 56 && init.btnText === 'Log summary (PDF)' && init.btnH >= 56 && !init.hasReport && !init.over,
+    JSON.stringify(init));
+
+  // Invalid inputs: 0, blank, 500 -> visible feedback, no report, no window.print()
+  const badResults = [];
+  for (const val of ['0', '', '500']) {
+    await page.fill('section.page-settings label.pdf-days input', val);
+    await page.click('section.page-settings button.pdf-btn');
+    await page.waitForTimeout(80);
+    const st = await page.evaluate((v) => {
+      const alert = document.querySelector('section.page-settings [role="alert"]');
+      return { v, alert: alert?.textContent?.trim() ?? null, hasRep: !!document.querySelector('.print-report'), prints: window.__printCalls };
+    }, val);
+    badResults.push(st);
+  }
+  ok(`${tag} (g) invalid inputs (0, blank, 500) produce visible feedback, no report, and zero print calls`,
+    badResults.every((r) => !!r.alert && !r.hasRep && r.prints === 0),
+    JSON.stringify(badResults));
+
+  // Valid 8 days: triggers window.print, stays display:none on screen, shows cleanly under @media print
+  await page.fill('section.page-settings label.pdf-days input', '8');
+  await page.click('section.page-settings button.pdf-btn');
+  await page.waitForTimeout(150);
+  const screenAfter8 = await page.evaluate(() => {
+    const rep = document.querySelector('.print-report');
+    return {
+      prints: window.__printCalls,
+      repDisplay: rep ? getComputedStyle(rep).display : null,
+      headerDisplay: getComputedStyle(document.querySelector('header.top')).display,
+      navDisplay: getComputedStyle(document.querySelector('nav.tabs')).display,
+      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok(`${tag} (g) after 8-day trigger, window.print fired and on-screen UI stays unchanged (.print-report display:none)`,
+    screenAfter8.prints === 1 && screenAfter8.repDisplay === 'none' && screenAfter8.headerDisplay !== 'none' && screenAfter8.navDisplay !== 'none' && !screenAfter8.over,
+    JSON.stringify(screenAfter8));
+
+  await page.emulateMedia({ media: 'print' });
+  await page.waitForTimeout(80);
+  const print8 = await page.evaluate(() => {
+    const DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+    const rep = document.querySelector('.print-report');
+    const secs = [...rep.querySelectorAll('section.pr-day')];
+    const head = rep.querySelector('header.pr-head');
+    const foot = rep.querySelector('footer.pr-foot');
+    const cellsOf = (sec) => [...sec.querySelectorAll('.daytotals > div')].map((d) => d.textContent.trim());
+    return {
+      repDisplay: getComputedStyle(rep).display,
+      appHeaderDisplay: getComputedStyle(document.querySelector('header.top')).display,
+      appNavDisplay: getComputedStyle(document.querySelector('nav.tabs')).display,
+      appMainDisplay: getComputedStyle(document.querySelector('main.pages')).display,
+      secCount: secs.length,
+      svgCount: secs.filter((s) => { const g = s.querySelector('svg.grid'); return g && g.getBoundingClientRect().height > 30; }).length,
+      newestFirst: secs.every((s, i) => i === 0 || Number(s.dataset.dayStart) < Number(secs[i - 1].dataset.dayStart)),
+      day0Totals: cellsOf(secs[0]),
+      day1Totals: cellsOf(secs[1]),
+      day2NoDuty: /no-duty day/i.test(secs[2].textContent) && secs[2].querySelectorAll('li.pr-entry').length === 0,
+      day3Totals: cellsOf(secs[3]),
+      headOk: head.textContent.includes('Split Decision') && head.textContent.includes('8 days') && head.textContent.includes('Generated') && head.textContent.includes(DISC),
+      footOk: foot.textContent.includes(DISC),
+    };
+  });
+  ok(`${tag} (g) @media print hides app chrome and shows 8-day report (newest-first) with visible Grids, exact engine totals, no-duty day, and header+footer disclaimers`,
+    print8.repDisplay === 'block' && print8.appHeaderDisplay === 'none' && print8.appNavDisplay === 'none' && print8.appMainDisplay === 'none'
+    && print8.secCount === 8 && print8.svgCount === 8 && print8.newestFirst
+    && JSON.stringify(print8.day0Totals) === JSON.stringify(['Driving2h 00m', 'On Duty2h 00m', 'Off Duty1h 00m', 'Sleeper0m'])
+    && JSON.stringify(print8.day1Totals) === JSON.stringify(['Driving5h 00m', 'On Duty1h 00m', 'Off Duty0m', 'Sleeper10h 00m'])
+    && print8.day2NoDuty
+    && JSON.stringify(print8.day3Totals) === JSON.stringify(['Driving4h 00m', 'On Duty0m', 'Off Duty8h 00m', 'Sleeper0m'])
+    && print8.headOk && print8.footOk,
+    JSON.stringify(print8));
+
+  // Switch back to screen, request 14 days
+  await page.emulateMedia({ media: 'screen' });
+  await page.waitForTimeout(80);
+  await page.fill('section.page-settings label.pdf-days input', '14');
+  await page.click('section.page-settings button.pdf-btn');
+  await page.waitForTimeout(150);
+  const count14 = await page.evaluate(() => ({
+    prints: window.__printCalls,
+    secCount: document.querySelectorAll('.print-report section.pr-day').length,
+    repDisplay: getComputedStyle(document.querySelector('.print-report')).display,
+  }));
+  ok(`${tag} (g) entering 14 triggers window.print again with 14 day sections while screen remains untouched`,
+    count14.prints === 2 && count14.secCount === 14 && count14.repDisplay === 'none',
+    JSON.stringify(count14));
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

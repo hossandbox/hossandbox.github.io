@@ -598,7 +598,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // slot (it lives under More). Each of these fails on the pre-patch app.tsx.
   if (!/DEMO — not your day/.test(hh)) throw new Error('a fresh clock must be stamped DEMO — not your day');
   if (!/class="app is-demo"/.test(hh)) throw new Error('a fresh clock must carry the demo stamp class on the shell');
-  if (!/Planning only — not a log, not an ELD/.test(hh)) throw new Error('every screen must carry the one-line planning-only disclaimer');
+  // Re-aimed (2026-11-20 logpin): header planning-only disclaimer line is Now-only (absent on Log/Plan/More).
+  if (/Planning only — not a log, not an ELD/.test(hh)) throw new Error('logpin: planning-only header line must be absent on Log');
   if (/Recap<\/button>/.test(hh)) throw new Error('Recap must not take a tab-bar slot');
   // patch #1.1 (2026-11-05): the dial stacks its stop-by as date over time so the full date from
   // #1 fits the ring at phone widths (pinned on the Now render in the hero section below), and
@@ -1279,6 +1280,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 9. tap targets: nothing on Now smaller than 48px by its own CSS (floor raised by patch #6;
   //    the per-class pins live in the patch 6 section at the end of this file)
   if (!/\nbutton \{[^}]*min-height: 48px/.test(css)) throw new Error('buttons must be at least 48px tall');
+  // Re-aimed (2026-11-20 logpin): header disclaimer renders on Now only (where every fresh launch opens).
+  setState({ tab: 'now' });
   setLaunchNotice(true);
   if (!/Split Decision is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
   setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
@@ -6279,6 +6282,21 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(freshHtml), 'C6: no blocking launch disclaimer dialog');
   need(!/<header[^>]*\binert\b/.test(freshHtml) && !/<nav[^>]*\binert\b/.test(freshHtml), 'C6: header/nav must not be inert on launch');
 
+  // Logpin (2026-11-20): header disclaimer Now-only, Log pinned top/bottom regions, BugButton removed from Log (kept on More).
+  for (const offTab of ['log', 'plan', 'split', 'settings']) {
+    setState({ tab: offTab });
+    const offHdr = (render(h(App, {})).match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
+    need(!/disclaimer-line/.test(offHdr) && !/Planning only — not a log, not an ELD/.test(offHdr), `logpin: header disclaimer line must be absent on ${offTab}`);
+  }
+  setState({ tab: 'log' });
+  const logFull = render(h(App, {}));
+  const logPg = pageOut(logFull, 'page-log');
+  const morePg = pageOut(logFull, 'page-settings');
+  need(/class="log-pin"[\s\S]*?class="daynav"[\s\S]*?class="card log-graph-card"[\s\S]*?<svg[^>]*class="grid"[\s\S]*?class="daytotals"[\s\S]*?class="log-scroll"[\s\S]*?class="log-foot"[\s\S]*?class="addbtn"/.test(logPg), 'logpin: Log page must structure .log-pin (.daynav + .log-graph-card), .log-scroll, and .log-foot (.addbtn)');
+  need(!/Report a bug \(GitHub\)/.test(logPg), 'logpin: Log screen must not render "Report a bug (GitHub)"');
+  need(/<h2>Bug reports<\/h2>[\s\S]*?Report a bug \(GitHub\)/.test(morePg), 'logpin: More screen must keep its Bug reports card with "Report a bug (GitHub)"');
+  setState({ tab: 'now' });
+
   // C7: Plain-language labels and trip-step reasons.
   need(A.displaySegLabel('OFF', S.breakNote('30-min break')) === '30-min break · off duty', `C7: displaySegLabel break (got ${A.displaySegLabel('OFF', S.breakNote('30-min break'))})`);
   need(A.displaySegLabel('OFF', 'PC') === 'Personal conveyance' && A.displaySegLabel('ON', 'YM') === 'Yard move', 'C7: displaySegLabel PC/YM');
@@ -6373,5 +6391,97 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`D17 label patch: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
   console.log('D17 load-check label patch: OK');
+}
+// --- Log summary (PDF) follow-on round (Lorico, 2026-11-20)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+  need(A.PDF_DAYS_DEFAULT === 14 && A.PDF_DAYS_MIN === 1 && A.PDF_DAYS_MAX === 92, 'pdf: defaults/bounds must be 14, 1..92');
+  need(A.PDF_DISCLAIMER === DISC, 'pdf: exact disclaimer string');
+  for (const [raw, badIn] of [['0', false], ['', false], ['   ', false], ['500', false], ['-1', false], ['93', false], ['14.5', false], ['abc', false], ['', true]]) {
+    const r = A.parseSummaryDays(raw, badIn);
+    need(!r.ok && r.problem.length > 0, `pdf: invalid input "${raw}" (badInput=${badIn}) must be rejected with feedback`);
+  }
+  for (const n of [1, 8, 14, 92]) {
+    const r = A.parseSummaryDays(String(n));
+    need(r.ok && r.days === n, `pdf: valid input ${n} must pass`);
+  }
+  // Seeded multi-day record under a non-zero day-start hour (06:00) and America/New_York home terminal.
+  const cfg = { ...S.INITIAL_STATE.config, dayStartHour: 6, timeZone: 'America/New_York' };
+  const nowT = Math.floor(Date.UTC(2026, 10, 20, 19, 0) / 60000); // Fri Nov 20 2026 14:00 EST
+  const d0 = E.carrierDayStart(nowT, cfg); // Fri Nov 20 06:00 EST
+  const d1 = E.carrierDayStart(d0 - 1, cfg); // Thu Nov 19 06:00 EST
+  const d2 = E.carrierDayStart(d1 - 1, cfg); // Wed Nov 18 06:00 EST (left empty -> no-duty day)
+  const d3 = E.carrierDayStart(d2 - 1, cfg); // Tue Nov 17 06:00 EST
+  const rec = {
+    ...S.INITIAL_STATE,
+    tab: 'settings',
+    config: cfg,
+    nowOverride: nowT,
+    drivingView: false,
+    historyAcknowledged: true,
+    disclaimerAcked: true,
+    tzChosen: true,
+    segments: [
+      { status: 'OFF', start: d3, end: d3 + 480, createdAt: 1 },
+      { status: 'D', start: d3 + 480, end: d3 + 720, createdAt: 2 },
+      { status: 'SB', start: d1, end: d1 + 600, createdAt: 3 },
+      { status: 'ON', start: d1 + 600, end: d1 + 660, createdAt: 4 },
+      { status: 'D', start: d1 + 660, end: d1 + 960, createdAt: 5 },
+      { status: 'OFF', start: d0, end: d0 + 120, createdAt: 6 },
+      { status: 'D', start: d0 + 120, end: d0 + 360, createdAt: 7 },
+    ],
+    current: { status: 'ON', since: d0 + 360, createdAt: 8 }, // 2h ON up to nowT (d0 + 480)
+  };
+  A.setPrintReport(null);
+  setState(rec);
+  const idleHtml = render(h(App, {}));
+  const moreHtml = pageOut(idleHtml, 'page-settings');
+  need(!/data-print-report/.test(idleHtml), 'pdf: no print-report rendered before requested');
+  need(/<h2>Data<\/h2>[\s\S]*?Export JSON[\s\S]*?<label class="pdf-days">Days<input[^>]*type="number"[^>]*value="14"[\s\S]*?>Log summary \(PDF\)<\/button>/.test(moreHtml), 'pdf: More Data card must render Days (default 14) and "Log summary (PDF)" next to Export JSON');
+
+  // Verify buildLogSummaryDays matches engine evaluation and day boundaries (newest-first order).
+  const ev = E.evaluate(S.allSegments(rec, nowT), { asOf: nowT, config: cfg });
+  const built8 = A.buildLogSummaryDays(rec, nowT, 8);
+  const built14 = A.buildLogSummaryDays(rec, nowT, 14);
+  need(built8.length === 8 && built14.length === 14, `pdf: buildLogSummaryDays lengths (${built8.length}, ${built14.length})`);
+  need(built8[0].back === 0 && built8[0].start === d0 && built8[1].start === d1 && built8[2].start === d2 && built8[3].start === d3, 'pdf: carrier day boundaries must follow dayStartHour=6 + America/New_York, newest-first');
+  need(built8[2].noDuty && built8[2].rows.length === 0 && built8[2].gridSegments.length === 0 && built8[2].totals.D === 0 && built8[2].totals.ON === 0 && built8[2].totals.OFF === 0 && built8[2].totals.SB === 0, 'pdf: empty day must be no-duty with zero invented entries');
+  need(built8[0].totals.D === 240 && built8[0].totals.ON === 120 && built8[0].totals.OFF === 120 && built8[0].totals.SB === 0, `pdf: day 0 totals mismatch ${JSON.stringify(built8[0].totals)}`);
+  need(built8[1].totals.D === 300 && built8[1].totals.ON === 60 && built8[1].totals.OFF === 0 && built8[1].totals.SB === 600, `pdf: day 1 totals mismatch ${JSON.stringify(built8[1].totals)}`);
+  need(built8[3].totals.D === 240 && built8[3].totals.ON === 0 && built8[3].totals.OFF === 480 && built8[3].totals.SB === 0, `pdf: day 3 totals mismatch ${JSON.stringify(built8[3].totals)}`);
+  // Cross-check engine evaluate().cycle.days onDuty for days after any 34h restart, plus full normalized timeline totals.
+  for (const cd of ev.cycle.days) {
+    const matchDay = built8.find((x) => x.start === cd.start);
+    need(!!matchDay, `pdf: cycle day ${cd.label} missing from 8-day report`);
+    if (matchDay && (ev.cycle.restartEnd === null || cd.start >= ev.cycle.restartEnd)) {
+      need(matchDay.totals.D + matchDay.totals.ON === cd.onDuty, `pdf: cycle day ${cd.label} onDuty mismatch (got ${matchDay.totals.D + matchDay.totals.ON} vs engine ${cd.onDuty})`);
+    }
+  }
+
+  // Verify SSR output for 8 and 14 days (graphs, totals, header/footer disclaimers, no-duty day).
+  for (const n of [8, 14]) {
+    A.setPrintReport({ days: n, generatedAt: nowT, generatedAtMs: nowT * 60000 });
+    const full = render(h(App, {}));
+    const rep = (full.match(/<article class="print-report"[\s\S]*?<\/article>/) || [''])[0];
+    need(rep.length > 0 && rep.includes(`data-days="${n}"`), `pdf (${n}d): report article missing`);
+    const daySecs = rep.match(/<section class="pr-day[^"]*"/g) || [];
+    const svgs = rep.match(/<svg[^>]*class="grid"/g) || [];
+    const totalsRows = rep.match(/class="daytotals pr-day-totals"/g) || [];
+    need(daySecs.length === n && svgs.length === n && totalsRows.length === n, `pdf (${n}d): expected ${n} sections/grids/totals, got ${daySecs.length}/${svgs.length}/${totalsRows.length}`);
+    const head = (rep.match(/<header class="pr-head">[\s\S]*?<\/header>/) || [''])[0];
+    const foot = (rep.match(/<footer class="pr-foot">[\s\S]*?<\/footer>/) || [''])[0];
+    need(head.includes('Split Decision') && head.includes(`${n} days`) && head.includes('Generated') && head.includes(DISC), `pdf (${n}d): header missing app name, day count, timestamp, or disclaimer`);
+    need(foot.includes(DISC), `pdf (${n}d): footer missing disclaimer`);
+    need(rep.includes('No duty entries logged — no-duty day.'), `pdf (${n}d): empty day must show no-duty marker`);
+  }
+  A.setPrintReport(null);
+  if (bad.length) throw new Error(`log summary PDF: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('log summary PDF (More Data controls, validation, carrier-day range, engine totals, disclaimers): OK');
 }
 console.log('OK');
