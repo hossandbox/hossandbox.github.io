@@ -6613,12 +6613,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
     `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
 
-  // 8. Plan tab placement (bottom / 5th .plan-item) & WeekRecapTab SSR render order (verdict banner first)
+  // 8. Plan tab placement (5th .plan-item, above tool #6) & WeekRecapTab SSR render order (verdict banner first)
   A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 5 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34',
+  need(itemTitles.length === 6 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6631,6 +6632,265 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   if (bad.length) throw new Error(`weekly recap vs 34: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
-  console.log('weekly recap vs 34 (midnight split, wall detection, 34h totals, 60/7, home-time cap, Plan bottom entry): OK');
+  console.log('weekly recap vs 34 (midnight split, wall detection, 34h totals, 60/7, home-time cap, Plan entry): OK');
+}
+// --- Work-Backwards Appointment & Departure Planner ("When to roll & PTA", Plan tab tool #6)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const RO = await import('../src/rollout.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  // Fixture 1: Overnight linehaul, home terminal America/Chicago (CST, UTC-6), appointment in America/New_York (EST, UTC-5).
+  // Now = Wed Nov 11 2026 06:00 CST. Driver drove 9h 30m previously, went OFF at 06:00 CST, plenty of cycle (40h used / 30h left).
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago'); // Wed Nov 11 06:00 CST
+  const prevShiftStart = E.localToMinute(2026, 11, 10, 20, 'America/Chicago'); // Tue 20:00 CST
+  const segsOk = [
+    { status: 'OFF', start: prevShiftStart - 600, end: prevShiftStart, createdAt: 1 },
+    { status: 'D', start: prevShiftStart, end: prevShiftStart + 480, createdAt: 2 },
+    { status: 'OFF', start: prevShiftStart + 480, end: prevShiftStart + 510, createdAt: 3 },
+    { status: 'D', start: prevShiftStart + 510, end: nowWed06, createdAt: 4 },
+  ];
+
+  // Hard appointment: Thu Nov 12 2026 08:00 Eastern (= 07:00 Central), 550 mi @ 55 mph = 10h drive, 45m buffer, 15m pre-trip, 2h dock.
+  const pLocal = RO.planRollout({
+    segments: segsOk,
+    now: nowWed06,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '08:00',
+    entryZoneMode: 'local',
+    apptTimeZone: 'America/New_York',
+    distanceMode: 'miles',
+    miles: 550,
+    mph: 55,
+    driveMinutesDirect: 0,
+    bufferMinutes: 45,
+    dockMinutes: 120,
+    preTripMinutes: 15,
+  });
+
+  const expAppt = E.localToMinute(2026, 11, 12, 8, 'America/New_York'); // Thu 08:00 EST = Thu 07:00 CST
+  const expBufArr = expAppt - 45;                                        // Thu 07:15 EST = Thu 06:15 CST
+  const expWheels = expBufArr - 600 - 30;                                // Wed 20:45 EST = Wed 19:45 CST
+  const expRoll = expWheels - 15;                                        // Wed 20:30 EST = Wed 19:30 CST
+  const expShut = expRoll - 600;                                         // Wed 10:30 EST = Wed 09:30 CST (in 08:00-10:00 sweet spot!)
+  const expBrkEarly = expWheels + (600 - 480);                           // Wed 21:45 CST / 22:45 EST
+  const expBrkLate = expWheels + 480;                                    // Thu 03:45 CST / 04:45 EST
+  const expPta = expAppt + 120;                                          // Thu 10:00 EST / 09:00 CST
+
+  need(pLocal.feasible && pLocal.restMode === 'reset10', `f1 feasible/restMode: ${pLocal.feasible}/${pLocal.restMode}`);
+  need(pLocal.driveMinutes === 600 && pLocal.effectiveMph === 55, `f1 drive/mph: ${pLocal.driveMinutes}/${pLocal.effectiveMph}`);
+  need(pLocal.appointment.minute === expAppt, `f1 appt: ${pLocal.appointment.minute} vs ${expAppt}`);
+  need(pLocal.bufferedArrival.minute === expBufArr && pLocal.plannedArrival.minute === expBufArr, `f1 arrival: ${pLocal.bufferedArrival.minute}/${pLocal.plannedArrival.minute} vs ${expBufArr}`);
+  need(pLocal.wheelsRoll.minute === expWheels && pLocal.rollOut.minute === expRoll, `f1 rollOut: ${pLocal.rollOut.minute} vs ${expRoll}`);
+  need(pLocal.latestShutdown.minute === expShut, `f1 shutdown: ${pLocal.latestShutdown.minute} vs ${expShut}`);
+  need(pLocal.inParkingSweetSpot === true, `f1 sweet spot should be true at 09:30 CST`);
+  need(pLocal.breakWindow.required && pLocal.breakWindow.earliestStart?.minute === expBrkEarly && pLocal.breakWindow.latestStart?.minute === expBrkLate,
+    `f1 break window: ${pLocal.breakWindow.earliestStart?.minute}..${pLocal.breakWindow.latestStart?.minute} vs ${expBrkEarly}..${expBrkLate}`);
+  need(pLocal.pta.minute === expPta, `f1 pta: ${pLocal.pta.minute} vs ${expPta}`);
+  // Dual-displayed roll-out explicitly contains BOTH Central (19:30) and Eastern (20:30)
+  need(pLocal.rollOut.homeText.includes('19:30 Central') && pLocal.rollOut.apptText.includes('20:30 Eastern'),
+    `f1 dual rollOut text: home="${pLocal.rollOut.homeText}" appt="${pLocal.rollOut.apptText}"`);
+
+  // Independent engine cross-check at BOTH earliest and latest break placements: 0 post-now violations!
+  const evEarly = E.evaluate([...segsOk, ...pLocal.simSegments], { asOf: expBufArr, config: cfgChi });
+  need(evEarly.violations.filter((v) => v.tentative || v.start >= nowWed06).length === 0,
+    `f1 engine early-break violations: ${JSON.stringify(evEarly.violations)}`);
+  const lateBreakSegs = [
+    { status: 'OFF', start: nowWed06, end: expRoll, tentative: true },
+    { status: 'ON', start: expRoll, end: expWheels, tentative: true },
+    { status: 'D', start: expWheels, end: expBrkLate, tentative: true },
+    { status: 'OFF', start: expBrkLate, end: expBrkLate + 30, tentative: true },
+    { status: 'D', start: expBrkLate + 30, end: expBufArr, tentative: true },
+  ];
+  const evLate = E.evaluate([...segsOk, ...lateBreakSegs], { asOf: expBufArr, config: cfgChi });
+  need(evLate.violations.filter((v) => v.tentative || v.start >= nowWed06).length === 0,
+    `f1 engine late-break violations: ${JSON.stringify(evLate.violations)}`);
+
+  // Fixture 2: Cross-zone timezone toggle equivalence — same appointment entered in Home Terminal time (07:00 Central)
+  // yields the EXACT same UTC instant and identical dual-displayed times & PTA as 08:00 Eastern (local).
+  const pTerminal = RO.planRollout({
+    segments: segsOk,
+    now: nowWed06,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '07:00',
+    entryZoneMode: 'terminal',
+    apptTimeZone: 'America/New_York',
+    distanceMode: 'miles',
+    miles: 550,
+    mph: 55,
+    driveMinutesDirect: 0,
+    bufferMinutes: 45,
+    dockMinutes: 120,
+    preTripMinutes: 15,
+  });
+  need(pTerminal.appointment.minute === pLocal.appointment.minute
+    && pTerminal.latestShutdown.minute === pLocal.latestShutdown.minute
+    && pTerminal.rollOut.minute === pLocal.rollOut.minute
+    && pTerminal.breakWindow.earliestStart?.minute === pLocal.breakWindow.earliestStart?.minute
+    && pTerminal.breakWindow.latestStart?.minute === pLocal.breakWindow.latestStart?.minute
+    && pTerminal.bufferedArrival.minute === pLocal.bufferedArrival.minute
+    && pTerminal.pta.minute === pLocal.pta.minute
+    && pTerminal.rollOut.homeText === pLocal.rollOut.homeText
+    && pTerminal.rollOut.apptText === pLocal.rollOut.apptText
+    && pTerminal.ptaText === pLocal.ptaText,
+    `f2 timezone toggle mismatch: local=${pLocal.appointment.minute}/${pLocal.rollOut.minute} terminal=${pTerminal.appointment.minute}/${pTerminal.rollOut.minute}`);
+
+  // Fixture 3: Speed/miles vs direct-hours equivalence (+ speed clamping + <=8h no-break case)
+  const pHours = RO.planRollout({
+    segments: segsOk,
+    now: nowWed06,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '08:00',
+    entryZoneMode: 'local',
+    apptTimeZone: 'America/New_York',
+    distanceMode: 'hours',
+    miles: 0,
+    mph: 55,
+    driveMinutesDirect: 600,
+    bufferMinutes: 45,
+    dockMinutes: 120,
+    preTripMinutes: 15,
+  });
+  const pMph45 = RO.planRollout({
+    segments: segsOk,
+    now: nowWed06,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '08:00',
+    entryZoneMode: 'local',
+    apptTimeZone: 'America/New_York',
+    distanceMode: 'miles',
+    miles: 450,
+    mph: 45,
+    driveMinutesDirect: 0,
+    bufferMinutes: 45,
+    dockMinutes: 120,
+    preTripMinutes: 15,
+  });
+  const pMphClamp = RO.computeDriveMinutes('miles', 650, 80, 0); // >65 clamps to 65 mph -> 600m
+  need(pHours.driveMinutes === 600 && pHours.rollOut.minute === pLocal.rollOut.minute && pHours.latestShutdown.minute === pLocal.latestShutdown.minute && pHours.pta.minute === pLocal.pta.minute,
+    `f3 miles vs direct-hours mismatch: ${pHours.rollOut.minute} vs ${pLocal.rollOut.minute}`);
+  need(pMph45.driveMinutes === 600 && pMph45.rollOut.minute === pLocal.rollOut.minute, `f3 450mi@45mph mismatch`);
+  need(pMphClamp.effectiveMph === 65 && pMphClamp.driveMinutes === 600, `f3 mph clamp: ${JSON.stringify(pMphClamp)}`);
+  const pShort = RO.planRollout({
+    segments: segsOk,
+    now: nowWed06,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '08:00',
+    entryZoneMode: 'terminal',
+    apptTimeZone: 'America/Chicago',
+    distanceMode: 'miles',
+    miles: 330,
+    mph: 55, // 6h drive <= 8h -> no mandatory 30m break
+    driveMinutesDirect: 0,
+    bufferMinutes: 45,
+    dockMinutes: 60,
+    preTripMinutes: 15,
+  });
+  need(pShort.feasible && pShort.driveMinutes === 360 && !pShort.breakWindow.required && !pShort.inParkingSweetSpot,
+    `f3 short run: feasible=${pShort.feasible} brk=${pShort.breakWindow.required} sweet=${pShort.inParkingSweetSpot}`);
+
+  // Fixture 4: PTA text content (includes appointment time, planned arrival, and empty/available PTA)
+  need(pLocal.ptaText.includes('Appt:') && pLocal.ptaText.includes('08:00 Eastern') && pLocal.ptaText.includes('07:00 Central')
+    && pLocal.ptaText.includes('Planned arrival:') && pLocal.ptaText.includes('07:15 Eastern') && pLocal.ptaText.includes('45m early')
+    && pLocal.ptaText.includes('PTA (empty & available):') && pLocal.ptaText.includes('10:00 Eastern') && pLocal.ptaText.includes('09:00 Central'),
+    `f4 cross-zone PTA text unexpected:\n${pLocal.ptaText}`);
+  need(pShort.ptaText.includes('Appt:') && pShort.ptaText.includes('08:00 Central')
+    && pShort.ptaText.includes('Planned arrival:') && pShort.ptaText.includes('07:15 Central')
+    && pShort.ptaText.includes('PTA (empty & available):') && pShort.ptaText.includes('09:00 Central'),
+    `f4 same-zone PTA text unexpected:\n${pShort.ptaText}`);
+
+  // Fixture 5: Infeasible case — 10-hour break cannot complete before required roll-out.
+  // Now = Wed Nov 11 16:00 CST. Driver drove 10h 30m (05:30->16:00 with 30m break at 11:30), just went OFF at 16:00.
+  // Earliest fresh roll-out = Thu 02:00 CST. Appt = Thu 10:00 CST, 495 mi @ 55 mph = 9h drive -> needs roll-out Wed 23:30 CST!
+  const nowWed16 = E.localToMinute(2026, 11, 11, 16, 'America/Chicago');
+  const segsTired = [
+    { status: 'OFF', start: nowWed16 - 1260, end: nowWed16 - 660, createdAt: 1 }, // 10h rest before 05:00
+    { status: 'D', start: nowWed16 - 660, end: nowWed16 - 300, createdAt: 2 },   // 6h drive (05:00-11:00)
+    { status: 'OFF', start: nowWed16 - 300, end: nowWed16 - 270, createdAt: 3 }, // 30m break (11:00-11:30)
+    { status: 'D', start: nowWed16 - 270, end: nowWed16, createdAt: 4 },         // 4h 30m drive (11:30-16:00) -> 10h30m driven, 30m left
+  ];
+  const pInf = RO.planRollout({
+    segments: segsTired,
+    now: nowWed16,
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '10:00',
+    entryZoneMode: 'local',
+    apptTimeZone: 'America/Chicago',
+    distanceMode: 'miles',
+    miles: 495,
+    mph: 55, // 9h drive + 30m break + 15m pre-trip = 9h 45m -> needs Wed 23:30 CST roll-out
+    driveMinutesDirect: 0,
+    bufferMinutes: 45,
+    dockMinutes: 120,
+    preTripMinutes: 15,
+  });
+  const expEarliestRoll = nowWed16 + 600;               // Thu 02:00 CST
+  const expEarliestArr = expEarliestRoll + 15 + 540 + 30; // Thu 11:45 CST
+  const expEarliestAppt = expEarliestArr + 45;          // Thu 12:30 CST (+2h 30m = 150m later)
+  need(!pInf.feasible && pInf.verdictSign === 'stop' && pInf.simSegments.length === 0 && pInf.ptaText === '',
+    `f5 infeasible flags: feasible=${pInf.feasible} sign=${pInf.verdictSign} sim=${pInf.simSegments.length}`);
+  need(/10-hour break cannot finish/.test(pInf.headline), `f5 headline: ${pInf.headline}`);
+  need(pInf.recovery !== null
+    && pInf.recovery.earliestLegalRollOut.minute === expEarliestRoll
+    && pInf.recovery.earliestLegalArrival.minute === expEarliestArr
+    && pInf.recovery.earliestWorkableAppt.minute === expEarliestAppt
+    && pInf.recovery.apptShiftMinutes === 150,
+    `f5 recovery mismatch: ${JSON.stringify(pInf.recovery)}`);
+
+  // Fixture 6: Cycle-exhausted infeasible case (66h used of 70/8 cycle, 4h left, needs 9h 15m on duty).
+  const todayC = E.carrierDayStart(nowWed06, cfgChi);
+  const cDays = [todayC];
+  for (let i = 1; i < 8; i++) cDays.unshift(E.carrierDayStart(cDays[0] - 1, cfgChi));
+  const cHours = [2, 2, 10, 10, 10, 11, 11, 10]; // sum = 66h used, only 2h drops off tomorrow
+  const segsCycle = cHours.map((h, i) => ({ status: 'D', start: cDays[i] + 60, end: cDays[i] + 60 + h * 60, createdAt: i + 1 }));
+  const pCycleInf = RO.planRollout({
+    segments: segsCycle,
+    now: nowWed06 + 600, // Wed 16:00 CST (after 10h rest from day 7's 01:00-11:00 -> fresh 11/14, but 66h cycle used)
+    config: cfgChi,
+    apptDate: '2026-11-12',
+    apptTime: '14:00',
+    entryZoneMode: 'terminal',
+    apptTimeZone: 'America/Chicago',
+    distanceMode: 'hours',
+    miles: 0,
+    mph: 55,
+    driveMinutesDirect: 540, // 9h drive + 15m pre-trip = 9h 15m > 4h remaining (+2h recap = 6h < 9h15m)
+    bufferMinutes: 45,
+    dockMinutes: 60,
+    preTripMinutes: 15,
+  });
+  need(!pCycleInf.feasible && /70-hour cycle/.test(pCycleInf.headline) && pCycleInf.recovery !== null,
+    `f6 cycle infeasible: feasible=${pCycleInf.feasible} headline="${pCycleInf.headline}"`);
+
+  // Fixture 7: Plan hub bottom placement (6th item) & RolloutTab SSR render order (verdict first, checklist, PTA)
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
+  const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
+  need(titles2.length === 6 && titles2[5] === 'When to roll &amp; PTA', `f7 Plan hub bottom entry: ${JSON.stringify(titles2)}`);
+
+  A.openRolloutPlanner(true);
+  const rollHtml = pageOut(render(h(App, {})), 'page-plan');
+  const vPos = rollHtml.indexOf('data-rollout-verdict');
+  const cPos = rollHtml.indexOf('data-rollout-checklist');
+  const pPos = rollHtml.indexOf('data-rollout-pta="1"');
+  need(vPos > 0 && cPos > vPos && pPos > cPos, `f7 SSR order wrong: verdict=${vPos} checklist=${cPos} pta=${pPos}`);
+  need(rollHtml.includes('When to roll &amp; PTA') && rollHtml.includes('Copy PTA for dispatch'), 'f7 SSR missing title or Copy PTA button');
+  A.openRolloutPlanner(false);
+
+  if (bad.length) throw new Error(`when to roll & PTA: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('when to roll & PTA (backwards chain, timezone toggle, miles/hours eq, infeasible, PTA, Plan bottom entry): OK');
 }
 console.log('OK');

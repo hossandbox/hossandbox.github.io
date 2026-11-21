@@ -32,6 +32,12 @@ import {
   PROJECTION_SHIFTS, SHIFT_BUDGET_PRESETS, SHIFT_START_PRESETS, RESET_TIME_PRESETS,
 } from './recap.ts';
 import {
+  planRollout, defaultAppointmentFor, resolveWallDateTime, formatWallDateTime, COMMON_APPT_ZONES,
+  MIN_MPH, MAX_MPH, DEFAULT_MPH, DEFAULT_BUFFER_MIN, DEFAULT_DOCK_MIN, DEFAULT_PRETRIP_MIN, DEFAULT_MILES,
+  MPH_PRESETS, MILES_PRESETS, HOURS_PRESETS, BUFFER_PRESETS, DOCK_PRESETS, PRETRIP_PRESETS,
+  type ZoneEntryMode, type DistanceMode,
+} from './rollout.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -351,6 +357,7 @@ const I = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   week: 'M4 19h16M6 16v-5M11 16V8M16 16v-8M20 16v-3M4 5h16',
+  rollout: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -424,6 +431,8 @@ export type SheetKind =
   | { kind: 'loadtime'; field: 'leave' | 'appt' }
   // Patch L1 item 3: the trip planner's departure, on the same shared clock picker.
   | { kind: 'triptime' }
+  // Clock-picker fix: "When to roll & PTA" appointment date & time on the shared clock picker.
+  | { kind: 'rollouttime'; apptDate: string; apptTime: string; entryZoneName: string; entryTimeZone: string; fallbackMinute: number | null; onApply: (date: string, time: string) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
@@ -4034,6 +4043,10 @@ let weekPlannerOpen = false;
 const weekPlannerSubs = new Set<() => void>();
 export function openWeekPlanner(open = true) {
   weekPlannerOpen = open;
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4042,6 +4055,29 @@ function useWeekPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); weekPlannerSubs.add(f); return () => { weekPlannerSubs.delete(f); }; }, []);
   return weekPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for the Work-Backwards Appointment & Departure Planner ("When to roll & PTA").
+ * Held outside `store.ts` (store is frozen) in the exact style of `useWeekPlanner()` above.
+ */
+let rolloutPlannerOpen = false;
+const rolloutPlannerSubs = new Set<() => void>();
+export function openRolloutPlanner(open = true) {
+  rolloutPlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'rollouttime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  rolloutPlannerSubs.forEach((f) => f());
+}
+export function isRolloutPlannerOpen(): boolean { return rolloutPlannerOpen; }
+function useRolloutPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); rolloutPlannerSubs.add(f); return () => { rolloutPlannerSubs.delete(f); }; }, []);
+  return rolloutPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4064,6 +4100,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openWeekPlanner(true)}>
         <span class="plan-icon"><Icon d={I.week} size={26} /></span>
         <span class="plan-text"><b>Weekly recap vs. 34</b><span class="muted small">Compare recaps against a 34-hour reset and plan home time.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openRolloutPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.rollout} size={26} /></span>
+        <span class="plan-text"><b>When to roll &amp; PTA</b><span class="muted small">Work backwards from a hard appointment for shutdown, roll-out, break, and dispatch PTA.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -5238,6 +5279,570 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
             );
           })()}
         </ul>
+      </Card>
+    </>
+  );
+}
+
+/* ============================================================ Work-backwards appointment & departure planner ("When to roll & PTA") */
+
+/**
+ * Work-backwards rollout planner ("When to roll & PTA"): appointment picker on the shared ClockPick.
+ * Edits wall-clock strings in the entry zone by converting through `deviceTz` (the local clock zone
+ * ClockPick renders and parses in — equal to `s.config.timeZone` in the home zone, and still exact
+ * when `deviceTz !== s.config.timeZone` or under `TZ=UTC`).
+ */
+function RolloutTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rollouttime' }>; now: number }) {
+  const nowWall = formatWallDateTime(now, k.entryTimeZone);
+  const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
+  const [at, setAt] = useState<number>(() => {
+    const parsed = resolveWallDateTime(k.apptDate, k.apptTime, deviceTz);
+    if (parsed !== null) return parsed;
+    if (k.fallbackMinute !== null) {
+      const fbWall = formatWallDateTime(k.fallbackMinute, k.entryTimeZone);
+      const fb = resolveWallDateTime(fbWall.date, fbWall.time, deviceTz);
+      if (fb !== null) return fb;
+    }
+    return nextHour(pickerNow);
+  });
+  const apply = () => {
+    const wall = formatWallDateTime(at, deviceTz);
+    k.onApply(wall.date, wall.time);
+    openSheet(null);
+  };
+  return (
+    <Sheet title={`Appointment (${k.entryZoneName})`}>
+      <p class="muted small" style="margin:0">Wall-clock time in <b>{k.entryZoneName}</b> time.</p>
+      <ClockPick at={at} set={setAt} now={pickerNow} future={true} say="Appointment" name="Appointment time" keys={KEYS_HOURS} />
+      <button class="primary wide ed-go" onClick={apply}>Apply · {clockFull(at)} ({k.entryZoneName})</button>
+    </Sheet>
+  );
+}
+
+/**
+ * Work-Backwards Appointment & Departure Planner ("When to roll & PTA").
+ * For a load already accepted: starts from a hard pickup/delivery appointment and works
+ * backwards through FMCSA 11/14/30-min/10-hr/cycle rules via `engine/src/index.ts` to
+ * produce a concrete execution checklist and copyable dispatch PTA.
+ */
+function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const initAppt = useMemo(() => defaultAppointmentFor(now, s.config), []);
+  const [apptDate, setApptDate] = useState(initAppt.apptDate);
+  const [apptTime, setApptTime] = useState(initAppt.apptTime);
+  const [apptTz, setApptTz] = useState(s.config.timeZone);
+  const [entryZoneMode, setEntryZoneMode] = useState<ZoneEntryMode>('local');
+  const [distanceMode, setDistanceMode] = useState<DistanceMode>('miles');
+  const [miles, setMiles] = useState(DEFAULT_MILES);
+  const [mph, setMph] = useState(() => Math.max(MIN_MPH, Math.min(MAX_MPH, Math.round(s.mph || DEFAULT_MPH))));
+  const [driveHours, setDriveHours] = useState(9);
+  const [driveMins, setDriveMins] = useState(0);
+  const [bufferMin, setBufferMin] = useState(DEFAULT_BUFFER_MIN);
+  const [dockMin, setDockMin] = useState(DEFAULT_DOCK_MIN);
+  const [preTripMin, setPreTripMin] = useState(DEFAULT_PRETRIP_MIN);
+  const [copyNote, setCopyNote] = useState('');
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const zoneChoices = useMemo(() => {
+    const set = new Set<string>([s.config.timeZone, deviceTz, ...COMMON_APPT_ZONES]);
+    return [...set].filter((z) => isValidTimeZone(z));
+  }, [s.config.timeZone]);
+
+  const plan = useMemo(
+    () => planRollout({
+      segments: logged,
+      now,
+      config: s.config,
+      apptDate,
+      apptTime,
+      entryZoneMode,
+      apptTimeZone: apptTz,
+      distanceMode,
+      miles,
+      mph,
+      driveMinutesDirect: driveHours * 60 + driveMins,
+      bufferMinutes: bufferMin,
+      dockMinutes: dockMin,
+      preTripMinutes: preTripMin,
+    }),
+    [logged, now, s.config, apptDate, apptTime, entryZoneMode, apptTz, distanceMode, miles, mph, driveHours, driveMins, bufferMin, dockMin, preTripMin],
+  );
+
+  const copyPta = async () => {
+    if (!plan.ptaText) return;
+    try {
+      await navigator.clipboard.writeText(plan.ptaText);
+      setCopyNote('Copied ✓');
+    } catch {
+      setCopyNote('Select & copy above');
+    }
+    window.setTimeout(() => setCopyNote(''), 2500);
+  };
+
+  const applyEarliestAppt = () => {
+    if (!plan.recovery) return;
+    setApptDate(plan.recovery.apptDateInEntryZone);
+    setApptTime(plan.recovery.apptTimeInEntryZone);
+  };
+
+  const hist = cycleBasis(s, now, plan.cycleWindowDays);
+  const entryZoneName = entryZoneMode === 'local' ? plan.apptZoneName : plan.homeZoneName;
+  const entryTz = entryZoneMode === 'local' ? apptTz : s.config.timeZone;
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">When to roll &amp; PTA</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Execution timetable for a booked load — work backwards from your hard appointment to get shutdown, roll-out, break window, and dispatch PTA.
+      </p>
+
+      {/* 1. VERDICT / FEASIBILITY LINE UP TOP */}
+      <Card tone={plan.tone}>
+        <div class="rollout-verdict" data-rollout-verdict="1">
+          <Sign kind={plan.verdictSign}>{plan.verdictLabel}</Sign>
+          <p class="rollout-headline">{plan.headline}</p>
+          <p class="rollout-subline">{plan.reason}</p>
+          <p class="muted small" style="margin:0">
+            Seeded from your log · {plan.cycleLimit / 60}h/{plan.cycleWindowDays}d cycle ({dur(plan.cycleRemainingNow)} left) · Home terminal: <b>{plan.homeZoneName}</b>
+            {!plan.sameZone && <> · Appointment: <b>{plan.apptZoneName}</b></>}.
+          </p>
+        </div>
+      </Card>
+
+      {/* 2a. INFEASIBLE RECOVERY — never print an impossible timetable as if it were fine */}
+      {plan.validInput && !plan.feasible && (
+        <Card title="What has to move" tone="bad">
+          <div class="rollout-recovery" data-rollout-infeasible="1">
+            {plan.recovery ? (
+              <>
+                <p class="small" style="margin:0">
+                  No legal timetable meets <b>{plan.appointment.apptText}</b> with a <b>{dur(plan.bufferMinutes)}</b> arrival buffer from your current clocks.
+                  {plan.recovery.needsRestart34 && <> Clearing your {plan.cycleLimit / 60}-hour cycle requires a 34-hour reset first.</>}
+                </p>
+                <div class="rollout-recovery-grid">
+                  <div class="rollout-recovery-item">
+                    <span class="rollout-dual-lbl">Earliest legal roll-out</span>
+                    <b class="mono">{plan.recovery.earliestLegalRollOut.homeShort}</b>
+                    {!plan.sameZone && <span class="muted small mono">{plan.recovery.earliestLegalRollOut.apptShort}</span>}
+                  </div>
+                  <div class="rollout-recovery-item">
+                    <span class="rollout-dual-lbl">Earliest workable appt</span>
+                    <b class="mono">{plan.recovery.earliestWorkableAppt.apptShort}</b>
+                    {!plan.sameZone && <span class="muted small mono">{plan.recovery.earliestWorkableAppt.homeShort}</span>}
+                    <span class="muted small">+{dur(plan.recovery.apptShiftMinutes)} later (keeps {dur(plan.bufferMinutes)} buffer)</span>
+                  </div>
+                </div>
+                {plan.recovery.maxBufferThatFits !== null && (
+                  <p class="small" style="margin:0">
+                    Or keep the appointment and trim your arrival buffer to <b>{dur(plan.recovery.maxBufferThatFits)}</b> (wheels stop at <b class="mono">{plan.recovery.earliestLegalArrival.apptShort}</b>).
+                  </p>
+                )}
+                <button class="primary wide" onClick={applyEarliestAppt}>
+                  Use earliest workable appointment ({plan.recovery.earliestWorkableAppt.apptShort})
+                </button>
+              </>
+            ) : (
+              <p class="small" style="margin:0">
+                Adjust pre-trip allowance or run length so each shift fits inside FMCSA’s 11-hour driving and 14-hour duty window limits.
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* 2b. FEASIBLE ACTION CHECKLIST IN ORDER */}
+      {plan.validInput && plan.feasible && (
+        <Card title="Action checklist">
+          <ol class="rollout-steps" data-rollout-checklist="1">
+            {/* Step 1: Latest shutdown for 10h break (or 34h reset / current shift) */}
+            <li class="rollout-step" data-rollout-shutdown="1">
+              <div class="rollout-step-head">
+                <span class="rollout-step-num">1</span>
+                <span class="rollout-step-title">
+                  {plan.restMode === 'current_shift'
+                    ? 'Pre-run rest (none required)'
+                    : plan.restMode === 'restart34'
+                      ? 'Latest shutdown for 34-hour reset'
+                      : 'Latest shutdown for 10-hour break'}
+                </span>
+                {plan.inParkingSweetSpot && (
+                  <span class="rollout-badge good" data-rollout-sweetspot="1">08:00–10:00 parking sweet spot</span>
+                )}
+              </div>
+              {plan.restMode === 'current_shift' ? (
+                <p class="small" style="margin:0">
+                  Fits on your current shift clocks without a 10-hour break before roll-out.
+                </p>
+              ) : (
+                <>
+                  <div class="rollout-time-main mono">{plan.latestShutdown.homeText}</div>
+                  {!plan.sameZone && (
+                    <div class="muted small mono">{plan.latestShutdown.apptText} (appointment local)</div>
+                  )}
+                  {plan.currentRestCoversBreak && plan.currentRestStart && plan.currentRestDoneAt && (
+                    <p class="small" style="margin:0">
+                      Your current rest (since <b class="mono">{plan.currentRestStart.homeShort}</b>) already covers this — {plan.requiredRestMinutes / 60}h completes at <b class="mono">{plan.currentRestDoneAt.homeShort}</b>.
+                    </p>
+                  )}
+                  {plan.inParkingSweetSpot && (
+                    <p class="muted small" style="margin:0">
+                      Lands in the 08:00–10:00 parking sweet spot — overnight drivers park easiest right after daytime trucks roll out.
+                    </p>
+                  )}
+                </>
+              )}
+            </li>
+
+            {/* Step 2: Exact roll-out / pre-trip time in BOTH zones */}
+            <li class="rollout-step highlight" data-rollout-rollout="1">
+              <div class="rollout-step-head">
+                <span class="rollout-step-num">2</span>
+                <span class="rollout-step-title">Roll out &amp; start pre-trip</span>
+                <span class="rollout-badge accent">Both zones</span>
+              </div>
+              <div class="rollout-dual">
+                <div class="rollout-dual-box">
+                  <span class="rollout-dual-lbl">Home terminal ({plan.homeZoneName})</span>
+                  <span class="rollout-dual-val mono">{plan.rollOut.homeText}</span>
+                </div>
+                <div class="rollout-dual-box">
+                  <span class="rollout-dual-lbl">Appointment local ({plan.apptZoneName})</span>
+                  <span class="rollout-dual-val mono">{plan.rollOut.apptText}</span>
+                </div>
+              </div>
+              <p class="muted small" style="margin:0">
+                {plan.preTripMinutes > 0
+                  ? <>Pre-trip {dur(plan.preTripMinutes)} on duty → wheels roll at <b class="mono">{plan.wheelsRoll.homeShort}</b>{!plan.sameZone && <> (<b class="mono">{plan.wheelsRoll.apptShort}</b>)</>}.</>
+                  : <>Wheels roll immediately at <b class="mono">{plan.wheelsRoll.homeShort}</b> (0m pre-trip).</>}
+                {' '}Total drive: <b>{dur(plan.driveMinutes)}</b>{distanceMode === 'miles' && <> ({miles} mi @ {plan.effectiveMph} mph)</>}.
+              </p>
+            </li>
+
+            {/* Step 3: Mandatory 30-minute break window */}
+            <li class="rollout-step" data-rollout-break="1">
+              <div class="rollout-step-head">
+                <span class="rollout-step-num">3</span>
+                <span class="rollout-step-title">Mandatory 30-minute break</span>
+              </div>
+              {plan.breakWindow.required && plan.breakWindow.earliestStart && plan.breakWindow.latestStart ? (
+                <>
+                  <div class="rollout-dual">
+                    <div class="rollout-dual-box">
+                      <span class="rollout-dual-lbl">Earliest break start</span>
+                      <span class="rollout-dual-val mono">{plan.breakWindow.earliestStart.homeShort}</span>
+                      {!plan.sameZone && <span class="muted small mono">{plan.breakWindow.earliestStart.apptShort}</span>}
+                      <span class="muted small">After {dur(plan.breakWindow.minDriveBeforeBreak)} driving (leaves 8h 00m max)</span>
+                    </div>
+                    <div class="rollout-dual-box">
+                      <span class="rollout-dual-lbl">Latest break start</span>
+                      <span class="rollout-dual-val mono">{plan.breakWindow.latestStart.homeShort}</span>
+                      {!plan.sameZone && <span class="muted small mono">{plan.breakWindow.latestStart.apptShort}</span>}
+                      <span class="muted small">At {dur(plan.breakWindow.maxDriveBeforeBreak)} driving (8h limit)</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p class="small" style="margin:0">{plan.breakWindow.reason}.</p>
+              )}
+              {plan.legs.length > 1 && (
+                <div class="muted small">
+                  Multi-shift run ({plan.legs.length} shifts): includes {plan.legs.length - 1} en-route 10-hour rest{plan.legs.length - 1 > 1 ? 's' : ''}.
+                  {plan.legs.map((lg) => lg.enRouteRestAfter && (
+                    <div key={lg.legIndex} style="margin-top:4px">
+                      Shift {lg.legIndex + 1} ends <b class="mono">{lg.legEnd.homeShort}</b> → 10h en-route break until <b class="mono">{lg.enRouteRestAfter.end.homeShort}</b>.
+                    </div>
+                  ))}
+                </div>
+              )}
+            </li>
+
+            {/* Step 4: Buffered arrival & planned arrival */}
+            <li class="rollout-step" data-rollout-arrival="1">
+              <div class="rollout-step-head">
+                <span class="rollout-step-num">4</span>
+                <span class="rollout-step-title">Buffered &amp; planned arrival</span>
+              </div>
+              <div class="rollout-dual">
+                <div class="rollout-dual-box">
+                  <span class="rollout-dual-lbl">Buffered target (−{dur(plan.bufferMinutes)})</span>
+                  <span class="rollout-dual-val mono">{plan.bufferedArrival.apptText}</span>
+                  {!plan.sameZone && <span class="muted small mono">{plan.bufferedArrival.homeShort} (home)</span>}
+                </div>
+                <div class="rollout-dual-box">
+                  <span class="rollout-dual-lbl">Planned arrival</span>
+                  <span class="rollout-dual-val mono">{plan.plannedArrival.apptText}</span>
+                  {!plan.sameZone && <span class="muted small mono">{plan.plannedArrival.homeShort} (home)</span>}
+                </div>
+              </div>
+              <p class="muted small" style="margin:0">
+                Hard appointment: <b class="mono">{plan.appointment.apptText}</b>
+                {!plan.sameZone && <> (<b class="mono">{plan.appointment.homeShort}</b> home)</>}.
+              </p>
+            </li>
+
+            {/* Step 5: Ready-to-send dispatch PTA */}
+            <li class="rollout-step" data-rollout-pta-step="1">
+              <div class="rollout-step-head">
+                <span class="rollout-step-num">5</span>
+                <span class="rollout-step-title">Dispatch PTA (empty &amp; available)</span>
+              </div>
+              <div class="rollout-time-main mono">{plan.pta.apptText}</div>
+              {!plan.sameZone && (
+                <div class="muted small mono">{plan.pta.homeText} (home terminal)</div>
+              )}
+              <p class="muted small" style="margin:0">
+                Appointment + {dur(plan.dockMinutes)} dock/unload time.
+                {plan.windowPastAtPta && <> Note: 14-hour shift window ends before unload completes — plan a 10h break or split before your next dispatch.</>}
+              </p>
+              <div class="rollout-pta-box">
+                <pre class="rollout-pta-text" data-rollout-pta="1">{plan.ptaText}</pre>
+                <div class="rollout-pta-actions">
+                  <button class="primary" onClick={copyPta}>{copyNote || 'Copy PTA for dispatch'}</button>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </Card>
+      )}
+
+      {/* 3. Log basis disclosure when log is fresh/incomplete */}
+      {hist !== 'known' && (
+        <div class="warnbox small">
+          Your log does not cover a full {plan.cycleWindowDays}-day cycle yet, so unlogged past days count as 0h. Update past days in <b>Log</b> or{' '}
+          <button class="link" style="display:inline;padding:0;min-height:0" onClick={() => { openRolloutPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}>Hours coming back</button>.
+        </div>
+      )}
+
+      {/* 4. INPUTS CARD */}
+      <Card title="Appointment & run details">
+        {/* Appointment date, time, and explicit timezone toggle */}
+        <div class="rollout-section">
+          <span class="stat-label">Appointment time entered in</span>
+          <div class="rollout-seg" role="group" aria-label="Appointment timezone entry mode">
+            <button
+              class={entryZoneMode === 'local' ? 'on' : ''}
+              onClick={() => setEntryZoneMode('local')}
+            >
+              Appointment local ({plan.apptZoneName})
+            </button>
+            <button
+              class={entryZoneMode === 'terminal' ? 'on' : ''}
+              onClick={() => setEntryZoneMode('terminal')}
+            >
+              Home terminal ({plan.homeZoneName})
+            </button>
+          </div>
+
+          <div class="rollout-fieldrow">
+            <label>Appointment facility time zone
+              <select
+                aria-label="Appointment time zone"
+                value={apptTz}
+                onChange={(e) => setApptTz((e.target as HTMLSelectElement).value)}
+              >
+                {zoneChoices.map((z) => (
+                  <option key={z} value={z}>
+                    {zoneLabel(z) ?? z}{z === s.config.timeZone ? ' (Home terminal)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div class="rollout-fieldrow">
+            <span class="stat-label">Appointment date &amp; time ({entryZoneName})</span>
+            <button
+              class="rowbtn"
+              data-rollout-appt-btn="1"
+              data-rollout-appt-date={apptDate}
+              data-rollout-appt-time={apptTime}
+              aria-label={`Appointment date and time (${entryZoneName}): ${plan.validInput ? plan.appointment.apptText : `${apptDate} ${apptTime}`}. Change`}
+              onClick={() => openSheet({
+                kind: 'rollouttime',
+                apptDate,
+                apptTime,
+                entryZoneName,
+                entryTimeZone: entryTz,
+                fallbackMinute: plan.validInput ? plan.appointment.minute : null,
+                onApply: (d, t) => { setApptDate(d); setApptTime(t); },
+              })}
+            >
+              <span>
+                <b class="mono">{plan.validInput ? plan.appointment.apptText : `${apptDate} ${apptTime}`}</b>
+                {plan.validInput && !plan.sameZone && (
+                  <><br /><span class="muted small mono">{plan.appointment.homeText} (home)</span></>
+                )}
+              </span>
+              <span class="muted small">Change</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Distance (miles + speed) OR direct drive hours */}
+        <div class="rollout-section">
+          <span class="stat-label">Run length</span>
+          <div class="rollout-seg" role="group" aria-label="Run length entry mode">
+            <button class={distanceMode === 'miles' ? 'on' : ''} onClick={() => setDistanceMode('miles')}>Miles + speed</button>
+            <button class={distanceMode === 'hours' ? 'on' : ''} onClick={() => setDistanceMode('hours')}>Direct drive hours</button>
+          </div>
+
+          {distanceMode === 'miles' ? (
+            <>
+              <div class="rollout-chips" role="group" aria-label="Distance presets">
+                {MILES_PRESETS.map((m) => (
+                  <button key={m} class={miles === m ? 'on' : ''} onClick={() => setMiles(m)}>{m} mi</button>
+                ))}
+              </div>
+              <div class="rollout-fieldgrid">
+                <label>Distance (miles)
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={1}
+                    max={5000}
+                    aria-label="Distance in miles"
+                    value={miles}
+                    onInput={(e) => setMiles(Math.max(0, Math.min(5000, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+                <label>Avg speed (45–65 mph)
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={MIN_MPH}
+                    max={MAX_MPH}
+                    aria-label="Average speed mph"
+                    value={mph}
+                    onInput={(e) => {
+                      const v = Number((e.target as HTMLInputElement).value);
+                      if (Number.isFinite(v)) setMph(Math.max(MIN_MPH, Math.min(MAX_MPH, Math.round(v))));
+                    }}
+                  />
+                </label>
+              </div>
+              <div class="rollout-chips" role="group" aria-label="Average speed presets">
+                {MPH_PRESETS.map((v) => (
+                  <button key={v} class={mph === v ? 'on' : ''} onClick={() => setMph(v)}>{v} mph</button>
+                ))}
+              </div>
+              <p class="muted small" style="margin:6px 0 0">
+                Drive time: <b class="mono">{dur(plan.driveMinutes)}</b> at {plan.effectiveMph} mph.
+              </p>
+            </>
+          ) : (
+            <>
+              <div class="rollout-chips" role="group" aria-label="Drive hours presets">
+                {HOURS_PRESETS.map((p) => (
+                  <button
+                    key={p.minutes}
+                    class={driveHours * 60 + driveMins === p.minutes ? 'on' : ''}
+                    onClick={() => { setDriveHours(Math.floor(p.minutes / 60)); setDriveMins(p.minutes % 60); }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div class="rollout-fieldgrid">
+                <label>Drive hours
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={0}
+                    max={60}
+                    aria-label="Drive hours"
+                    value={driveHours}
+                    onInput={(e) => setDriveHours(Math.max(0, Math.min(60, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+                <label>Drive minutes
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={0}
+                    max={59}
+                    aria-label="Drive minutes"
+                    value={driveMins}
+                    onInput={(e) => setDriveMins(Math.max(0, Math.min(59, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Buffer, dock time, pre-trip */}
+        <div class="rollout-section">
+          <span class="stat-label">Arrival buffer (arrive early)</span>
+          <div class="rollout-chips" role="group" aria-label="Arrival buffer presets">
+            {BUFFER_PRESETS.map((m) => (
+              <button key={m} class={bufferMin === m ? 'on' : ''} onClick={() => setBufferMin(m)}>{m === 0 ? '0m' : dur(m)}</button>
+            ))}
+          </div>
+          <div class="rollout-fieldrow">
+            <label>Custom arrival buffer (minutes)
+              <input
+                type="number"
+                class="num"
+                inputMode="numeric"
+                min={0}
+                max={240}
+                aria-label="Arrival buffer minutes"
+                value={bufferMin}
+                onInput={(e) => setBufferMin(Math.max(0, Math.min(240, Number((e.target as HTMLInputElement).value) || 0)))}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div class="rollout-section">
+          <span class="stat-label">Expected dock / unload time (for PTA)</span>
+          <div class="rollout-chips" role="group" aria-label="Dock unload presets">
+            {DOCK_PRESETS.map((p) => (
+              <button key={p.minutes} class={dockMin === p.minutes ? 'on' : ''} onClick={() => setDockMin(p.minutes)}>{p.label}</button>
+            ))}
+          </div>
+          <div class="rollout-fieldrow">
+            <label>Custom dock / unload time (minutes)
+              <input
+                type="number"
+                class="num"
+                inputMode="numeric"
+                min={0}
+                max={720}
+                aria-label="Dock or unload minutes"
+                value={dockMin}
+                onInput={(e) => setDockMin(Math.max(0, Math.min(720, Number((e.target as HTMLInputElement).value) || 0)))}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div class="rollout-section">
+          <span class="stat-label">Pre-trip / roll-out allowance (on duty)</span>
+          <div class="rollout-chips" role="group" aria-label="Pre-trip presets">
+            {PRETRIP_PRESETS.map((m) => (
+              <button key={m} class={preTripMin === m ? 'on' : ''} onClick={() => setPreTripMin(m)}>{m === 0 ? '0m' : dur(m)}</button>
+            ))}
+          </div>
+          <div class="rollout-fieldrow">
+            <label>Custom pre-trip allowance (minutes)
+              <input
+                type="number"
+                class="num"
+                inputMode="numeric"
+                min={0}
+                max={240}
+                aria-label="Pre-trip minutes"
+                value={preTripMin}
+                onInput={(e) => setPreTripMin(Math.max(0, Math.min(240, Number((e.target as HTMLInputElement).value) || 0)))}
+              />
+            </label>
+          </div>
+        </div>
       </Card>
     </>
   );
@@ -6550,7 +7155,11 @@ export function App() {
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
   const weekOpen = useWeekPlanner();
-  useEffect(() => { if (s.tab !== 'plan' && weekPlannerOpen) openWeekPlanner(false); }, [s.tab]);
+  const rolloutOpen = useRolloutPlanner();
+  useEffect(() => {
+    if (s.tab !== 'plan' && weekPlannerOpen) openWeekPlanner(false);
+    if (s.tab !== 'plan' && rolloutPlannerOpen) openRolloutPlanner(false);
+  }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
   // before the back-nav is created, so its entries are built for the screen the shortcut chose.
@@ -6578,15 +7187,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' && isWeekPlannerOpen() ? 'week' : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { openWeekPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { openWeekPlanner(false); openRolloutPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -6762,11 +7371,12 @@ export function App() {
           {warnbox}
           {themeNoticeCard}
           <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key={planFamily ? (s.tab === 'plan' && weekOpen ? 'week' : s.tab) : 'plan'} tab={planFamily ? (s.tab === 'plan' && weekOpen ? 'week' : s.tab) : 'plan'}>
+          <TabBoundary key={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : 'plan') : s.tab) : 'plan'} tab={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : 'plan') : s.tab) : 'plan'}>
             {planFamily ? (
               <>
-                {s.tab === 'plan' && !weekOpen && <PlanTab ev={ev} />}
+                {s.tab === 'plan' && !weekOpen && !rolloutOpen && <PlanTab ev={ev} />}
                 {s.tab === 'plan' && weekOpen && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
+                {s.tab === 'plan' && rolloutOpen && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
                 {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
                 {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
                 {s.tab === 'history' && <HistoryTab s={s} now={now} />}
@@ -6805,7 +7415,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan' && isWeekPlannerOpen()) openWeekPlanner(false); if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
@@ -6817,6 +7427,7 @@ export function App() {
       {!showDisclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
       {!showDisclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
       {!showDisclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'rollouttime' && s.tab === 'plan' && rolloutOpen && <RolloutTimeSheet key={`${sheet.apptDate}-${sheet.apptTime}-${sheet.entryTimeZone}`} k={sheet} now={now} />}
       {!showDisclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
       {!showDisclaimer && s.speakAskOpen && <SpeakAskDialog />}

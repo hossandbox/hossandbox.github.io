@@ -830,13 +830,14 @@ await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5
 });
 
 /* ---------------- (w) Weekly Recap vs. 34-Hour Reset & Home-Time Planner ---------------- */
-await pin('W1. Plan hub lists 5 .plan-item tools with "Weekly recap vs. 34" at the bottom; tapping opens verdict banner first and Back returns to Plan', async () => {
+await pin('W1. Plan hub lists 6 .plan-item tools with "Weekly recap vs. 34" 5th and "When to roll & PTA" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
   A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 5 || titles[4] !== 'Weekly recap vs. 34') return `items=${JSON.stringify(titles)}`;
+  if (items.length !== 6 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA') return `items=${JSON.stringify(titles)}`;
   fire(items[4], 'click'); await sleep(60);
   const txt = planPg.textContent;
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
@@ -847,11 +848,12 @@ await pin('W1. Plan hub lists 5 .plan-item tools with "Weekly recap vs. 34" at t
   if (!back || !/Plan/.test(back.textContent)) return `back=${back?.textContent}`;
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return afterItems.length === 5 || `after back items=${afterItems.length}`;
+  return afterItems.length === 6 || `after back items=${afterItems.length}`;
 });
 
 await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset net gain; changing budget preset & target home time updates live', async () => {
   A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
   const E = await import('../../../engine/src/index.ts');
   const cfg = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago' };
   const todayStart = E.carrierDayStart(T, cfg);
@@ -883,6 +885,7 @@ await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset 
 
 await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cycle and explicitly notes unlogged days counted as 0h', async () => {
   A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
   const cfg60 = { ...getState().config, cycle: '60/7', dayStartHour: 0, timeZone: 'America/Chicago' };
   await seed({ tab: 'plan', config: cfg60, segments: [], current: null, historyAcknowledged: false });
   const planPg = pages()[0];
@@ -896,8 +899,9 @@ await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cy
   return ok || `60/7 text: ${txt.slice(0, 400)}`;
 });
 
-await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 5-item hub', async () => {
+await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 6-item hub', async () => {
   A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
@@ -906,7 +910,342 @@ await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returni
   await seed({ tab: 'now', ...segs });
   await seed({ tab: 'plan', ...segs });
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!A.isWeekPlannerOpen() && items.length === 5) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
+  return (!A.isWeekPlannerOpen() && items.length === 6) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
+});
+
+/* ---------------- (r) Work-Backwards Appointment & Departure Planner ("When to roll & PTA") ---------------- */
+const setRolloutAppt = async (planPg, dateStr, timeStr) => {
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  if (!apptBtn) return 'missing rollout appointment button';
+  fire(apptBtn, 'click'); await sleep(40);
+  const sh = all((n) => has(n, 'sheet'))[0];
+  if (!sh) return 'appointment sheet did not open';
+  const dayIn = all((n) => n.localName === 'input' && has(n, 'ed-day-input'), sh)[0];
+  const timeIn = all((n) => n.localName === 'input' && has(n, 'ed-clock-input'), sh)[0];
+  const applyBtn = all((n) => n.localName === 'button' && has(n, 'ed-go'), sh)[0];
+  if (!dayIn || !timeIn || !applyBtn) return `missing sheet controls day=${!!dayIn} time=${!!timeIn} apply=${!!applyBtn}`;
+  if (dateStr) { dayIn.value = dateStr; fire(dayIn, 'input'); await sleep(30); }
+  if (timeStr) { timeIn.value = timeStr; fire(timeIn, 'input'); await sleep(30); }
+  fire(applyBtn, 'click'); await sleep(60);
+  return null;
+};
+
+await pin('R1. Plan hub lists 6 .plan-item tools with "When to roll & PTA" at the bottom; tapping opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  await seed({ tab: 'plan', ...segs });
+  const planPg = pages()[0];
+  const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
+  if (items.length !== 6 || titles[5] !== 'When to roll & PTA') return `items=${JSON.stringify(titles)}`;
+  fire(items[5], 'click'); await sleep(60);
+  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
+  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planPg)[0];
+  const checklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg)[0];
+  const pta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0];
+  const txt = planPg.textContent;
+  if (h1 !== 'When to roll & PTA' || !verdict || !checklist || !pta) return `h1=${h1} v=${!!verdict} c=${!!checklist} p=${!!pta}`;
+  if (txt.indexOf(verdict.textContent) > txt.indexOf(checklist.textContent)) return 'verdict not before checklist';
+  const back = all((n) => n.localName === 'button' && has(n, 'back'), planPg)[0];
+  fire(back, 'click'); await sleep(60);
+  const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  return afterItems.length === 6 || `after back items=${afterItems.length}`;
+});
+
+await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Central (home terminal) yields identical dual-displayed roll-out, 08:00-10:00 sweet spot & PTA', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
+  const prevStart = E.localToMinute(2026, 11, 10, 20, 'America/Chicago');
+  const sOk = [
+    { status: 'OFF', start: prevStart - 600, end: prevStart, createdAt: 1 },
+    { status: 'D', start: prevStart, end: prevStart + 480, createdAt: 2 },
+    { status: 'OFF', start: prevStart + 480, end: prevStart + 510, createdAt: 3 },
+    { status: 'D', start: prevStart + 510, end: nowWed06, createdAt: 4 },
+  ];
+  await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: sOk, current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  // Choose America/New_York, date 2026-11-12, time 08:00 in local mode via ClockPick sheet, 550 mi @ 55 mph
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
+  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', planPg)[0];
+  if (!tzSel || !btn550) return 'missing rollout controls';
+  tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
+  const errLocal = await setRolloutAppt(planPg, '2026-11-12', '08:00');
+  if (errLocal) return errLocal;
+  fire(btn550, 'click'); await sleep(60);
+
+  const rollLocal = all((n) => n.attributes?.['data-rollout-rollout'] === '1', planPg)[0]?.textContent ?? '';
+  const sweetLocal = all((n) => n.attributes?.['data-rollout-sweetspot'] === '1', planPg)[0]?.textContent ?? '';
+  const ptaLocal = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0]?.textContent ?? '';
+
+  // Toggle to Home terminal and enter 07:00 Central via ClockPick sheet — must produce the EXACT same roll-out and PTA!
+  const termBtn = all((n) => n.localName === 'button' && /Home terminal/.test(n.textContent), planPg)[0];
+  fire(termBtn, 'click'); await sleep(40);
+  const errTerm = await setRolloutAppt(planPg, '2026-11-12', '07:00');
+  if (errTerm) return errTerm;
+
+  const rollTerm = all((n) => n.attributes?.['data-rollout-rollout'] === '1', planPg)[0]?.textContent ?? '';
+  const ptaTerm = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0]?.textContent ?? '';
+
+  A.openRolloutPlanner(false);
+  const okDual = /19:30 Central/.test(rollLocal) && /20:30 Eastern/.test(rollLocal);
+  const okSweet = /08:00–10:00 parking sweet spot/.test(sweetLocal);
+  const okPta = /08:00 Eastern/.test(ptaLocal) && /07:15 Eastern/.test(ptaLocal) && /10:00 Eastern/.test(ptaLocal);
+  const okSame = rollLocal === rollTerm && ptaLocal === ptaTerm;
+  return (okDual && okSweet && okPta && okSame) || JSON.stringify({ okDual, okSweet, okPta, okSame, rollLocal, ptaLocal });
+});
+
+await pin('R3. miles + speed vs direct drive hours mode equivalence in live DOM (550 mi @ 55 mph === 10h 00m direct)', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
+  await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', planPg)[0];
+  fire(btn550, 'click'); await sleep(60);
+  const brkMiles = all((n) => n.attributes?.['data-rollout-break'] === '1', planPg)[0]?.textContent ?? '';
+  const shutMiles = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', planPg)[0]?.textContent ?? '';
+
+  const hrsModeBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Direct drive hours', planPg)[0];
+  fire(hrsModeBtn, 'click'); await sleep(40);
+  const btn10h = all((n) => n.localName === 'button' && n.textContent.trim() === '10h', planPg)[0];
+  fire(btn10h, 'click'); await sleep(60);
+  const brkHours = all((n) => n.attributes?.['data-rollout-break'] === '1', planPg)[0]?.textContent ?? '';
+  const shutHours = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', planPg)[0]?.textContent ?? '';
+
+  A.openRolloutPlanner(false);
+  return (brkMiles === brkHours && shutMiles === shutHours && brkMiles.length > 0)
+    || JSON.stringify({ brkMiles, brkHours, shutMiles, shutHours });
+});
+
+await pin('R4. infeasible run (10h break cannot complete before roll-out): shows plain message, hides impossible checklist & PTA, one-tap shift recovers', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed16 = E.localToMinute(2026, 11, 11, 16, 'America/Chicago');
+  const segsTired = [
+    { status: 'OFF', start: nowWed16 - 1260, end: nowWed16 - 660, createdAt: 1 },
+    { status: 'D', start: nowWed16 - 660, end: nowWed16 - 300, createdAt: 2 },
+    { status: 'OFF', start: nowWed16 - 300, end: nowWed16 - 270, createdAt: 3 },
+    { status: 'D', start: nowWed16 - 270, end: nowWed16, createdAt: 4 },
+  ];
+  await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  const errSet = await setRolloutAppt(planPg, '2026-11-12', '10:00');
+  if (errSet) return errSet;
+
+  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planPg)[0]?.textContent ?? '';
+  const infCard = all((n) => n.attributes?.['data-rollout-infeasible'] === '1', planPg)[0];
+  const badChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg);
+  const badPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg);
+  if (!/Does not fit/.test(verdict) || !/10-hour break cannot finish/.test(verdict)) return `bad verdict: ${verdict}`;
+  if (!infCard || badChecklist.length !== 0 || badPta.length !== 0) return `inf=${!!infCard} chk=${badChecklist.length} pta=${badPta.length}`;
+
+  // One-tap shift to earliest workable appointment flips to legal timetable
+  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), planPg)[0];
+  if (!shiftBtn) return 'missing recovery shift button';
+  fire(shiftBtn, 'click'); await sleep(60);
+  const okChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg).length === 1;
+  const okPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg).length === 1;
+  A.openRolloutPlanner(false);
+  return (okChecklist && okPta) || `after shift chk=${okChecklist} pta=${okPta}`;
+});
+
+await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returning to Plan shows the 6-item hub', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  await seed({ tab: 'plan', ...segs });
+  const planPg = pages()[0];
+  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5];
+  fire(lastBtn, 'click'); await sleep(60);
+  if (!A.isRolloutPlannerOpen()) return 'did not open';
+  await seed({ tab: 'now', ...segs });
+  await seed({ tab: 'plan', ...segs });
+  const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  return (!A.isRolloutPlannerOpen() && items.length === 6) || `open=${A.isRolloutPlannerOpen()} items=${items.length}`;
+});
+
+await pin('R6. rollout screen has no raw <input type="time"> or <input type="date"> of its own; ClockPick inputs only appear inside the open sheet', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  await seed({ tab: 'plan', ...segs });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  const rawClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), planPg);
+  const rootClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'));
+  if (rawClosed.length !== 0 || rootClosed.length !== 0) return `closed raw=${rawClosed.length} root=${rootClosed.length}`;
+
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  if (!apptBtn) return 'missing appointment button';
+  fire(apptBtn, 'click'); await sleep(40);
+  const sh = all((n) => has(n, 'sheet'))[0];
+  const rawOnPage = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), planPg);
+  const inSheetTime = all((n) => n.localName === 'input' && n.attributes?.type === 'time', sh);
+  const inSheetDate = all((n) => n.localName === 'input' && n.attributes?.type === 'date', sh);
+  openSheet(null); await sleep(40);
+  const rootAfter = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'));
+  A.openRolloutPlanner(false);
+  return (rawOnPage.length === 0 && inSheetTime.length === 1 && inSheetDate.length === 1 && rootAfter.length === 0)
+    || JSON.stringify({ rawOnPage: rawOnPage.length, inSheetTime: inSheetTime.length, inSheetDate: inSheetDate.length, rootAfter: rootAfter.length });
+});
+
+await pin('R7. tapping rollout appointment opens ClockPick sheet naming entry zone with day chips, big clock, preset rows, Another day, and enabled Apply', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
+  await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
+  tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
+
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  fire(apptBtn, 'click'); await sleep(40);
+  const sh = all((n) => has(n, 'sheet'))[0];
+  if (!sh) return 'sheet did not open';
+  const title = all((n) => n.localName === 'h2', sh)[0]?.textContent ?? '';
+  const dayBtns = all((n) => n.localName === 'button', all((n) => has(n, 'ed-days'), sh)[0] || { childNodes: [] });
+  const clockOut = all((n) => n.localName === 'output', all((n) => has(n, 'ed-clock'), sh)[0] || { childNodes: [] })[0];
+  const timeIn = all((n) => n.localName === 'input' && n.attributes?.['aria-label'] === 'Appointment time', sh)[0];
+  const keyRows = all((n) => has(n, 'ed-keys'), sh);
+  const keyTexts = all((n) => n.localName === 'button', sh).map((b) => b.textContent.trim());
+  const anotherDay = all((n) => n.localName === 'input' && has(n, 'ed-day-input'), sh)[0];
+  const applyBtn = all((n) => n.localName === 'button' && has(n, 'ed-go'), sh)[0];
+
+  const beforeClock = clockOut?.textContent?.trim();
+  const plus1h = all((n) => n.localName === 'button' && n.textContent.trim() === '+ 1 hour', sh)[0];
+  if (plus1h) { fire(plus1h, 'click'); await sleep(30); }
+  const afterClock = all((n) => n.localName === 'output', sh)[0]?.textContent?.trim();
+
+  openSheet(null); await sleep(30);
+  A.openRolloutPlanner(false);
+  const okZone = /Eastern/.test(title) && /Eastern/.test(sh.textContent);
+  const okDays = dayBtns.length === 4;
+  const okClock = !!clockOut && !!timeIn && beforeClock === '08:00' && afterClock === '09:00';
+  const okKeys = keyRows.length === 2 && keyTexts.includes('+ 1 hour') && keyTexts.includes('− 1 hour') && keyTexts.includes('+15') && keyTexts.includes('−15');
+  const okAnyDay = !!anotherDay;
+  const okApply = !!applyBtn && !applyBtn.disabled && !applyBtn.attributes?.disabled;
+  return (okZone && okDays && okClock && okKeys && okAnyDay && okApply)
+    || JSON.stringify({ title, okZone, days: dayBtns.length, beforeClock, afterClock, keyRows: keyRows.length, okKeys, okAnyDay, okApply });
+});
+
+await pin('R8. cross-zone (Chicago home / New York entry) sets 08:00 -> stores date + "08:00" and resolves 08:00 Eastern / 07:00 Central; same-zone (Chicago/Chicago) stores & resolves exact wall time', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
+  await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  // Cross-zone: home America/Chicago, entry America/New_York (local mode)
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
+  tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
+  const errX = await setRolloutAppt(planPg, '2026-11-12', '08:00');
+  if (errX) return errX;
+
+  const btnX = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const storedDateX = btnX?.attributes?.['data-rollout-appt-date'];
+  const storedTimeX = btnX?.attributes?.['data-rollout-appt-time'];
+  const btnTextX = btnX?.textContent ?? '';
+  const arrTextX = all((n) => n.attributes?.['data-rollout-arrival'] === '1', planPg)[0]?.textContent ?? '';
+
+  // Reopen sheet to confirm ClockPick displays the exact stored wall date/time (2026-11-12, 08:00)
+  fire(btnX, 'click'); await sleep(40);
+  const shX = all((n) => has(n, 'sheet'))[0];
+  const dayElX = all((n) => n.localName === 'input' && has(n, 'ed-day-input'), shX)[0];
+  const timeElX = all((n) => n.localName === 'input' && has(n, 'ed-clock-input'), shX)[0];
+  const reopenDateX = dayElX?.value ?? dayElX?.attributes?.value;
+  const reopenTimeX = timeElX?.value ?? timeElX?.attributes?.value;
+  const reopenOutX = all((n) => n.localName === 'output', shX)[0]?.textContent?.trim();
+  openSheet(null); await sleep(30);
+
+  // Same-zone: home America/Chicago, entry America/Chicago
+  tzSel.value = 'America/Chicago'; fire(tzSel, 'change'); await sleep(40);
+  const errS = await setRolloutAppt(planPg, '2026-11-12', '09:30');
+  if (errS) return errS;
+  const btnS = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const storedDateS = btnS?.attributes?.['data-rollout-appt-date'];
+  const storedTimeS = btnS?.attributes?.['data-rollout-appt-time'];
+  const btnTextS = btnS?.textContent ?? '';
+
+  fire(btnS, 'click'); await sleep(40);
+  const shS = all((n) => has(n, 'sheet'))[0];
+  const dayElS = all((n) => n.localName === 'input' && has(n, 'ed-day-input'), shS)[0];
+  const timeElS = all((n) => n.localName === 'input' && has(n, 'ed-clock-input'), shS)[0];
+  const reopenDateS = dayElS?.value ?? dayElS?.attributes?.value;
+  const reopenTimeS = timeElS?.value ?? timeElS?.attributes?.value;
+  openSheet(null); await sleep(30);
+  A.openRolloutPlanner(false);
+
+  const okCross = storedDateX === '2026-11-12' && storedTimeX === '08:00'
+    && /Thu Nov 12, 08:00 Eastern/.test(btnTextX) && /Thu Nov 12, 07:00 Central/.test(btnTextX)
+    && /08:00 Eastern/.test(arrTextX) && /07:00 Central/.test(arrTextX)
+    && reopenDateX === '2026-11-12' && reopenTimeX === '08:00' && reopenOutX === '08:00';
+  const okSame = storedDateS === '2026-11-12' && storedTimeS === '09:30'
+    && /Thu Nov 12, 09:30 Central/.test(btnTextS) && !/Eastern/.test(btnTextS)
+    && reopenDateS === '2026-11-12' && reopenTimeS === '09:30';
+  return (okCross && okSame)
+    || JSON.stringify({ storedDateX, storedTimeX, btnTextX, reopenDateX, reopenTimeX, reopenOutX, storedDateS, storedTimeS, btnTextS, reopenDateS, reopenTimeS });
+});
+
+await pin('R9. recovery "Use earliest workable appointment" updates stored appointment fields and reopened ClockPick sheet reflects recovered date & time', async () => {
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfgChi = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const nowWed16 = E.localToMinute(2026, 11, 11, 16, 'America/Chicago');
+  const segsTired = [
+    { status: 'OFF', start: nowWed16 - 1260, end: nowWed16 - 660, createdAt: 1 },
+    { status: 'D', start: nowWed16 - 660, end: nowWed16 - 300, createdAt: 2 },
+    { status: 'OFF', start: nowWed16 - 300, end: nowWed16 - 270, createdAt: 3 },
+    { status: 'D', start: nowWed16 - 270, end: nowWed16, createdAt: 4 },
+  ];
+  await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
+  const planPg = pages()[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+
+  const errSet = await setRolloutAppt(planPg, '2026-11-12', '10:00');
+  if (errSet) return errSet;
+  const beforeBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const beforePair = `${beforeBtn?.attributes?.['data-rollout-appt-date']} ${beforeBtn?.attributes?.['data-rollout-appt-time']}`;
+
+  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), planPg)[0];
+  if (!shiftBtn) return 'missing recovery button';
+  fire(shiftBtn, 'click'); await sleep(60);
+
+  const afterBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const afterDate = afterBtn?.attributes?.['data-rollout-appt-date'];
+  const afterTime = afterBtn?.attributes?.['data-rollout-appt-time'];
+  const afterPair = `${afterDate} ${afterTime}`;
+
+  fire(afterBtn, 'click'); await sleep(40);
+  const sh = all((n) => has(n, 'sheet'))[0];
+  const dayEl = all((n) => n.localName === 'input' && has(n, 'ed-day-input'), sh)[0];
+  const timeEl = all((n) => n.localName === 'input' && has(n, 'ed-clock-input'), sh)[0];
+  const sheetDate = dayEl?.value ?? dayEl?.attributes?.value;
+  const sheetTime = timeEl?.value ?? timeEl?.attributes?.value;
+  openSheet(null); await sleep(30);
+  A.openRolloutPlanner(false);
+
+  return (beforePair === '2026-11-12 10:00' && afterPair !== beforePair && sheetDate === afterDate && sheetTime === afterTime)
+    || JSON.stringify({ beforePair, afterPair, sheetDate, sheetTime });
 });
 
 let fails = 0;
