@@ -698,6 +698,119 @@ await section(async () => {
   }
 });
 
+/* ---------------- BUG-2026-11-20: Fix the start time on live entries (all 4 statuses) + closed entry ---------------- */
+await section(async () => {
+  const makeLive = (status, extra = {}) => ({
+    ...base,
+    drivingView: true,
+    ...extra,
+    segments: [
+      { status: 'OFF', start: N - 1000, end: N - 400, createdAt: 1 },
+      { status: status === 'D' ? 'ON' : 'D', start: N - 400, end: N - 30, createdAt: 2 },
+    ],
+    current: { status, since: N - 30, createdAt: 3 },
+  });
+  const btnVis = (p, sel) => p.evaluate((q) => {
+    const sh = document.querySelector('.sheet');
+    const b = sh?.querySelector(q);
+    if (!sh || !b) return null;
+    const sr = sh.getBoundingClientRect(), r = b.getBoundingClientRect();
+    return {
+      text: b.textContent.trim(),
+      disabled: b.disabled,
+      pos: getComputedStyle(b).position,
+      inSheetView: r.top >= sr.top - 1 && r.bottom <= sr.bottom + 1,
+      inViewport: r.top >= 0 && r.bottom <= window.innerHeight + 1,
+      sheetText: sh.innerText,
+      driveUp: !!document.querySelector('main.drive'),
+    };
+  }, sel);
+  const pickTime = async (p, hhmm) => {
+    await p.evaluate((v) => {
+      const inp = document.querySelector('.sheet input[type="time"]');
+      if (!inp) throw new Error('no time input');
+      inp.value = v;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    }, hhmm);
+    await wait(p, 200);
+  };
+
+  // 1. Live Driving (drivingView=true, via Details -> Fix the start time) at 412x915 and 360x640
+  for (const [W, H] of [[412, 915], [360, 640]]) {
+    const p = await open(makeLive('D'), W, H);
+    await tap(p, 'button.drive-details', /Details/);
+    await tap(p, 'button.rowbtn', /Fix the start time/);
+    await pickTime(p, '22:20');
+    const beforeConfirm = await btnVis(p, 'button.ed-go');
+    ok(`BUG-2026-11-20 Driving [${W}x${H}]: picking time does not save before confirm and shows visible enabled "Set start to Fri 22:20"`,
+      (await state(p)).current?.since === N - 30 && beforeConfirm && !beforeConfirm.disabled && /Set start to Fri 22:20/.test(beforeConfirm.text) && beforeConfirm.inSheetView && beforeConfirm.inViewport,
+      beforeConfirm);
+    // Pressing X without confirming must NOT save
+    await tap(p, '.sheet button[aria-label="Close"]', null);
+    ok(`BUG-2026-11-20 Driving [${W}x${H}]: X without confirming leaves start time unchanged`, (await state(p)).current?.since === N - 30, (await state(p)).current);
+    // Re-open, pick, apply via confirm button -> must save AND show confirmation screen + See my clocks (never stall on disabled picker)
+    await tap(p, 'button.rowbtn', /Fix the start time/);
+    await pickTime(p, '22:20');
+    await tap(p, '.sheet button.ed-go', /Set start to Fri 22:20/);
+    const afterApply = await btnVis(p, 'button.primary');
+    ok(`BUG-2026-11-20 Driving [${W}x${H}]: applying saves start time and shows confirmation + visible "See my clocks" (no remount stall)`,
+      (await state(p)).current?.since === N - 40 && afterApply && !afterApply.driveUp && afterApply.text === 'See my clocks' && !afterApply.disabled && afterApply.inSheetView && afterApply.inViewport && /Start time fixed — Driving since Fri 22:20/.test(afterApply.sheetText) && !/Pick the real start time/.test(afterApply.sheetText),
+      afterApply);
+    await tap(p, '.sheet button.primary', /^See my clocks$/);
+    const closed = await p.evaluate(() => ({ sheet: !!document.querySelector('.sheet'), drive: !!document.querySelector('main.drive'), txt: document.querySelector('.page.is-active')?.innerText ?? '' }));
+    ok(`BUG-2026-11-20 Driving [${W}x${H}]: "See my clocks" closes cleanly back to Now with updated start`, !closed.sheet && !closed.drive && /Driving since Fri 22:20/.test(closed.txt), closed);
+    ok(`BUG-2026-11-20 Driving [${W}x${H}]: no page errors`, p.errors.length === 0, p.errors.join(' | '));
+    await p.ctx.close();
+  }
+
+  // 2. All 4 statuses' live entries at 412x750 (typical phone Chrome height) and 360x640
+  for (const [st, label] of [['D', 'Driving'], ['ON', 'On Duty'], ['SB', 'Sleeper'], ['OFF', 'Off Duty']]) {
+    for (const [W, H] of [[412, 750], [360, 640]]) {
+      const p = await open(makeLive(st), W, H);
+      if (st === 'D') await tap(p, 'button.drive-details', /Details/);
+      await tap(p, 'button.rowbtn', /Fix the start time/);
+      await pickTime(p, '22:20');
+      const go = await btnVis(p, 'button.ed-go');
+      ok(`BUG-2026-11-20 ${label} [${W}x${H}]: apply affordance visible in sheet + viewport after picking time, not saved yet`,
+        (await state(p)).current?.since === N - 30 && go && !go.disabled && /Set start to Fri 22:20/.test(go.text) && go.inSheetView && go.inViewport,
+        go);
+      await tap(p, '.sheet button[aria-label="Close"]', null);
+      ok(`BUG-2026-11-20 ${label} [${W}x${H}]: X without confirm does not change start`, (await state(p)).current?.since === N - 30);
+      await tap(p, 'button.rowbtn', /Fix the start time/);
+      await pickTime(p, '22:20');
+      await tap(p, '.sheet button.ed-go', /Set start to Fri 22:20/);
+      const done = await btnVis(p, 'button.primary');
+      ok(`BUG-2026-11-20 ${label} [${W}x${H}]: confirm saves time and shows confirmation + visible "See my clocks"`,
+        (await state(p)).current?.since === N - 40 && done && done.text === 'See my clocks' && done.inSheetView && done.inViewport && new RegExp(`Start time fixed — ${label} since Fri 22:20`).test(done.sheetText),
+        done);
+      await tap(p, '.sheet button.primary', /^See my clocks$/);
+      ok(`BUG-2026-11-20 ${label} [${W}x${H}]: sheet closes cleanly`, await p.evaluate(() => !document.querySelector('.sheet')));
+      await p.ctx.close();
+    }
+  }
+
+  // 3. Non-live (closed) entry on Log at 412x750
+  {
+    const p = await open(makeLive('ON'), 412, 750);
+    await go(p, 'Log');
+    await tap(p, '.page-log button.entry:not(.live)', /Driving/);
+    await tap(p, '.sheet button.act', /The times are wrong/);
+    await pickTime(p, '16:15');
+    const nxt = await btnVis(p, 'button.ed-go');
+    ok('BUG-2026-11-20 Closed entry [412x750]: visible forward button after picking start', nxt && !nxt.disabled && /Next: when it ended/.test(nxt.text) && nxt.inSheetView && nxt.inViewport, nxt);
+    await tap(p, '.sheet button[aria-label="Close"]', null);
+    ok('BUG-2026-11-20 Closed entry [412x750]: X without saving leaves entry unchanged', (await state(p)).segments[1].start === N - 400);
+    await tap(p, '.page-log button.entry:not(.live)', /Driving/);
+    await tap(p, '.sheet button.act', /The times are wrong/);
+    await pickTime(p, '16:15');
+    await tap(p, '.sheet button.ed-go', /Next: when it ended/);
+    await tap(p, '.sheet button.ed-go', /Next: check it/);
+    await tap(p, '.sheet button.ed-go', /Change the others and save|Save the change/);
+    ok('BUG-2026-11-20 Closed entry [412x750]: saving updates start time and closes sheet', (await state(p)).segments[1].start === N - 405 && await p.evaluate(() => !document.querySelector('.sheet')));
+    await p.ctx.close();
+  }
+});
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

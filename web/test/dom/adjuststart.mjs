@@ -298,6 +298,105 @@ await pin('C7. yesterday: a status that started yesterday is edited on its own d
   await click(/^Set start to /);
   return (getState().current.since === T - 1210 && getState().segments[0].end === T - 1210) || plain(getState());
 });
+// BUG-2026-11-20: live-entry Fix-start pins (Driving with drivingView Details peek, all 4 statuses, X cancel, Driving via I've stopped, and closed entry).
+await pin('C8. BUG-2026-11-20: live Driving (drivingView=true, via Details peek) — apply shows confirmation + See my clocks instead of remounting stalled, and keeps peek on apply + undo', async () => {
+  A.setDrivingPeek(null);
+  await seed({ segments: [{ status: 'OFF', start: T - 900, end: T - 300, createdAt: 1 }, { status: 'ON', start: T - 300, end: T - 30, createdAt: 2 }], current: { status: 'D', since: T - 30, createdAt: 3 }, drivingView: true });
+  if (!A.showsDrivingView(getState())) return 'precondition: expected DrivingView';
+  await click(/^Details$/);
+  if (A.showsDrivingView(getState()) || !A.drivingPeeked(getState())) return 'Details did not peek Now';
+  await click(/Fix the start time/);
+  if (currentSheet()?.kind !== 'since') return 'SinceSheet did not open';
+  const sBefore = getState();
+  await type('Start time', hhmm(T - 40));
+  if (getState() !== sBefore) return 'picking time must not apply before confirm';
+  const go = button(/^Set start to /);
+  if (!go || disabled(go)) return 'apply button missing/disabled: ' + (go && go.textContent);
+  fire(go, 'click'); await sleep(60);
+  const sAfter = getState();
+  if (sAfter.current.since !== T - 40 || sAfter.segments[1].end !== T - 40) return 'did not save: ' + plain(sAfter);
+  if (A.showsDrivingView(sAfter) || !A.drivingPeeked(sAfter)) return 'applying Fix-start broke DrivingView peek';
+  const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+  if (!/Start time fixed/.test(panel) || !panel.includes(`Driving since ${clock(T - 40)}`) || /When did it really start\?/.test(panel) || /Pick the real start time/.test(panel)) {
+    return 'stalled instead of confirming: ' + panel.slice(0, 220);
+  }
+  const doneBtn = button(/^See my clocks$/);
+  if (!doneBtn || disabled(doneBtn)) return 'missing See my clocks button';
+  fire(doneBtn, 'click'); await sleep(50);
+  if (currentSheet() !== null) return 'See my clocks did not close sheet';
+  if (!undoLast()) return 'undo refused';
+  if (getState().current.since !== T - 30 || !A.drivingPeeked(getState())) return 'undo did not restore since + peek';
+  A.setDrivingPeek(null);
+  return true;
+});
+await pin('C9. BUG-2026-11-20: all four live statuses (Driving, On Duty, Sleeper, Off Duty) — X without confirm saves nothing; confirm saves exact time + shows confirmation + See my clocks', async () => {
+  const cases = [['D', 'Driving'], ['ON', 'On Duty'], ['SB', 'Sleeper'], ['OFF', 'Off Duty']];
+  for (const [st, label] of cases) {
+    A.setDrivingPeek(null);
+    const rec = {
+      segments: [{ status: 'OFF', start: T - 900, end: T - 300, createdAt: 1 }, { status: st === 'D' ? 'ON' : 'D', start: T - 300, end: T - 30, createdAt: 2 }],
+      current: { status: st, since: T - 30, createdAt: 3 },
+      drivingView: st === 'D',
+    };
+    await seed(rec);
+    if (st === 'D') await click(/^Details$/);
+    const oracle = S.adjustCurrentStart(getState(), T - 42, T);
+    if (!oracle.ok) return `${st}: oracle refused`;
+    await click(/Fix the start time/);
+    await type('Start time', hhmm(T - 42));
+    if (getState().current.since !== T - 30) return `${st}: applied on picker change before confirm`;
+    const closeBtn = all((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Close')[0];
+    if (!closeBtn) return `${st}: no X button`;
+    fire(closeBtn, 'click'); await sleep(50);
+    if (currentSheet() !== null || getState().current.since !== T - 30) return `${st}: X changed start time or left sheet open`;
+    // Re-open, drive via change event (covers pickers emitting change rather than input), confirm via button
+    await click(/Fix the start time/);
+    const inp = input('Start time');
+    inp.value = hhmm(T - 42); fire(inp, 'change'); await sleep(50);
+    const go = button(/^Set start to /);
+    if (!go || disabled(go) || !go.textContent.includes(clock(T - 42))) return `${st}: confirm button not enabled after change (${go && go.textContent})`;
+    if (/\bed-absorb\b/.test(go.attributes.class ?? '')) return `${st}: routine boundary fix must keep ed-go sticky (not .ed-absorb)`;
+    fire(go, 'click'); await sleep(60);
+    const s1 = getState();
+    if (s1.current.since !== oracle.patch.current.since || s1.segments[1].end !== oracle.patch.segments[1].end) return `${st}: math mismatch ${plain(s1)}`;
+    const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+    if (!/Start time fixed/.test(panel) || !panel.includes(`${label} since ${clock(T - 42)}`) || /When did it really start\?/.test(panel)) return `${st}: confirmation missing (${panel.slice(0, 180)})`;
+    await click(/^See my clocks$/);
+    if (currentSheet() !== null) return `${st}: See my clocks did not close`;
+  }
+  A.setDrivingPeek(null);
+  return true;
+});
+await pin('C10. BUG-2026-11-20: Driving via DrivingView -> I\'ve stopped -> Fix its start time confirms and closes cleanly', async () => {
+  A.setDrivingPeek(null);
+  await seed({ segments: [{ status: 'OFF', start: T - 900, end: T - 300, createdAt: 1 }, { status: 'ON', start: T - 300, end: T - 30, createdAt: 2 }], current: { status: 'D', since: T - 30, createdAt: 3 }, drivingView: true });
+  await click(/I've stopped/);
+  await click(/Still Driving\? Fix its start time/);
+  await type('Start time', hhmm(T - 45));
+  await click(/^Set start to /);
+  const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+  if (getState().current.since !== T - 45 || !/Start time fixed/.test(panel) || !panel.includes(`Driving since ${clock(T - 45)}`)) return 'confirm failed: ' + panel.slice(0, 180);
+  await click(/^See my clocks$/);
+  return (currentSheet() === null && A.showsDrivingView(getState())) || 'did not return cleanly to DrivingView';
+});
+await pin('C11. BUG-2026-11-20: non-live (closed) entry on Log — X without saving leaves entry unchanged; Save the change saves cleanly', async () => {
+  await seed({ ...fieldDay(), tab: 'log' });
+  const row = all((n) => n.localName === 'button' && /\bentry\b/.test(n.attributes.class ?? '') && !/\blive\b/.test(n.attributes.class ?? '') && /Driving/.test(n.textContent))[0];
+  if (!row) return 'no closed Driving row';
+  fire(row, 'click'); await sleep(50);
+  await click(/The times are wrong/);
+  await type('Start time', hhmm(T - 290));
+  const closeBtn = all((n) => n.localName === 'button' && n.attributes['aria-label'] === 'Close')[0];
+  fire(closeBtn, 'click'); await sleep(50);
+  if (getState().segments[1].start !== T - 300) return 'X changed closed entry';
+  fire(row, 'click'); await sleep(50);
+  await click(/The times are wrong/);
+  await type('Start time', hhmm(T - 290));
+  await click(/^Next: when it ended$/);
+  await click(/^Next: check it$/);
+  await click(/^Save the change$/);
+  return (currentSheet() === null && getState().segments[1].start === T - 290 && getState().segments[1].end === T - 20) || plain(getState());
+});
 
 /* ---------------- fences ---------------- */
 // D6/D7 (audit-fix): SinceSheet dropped input.num and Exact start time for ClockPick (.ed-clock-pick / .ed-day-pick); hold the 48/56px floors on the picker classes and keep the StatusSheet input.num check.

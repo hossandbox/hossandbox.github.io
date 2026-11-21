@@ -403,7 +403,9 @@ function Sign({ kind, children }: { kind: SignKind; children: ComponentChildren 
 export type SheetKind =
   | { kind: 'status' }
   // Patch 19: fix the start time of the status the driver is in now (the after-the-fact door).
-  | { kind: 'since' }
+  // `done` (BUG-2026-11-20) carries the saved minute in sheet state so the confirmation screen
+  // survives even if a DrivingView/Now transition re-seats the sheet.
+  | { kind: 'since'; done?: number }
   | { kind: 'quickstart' }
   | { kind: 'drift' }
   | { kind: 'why' }
@@ -651,12 +653,17 @@ export function adjustStartProblemText(problem: AdjustStartProblem, cur: State, 
 export function adjustStartNow(newSince: number, absorb = false): string | null {
   const cur = getState();
   const now = cur.nowOverride ?? nowMin();
+  // BUG-2026-11-20: adjusting the start of the SAME Driving run is not a status change. Keep the
+  // Details peek pinned to the new start before setState runs so showsDrivingView does not flip
+  // mid-apply and unmount SinceSheet.
+  const wasPeeked = cur.current?.status === 'D' && peekSince === cur.current.since;
   // Patch L1 item 4b: with the driver's one confirmation (`absorb`), a start that reaches back
   // over the status being left — or across another entry — takes that stretch in instead of
   // being refused. Without it the plain operation's guards stand exactly as before.
   if (absorb) {
     const r = absorbCurrentStart(cur, newSince, now);
     if (!r.ok) return adjustStartProblemText(r.problem, cur, now);
+    if (wasPeeked) setDrivingPeek(newSince);
     undoable(`${segLabel(cur.current!.status, cur.current!.note)} since ${clock(newSince, false)}`, () => {
       setState((c) => { const x = absorbCurrentStart(c, newSince, now); return x.ok ? x.patch : {}; });
     });
@@ -664,6 +671,7 @@ export function adjustStartNow(newSince: number, absorb = false): string | null 
   }
   const r = adjustCurrentStart(cur, newSince, now);
   if (!r.ok) return adjustStartProblemText(r.problem, cur, now);
+  if (wasPeeked) setDrivingPeek(newSince);
   undoable(`${segLabel(cur.current!.status, cur.current!.note)} since ${clock(newSince, false)}`, () => {
     setState((c) => { const x = adjustCurrentStart(c, newSince, now); return x.ok ? x.patch : {}; });
   });
@@ -2773,11 +2781,31 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
  * judges it on every render, so the reason a time cannot be used is on screen before the
  * button is. On apply the panel shows the resulting "since" time.
  */
-function SinceSheet({ s, now }: { s: State; now: number }) {
+function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: number | null }) {
   const cur = s.current;
   const [at, setAt] = useState<number>(cur ? cur.since : now);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<number | null>(null);
+  const warnRef = useRef<HTMLDivElement>(null);
+  // Patch L1 item 4b: a start at or before the status being left's start, or across another
+  // entry, is no longer refused — the panel says what it would absorb and the main button
+  // becomes the one explicit confirmation. The other refusals (future, invalid) stand.
+  const check = cur ? absorbCurrentStart(s, at, now) : null;
+  const unchanged = !cur || at === cur.since;
+  const problem = !cur || unchanged || check!.ok ? null : adjustStartProblemText(check!.problem, s, now);
+  const absorbed = cur && !problem && !unchanged && check!.ok ? check!.absorbed : [];
+  // D8 (audit): the same disclosure as the Log's check step, from the patch this save applies.
+  const after: State | null = cur && !problem && !unchanged && check!.ok ? { ...s, ...check!.patch } : null;
+  const knock = after ? knockOnLines(s, after, null, absorbed, now, true) : [];
+  const effects = after ? consequenceLines(s, after, now) : [];
+  // BUG-2026-11-20: routine start-time fixes always move the adjacent entry's end boundary
+  // (`knock`), so only genuine warnings (absorbing other entries or bad HOS consequences) drop
+  // the apply button out of its sticky bottom slot (A1). Routine fixes keep the confirm button
+  // visible in-viewport on all screen heights; when a warning does drop it below, scroll the
+  // warning into view.
+  const confirm = absorbed.length > 0 || effects.some((e) => e.bad);
+  useEffect(() => {
+    if (confirm) (warnRef.current?.querySelector?.('.warnbox') as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' });
+  }, [confirm]);
   if (!cur) {
     return (
       <Sheet title="Fix the start time">
@@ -2789,34 +2817,22 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
   const label = segLabel(cur.status, cur.note);
   if (done !== null) {
     return (
-      <Sheet title="Fix the start time">
-        <p><b>{label} since {clock(done)}</b></p>
-        <p class="small">The entry before it ends at that time now, and every clock has been worked out again from it.</p>
+      <Sheet title="Fix the start time" focusKey="done">
+        <p><b>Start time fixed — {label} since {clock(done)}</b></p>
+        <p class="small">{statusBeingLeft(s) ? 'The entry before it ends at that time now, and every clock has been worked out again from it.' : 'Every clock has been worked out again from it.'}</p>
         <p class="muted small">Undo is on the Log until your next change.</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
       </Sheet>
     );
   }
   const set = (v: number) => { setAt(v); setErr(null); };
-  // Patch L1 item 4b: a start at or before the status being left's start, or across another
-  // entry, is no longer refused — the panel says what it would absorb and the main button
-  // becomes the one explicit confirmation. The other refusals (future, invalid) stand.
-  const check = absorbCurrentStart(s, at, now);
-  const unchanged = at === cur.since;
-  const problem = check.ok || unchanged ? null : adjustStartProblemText(check.problem, s, now);
-  const absorbed = !problem && !unchanged && check.ok ? check.absorbed : [];
-  // D8 (audit): the same disclosure as the Log's check step, from the patch this save applies.
-  const after: State | null = !problem && !unchanged && check.ok ? { ...s, ...check.patch } : null;
-  const knock = after ? knockOnLines(s, after, null, absorbed, now, true) : [];
-  const effects = after ? consequenceLines(s, after, now) : [];
-  const confirm = absorbed.length > 0 || knock.length > 0 || effects.some((e) => e.bad);
   const apply = () => {
     if (problem || unchanged) return;
     const e = adjustStartNow(at, absorbed.length > 0);
-    if (e) setErr(e); else setDone(at);
+    if (e) setErr(e); else openSheet({ kind: 'since', done: at });
   };
   return (
-    <Sheet title="Fix the start time">
+    <Sheet title="Fix the start time" focusKey="pick">
       <div class="ed-ctx">
         <span class="dot" style={{ background: STATUS_COLOR[cur.status] }} />
         <span class="ed-ctx-t">{label} since {clock(cur.since)}</span>
@@ -2827,8 +2843,10 @@ function SinceSheet({ s, now }: { s: State; now: number }) {
           ago" stays on the status sheet, where it is the natural question. */}
       <ClockPick at={at} set={set} now={now} future={false} say="Started" name="Start time" keys={KEYS_MINUTES} />
       {(problem || err) && <div class="warnbox small">{problem ?? err}</div>}
-      <AbsorbNote absorbed={absorbed} now={now} />
-      <KnockOn rows={knock} effects={effects} />
+      <div ref={warnRef} style="display:contents">
+        <AbsorbNote absorbed={absorbed} now={now} />
+        <KnockOn rows={knock} effects={effects} />
+      </div>
       <button class={`primary wide ed-go${confirm ? ' ed-absorb' : ''}`} disabled={!!problem || unchanged} onClick={apply}>{unchanged ? 'Pick the real start time' : absorbed.length ? `Change the others and set start to ${clock(at)}` : `Set start to ${clock(at)}`}</button>
       <p class="muted small ed-foot">Undo is on the Log until your next change.</p>
     </Sheet>
@@ -3049,6 +3067,9 @@ function useUndo(): Undo | null {
 export function undoLast(): boolean {
   const u = currentUndo();
   if (!u) { setUndo(null); return false; }
+  if (u.after.current?.status === 'D' && u.before.current?.status === 'D' && peekSince === u.after.current.since) {
+    setDrivingPeek(u.before.current.since);
+  }
   setState({ ...u.before });
   setUndo(null);
   return true;
@@ -3441,7 +3462,8 @@ function TimePicker({ at, set, name, cls }: { at: number; set: (v: number) => vo
   return (
     <input type="time" class={cls} aria-label={name} value={toInput(at).slice(11, 16)}
       onClick={(e) => { try { (e.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); } catch { /* the tap's own picker stands */ } }}
-      onInput={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null) set(v); }} />
+      onInput={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null) set(v); }}
+      onChange={(e) => { const v = fromTimeInput(at, (e.target as HTMLInputElement).value); if (v !== null && v !== at) set(v); }} />
   );
 }
 
@@ -6267,7 +6289,7 @@ export function App() {
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
         {sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-        {sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}
+        {sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
       </div>
     );
   }
@@ -6329,7 +6351,7 @@ export function App() {
         return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-      {sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}
+      {sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
       {sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
       {sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
       {sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
