@@ -88,9 +88,7 @@ function audit(name, V) {
     ['dial arc against its track', V['--accent'], V['--dial-track'], GRAPHIC],
     ['amber arc against its track', V['--warn'], V['--dial-track'], GRAPHIC],
     ['red arc against its track', V['--bad'], V['--dial-track'], GRAPHIC],
-    // the time-order bar (DESIGN-NAV, 2026-11-20): Now home plate contrast
-    ['ink on Now plate', V['--now-plate-ink'], V['--now-plate'], AA],
-    ['Now plate edge vs bar', V['--now-plate-ring'], V['--panel'], GRAPHIC],
+    // Removed (2026-11-20 nowplain): Now tab matches the other tabs via shared .on styling; --now-plate* variables removed.
   ];
   // tints appear both inside cards and in the sticky header (which sits on --bg)
   for (const [label, t] of [['warnbox', warnbox], ['violation row', violbox], ['selected card', selcard]]) {

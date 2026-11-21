@@ -1,6 +1,7 @@
-// Revisions (2026-11-18, Lorico; re-aimed by DESIGN-NAV 2026-11-20): bottom-bar time order
-// Log/Now/Plan/More, the Now home-plate hook, TimeHead headers, the panel strip, open-on-Now,
-// driving-view return (R1), GitHub-only bug reports, and end of the $5 bounty + free-paid perk.
+// Revisions (2026-11-18, Lorico; re-aimed 2026-11-20 nowplain): bottom-bar order
+// Plan/Now/Log/More, equal plain Now tab (no tab-now plate), TimeHead headers traveling with
+// Log/Plan, the panel strip, open-on-Now, driving-view return (R1), GitHub-only bug reports,
+// and end of the $5 bounty + free-paid perk.
 //
 // The strip pins (S) replace the touch-pager pins: the pager classified touches and
 // yielded to any control, and the Plan panel is four full-width buttons, so on a real
@@ -80,18 +81,18 @@ const freshMount = {
 // the strip moves and the snap lands it; the app's settle timer (120ms) then commits.
 const scrollStripTo = async (px) => { const el = strip(); el.scrollLeft = px; fire(el, 'scroll'); await sleep(220); };
 
-/* ---------------- (a) the bottom bar shows Log, Now, Plan, More ---------------- */
-// Re-aimed (DESIGN-NAV §2.1): time order Log — Now — Plan — More.
-await pin('A1. PANEL_ORDER is log/now/plan/settings', async () => {
-  return JSON.stringify(PANEL_ORDER) === JSON.stringify(['log', 'now', 'plan', 'settings']) || `got ${JSON.stringify(PANEL_ORDER)}`;
+/* ---------------- (a) the bottom bar shows Plan, Now, Log, More ---------------- */
+// Re-aimed (2026-11-20 nowplain): Log and Plan swapped — bar order is Plan — Now — Log — More.
+await pin('A1. PANEL_ORDER is plan/now/log/settings', async () => {
+  return JSON.stringify(PANEL_ORDER) === JSON.stringify(['plan', 'now', 'log', 'settings']) || `got ${JSON.stringify(PANEL_ORDER)}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): bottom bar is derived from PANEL_ORDER (Log, Now, Plan, More).
-await pin('A2. the rendered tab bar reads Log, Now, Plan, More in that order', async () => {
+// Re-aimed (2026-11-20 nowplain): bottom bar is derived from PANEL_ORDER (Plan, Now, Log, More).
+await pin('A2. the rendered tab bar reads Plan, Now, Log, More in that order', async () => {
   await seed({ ...segs });
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
   if (!nav) return 'no tab bar rendered';
   const labels = nav.childNodes.filter((n) => n.localName === 'button').map((b) => b.textContent.trim());
-  return JSON.stringify(labels) === JSON.stringify(['Log', 'Now', 'Plan', 'More']) || `got ${JSON.stringify(labels)}`;
+  return JSON.stringify(labels) === JSON.stringify(['Plan', 'Now', 'Log', 'More']) || `got ${JSON.stringify(labels)}`;
 });
 await pin('A3. the app still lands on Now by default, seated at 1 × width on fresh mount (DESIGN-NAV R2)', async () => {
   const ok = freshMount.tab === 'now'
@@ -103,15 +104,15 @@ await pin('A3. the app still lands on Now by default, seated at 1 × width on fr
 });
 
 /* ---------------- (s) the snap strip ---------------- */
-// Re-aimed (DESIGN-NAV §2.1): strip section order matches PANEL_ORDER (page-log, page-now, page-plan, page-settings) and the bar.
-await pin('S1. <main> is the strip: four pages side by side, Log/Now/Plan/More order, matching PANEL_ORDER and bar', async () => {
+// Re-aimed (2026-11-20 nowplain): strip section order matches PANEL_ORDER (page-plan, page-now, page-log, page-settings) and the bar.
+await pin('S1. <main> is the strip: four pages side by side, Plan/Now/Log/More order, matching PANEL_ORDER and bar', async () => {
   const ps = pages();
   if (ps.length !== 4) return `pages=${ps.length}`;
-  const want = ['page-log', 'page-now', 'page-plan', 'page-settings'];
+  const want = ['page-plan', 'page-now', 'page-log', 'page-settings'];
   const got = ps.map((p) => cls(p).split(/\s+/).find((c) => c.startsWith('page-')));
   const expectedFromOrder = PANEL_ORDER.map((k) => `page-${k}`);
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
-  const barIds = nav.childNodes.filter((n) => n.localName === 'button').map((b) => ({ Log: 'log', Now: 'now', Plan: 'plan', More: 'settings' }[b.textContent.trim()]));
+  const barIds = nav.childNodes.filter((n) => n.localName === 'button').map((b) => ({ Plan: 'plan', Now: 'now', Log: 'log', More: 'settings' }[b.textContent.trim()]));
   return (JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(got) === JSON.stringify(expectedFromOrder) && JSON.stringify(barIds) === JSON.stringify(PANEL_ORDER))
     || `strip=${JSON.stringify(got)} bar=${JSON.stringify(barIds)} PANEL_ORDER=${JSON.stringify(PANEL_ORDER)}`;
 });
@@ -124,10 +125,10 @@ await pin('S2. all four panels stay mounted at once (the strip never unmounts a 
   if (!entry) missing.push('log entry');
   return missing.length === 0 || `missing while tab=now: ${missing.join('; ')}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): new snap stops 0=log, 400=now, 800=plan, 1200=settings.
+// Re-aimed (2026-11-20 nowplain): snap stops 0=plan, 400=now, 800=log, 1200=settings.
 await pin('S3. scrolling the strip walks the tab — and the bar follows — at every snap point', async () => {
   await seed({ tab: 'now', ...segs });
-  const stops = [[0, 'log', 'Log'], [400, 'now', 'Now'], [800, 'plan', 'Plan'], [1200, 'settings', 'More']];
+  const stops = [[0, 'plan', 'Plan'], [400, 'now', 'Now'], [800, 'log', 'Log'], [1200, 'settings', 'More']];
   for (const [px, tab, label] of stops) {
     await scrollStripTo(px);
     if (getState().tab !== tab) return `at ${px}px tab=${getState().tab}, want ${tab}`;
@@ -135,9 +136,9 @@ await pin('S3. scrolling the strip walks the tab — and the bar follows — at 
   }
   return true;
 });
-// Re-aimed (DESIGN-NAV §2.1): ring walks 0=log, 400=now, 800=plan, 1200=settings.
+// Re-aimed (2026-11-20 nowplain): ring walks 0=plan, 400=now, 800=log, 1200=settings.
 await pin('S4. REPEATED walks keep working — the full ring, forth and back, twice (Lorico\u2019s one-swipe bug)', async () => {
-  const ring = [[800, 'plan'], [400, 'now'], [0, 'log'], [400, 'now'], [800, 'plan'], [1200, 'settings'], [800, 'plan'], [400, 'now'], [0, 'log'], [400, 'now'], [800, 'plan'], [1200, 'settings']];
+  const ring = [[800, 'log'], [400, 'now'], [0, 'plan'], [400, 'now'], [800, 'log'], [1200, 'settings'], [800, 'log'], [400, 'now'], [0, 'plan'], [400, 'now'], [800, 'log'], [1200, 'settings']];
   for (const [px, tab] of ring) {
     await scrollStripTo(px);
     if (getState().tab !== tab) return `at ${px}px tab=${getState().tab}, want ${tab}`;
@@ -150,39 +151,49 @@ await pin('S5. the page nodes are the same objects after the walks (scroll state
   const after = pages();
   return (before.length === 4 && after.length === 4 && before.every((p, i) => p === after[i])) || 'a page node was replaced';
 });
-// Re-aimed (DESIGN-NAV §2.1): Now starts at 400px; tapping More scrolls to 1200px.
-await pin('S6. a tab tap scrolls the strip to that page', async () => {
+// Re-aimed (2026-11-20 nowplain): tapping each tab (Plan, Now, Log, More) opens its own screen and scrolls to its snap offset.
+await pin('S6. each tab tap scrolls the strip to its own page (Plan=0, Now=400, Log=800, More=1200)', async () => {
   await seed({ tab: 'now', ...segs });
   strip().scrollLeft = 400; scrollCalls.length = 0;
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
-  const more = nav.childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === 'More');
-  fire(more, 'click');
-  await sleep(60);
-  if (getState().tab !== 'settings') return `tab=${getState().tab}`;
-  const last = scrollCalls[scrollCalls.length - 1];
-  return (last && last.left === 1200 && litTab() === 'More') || `scrollTo=${JSON.stringify(last)} lit=${litTab()}`;
+  const btn = (lbl) => nav.childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === lbl);
+  for (const [lbl, tab, px, pageCls] of [['More', 'settings', 1200, 'page-settings'], ['Plan', 'plan', 0, 'page-plan'], ['Log', 'log', 800, 'page-log'], ['Now', 'now', 400, 'page-now']]) {
+    scrollCalls.length = 0;
+    fire(btn(lbl), 'click');
+    await sleep(60);
+    const last = scrollCalls[scrollCalls.length - 1];
+    const activePg = pages().find((p) => has(p, 'is-active'));
+    if (getState().tab !== tab || !last || last.left !== px || litTab() !== lbl || !activePg || !has(activePg, pageCls)) {
+      return `tap ${lbl}: tab=${getState().tab} scrollTo=${JSON.stringify(last)} lit=${litTab()} active=${activePg && cls(activePg)}`;
+    }
+  }
+  return true;
 });
-// Re-aimed (DESIGN-NAV §2.1): Log moved from index 2 (800px) to index 0 (0px).
+// Re-aimed (2026-11-20 nowplain): Plan is now index 0 (0px) and Log is now index 2 (800px).
 await pin('S7. a programmatic tab change (restore / deep link / back) scrolls the strip to match', async () => {
   strip().scrollLeft = 1200; scrollCalls.length = 0;
+  await seed({ tab: 'plan', ...segs });
+  const lastPlan = scrollCalls[scrollCalls.length - 1];
+  if (!lastPlan || lastPlan.left !== 0) return `plan scrollTo=${JSON.stringify(lastPlan)}`;
+  scrollCalls.length = 0;
   await seed({ tab: 'log', ...segs });
-  const last = scrollCalls[scrollCalls.length - 1];
-  return (last && last.left === 0) || `scrollTo=${JSON.stringify(last)}`;
+  const lastLog = scrollCalls[scrollCalls.length - 1];
+  return (lastLog && lastLog.left === 800) || `log scrollTo=${JSON.stringify(lastLog)}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Plan moved from index 1 (400px) to index 2 (800px); swiping right from Plan goes to Now (400px).
+// Re-aimed (2026-11-20 nowplain): Plan is now index 0 (0px); swiping left from Plan goes to Now (400px).
 await pin('S8. a planning sub-screen sits on the Plan page; a settle there never walks it back to the menu', async () => {
   scrollCalls.length = 0;
   await seed({ tab: 'split', ...segs });
   const last = scrollCalls[scrollCalls.length - 1];
-  if (!last || last.left !== 800) return `strip went to ${JSON.stringify(last)}, want plan (800)`;
-  const planPage = pages()[2];
+  if (!last || last.left !== 0) return `strip went to ${JSON.stringify(last)}, want plan (0)`;
+  const planPage = pages()[0];
   if (!planPage.textContent.includes('Break 1')) return 'Split Lab content not in the Plan page';
-  await scrollStripTo(800);
+  await scrollStripTo(0);
   if (getState().tab !== 'split') return `settle clobbered the sub-screen: tab=${getState().tab}`;
   await scrollStripTo(400);
   return getState().tab === 'now' || `swiping away from a sub-screen: tab=${getState().tab}, want now`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Log is now panel index 0.
+// Re-aimed (2026-11-20 nowplain): Log is now panel index 2.
 await pin('S9. the pages off the settled panel are inert and aria-hidden; the settled page is neither', async () => {
   await seed({ tab: 'log', ...segs });
   const ps = pages();
@@ -190,7 +201,7 @@ await pin('S9. the pages off the settled panel are inert and aria-hidden; the se
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   const bad = [];
   ps.forEach((p, i) => {
-    const active = i === 0;
+    const active = i === 2;
     if (active && (off(p) || hid(p))) bad.push(`log page inert=${off(p)} hidden=${hid(p)}`);
     if (!active && (!off(p) || !hid(p))) bad.push(`page ${i} inert=${off(p)} hidden=${hid(p)}`);
   });
@@ -205,19 +216,19 @@ await pin('S10. while a sheet is open, a strip settle does not change the tab', 
   openSheet(null);
   return t === 'now' || `tab=${t} under an open sheet`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Plan is at 800px between Now (400px) and More (1200px).
+// Re-aimed (2026-11-20 nowplain): Log is at 800px between Now (400px) and More (1200px).
 await pin('S11. a settle that fires mid-flight (a tab tap\u2019s smooth scroll pausing its events) never commits the panel it is passing', async () => {
   const el = strip();
   el.scrollTo = (opts) => { scrollCalls.push(opts); }; // travelling: records, does not land
   await seed({ tab: 'settings', ...segs });
   el.scrollTo = applyingScrollTo(el);
   if (getState().tab !== 'settings') return `setup tab=${getState().tab}`;
-  await scrollStripTo(800); // the strip is passing Plan with a quiet spell in its events
+  await scrollStripTo(800); // the strip is passing Log with a quiet spell in its events
   if (getState().tab !== 'settings') return `mid-flight settle committed ${getState().tab}`;
   await scrollStripTo(1200); // it lands on its goal
   if (getState().tab !== 'settings') return `arrival tab=${getState().tab}`;
   await scrollStripTo(800); // and once arrived, the driver\u2019s own scrolls commit again
-  return getState().tab === 'plan' || `after arrival, scroll to 800 gave ${getState().tab}`;
+  return getState().tab === 'log' || `after arrival, scroll to 800 gave ${getState().tab}`;
 });
 
 /* ---------------- (h) feel round 2 (2026-11-19): the haptic click on a swipe settle ---------------- */
@@ -231,33 +242,33 @@ setVibrate((p) => { vib.push(p); return true; });
 // programmatic scroll goal the seed's own tab change left behind, exactly as on a phone).
 // (Matched case-blind: preact registers onTouchStart under whichever casing the shim exposes.)
 const grab = () => { const el = strip(); for (const k of Object.keys(el.listeners)) if (/^(touchstart|pointerdown)$/i.test(k)) for (const f of el.listeners[k]) f.call(el, { type: k, target: el, currentTarget: el, preventDefault() {}, stopPropagation() {} }); };
-// Re-aimed (DESIGN-NAV §2.1): Now is at 400px, Plan is at 800px.
+// Re-aimed (2026-11-20 nowplain): Now is at 400px, Log is at 800px.
 await pin('H1. a swipe that settles on a NEW panel gives exactly one short haptic click — none during the drag', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; vib.length = 0; grab();
   // the drag: a run of scroll events closer together than the settle window
   const el = strip();
   for (const px of [440, 520, 610, 700, 770]) { el.scrollLeft = px; fire(el, 'scroll'); await sleep(30); }
   if (vib.length) return `buzzed during the drag: ${JSON.stringify(vib)}`;
-  await scrollStripTo(800); // the snap lands it on Plan and the settle commits
-  if (getState().tab !== 'plan') return `tab=${getState().tab}`;
+  await scrollStripTo(800); // the snap lands it on Log and the settle commits
+  if (getState().tab !== 'log') return `tab=${getState().tab}`;
   if (vib.length !== 1) return `vibrate calls: ${JSON.stringify(vib)}`;
   const p = vib[0], ms = Array.isArray(p) ? p.reduce((a, b) => a + b, 0) : p;
   if (!(ms > 0 && ms <= 30)) return `not a short tick: ${JSON.stringify(p)}`;
   await sleep(200); // a quiet strip after the commit never buzzes again
   return vib.length === 1 || `buzzed again at rest: ${JSON.stringify(vib)}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): walking the full strip is now Log → Now → Plan → More (0→400→800→1200).
-await pin('H2. once per panel change: walking Log → Now → Plan → More gives three clicks, one each', async () => {
-  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 0; vib.length = 0;
+// Re-aimed (2026-11-20 nowplain): walking the full strip is Plan → Now → Log → More (0→400→800→1200).
+await pin('H2. once per panel change: walking Plan → Now → Log → More gives three clicks, one each', async () => {
+  await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; vib.length = 0;
   grab(); await scrollStripTo(400); grab(); await scrollStripTo(800); grab(); await scrollStripTo(1200);
   return (getState().tab === 'settings' && vib.length === 3) || `tab=${getState().tab} vibrate×${vib.length}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Log rests at 0px.
+// Re-aimed (2026-11-20 nowplain): Plan rests at 0px.
 await pin('H3. a swipe that springs back to the same panel is silent', async () => {
-  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 0; vib.length = 0; grab();
+  await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; vib.length = 0; grab();
   const el = strip(); el.scrollLeft = 100; fire(el, 'scroll'); await sleep(30);
   await scrollStripTo(0);
-  return (getState().tab === 'log' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
+  return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
 });
 // A real click: the document's capture listeners first (the app's global button tap tick lives
 // there), then the node's own. The shim's closest() is a stub, so the clicked node is given a
@@ -269,13 +280,13 @@ const realClick = (node) => {
   finally { if (had) node.closest = prev; else delete node.closest; }
 };
 const navBtn = (label) => all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === label);
-// Re-aimed (DESIGN-NAV §2.6): Log(0) → Plan(800) crosses Now(400) for 2 ticks, then Plan(800) → Now(400) is 1 tick at lock.
-await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Log → Plan ticks once passing Now and once at the lock (DESIGN-NAV §2.6)', async () => {
-  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+// Re-aimed (2026-11-20 nowplain): Plan(0) → Log(800) crosses Now(400) for 2 ticks, then Log(800) → Now(400) is 1 tick at lock.
+await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Plan → Log ticks once passing Now and once at the lock', async () => {
+  await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
   const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); }; // a smooth glide: travels, lands later
-  realClick(navBtn('Plan'));
+  realClick(navBtn('Log'));
   el.scrollTo = applyingScrollTo(el);
-  if (getState().tab !== 'plan') return `tab=${getState().tab}`;
+  if (getState().tab !== 'log') return `tab=${getState().tab}`;
   if (vib.length) return `ticked on the tap itself: ${JSON.stringify(vib)}`;
   await sleep(60);
   // mid-glide: scroll events closer together than the settle window, then the arrival
@@ -284,12 +295,12 @@ await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Log �
   el.scrollLeft = 500; fire(el, 'scroll'); await sleep(30);
   if (vib.length !== 1) return `passing Now: vibrate×${vib.length}, want 1`;
   el.scrollLeft = 700; fire(el, 'scroll'); await sleep(30);
-  if (vib.length !== 1) return `between Now and Plan: vibrate×${vib.length}, want still 1`;
+  if (vib.length !== 1) return `between Now and Log: vibrate×${vib.length}, want still 1`;
   await scrollStripTo(800); await sleep(60);
-  if (vib.length !== 2) return `at the lock: vibrate×${vib.length} ${JSON.stringify(vib)}, want exactly 2 (Now pass + Plan lock)`;
+  if (vib.length !== 2) return `at the lock: vibrate×${vib.length} ${JSON.stringify(vib)}, want exactly 2 (Now pass + Log lock)`;
   await sleep(200);
   if (vib.length !== 2) return `ticked again at rest: ${JSON.stringify(vib)}`;
-  // a second tap, Plan → Now (next door, nothing passed): one more tick, at the lock only
+  // a second tap, Log → Now (next door, nothing passed): one more tick, at the lock only
   el.scrollTo = (opts) => { scrollCalls.push(opts); };
   realClick(navBtn('Now'));
   el.scrollTo = applyingScrollTo(el);
@@ -299,7 +310,7 @@ await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Log �
   await scrollStripTo(400); await sleep(60);
   return (getState().tab === 'now' && vib.length === 3) || `tab=${getState().tab} vibrate×${vib.length}: ${JSON.stringify(vib)}`;
 });
-// Amendment A (Lorico 2026-11-20; re-aimed for DESIGN-NAV §2.6): a tab tap's glide ticks as it
+// Amendment A (Lorico 2026-11-20; re-aimed 2026-11-20 nowplain): a tab tap's glide ticks as it
 // passes each panel, plus the lock. glideTap taps `label` with a travelling (smooth) scrollTo,
 // walks the strip through `path` in scroll events closer together than the settle window, and
 // lets the last px settle.
@@ -318,47 +329,47 @@ const glideTap = async (label, path) => {
   await sleep(220);
   return { atPress, seen, beforeLock, total: vib.length };
 };
-// Re-aimed (DESIGN-NAV §2.6): Log→More=3 (pass Now, Plan, lock More); Now→More=2 (pass Plan, lock More).
-await pin('H10. amendment A (DESIGN-NAV §2.6): Log → More yields 3 ticks (Now, Plan, lock); Now → More yields 2 ticks (Plan, lock)', async () => {
-  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
+// Re-aimed (2026-11-20 nowplain): Plan→More=3 (pass Now, Log, lock More); Now→More=2 (pass Log, lock More).
+await pin('H10. amendment A (nowplain): Plan → More yields 3 ticks (Now, Log, lock); Now → More yields 2 ticks (Log, lock)', async () => {
+  await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
   const r = await glideTap('More', [150, 350, 420, 600, 790, 810, 1000, 1150, 1200]);
   const want = [0, 0, 1, 1, 1, 2, 2, 2];
-  if (r.atPress !== 0) return `Log→More ticked at press: ${r.atPress}`;
-  if (JSON.stringify(r.seen) !== JSON.stringify(want)) return `Log→More glide ${JSON.stringify(r.seen)}, want ${JSON.stringify(want)}`;
-  if (r.beforeLock !== 2 || getState().tab !== 'settings' || r.total !== 3) return `Log→More beforeLock=${r.beforeLock} total=${r.total} tab=${getState().tab}`;
+  if (r.atPress !== 0) return `Plan→More ticked at press: ${r.atPress}`;
+  if (JSON.stringify(r.seen) !== JSON.stringify(want)) return `Plan→More glide ${JSON.stringify(r.seen)}, want ${JSON.stringify(want)}`;
+  if (r.beforeLock !== 2 || getState().tab !== 'settings' || r.total !== 3) return `Plan→More beforeLock=${r.beforeLock} total=${r.total} tab=${getState().tab}`;
   await sleep(200);
-  if (vib.length !== 3) return `Log→More ticked again at rest: ${vib.length}`;
-  // Now → More (1 → 3): pass Plan (800), lock More (1200) = 2 ticks
+  if (vib.length !== 3) return `Plan→More ticked again at rest: ${vib.length}`;
+  // Now → More (1 → 3): pass Log (800), lock More (1200) = 2 ticks
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220);
   const r2 = await glideTap('More', [550, 780, 810, 1050, 1200]);
   return (r2.atPress === 0 && JSON.stringify(r2.seen) === '[0,0,1,1]' && r2.beforeLock === 1 && r2.total === 2 && getState().tab === 'settings')
     || `Now→More press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total}`;
 });
-// Re-aimed (DESIGN-NAV §2.6): Now(400) → Plan(800) = 1 tick, Now(400) → Log(0) = 1 tick, both at lock only.
-await pin('H11. amendment A (DESIGN-NAV §2.6): Now → Plan and Now → Log (adjacent) each yield exactly 1 tick, at the lock', async () => {
+// Re-aimed (2026-11-20 nowplain): Now(400) → Log(800) = 1 tick, Now(400) → Plan(0) = 1 tick, both at lock only.
+await pin('H11. amendment A (nowplain): Now → Log and Now → Plan (adjacent) each yield exactly 1 tick, at the lock', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220);
-  const r1 = await glideTap('Plan', [500, 650, 790, 800]);
-  if (!(r1.atPress === 0 && r1.seen.every((n) => n === 0) && r1.beforeLock === 0 && r1.total === 1 && getState().tab === 'plan')) {
-    return `Now→Plan press=${r1.atPress} glide=${JSON.stringify(r1.seen)} beforeLock=${r1.beforeLock} total=${r1.total} tab=${getState().tab}`;
+  const r1 = await glideTap('Log', [500, 650, 790, 800]);
+  if (!(r1.atPress === 0 && r1.seen.every((n) => n === 0) && r1.beforeLock === 0 && r1.total === 1 && getState().tab === 'log')) {
+    return `Now→Log press=${r1.atPress} glide=${JSON.stringify(r1.seen)} beforeLock=${r1.beforeLock} total=${r1.total} tab=${getState().tab}`;
   }
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220);
-  const r2 = await glideTap('Log', [300, 150, 10, 0]);
-  return (r2.atPress === 0 && r2.seen.every((n) => n === 0) && r2.beforeLock === 0 && r2.total === 1 && getState().tab === 'log')
-    || `Now→Log press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total} tab=${getState().tab}`;
+  const r2 = await glideTap('Plan', [300, 150, 10, 0]);
+  return (r2.atPress === 0 && r2.seen.every((n) => n === 0) && r2.beforeLock === 0 && r2.total === 1 && getState().tab === 'plan')
+    || `Now→Plan press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total} tab=${getState().tab}`;
 });
-// Re-aimed (DESIGN-NAV §2.6): backwards More→Log=3, More→Now=2, and fast glide Log→More skipping 2 panels in one frame still counts 3.
-await pin('H12. amendment A, backwards (DESIGN-NAV §2.6): More → Log ticks 3, More → Now ticks 2; fast glide skipping two panels still counts each', async () => {
+// Re-aimed (2026-11-20 nowplain): backwards More→Plan=3, More→Now=2, fast glide Plan→More skipping 2 panels still counts 3.
+await pin('H12. amendment A, backwards (nowplain): More → Plan ticks 3, More → Now ticks 2; fast glide skipping two panels still counts each', async () => {
   await seed({ tab: 'settings', ...segs }); strip().scrollLeft = 1200; fire(strip(), 'scroll'); await sleep(220);
-  const r1 = await glideTap('Log', [1000, 790, 600, 390, 0]);
-  if (!(r1.atPress === 0 && JSON.stringify(r1.seen) === '[0,1,1,2]' && r1.total === 3 && getState().tab === 'log')) return `More→Log: press=${r1.atPress} glide=${JSON.stringify(r1.seen)} total=${r1.total} tab=${getState().tab}`;
-  const r2 = await glideTap('More', [900, 1200]); // Now and Plan both passed between two frames
-  if (!(r2.atPress === 0 && JSON.stringify(r2.seen) === '[2]' && r2.total === 3 && getState().tab === 'settings')) return `Log→More skip: press=${r2.atPress} glide=${JSON.stringify(r2.seen)} total=${r2.total}`;
-  const r3 = await glideTap('Now', [1000, 790, 600, 400]); // More → Now: passes Plan, locks Now = 2
+  const r1 = await glideTap('Plan', [1000, 790, 600, 390, 0]);
+  if (!(r1.atPress === 0 && JSON.stringify(r1.seen) === '[0,1,1,2]' && r1.total === 3 && getState().tab === 'plan')) return `More→Plan: press=${r1.atPress} glide=${JSON.stringify(r1.seen)} total=${r1.total} tab=${getState().tab}`;
+  const r2 = await glideTap('More', [900, 1200]); // Now and Log both passed between two frames
+  if (!(r2.atPress === 0 && JSON.stringify(r2.seen) === '[2]' && r2.total === 3 && getState().tab === 'settings')) return `Plan→More skip: press=${r2.atPress} glide=${JSON.stringify(r2.seen)} total=${r2.total}`;
+  const r3 = await glideTap('Now', [1000, 790, 600, 400]); // More → Now: passes Log, locks Now = 2
   return (r3.atPress === 0 && JSON.stringify(r3.seen) === '[0,1,1]' && r3.beforeLock === 1 && r3.total === 2 && getState().tab === 'now')
     || `More→Now: press=${r3.atPress} glide=${JSON.stringify(r3.seen)} beforeLock=${r3.beforeLock} total=${r3.total} tab=${getState().tab}`;
 });
-// Re-aimed (DESIGN-NAV §2.6): swipe fling Now(400) → Plan(800) → More(1200) is 1 tick at settle; reduced-motion More → Log is 1 tick at lock.
-await pin('H13. amendment A leaves swipes alone (DESIGN-NAV §2.6): fling Now → Plan → More is ONE tick at settle; reduced-motion tap is one tick at lock', async () => {
+// Re-aimed (2026-11-20 nowplain): swipe fling Now(400) → Log(800) → More(1200) is 1 tick at settle; reduced-motion More → Plan is 1 tick at lock.
+await pin('H13. amendment A leaves swipes alone (nowplain): fling Now → Log → More is ONE tick at settle; reduced-motion tap is one tick at lock', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
   grab(); const el = strip();
   for (const px of [500, 700, 820, 1000, 1190]) { el.scrollLeft = px; fire(el, 'scroll'); await sleep(30); }
@@ -371,25 +382,25 @@ await pin('H13. amendment A leaves swipes alone (DESIGN-NAV §2.6): fling Now �
   try {
     vib.length = 0; scrollCalls.length = 0;
     el.scrollTo = applyingScrollTo(el);
-    realClick(navBtn('Log')); await sleep(60);
+    realClick(navBtn('Plan')); await sleep(60);
     if (!scrollCalls.length || scrollCalls[scrollCalls.length - 1].behavior !== 'auto') return `reduced motion did not jump: ${JSON.stringify(scrollCalls)}`;
     fire(el, 'scroll'); await sleep(30);
     const beforeLock = vib.length; await sleep(220);
-    return (beforeLock === 0 && vib.length === 1 && getState().tab === 'log') || `reduced-motion tap: beforeLock=${beforeLock} total=${vib.length}`;
+    return (beforeLock === 0 && vib.length === 1 && getState().tab === 'plan') || `reduced-motion tap: beforeLock=${beforeLock} total=${vib.length}`;
   } finally { globalThis.matchMedia = mm; }
 });
-// Re-aimed (DESIGN-NAV §2.1): Log rests at 0px, Plan/split at 800px.
+// Re-aimed (2026-11-20 nowplain): Plan/split rests at 0px, Log at 800px.
 await pin('H7. a tap on the tab of the panel already showing never ticks — not on the tap, not later', async () => {
-  await seed({ tab: 'log', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
-  realClick(navBtn('Log')); await sleep(60);
+  await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
+  realClick(navBtn('Plan')); await sleep(60);
   fire(strip(), 'scroll'); await sleep(220);
-  if (getState().tab !== 'log' || vib.length) return `tab=${getState().tab} vibrate×${vib.length}`;
+  if (getState().tab !== 'plan' || vib.length) return `tab=${getState().tab} vibrate×${vib.length}`;
   // and from a planning sub-screen, Plan's tab (same panel: back to the Plan menu) is silent too
   await seed({ tab: 'split', ...segs }); fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
   realClick(navBtn('Plan')); await sleep(60); fire(strip(), 'scroll'); await sleep(220);
   return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Now(400) → More(1200) grabbed mid-glide (700) back to Now(400) or on to Plan(800).
+// Re-aimed (2026-11-20 nowplain): Now(400) → More(1200) grabbed mid-glide (700) back to Now(400) or on to Log(800).
 await pin('H8. a tab tap whose glide the driver grabs and swipes back to where it started is silent; one swiped on to a third panel ticks once', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
   const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); };
@@ -401,7 +412,7 @@ await pin('H8. a tab tap whose glide the driver grabs and swipes back to where i
   realClick(navBtn('More')); el.scrollTo = applyingScrollTo(el); await sleep(60);
   el.scrollLeft = 700; fire(el, 'scroll'); await sleep(30);
   grab(); await scrollStripTo(800); await sleep(60);
-  return (getState().tab === 'plan' && vib.length === 1) || `swiped on to Plan: tab=${getState().tab} vibrate×${vib.length}`;
+  return (getState().tab === 'log' && vib.length === 1) || `swiped on to Log: tab=${getState().tab} vibrate×${vib.length}`;
 });
 // Re-aimed (DESIGN-NAV §2.1): Now rests at 400px.
 await pin('H9. every other button keeps its instant click tick (the global handler is untouched); only the four tab buttons opt out', async () => {
@@ -418,7 +429,7 @@ await pin('H9. every other button keeps its instant click tick (the global handl
   if (tabs.length !== 4 || !tabs.every((t) => t.attributes['data-haptic'] === 'lock')) return `tab buttons: ${tabs.map((t) => t.attributes['data-haptic']).join(',')}`;
   return true;
 });
-// Re-aimed (DESIGN-NAV §2.1): Now rests at 400px, Plan at 800px.
+// Re-aimed (2026-11-20 nowplain): Now rests at 400px, Log at 800px.
 await pin('H5. a programmatic change (restore / back / shortcut) and a settle under an open sheet are silent', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; vib.length = 0;
   await seed({ tab: 'settings', ...segs }); fire(strip(), 'scroll'); await sleep(220);
@@ -427,14 +438,14 @@ await pin('H5. a programmatic change (restore / back / shortcut) and a settle un
   openSheet(null); await sleep(30);
   return vib.length === 0 || `vibrate×${vib.length}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Now(400) → Plan(800) → More(1200).
+// Re-aimed (2026-11-20 nowplain): Now(400) → Log(800) → More(1200).
 await pin('H6. no vibration API (iPhone) — or one that throws — the swipe still commits, nothing throws', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400;
   const nav = globalThis.navigator;
   delete nav.vibrate;
   if ('vibrate' in nav) return 'could not remove vibrate for the test';
   grab(); await scrollStripTo(800);
-  if (getState().tab !== 'plan') return `no-API: tab=${getState().tab}`;
+  if (getState().tab !== 'log') return `no-API: tab=${getState().tab}`;
   setVibrate(() => { throw new Error('blocked'); });
   grab(); await scrollStripTo(1200);
   setVibrate((p) => { vib.push(p); return true; });
@@ -484,18 +495,24 @@ await pin('N2. DESIGN-NAV §2.5: exactly one .dock inside section.page-now only;
   }
   return true;
 });
-await pin('N3. DESIGN-NAV §2.3: exactly one nav.tabs button.tab-now at index 1, keeping tab-now active and inactive', async () => {
+// Re-aimed (2026-11-20 nowplain): Now carries no tab-now class (matches other tabs' .on class logic, active and inactive).
+await pin('N3. nowplain: zero button.tab-now anywhere in nav.tabs; Now uses plain .on active and "" inactive, matching other tabs', async () => {
   await seed({ tab: 'now', ...segs });
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
   const btns = nav.childNodes.filter((n) => n.localName === 'button');
   const nowBtns = btns.filter((b) => has(b, 'tab-now'));
-  if (nowBtns.length !== 1 || btns[1] !== nowBtns[0] || !has(btns[1], 'on')) return `active: count=${nowBtns.length} idx=${btns.indexOf(nowBtns[0])} cls="${cls(btns[1])}"`;
-  await seed({ tab: 'log', ...segs });
+  if (nowBtns.length !== 0 || btns[1].textContent.trim() !== 'Now' || cls(btns[1]).trim() !== 'on') {
+    return `active: tab-now count=${nowBtns.length} idx1="${btns[1].textContent.trim()}" cls="${cls(btns[1])}"`;
+  }
+  await seed({ tab: 'plan', ...segs });
   const btns2 = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button');
-  if (!has(btns2[1], 'tab-now') || has(btns2[1], 'on') || !has(btns2[0], 'on')) return `inactive: now="${cls(btns2[1])}" log="${cls(btns2[0])}"`;
+  if (btns2.some((b) => has(b, 'tab-now')) || cls(btns2[1]).trim() !== '' || cls(btns2[0]).trim() !== 'on') {
+    return `inactive: now="${cls(btns2[1])}" plan="${cls(btns2[0])}"`;
+  }
   return true;
 });
-await pin('N4. DESIGN-NAV §2.4: TimeHead present on Log (before .daynav, including resolved view) and Plan menu (before h1.screen-title), non-interactive with aria-hidden rail', async () => {
+// Re-aimed (2026-11-20 nowplain): TimeHead travels with its screen — Log (index 2) keeps past, Plan (index 0) keeps future.
+await pin('N4. TimeHead travels with its screen: past on Log (index 2, before .daynav, including resolved view) and future on Plan (index 0, before h1.screen-title)', async () => {
   const checkHead = (pg, kind, wantText, beforePred) => {
     const flat = []; const w = (n) => { flat.push(n); n.childNodes.forEach(w); }; w(pg);
     const heads = flat.filter((n) => n.localName === 'p' && has(n, 'timehead') && has(n, `timehead-${kind}`));
@@ -513,15 +530,16 @@ await pin('N4. DESIGN-NAV §2.4: TimeHead present on Log (before .daynav, includ
     return null;
   };
   await seed({ tab: 'log', logResolved: false, ...segs });
-  const errLog1 = checkHead(pages()[0], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
+  const errLog1 = checkHead(pages()[2], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
   if (errLog1) return errLog1;
   await seed({ tab: 'log', logResolved: true, ...segs });
-  const errLog2 = checkHead(pages()[0], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
+  const errLog2 = checkHead(pages()[2], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
   if (errLog2) return `resolved: ${errLog2}`;
   await seed({ tab: 'plan', ...segs });
-  const errPlan = checkHead(pages()[2], 'future', "The future — what's still ahead", (n) => n.localName === 'h1' && has(n, 'screen-title'));
+  const errPlan = checkHead(pages()[0], 'future', "The future — what's still ahead", (n) => n.localName === 'h1' && has(n, 'screen-title'));
   return errPlan || true;
 });
+// Re-aimed (2026-11-20 nowplain): Plan sub-screens sit on pages()[0]; Now (1) and More (3) unchanged.
 await pin('N5. DESIGN-NAV §2.4: TimeHead is ABSENT on Now, More, and every Plan sub-screen (split, trip, load, recap, history)', async () => {
   await seed({ tab: 'now', ...segs });
   const ps = pages();
@@ -529,7 +547,7 @@ await pin('N5. DESIGN-NAV §2.4: TimeHead is ABSENT on Now, More, and every Plan
   if (all((n) => has(n, 'timehead'), ps[3]).length !== 0) return 'timehead on More';
   for (const sub of ['split', 'trip', 'load', 'recap', 'history']) {
     await seed({ tab: sub, ...segs });
-    if (all((n) => has(n, 'timehead'), pages()[2]).length !== 0) return `timehead on Plan sub-screen ${sub}`;
+    if (all((n) => has(n, 'timehead'), pages()[0]).length !== 0) return `timehead on Plan sub-screen ${sub}`;
   }
   return true;
 });

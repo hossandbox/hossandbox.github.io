@@ -240,15 +240,15 @@ for (const [W, H] of SIZES) {
   const css = await page.evaluate(() => { const c = getComputedStyle(document.querySelector('.page')); return `${c.overscrollBehaviorX}/${c.overscrollBehaviorY}`; });
   ok(`${tag} (c) a page hands sideways overscroll up to the strip (overscroll-behavior x auto), and keeps vertical closed (y none)`, css === 'auto/none', css);
   await seated();
-  // Re-aimed (DESIGN-NAV §2.1, 2026-11-20): time order Log — Now — Plan — More (opens on Now at index 1).
+  // Re-aimed (2026-11-20 nowplain): bar order Plan(0) — Now(1) — Log(2) — More(3) (opens on Now at index 1).
   // [from-panel, content selector, dx, expected panel, label]
   const legs = [
-    ['now', '.hero, .card, section', -1, 'plan', 'Now content'],
-    ['plan', 'button.plan-item b, button.plan-item', -1, 'settings', 'a Plan row (button)'],
-    ['settings', 'label, .card', 1, 'plan', 'a More/Settings row'],
-    ['plan', 'button.plan-item b, button.plan-item', 1, 'now', 'a Plan row, rightward'],
-    ['now', '.hero, .card, section', 1, 'log', 'Now content, rightward'],
-    ['log', 'button.entry', -1, 'now', 'a Log entry (button)'],
+    ['now', '.hero, .card, section', -1, 'log', 'Now content'],
+    ['log', 'button.entry', -1, 'settings', 'a Log entry (button)'],
+    ['settings', 'label, .card', 1, 'log', 'a More/Settings row'],
+    ['log', 'button.entry', 1, 'now', 'a Log entry, rightward'],
+    ['now', '.hero, .card, section', 1, 'plan', 'Now content, rightward'],
+    ['plan', 'button.plan-item b, button.plan-item', -1, 'now', 'a Plan row (button)'],
   ];
   for (const [from, sel, dir, want, label] of legs) {
     const b = await st();
@@ -261,12 +261,13 @@ for (const [W, H] of SIZES) {
     ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && a.bar === { now: 'Now', plan: 'Plan', log: 'Log', settings: 'More' }[want], `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
     ok(`${tag} (c) …and its settle gives exactly one haptic click`, a.vib - b.vib === 1, `vibrate calls +${a.vib - b.vib}`);
   }
+  // Re-aimed (2026-11-20 nowplain): leftward diagonal swipe from Now pages to Log (index 2).
   // a slightly diagonal swipe (thumbs are not rulers) still pages
   {
     const b = await st(); const at = await spot('.hero, .card, section');
     if (at) { await drag(at.x, at.y, -Math.round(W * 0.7), 40); await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250); }
     const a = await st();
-    ok(`${tag} (c) a slightly diagonal swipe on Now content still pages to Plan`, b.active === 'now' && a.active === 'plan', `${b.active} → ${a.active}`);
+    ok(`${tag} (c) a slightly diagonal swipe on Now content still pages to Log`, b.active === 'now' && a.active === 'log', `${b.active} → ${a.active}`);
   }
   // vertical scrolling is untouched: a vertical drag on Log scrolls the page, never the strip
   {
@@ -277,7 +278,7 @@ for (const [W, H] of SIZES) {
     const a = await st();
     ok(`${tag} (c) a vertical drag on Log content scrolls the page and leaves the strip on Log`, b.active === 'log' && a.active === 'log' && a.top > b.top && a.vib === b.vib, `${b.active}/${b.top} → ${a.active}/${a.top}, vibrate +${a.vib - b.vib}`);
   }
-  // Re-aimed (DESIGN-NAV §2.1 / §2.6, 2026-11-20): from Log(0), Now(1) is the adjacent tab (was More).
+  // Re-aimed (2026-11-20 nowplain): from Log(2), Now(1) is the adjacent tab.
   // a tab-bar tap glides the strip and ticks ONCE, when it locks onto the new panel — never on
   // the tap itself (haptic timing, 2026-11-20: "The haptic feedback should happen only when the
   // screen locks into place. Both the swiping and the tapping."). A tap on the tab of the panel
@@ -298,8 +299,8 @@ for (const [W, H] of SIZES) {
     const a2 = await st();
     ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'now' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
   }
-  // Re-aimed (DESIGN-NAV §2.6, 2026-11-20): Log(0)–Now(1)–Plan(2)–More(3); Now↔More is 2 ticks,
-  // Log↔More is 3 ticks, Log→Plan is 2 ticks, Now→Log and Now→Plan are 1 tick each.
+  // Re-aimed (2026-11-20 nowplain): Plan(0)–Now(1)–Log(2)–More(3); Now↔More is 2 ticks (pass Log),
+  // Plan↔More is 3 ticks, Plan→Log is 2 ticks, Now→Plan and Now→Log are 1 tick each.
   {
     const tabBox = (label) => page.evaluate((l) => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l)).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, label);
     const glide = async (label) => {
@@ -314,33 +315,33 @@ for (const [W, H] of SIZES) {
       return { a, got, early, t0 };
     };
     const where = (g) => g.got.map((v) => `${Math.round(v.t - g.t0)}ms@${(v.sl / (v.w || 1)).toFixed(2)}`).join(' ');
-    // Now(1) → More(3): pass Plan(2), lock More(3) = 2 ticks
+    // Now(1) → More(3): pass Log(2), lock More(3) = 2 ticks
     const g1 = await glide('More');
     const pos1 = g1.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → More ticks 2 times (pass Plan, lock More), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
-    // More(3) → Now(1): pass Plan(2), lock Now(1) = 2 ticks
+    ok(`${tag} (c) amendment A (nowplain): Now → More ticks 2 times (pass Log, lock More), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
+    // More(3) → Now(1): pass Log(2), lock Now(1) = 2 ticks
     const g2 = await glide('Now');
     const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): More → Now ticks 2 times (pass Plan, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
-    // Now(1) → Log(0): adjacent = 1 tick at lock
-    const g3 = await glide('Log');
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → Log ticks once, at the lock`, g3.a.active === 'log' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
-    // Log(0) → More(3): pass Now(1), pass Plan(2), lock More(3) = 3 ticks
+    ok(`${tag} (c) amendment A (nowplain): More → Now ticks 2 times (pass Log, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
+    // Now(1) → Plan(0): adjacent = 1 tick at lock
+    const g3 = await glide('Plan');
+    ok(`${tag} (c) amendment A (nowplain): Now → Plan ticks once, at the lock`, g3.a.active === 'plan' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
+    // Plan(0) → More(3): pass Now(1), pass Log(2), lock More(3) = 3 ticks
     const g4 = await glide('More');
     const pos4 = g4.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Log → More ticks 3 times (Now, Plan, lock More), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
-    // More(3) → Log(0): pass Plan(2), pass Now(1), lock Log(0) = 3 ticks
-    const g5 = await glide('Log');
+    ok(`${tag} (c) amendment A (nowplain): Plan → More ticks 3 times (Now, Log, lock More), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
+    // More(3) → Plan(0): pass Log(2), pass Now(1), lock Plan(0) = 3 ticks
+    const g5 = await glide('Plan');
     const pos5 = g5.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): More → Log ticks 3 times (Plan, Now, lock Log), none at press`, g5.a.active === 'log' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
-    // Log(0) → Plan(2): pass Now(1), lock Plan(2) = 2 ticks
-    const g6 = await glide('Plan');
+    ok(`${tag} (c) amendment A (nowplain): More → Plan ticks 3 times (Log, Now, lock Plan), none at press`, g5.a.active === 'plan' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
+    // Plan(0) → Log(2): pass Now(1), lock Log(2) = 2 ticks
+    const g6 = await glide('Log');
     const pos6 = g6.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Log → Plan ticks 2 times (Now, lock Plan), none at press`, g6.a.active === 'plan' && g6.got.length === 2 && g6.early === 0 && pos6[0] >= 0.99 && pos6[0] < 1.5 && Math.abs(pos6[1] - 2) <= 0.02, `active ${g6.a.active}; ${g6.got.length} ticks, ${g6.early} early: ${where(g6)}`);
+    ok(`${tag} (c) amendment A (nowplain): Plan → Log ticks 2 times (Now, lock Log), none at press`, g6.a.active === 'log' && g6.got.length === 2 && g6.early === 0 && pos6[0] >= 0.99 && pos6[0] < 1.5 && Math.abs(pos6[1] - 2) <= 0.02, `active ${g6.a.active}; ${g6.got.length} ticks, ${g6.early} early: ${where(g6)}`);
     await glide('Now');
-    // Now(1) → Plan(2): adjacent = 1 tick at lock
-    const g7 = await glide('Plan');
-    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → Plan ticks once, at the lock`, g7.a.active === 'plan' && g7.got.length === 1 && g7.early === 0 && Math.abs(g7.got[0].sl / (g7.got[0].w || 1) - 2) <= 0.02, `active ${g7.a.active}; ${g7.got.length} ticks: ${where(g7)}`);
+    // Now(1) → Log(2): adjacent = 1 tick at lock
+    const g7 = await glide('Log');
+    ok(`${tag} (c) amendment A (nowplain): Now → Log ticks once, at the lock`, g7.a.active === 'log' && g7.got.length === 1 && g7.early === 0 && Math.abs(g7.got[0].sl / (g7.got[0].w || 1) - 2) <= 0.02, `active ${g7.a.active}; ${g7.got.length} ticks: ${where(g7)}`);
   }
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -441,9 +442,10 @@ for (const [W, H] of SIZES) {
     await ctx.close();
   }
 }
-// (e) DESIGN-NAV (2026-11-20): browser-verified pins for the time-order bar (Log — Now — Plan — More),
-// open-on-Now at frame 1 (R2), driving-view return (R1), Now-only dock & --dock-h stability,
-// tab-now plate ratio & theme colors, TimeHead headers, and zero overflow across both sizes & themes.
+// (e) DESIGN-NAV + nowplain (2026-11-20): browser-verified pins for the equal-width bar
+// (Plan — Now — Log — More), open-on-Now at frame 1 (R2), driving-view return (R1), Now-only
+// dock & --dock-h stability, plain Now button (no tab-now class or plate), TimeHead headers
+// traveling with Log/Plan, and zero overflow across both sizes & themes.
 for (const [W, H] of SIZES) {
   for (const theme of ['day', 'night']) {
     const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
@@ -479,42 +481,63 @@ for (const [W, H] of SIZES) {
     const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
     // 1 + 2. Order & Open-on-Now at the first animation frame after load (R2)
+    // Re-aimed (2026-11-20 nowplain): Log and Plan swapped — bar is Plan/Now/Log/More and strip is page-plan/page-now/page-log/page-settings.
     const open = await page.evaluate(() => {
       const bar = [...document.querySelectorAll('nav.tabs button')].map((b) => b.textContent.trim());
       const strip = [...document.querySelectorAll('main.pages > section.page')].map((s) => [...s.classList].find((c) => c.startsWith('page-')));
       return { ff: window.__firstFrame, bar, strip };
     });
-    ok(`${tag} (e) order: bar is Log/Now/Plan/More and strip is page-log/page-now/page-plan/page-settings`, JSON.stringify(open.bar) === '["Log","Now","Plan","More"]' && JSON.stringify(open.strip) === '["page-log","page-now","page-plan","page-settings"]', JSON.stringify(open));
+    ok(`${tag} (e) order: bar is Plan/Now/Log/More and strip is page-plan/page-now/page-log/page-settings`, JSON.stringify(open.bar) === '["Plan","Now","Log","More"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log","page-settings"]', JSON.stringify(open));
     ok(`${tag} (e) open on Now at first animation frame (R2): scrollLeft === innerWidth and page-now visible`, open.ff && open.ff.sl === W && open.ff.iw === W && /\bpage-now\b/.test(open.ff.active || '') && Math.abs(open.ff.nowLeft) <= 1, JSON.stringify(open.ff));
 
-    // 6. Now treatment (active)
+    // 6. Equal-width tabs & plain Now treatment (active)
+    // Re-aimed (2026-11-20 nowplain): four equal-width columns (1fr 1fr 1fr 1fr) spanning exact viewport width; Now carries no tab-now class and no ::after plate background.
     const nowStyle = await page.evaluate(() => {
       const nav = document.querySelector('nav.tabs');
       const btns = [...nav.querySelectorAll('button')];
       const nowBtns = [...nav.querySelectorAll('button.tab-now')];
-      const nb = btns[1], lb = btns[0];
-      const nr = nb.getBoundingClientRect(), lr = lb.getBoundingClientRect(), navR = nav.getBoundingClientRect();
-      const cs = getComputedStyle(nb), aft = getComputedStyle(nb, '::after');
-      const heights = btns.map((b) => Math.round(b.getBoundingClientRect().height * 10) / 10);
-      const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top * 10) / 10);
+      const nb = btns[1];
+      const rects = btns.map((b) => { const r = b.getBoundingClientRect(); return { left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, width: Math.round(r.width * 10) / 10, height: Math.round(r.height * 10) / 10, top: Math.round(r.top * 10) / 10 }; });
+      const navR = nav.getBoundingClientRect();
+      const cs = getComputedStyle(nb), aft = getComputedStyle(nb, '::after'), bef = getComputedStyle(nb, '::before');
+      const svgCol = getComputedStyle(nb.querySelector('svg')).color;
       return {
-        count: nowBtns.length, isSecond: nowBtns[0] === nb, on: nb.classList.contains('on'),
-        ratio: Math.round((nr.width / lr.width) * 1000) / 1000,
-        heights, tops, navTop: Math.round(navR.top * 10) / 10,
-        aftRadius: aft.borderRadius, aftBg: aft.backgroundColor, color: cs.color,
+        tabNowCount: nowBtns.length,
+        nowHasTabNow: nb.classList.contains('tab-now'),
+        on: nb.classList.contains('on'),
+        widths: rects.map((r) => r.width),
+        sumWidth: Math.round(rects.reduce((a, r) => a + r.width, 0) * 10) / 10,
+        firstLeft: rects[0].left,
+        lastRight: rects[rects.length - 1].right,
+        heights: rects.map((r) => r.height),
+        tops: rects.map((r) => r.top),
+        navTop: Math.round(navR.top * 10) / 10,
+        aftContent: aft.content,
+        aftBg: aft.backgroundColor,
+        befBg: bef.backgroundColor,
+        bgImg: cs.backgroundImage,
+        color: cs.color,
+        svgCol,
       };
     });
-    const wantPlate = theme === 'day' ? 'rgb(11, 95, 168)' : 'rgb(27, 79, 125)';
-    const wantInk = theme === 'day' ? 'rgb(255, 255, 255)' : 'rgb(243, 238, 228)';
-    ok(`${tag} (e) tab-now hook: unique at index 1, width ratio 1.24 ±0.02, equal 60px height, nothing raised`,
-      nowStyle.count === 1 && nowStyle.isSecond && nowStyle.on
-      && nowStyle.ratio >= 1.22 && nowStyle.ratio <= 1.26
+    const wantText = theme === 'day' ? 'rgb(11, 17, 23)' : 'rgb(243, 238, 228)';
+    const wantMuted = theme === 'day' ? 'rgb(69, 82, 95)' : 'rgb(170, 167, 157)';
+    const wantAccent = theme === 'day' ? 'rgb(11, 95, 168)' : 'rgb(124, 200, 255)';
+    const maxW = Math.max(...nowStyle.widths), minW = Math.min(...nowStyle.widths);
+    ok(`${tag} (e) equal-width tabs: all four measure equal width (${W / 4}px), span [0..${W}], 60px height, nothing raised`,
+      maxW - minW <= 0.5
+      && Math.abs(nowStyle.sumWidth - W) <= 0.5
+      && Math.abs(nowStyle.firstLeft) <= 0.5
+      && Math.abs(nowStyle.lastRight - W) <= 0.5
       && nowStyle.heights.every((h) => Math.abs(h - 60) <= 1)
       && nowStyle.tops.every((t) => Math.abs(t - nowStyle.tops[0]) <= 0.5 && t >= nowStyle.navTop),
       JSON.stringify(nowStyle));
-    ok(`${tag} (e) tab-now active plate: 12px radius, exact --now-plate bg and --now-plate-ink color`,
-      nowStyle.aftRadius === '12px' && nowStyle.aftBg === wantPlate && nowStyle.color === wantInk,
-      `${JSON.stringify(nowStyle)} want bg=${wantPlate} ink=${wantInk}`);
+    ok(`${tag} (e) Now active button matches standard .on styling: no tab-now class, no ::after plate, standard text/accent/bar`,
+      nowStyle.tabNowCount === 0 && !nowStyle.nowHasTabNow && nowStyle.on
+      && nowStyle.aftContent === 'none' && nowStyle.aftBg === 'rgba(0, 0, 0, 0)'
+      && nowStyle.color === wantText && nowStyle.svgCol === wantAccent && nowStyle.befBg === wantAccent
+      && /linear-gradient/.test(nowStyle.bgImg),
+      JSON.stringify(nowStyle));
 
     // 4 + 5. Dock Now-only geometry & --dock-h stability across all 4 panels, plus TimeHead & overflow
     const dockNow = await page.evaluate(() => {
@@ -545,7 +568,7 @@ for (const [W, H] of SIZES) {
       JSON.stringify(dockNow));
 
     const offChecks = [];
-    for (const label of ['Log', 'Plan', 'More', 'Now']) {
+    for (const label of ['Plan', 'Log', 'More', 'Now']) {
       await tapNav(label); await settle();
       const snap = await page.evaluate((lbl) => {
         const de = document.documentElement;
@@ -560,8 +583,13 @@ for (const [W, H] of SIZES) {
         const thRect = th[0]?.getBoundingClientRect() ?? null;
         const pgRect = pg.getBoundingClientRect();
         const csPg = getComputedStyle(pg);
+        const nbCs = getComputedStyle(nb), nbAft = getComputedStyle(nb, '::after');
+        const otherInactive = navBtns.find((b) => b !== nb && !b.classList.contains('on'));
+        const otherCs = otherInactive ? getComputedStyle(otherInactive) : null;
         return {
           lbl,
+          activePage: [...pg.classList].find((c) => c.startsWith('page-')),
+          litBar: navBtns.find((b) => b.classList.contains('on'))?.textContent.trim() ?? null,
           docOverflow: de.scrollWidth !== window.innerWidth,
           pageOverflow: pg.scrollWidth !== pg.clientWidth,
           tabClips,
@@ -571,9 +599,15 @@ for (const [W, H] of SIZES) {
           nowInert: nowPg.inert || nowPg.hasAttribute('inert'),
           nowHidden: nowPg.getAttribute('aria-hidden'),
           nowBtnOn: nb.classList.contains('on'),
+          nowHasTabNow: nb.classList.contains('tab-now'),
           otherOn: navBtns.some((b) => b !== nb && b.classList.contains('on')),
-          nowAftBg: getComputedStyle(nb, '::after').backgroundColor,
-          nowColor: getComputedStyle(nb).color,
+          nowAftContent: nbAft.content,
+          nowAftBg: nbAft.backgroundColor,
+          nowBg: nbCs.backgroundColor,
+          nowBgImg: nbCs.backgroundImage,
+          nowColor: nbCs.color,
+          otherInactiveColor: otherCs?.color ?? null,
+          otherInactiveBgImg: otherCs?.backgroundImage ?? null,
           thCount: th.length,
           thText: th[0] ? th[0].textContent.replace(/\u2019/g, "'").trim() : null,
           thInBox: thRect ? (thRect.left >= pgRect.left - 0.5 && thRect.right <= pgRect.right + 0.5) : true,
@@ -586,10 +620,12 @@ for (const [W, H] of SIZES) {
       }, label);
       offChecks.push(snap);
     }
-    const wantPanel2 = theme === 'day' ? 'rgb(232, 236, 240)' : 'rgb(25, 33, 42)';
-    const wantText = theme === 'day' ? 'rgb(11, 17, 23)' : 'rgb(243, 238, 228)';
+    const wantPage = { Plan: 'page-plan', Now: 'page-now', Log: 'page-log', More: 'page-settings' };
+    ok(`${tag} (e) each tab in Plan/Now/Log/More opens its own screen and lights only itself`,
+      offChecks.every((s) => s.activePage === wantPage[s.lbl] && s.litBar === s.lbl),
+      JSON.stringify(offChecks.map((s) => ({ l: s.lbl, pg: s.activePage, lit: s.litBar }))));
     const offNow = offChecks.filter((s) => s.lbl !== 'Now');
-    ok(`${tag} (e) dock off Now: completely outside [0, ${W}) and page-now inert + aria-hidden on Log/Plan/More`,
+    ok(`${tag} (e) dock off Now: completely outside [0, ${W}) and page-now inert + aria-hidden on Plan/Log/More`,
       offNow.every((s) => (s.dockRect.right <= 0.5 || s.dockRect.left >= W - 0.5) && s.nowInert && s.nowHidden === 'true'),
       JSON.stringify(offNow.map((s) => ({ l: s.lbl, r: s.dockRect, inert: s.nowInert, hid: s.nowHidden }))));
     ok(`${tag} (e) --dock-h unchanged off Now (${dockNow.dockH}) and other pages scroll-padding-bottom independent (73px)`,
@@ -599,10 +635,14 @@ for (const [W, H] of SIZES) {
     const planSnap = offChecks.find((s) => s.lbl === 'Plan');
     const moreSnap = offChecks.find((s) => s.lbl === 'More');
     const nowSnap = offChecks.find((s) => s.lbl === 'Now');
-    ok(`${tag} (e) tab-now inactive on Log: ::after is --panel2, label is --text, another tab has .on`,
-      !logSnap.nowBtnOn && logSnap.otherOn && logSnap.nowAftBg === wantPanel2 && logSnap.nowColor === wantText,
-      JSON.stringify({ bg: logSnap.nowAftBg, wantPanel2, col: logSnap.nowColor, wantText, on: logSnap.nowBtnOn, other: logSnap.otherOn }));
-    ok(`${tag} (e) TimeHead on Log & Plan (placed & within content box) and absent on Now & More`,
+    // Re-aimed (2026-11-20 nowplain): inactive Now button matches other inactive tabs (no tab-now, no ::after plate, --muted text, no bg).
+    ok(`${tag} (e) Now inactive on Log: no tab-now, no ::after plate, matches other inactive tabs (--muted, transparent bg)`,
+      !logSnap.nowBtnOn && !logSnap.nowHasTabNow && logSnap.otherOn
+      && logSnap.nowAftContent === 'none' && logSnap.nowAftBg === 'rgba(0, 0, 0, 0)'
+      && logSnap.nowBg === 'rgba(0, 0, 0, 0)' && logSnap.nowBgImg === 'none'
+      && logSnap.nowColor === wantMuted && logSnap.nowColor === logSnap.otherInactiveColor && logSnap.nowBgImg === logSnap.otherInactiveBgImg,
+      JSON.stringify({ aftC: logSnap.nowAftContent, aftBg: logSnap.nowAftBg, bg: logSnap.nowBg, bgImg: logSnap.nowBgImg, col: logSnap.nowColor, wantMuted, otherCol: logSnap.otherInactiveColor }));
+    ok(`${tag} (e) TimeHead travels with Log & Plan (placed & within content box) and absent on Now & More`,
       logSnap.thCount === 1 && logSnap.thText === "The past — what's already done" && logSnap.thBeforeTarget && logSnap.thInBox
       && planSnap.thCount === 1 && planSnap.thText === "The future — what's still ahead" && planSnap.thBeforeTarget && planSnap.thInBox
       && nowSnap.thCount === 0 && moreSnap.thCount === 0,

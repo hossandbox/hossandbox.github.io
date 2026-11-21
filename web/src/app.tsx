@@ -5709,10 +5709,10 @@ export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
 /* ============================================================ panel strip */
 
-/** Bottom-bar panels in display order (Lorico, 2026-11-20: time order — past, present, future,
- * then More). The tab ids are unchanged — only the order the bar shows them in, and the order
+/** Bottom-bar panels in display order (Lorico, 2026-11-20: Plan — Now — Log — More).
+ * The tab ids are unchanged — only the order the bar shows them in, and the order
  * the strip walks. */
-export const PANEL_ORDER: State['tab'][] = ['log', 'now', 'plan', 'settings'];
+export const PANEL_ORDER: State['tab'][] = ['plan', 'now', 'log', 'settings'];
 
 /** The panel the bottom bar lights for a tab: the planning screens sit under Plan (declutter
  * patch, 2026-11-05; Capstone C3 D10-A moved recap/history there too). */
@@ -5762,7 +5762,7 @@ export function App() {
   const tapGoal = useRef<number | null>(null);
   // Pass-through ticks (owner amendment A, 2026-11-20): while a tab tap's SMOOTH glide crosses
   // panels on its way to the goal, one tick as the strip passes each intermediate panel
-  // (Log→More: Now, Plan, then the lock tick at More = 3; Now→More: Plan, then the lock tick
+  // (Plan→More: Now, Log, then the lock tick at More = 3; Now→More: Log, then the lock tick
   // at More = 2). `next` is the next intermediate panel index still to pass, `dir` the travel
   // direction. null = no tap glide in flight. Swipes never set it (they keep the one-tick-at-settle rule).
   const tapPass = useRef<{ next: number; dir: number; goal: number } | null>(null);
@@ -5962,7 +5962,7 @@ export function App() {
   // R1 & R2 (DESIGN-NAV §4): seat the strip before paint (useLayoutEffect) whenever
   // activePanel changes OR <main class="pages"> mounts (including returning from the driving
   // view, which unmounts the shell while activePanel stays 'now'). A freshly mounted strip
-  // jumps silently (behavior: 'auto') so first paint never flashes Log and driving-view return
+  // jumps silently (behavior: 'auto') so first paint never flashes Plan and driving-view return
   // lands on Now.
   useLayoutEffect(() => {
     if (barPanelRef.current !== activePanel) { barPanelRef.current = activePanel; setBarPanel(activePanel); }
@@ -6025,21 +6025,6 @@ export function App() {
           notices ride at the top of each page, as they rode at the top of the one
           scroller before; the planning sub-screens stay inside the Plan page. */}
       <main ref={pagesRef} class="pages" inert={blocked} onScroll={onPagesScroll} onPointerDown={onStripGrab} onTouchStart={onStripGrab} onWheel={onStripGrab}>
-        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
-          {warnbox}
-          {themeNoticeCard}
-          <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key="log" tab="log">
-            <LogTab s={s} now={now} ev={ev} />
-          </TabBoundary>
-        </section>
-        <section class={`page page-now has-dock${activePanel === 'now' ? ' is-active' : ''}`} inert={activePanel !== 'now'} aria-hidden={activePanel !== 'now'}>
-          {warnbox}
-          {themeNoticeCard}
-          <TabBoundary key="now" tab="now">
-            <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
-          </TabBoundary>
-        </section>
         <section class={`page page-plan${activePanel === 'plan' ? ' is-active' : ''}`} inert={activePanel !== 'plan'} aria-hidden={activePanel !== 'plan'}>
           {warnbox}
           {themeNoticeCard}
@@ -6059,6 +6044,21 @@ export function App() {
             )}
           </TabBoundary>
         </section>
+        <section class={`page page-now has-dock${activePanel === 'now' ? ' is-active' : ''}`} inert={activePanel !== 'now'} aria-hidden={activePanel !== 'now'}>
+          {warnbox}
+          {themeNoticeCard}
+          <TabBoundary key="now" tab="now">
+            <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
+          </TabBoundary>
+        </section>
+        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
+          {warnbox}
+          {themeNoticeCard}
+          <Notices ev={ev} now={now} s={s} />
+          <TabBoundary key="log" tab="log">
+            <LogTab s={s} now={now} ev={ev} />
+          </TabBoundary>
+        </section>
         <section class={`page page-settings${activePanel === 'settings' ? ' is-active' : ''}`} inert={activePanel !== 'settings'} aria-hidden={activePanel !== 'settings'}>
           {warnbox}
           {themeNoticeCard}
@@ -6071,7 +6071,7 @@ export function App() {
       <nav class="tabs" inert={blocked}>{PANEL_ORDER.map((k) => {
         const [l, icon] = TAB_META[k];
         const on = barPanel === k;
-        const cls = k === 'now' ? (on ? 'tab-now on' : 'tab-now') : (on ? 'on' : '');
+        const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
         return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
