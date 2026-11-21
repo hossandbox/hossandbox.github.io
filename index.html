@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme="day">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#090c10" />
+<!-- The shell starts DARK (patch 16, P1a — sanction S1): the static colour is the night page
+     colour, so a cold start can splash dark, never light — the failure this prevents is a dark
+     cab flooded by a white splash at 3 a.m. The inline script below runs before the stylesheet
+     and the app bundle and corrects the shell pre-paint for a driver whose effective theme is
+     day. It only READS the save — nothing is written, seeded or started from here — and the
+     theme it applies is the app's own rule (the store's effectiveTheme): a chosen theme wins,
+     an un-chosen one follows the phone. The hard-coded data-theme="day" on <html> stays as the
+     no-JavaScript fallback. -->
+<script>
+(function () {
+  var theme = null, raw = null;
+  try {
+    raw = localStorage.getItem('hos-sandbox-v1');
+    if (raw) {
+      var s = JSON.parse(raw);
+      if (s && s.themeChosen && (s.theme === 'day' || s.theme === 'night')) theme = s.theme;
+    }
+  } catch (e) { /* an unreadable save falls back to the phone's own setting below */ }
+  if (!theme) {
+    var dark = false;
+    try { dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (e) { /* keep the fallback */ }
+    theme = dark ? 'night' : 'day';
+  }
+  // The driving-view night rule (P1b) on top, exactly as the store's screenTheme: at launch the
+  // tab is always Now and no Details peek exists, so the driving view is up iff status is Driving.
+  try {
+    var sv = raw ? JSON.parse(raw) : null;
+    if (sv && sv.current && sv.current.status === 'D' && sv.drivingView !== false && sv.darkDriveAtNight !== false) {
+      var at = typeof sv.nowOverride === 'number' && isFinite(sv.nowOverride) ? new Date(sv.nowOverride * 60000) : new Date();
+      var hr = at.getHours();
+      if (hr >= 19 || hr < 7) theme = 'night';
+    }
+  } catch (e) { /* keep the effective theme */ }
+  var root = document.documentElement;
+  if (theme === 'day') root.setAttribute('data-theme', 'day'); else root.removeAttribute('data-theme');
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'day' ? '#e4e9ee' : '#090c10');
+})();
+</script>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>Split Decision — HOS What-If Planner</title>
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="icon" href="./icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
