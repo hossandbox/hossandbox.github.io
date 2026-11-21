@@ -78,7 +78,7 @@ async function open(seed, W = 412, H = 915) {
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
   await page.waitForSelector('#root *');
   await page.waitForTimeout(300);
-  const ack = page.locator('button', { hasText: 'I understand' });
+  const ack = page.locator('button', { hasText: /I understand|Understood — don't show again/ });
   if (await ack.count()) { await ack.first().click(); await page.waitForTimeout(300); }
   page.ctx = ctx; OPEN.add(ctx);
   return page;
@@ -491,9 +491,8 @@ await section(async () => {
   await p.ctx.close();
 });
 
-/* ---------------- Taste round (2026-11-20): C1, C2, C3, C5, C6, A6, A7, A10 ---------------- */
+/* ---------------- Startup disclaimer pop-up + C1 (real browser) ---------------- */
 await section(async () => {
-  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer consolidated from .disclaimer-banner on Now into TopBar's details.disclaimer-line with Details toggle.
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
   await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
   await ctx.addInitScript(() => { if (!sessionStorage.getItem('af-c6')) { sessionStorage.setItem('af-c6', '1'); localStorage.clear(); } });
@@ -502,19 +501,75 @@ await section(async () => {
   OPEN.add(ctx);
   await p.goto(ORIGIN + '/', { waitUntil: 'load' });
   await p.waitForSelector('#root *'); await wait(p, 300);
-  const c6 = await p.evaluate(() => ({
-    modal: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
-    oldBanner: !!document.querySelector('.disclaimer-banner'),
-    lineText: document.querySelector('header.top details.disclaimer-line > summary .disclaimer-text')?.textContent?.trim() ?? null,
-    moreText: document.querySelector('header.top details.disclaimer-line > summary .disclaimer-more')?.textContent?.trim() ?? null,
-    openBefore: document.querySelector('header.top details.disclaimer-line')?.open ?? null,
-    topHBefore: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 0,
+  const fresh = await p.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]');
+    const modal = dlg?.querySelector('.modal');
+    const btns = [...(dlg?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim());
+    const modalText = modal?.querySelector('p')?.textContent?.trim() ?? '';
+    const aboutCard = [...document.querySelectorAll('section.page-settings .card')].find((c) => c.querySelector('h2')?.textContent?.trim() === 'About');
+    const aboutText = aboutCard?.querySelector('p.small')?.textContent?.trim() ?? '';
+    const mr = modal?.getBoundingClientRect();
+    return {
+      hasDialog: !!dlg,
+      ariaModal: dlg?.getAttribute('aria-modal') ?? null,
+      btns,
+      modalText,
+      aboutText,
+      exactMatch: modalText.length > 100 && modalText === aboutText,
+      oldBanner: !!document.querySelector('.disclaimer-banner'),
+      oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
+      hdrInert: document.querySelector('header.top')?.hasAttribute('inert') ?? false,
+      mainInert: document.querySelector('main.pages')?.hasAttribute('inert') ?? false,
+      navInert: document.querySelector('nav.tabs')?.hasAttribute('inert') ?? false,
+      fitsViewport: !!mr && mr.left >= 0 && mr.right <= window.innerWidth && mr.top >= 0 && mr.bottom <= window.innerHeight,
+      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok('Disclaimer fresh launch: startup pop-up renders with verbatim More → About text, single "Understood — don\'t show again" button, inert background, and fits viewport cleanly',
+    fresh.hasDialog && fresh.ariaModal === 'true' && fresh.exactMatch && fresh.btns.length === 1 && fresh.btns[0] === "Understood — don't show again" && fresh.hdrInert && fresh.mainInert && fresh.navInert && fresh.fitsViewport && !fresh.over, fresh);
+  ok('Disclaimer fresh launch: old TopBar header line "Planning only — not a log, not an ELD" and .disclaimer-banner are absent', !fresh.oldBanner && !fresh.oldHeaderLine, fresh);
+  // Narrow phone (360×740): modal still fits cleanly with no horizontal overflow.
+  await p.setViewportSize({ width: 360, height: 740 }); await wait(p, 200);
+  const narrow = await p.evaluate(() => {
+    const mr = document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"] .modal')?.getBoundingClientRect();
+    return { fits: !!mr && mr.left >= 0 && mr.right <= window.innerWidth && mr.top >= 0 && mr.bottom <= window.innerHeight, over: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  });
+  ok('Disclaimer modal at 360×740: fits viewport with no horizontal overflow', narrow.fits && !narrow.over, narrow);
+  await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 200);
+  // Tapping the single button dismisses the pop-up and persists disclaimerAcked=true.
+  await p.locator('[role="dialog"][aria-labelledby="disclaimer-title"] button', { hasText: "Understood — don't show again" }).click({ timeout: 5000 });
+  await wait(p, 300);
+  const afterAck = await p.evaluate(() => ({
+    hasDialog: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
+    persistedAck: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').disclaimerAcked === true,
+    hdrInert: document.querySelector('header.top')?.hasAttribute('inert') ?? false,
+    oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
   }));
-  ok('C6 fresh launch: no .disclaimer-banner on Now, no blocking modal, TopBar shows "Planning only — not a log, not an ELD" + Details collapsed', !c6.modal && !c6.oldBanner && c6.lineText === 'Planning only — not a log, not an ELD' && c6.moreText === 'Details' && c6.openBefore === false, c6);
+  ok('Disclaimer tap "Understood — don\'t show again": dismisses pop-up, persists disclaimerAcked=true, unlocks UI, and Now has no header disclaimer line',
+    !afterAck.hasDialog && afterAck.persistedAck && !afterAck.hdrInert && !afterAck.oldHeaderLine, afterAck);
+  // Reload with persisted state: pop-up must NOT reappear.
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('#root *'); await wait(p, 300);
+  const afterReload = await p.evaluate(() => ({
+    hasDialog: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
+    persistedAck: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').disclaimerAcked === true,
+    oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
+  }));
+  ok('Disclaimer reload with persisted ack: no startup pop-up on launch and no old header line on Now', !afterReload.hasDialog && afterReload.persistedAck && !afterReload.oldHeaderLine, afterReload);
+  // Home-terminal timezone picker stays reachable under More → Rules.
+  await go(p, 'More');
+  const tzMore = await p.evaluate(() => {
+    const more = document.querySelector('section.page-settings');
+    const inp = more?.querySelector('input[aria-label="Home terminal time zone"]');
+    const r = inp?.getBoundingClientRect();
+    return { present: !!inp, value: inp?.value ?? null, visible: !!r && r.width > 0 && r.height > 0 };
+  });
+  ok('Home-terminal timezone picker is reachable and visible under More → Rules', tzMore.present && tzMore.visible && !!tzMore.value, tzMore);
+  await go(p, 'Now');
   // C1 (taste, 2026-11-20): first Driving tap must NEVER pop the read-aloud dialog; first non-Driving tap on Now pops it once.
   await p.locator('.status-buttons button', { hasText: 'Driving' }).click({ timeout: 5000 }); await wait(p, 350);
   const c1Drive = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
-  ok('C6+C1 first tap Driving: works on first tap (no disclaimer modal) and Driving never pops read-aloud dialog', c1Drive.inDrive && !c1Drive.dlg, c1Drive);
+  ok('C1 first tap Driving: enters DrivingView and never pops read-aloud dialog', c1Drive.inDrive && !c1Drive.dlg, c1Drive);
   await tap(p, 'button.drive-stop', /I.?ve stopped/);
   await tap(p, '.sheet .big-status button', /^Off Duty$/, 350);
   const c1Parked = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
@@ -522,39 +577,7 @@ await section(async () => {
   await tap(p, 'button', /^No thanks$/, 250);
   await p.locator('.status-buttons button', { hasText: 'Sleeper' }).click({ timeout: 5000 }); await wait(p, 250);
   ok('C1 answered once: subsequent non-Driving tap never re-asks', !/Want the alerts read out loud\?/.test(await p.evaluate(() => document.body.innerText)));
-  // Expand TopBar disclaimer Details and confirm full copy, unconfirmed zone picker, --top-h resize, and clean phone layout (no overflow/overlap).
-  await tap(p, 'header.top details.disclaimer-line > summary', null, 250);
-  const c6Expanded = await p.evaluate(() => {
-    const d = document.querySelector('header.top details.disclaimer-line');
-    const hdr = document.querySelector('header.top').getBoundingClientRect();
-    const body = d?.querySelector('.disclaimer-body')?.getBoundingClientRect();
-    const nav = document.querySelector('nav.tabs').getBoundingClientRect();
-    const text = d?.innerText ?? '';
-    return {
-      open: d?.open ?? false,
-      text,
-      hasSaveBtn: !!d?.querySelector('.disclaimer-tz button'),
-      topHAfter: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 0,
-      hdrBottom: Math.round(hdr.bottom),
-      navTop: Math.round(nav.top),
-      bodyRight: body ? Math.round(body.right) : 0,
-      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      vw: document.documentElement.clientWidth,
-    };
-  });
-  ok('C6 expanding header Details reveals full disclaimer (planning scratchpad, ELD governs, 395.34, 49 CFR part 395)', c6Expanded.open && /Split Decision is a planning scratchpad/.test(c6Expanded.text) && /when it and this app disagree, the ELD governs/.test(c6Expanded.text) && /49 CFR 395\.34/.test(c6Expanded.text) && /49 CFR part 395/.test(c6Expanded.text), c6Expanded.text.slice(0, 220));
-  ok('C6 with zone unconfirmed, expanding header Details reveals home-terminal zone picker and Save button', /Where is your home terminal\?/.test(c6Expanded.text) && c6Expanded.hasSaveBtn, c6Expanded.text.slice(0, 220));
-  ok('C6 expanded header updates --top-h and lays out cleanly with no clipping, overflow, or nav overlap', c6Expanded.topHAfter > c6.topHBefore && !c6Expanded.over && c6Expanded.hdrBottom < c6Expanded.navTop && c6Expanded.bodyRight <= c6Expanded.vw, c6Expanded);
-  // Narrow phone (360×740): collapsed summary fits cleanly and expanded disclaimer+picker stays inside viewport with no overflow/overlap.
-  await p.setViewportSize({ width: 360, height: 740 }); await wait(p, 250);
-  const c6Narrow = await p.evaluate(() => {
-    const hdr = document.querySelector('header.top').getBoundingClientRect();
-    const body = document.querySelector('header.top details.disclaimer-line .disclaimer-body').getBoundingClientRect();
-    const nav = document.querySelector('nav.tabs').getBoundingClientRect();
-    return { hdrBottom: Math.round(hdr.bottom), navTop: Math.round(nav.top), bodyRight: Math.round(body.right), vw: document.documentElement.clientWidth, over: document.documentElement.scrollWidth > document.documentElement.clientWidth };
-  });
-  ok('C6 expanded header at 360×740: no horizontal overflow, no clipping, clears nav bar', !c6Narrow.over && c6Narrow.bodyRight <= c6Narrow.vw && c6Narrow.hdrBottom < c6Narrow.navTop, c6Narrow);
-  ok('C1/C6 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  ok('Disclaimer/C1 no page errors', p.errors.length === 0, p.errors.join(' | '));
   await ctx.close();
 });
 

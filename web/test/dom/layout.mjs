@@ -94,7 +94,7 @@ for (const [W, H] of SIZES) {
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
     await page.waitForSelector('#root *');
     await page.waitForTimeout(300);
-    const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
+    const ack = page.getByRole('button', { name: /^(I understand|Understood|Got it|OK|Continue)/ });
     if (await ack.count()) await ack.first().click();
     await page.evaluate(() => document.fonts && document.fonts.ready);
     for (const tab of TABS) {
@@ -385,7 +385,7 @@ for (const [W, H] of SIZES) {
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
     await page.waitForSelector('#root *');
     await page.waitForTimeout(300);
-    const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
+    const ack = page.getByRole('button', { name: /^(I understand|Understood|Got it|OK|Continue)/ });
     if (await ack.count()) await ack.first().click();
     await page.evaluate(() => document.fonts && document.fonts.ready);
     const tag = `[${W}x${H} ${nowCard} gemini]`;
@@ -795,13 +795,12 @@ for (const [W, H] of SIZES) {
   const hPlan = await hdrCheck('Plan');
   const hMore = await hdrCheck('More');
   const hLog = await hdrCheck('Log');
-  ok(`${tag} (f) header disclaimer ("Planning only" + Details) present on Now and absent on Plan/More/Log`,
-    hNow.hasDisc && hNow.discText === 'Planning only — not a log, not an ELD' && hNow.discMore === 'Details'
-    && !hPlan.hasDisc && !hMore.hasDisc && !hLog.hasDisc,
+  ok(`${tag} (f) header disclaimer ("Planning only" + Details) absent on Now/Plan/More/Log`,
+    !hNow.hasDisc && !hPlan.hasDisc && !hMore.hasDisc && !hLog.hasDisc,
     JSON.stringify({ now: hNow, plan: hPlan, more: hMore, log: hLog }));
   ok(`${tag} (f) header summary strip (.compact) absent on Plan/More/Log/Now with no empty header gap`,
     [hNow, hPlan, hMore, hLog].every((x) => !x.hasCompact)
-    && [hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && x.hdrH <= x.topRowH + 20 && !x.over),
+    && [hNow, hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && x.hdrH <= x.topRowH + 20 && !x.over),
     JSON.stringify([hNow, hPlan, hMore, hLog].map((x) => ({ l: x.lbl, compact: x.hasCompact, hdrH: x.hdrH, rowH: x.topRowH, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
 
   // BugButton absent on Log, present on More

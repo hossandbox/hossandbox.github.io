@@ -834,30 +834,28 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   }
   setState({ tab: 'now' });
 
-  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer moved from .disclaimer-banner on Now into TopBar's details.disclaimer-line with Details toggle.
+  // Startup disclaimer pop-up: shown once when disclaimerAcked is false; header line removed from TopBar.
+  const ABOUT_DISC = "Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.";
+  setState({ disclaimerAcked: false, tab: 'now' });
   const dx = out('startup disclaimer');
-  if (/class="disclaimer-banner"/.test(dx)) throw new Error('C6: .disclaimer-banner must not render on Now after header consolidation');
-  if (!/<details class="disclaimer-line"[^>]*>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>/.test(dx)) throw new Error('C6: TopBar disclaimer-line must show "Planning only — not a log, not an ELD" with Details toggle');
-  if (!/Split Decision is a planning scratchpad/.test(dx)) throw new Error('C6: the header disclaimer must keep the planning-scratchpad copy');
-  if (!/not an ELD/.test(dx)) throw new Error('the disclaimer must say the app is not an ELD');
-  if (!/395\.34/.test(dx)) throw new Error('the disclaimer must point to the paper-record requirement');
-  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(dx)) throw new Error('C6: launch disclaimer must not render a blocking modal dialog');
+  if (/class="disclaimer-banner"|class="disclaimer-line"|Planning only — not a log, not an ELD/.test(dx)) throw new Error('disclaimer: TopBar header line and .disclaimer-banner must be absent');
+  if (!/role="dialog"[^>]*aria-modal="true"[^>]*aria-labelledby="disclaimer-title"/.test(dx)) throw new Error('disclaimer: startup modal dialog must render when disclaimerAcked is false');
+  if (!dx.includes(ABOUT_DISC.replace(/'/g, '&#39;')) && !dx.includes(ABOUT_DISC)) throw new Error('disclaimer: startup modal must contain verbatim More → About text');
+  if (!/>Understood — don(&#39;|')t show again<\/button>/.test(dx)) throw new Error('disclaimer: startup modal must have "Understood — don\'t show again" button');
   for (const tag of ['header', 'main', 'nav']) {
-    if (new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`C6: <${tag}> must NOT be inert on launch (non-blocking header disclaimer)`);
+    if (!new RegExp(`<${tag}[^>]*\\binert\\b`).test(dx)) throw new Error(`disclaimer: <${tag}> must be inert while startup modal is open`);
   }
-
-  // First-run: the terminal zone is asked for, not silently inherited from the phone (round-3 item 3).
-  // A driver who set the app up on the road got the phone's zone, which moves every day boundary and
-  // the whole recap.
-  setState({ tzChosen: false });
-  const fz = out('first-run terminal zone');
-  if (!/Where is your home terminal\?/.test(fz)) throw new Error('a fresh install must be asked where its terminal is, not handed the phone zone');
-  if (!/Home terminal time zone/.test(fz)) throw new Error('the first-run question must offer the zone picker');
-  if (!/phone's zone right now/.test(fz)) throw new Error('the first-run question must say which zone it is using until told otherwise');
-  setState({ tzChosen: true });
-  const fz2 = out('terminal zone already confirmed');
-  if (/Where is your home terminal\?/.test(fz2)) throw new Error('once the zone is confirmed the app must stop asking');
-  if (!/Split Decision is a planning scratchpad/.test(fz2)) throw new Error('the disclaimer itself must still show on every launch');
+  setState({ disclaimerAcked: true });
+  const dxAcked = out('startup disclaimer acked');
+  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(dxAcked)) throw new Error('disclaimer: startup modal must not render when disclaimerAcked is true');
+  for (const tag of ['header', 'main', 'nav']) {
+    if (new RegExp(`<${tag}[^>]*\\binert\\b`).test(dxAcked)) throw new Error(`disclaimer: <${tag}> must NOT be inert once disclaimerAcked is true`);
+  }
+  // Home-terminal timezone picker stays reachable under More → Rules.
+  setState({ tab: 'settings' });
+  const tzMore = pageOut(out('more/timezone picker'), 'page-settings');
+  if (!/Home terminal time zone/.test(tzMore) || !/aria-label="Home terminal time zone"/.test(tzMore)) throw new Error('More → Rules must keep the Home terminal time zone picker');
+  setState({ tab: 'now', tzChosen: true });
 
   // A legacy save (night was the default when it was written) is moved to the new day default ONCE and
   // says so — never silently (round-3 item 2).
@@ -1290,11 +1288,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // 9. tap targets: nothing on Now smaller than 48px by its own CSS (floor raised by patch #6;
   //    the per-class pins live in the patch 6 section at the end of this file)
   if (!/\nbutton \{[^}]*min-height: 48px/.test(css)) throw new Error('buttons must be at least 48px tall');
-  // Re-aimed (2026-11-20 logpin): header disclaimer renders on Now only (where every fresh launch opens).
-  setState({ tab: 'now' });
-  setLaunchNotice(true);
-  if (!/Split Decision is a planning scratchpad/.test(out('launch notice back'))) throw new Error('the launch notice must be back for the next launch');
-  setState({ nowOverride: null, tab: 'now', historyAcknowledged: false, segments: [], current: null });
+  // Re-aimed (startup disclaimer patch): unacknowledged launch shows the one-time disclaimer pop-up; acked state keeps it hidden.
+  setState({ tab: 'now', disclaimerAcked: false });
+  const unackedLaunch = out('startup disclaimer unacked');
+  if (!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(unackedLaunch) || !/>Understood — don(&#39;|')t show again<\/button>/.test(unackedLaunch)) throw new Error('the startup disclaimer pop-up must show when disclaimerAcked is false');
+  setState({ nowOverride: null, tab: 'now', disclaimerAcked: true, historyAcknowledged: false, segments: [], current: null });
   console.log('redesign 1 (Now, header, panels, Plan): OK');
 }
 // --- redesign 2: the driving view
@@ -1614,13 +1612,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // a save from before the question existed: no tzChosen, terminal zone not the phone's
   const legacy = ps(JSON.stringify({ segments: [], config: { cycle: '70/8', dayStartHour: 0, timeZone: other, shortHaul: false }, themeChosen: true }));
   if (legacy.tzChosen !== false || legacy.config.timeZone !== other) throw new Error('setup: a legacy save keeps its zone and is asked to confirm it');
-  setState({ ...legacy, tab: 'now' });
+  setState({ ...legacy, tab: 'settings', disclaimerAcked: true });
   const h = out('legacy save, terminal zone not the phone zone');
-  if (!new RegExp(`It is set to <b>${other}</b>`).test(h)) throw new Error('the question must name the zone actually saved');
-  if (!new RegExp(`Your phone's zone right now is <b>${dz}</b>`).test(h)) throw new Error('and name the phone zone separately when they differ');
   const field = (h.match(/<input[^>]*aria-label="Home terminal time zone"[^>]*>/) || [''])[0];
-  if (!field.includes(`value="${other}"`)) throw new Error(`the field must be pre-filled with the saved zone, so "I understand" keeps it (saw ${field})`);
-  setState({ tzChosen: true, config: { ...getState().config, timeZone: dz } });
+  if (!field.includes(`value="${other}"`)) throw new Error(`the field must be pre-filled with the saved zone in More → Rules (saw ${field})`);
+  setState({ tzChosen: true, disclaimerAcked: true, tab: 'now', config: { ...getState().config, timeZone: dz } });
   console.log('re-check N1 (terminal-zone question keeps the saved zone): OK');
 }
 // --- re-check N6: the Log's day is the terminal's day, and its date is read in the terminal zone
@@ -2622,19 +2618,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: true })).disclaimerAcked !== true) throw new Error('patch 7: an acknowledged save must stay acknowledged');
   if (ps7(JSON.stringify({ segments: [], disclaimerAcked: 'yes' })).disclaimerAcked !== false) throw new Error('patch 7: a damaged flag must read as not acknowledged');
 
-  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer now rides TopBar's details.disclaimer-line with Details toggle instead of a separate Now banner.
+  // Startup disclaimer pop-up: shown once when disclaimerAcked is false; TopBar header line removed; timezone picker stays in More → Rules.
   ss({ segments: [], tentative: [], current: null, tab: 'now', disclaimerAcked: false, tzChosen: true, nowOverride: null });
-  let h = out('patch 7/header disclaimer');
-  if (/class="disclaimer-banner"/.test(h)) throw new Error('C6: .disclaimer-banner must be removed from Now');
-  if (!/<details class="disclaimer-line"[^>]*>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>/.test(h) || !/Split Decision is a planning scratchpad/.test(h) || !/395\.34/.test(h)) throw new Error('C6: header disclaimer line must carry Details toggle and full planning-only/395.34 content');
-  if (!/when it and this app disagree, the ELD governs/.test(h)) throw new Error('C6: the header disclaimer must name the ELD as governing');
-  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(h)) throw new Error('C6: no blocking launch disclaimer modal');
-  ss({ tzChosen: false });
-  h = out('patch 7/header disclaimer, zone unconfirmed');
-  if (!/Where is your home terminal\?/.test(h)) throw new Error('C6: the header disclaimer must still offer the terminal zone picker when unconfirmed');
-  if (!/Clock times on screen are shown in your/.test(h)) throw new Error('patch 7: the zone section must say clock times ride the phone zone');
-  if (/Every clock here is worked out in your/.test(h)) throw new Error('patch 7: the stale worked-out-in-your-terminal sentence must be gone');
-  ss({ tzChosen: true });
+  let h = out('patch 7/startup disclaimer modal');
+  if (/class="disclaimer-banner"|class="disclaimer-line"|Planning only — not a log, not an ELD/.test(h)) throw new Error('disclaimer: no .disclaimer-banner or TopBar disclaimer-line may render');
+  if (!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(h)) throw new Error('disclaimer: startup modal must render when disclaimerAcked is false');
+  if (!/not FMCSA-registered/.test(h) || !/Your official log and your carrier(&#39;|')s ELD govern\./.test(h) || !/49 CFR 395\.1\(b\)\(1\), \(g\), \(o\), 395\.3/.test(h)) throw new Error('disclaimer: startup modal must contain verbatim About disclaimer copy');
+  if (!/>Understood — don(&#39;|')t show again<\/button>/.test(h)) throw new Error('disclaimer: startup modal must render single acknowledge button');
+  ss({ disclaimerAcked: true });
+  h = out('patch 7/startup disclaimer dismissed');
+  if (/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(h)) throw new Error('disclaimer: startup modal must not render when disclaimerAcked is true');
+  ss({ tab: 'settings' });
+  h = out('patch 7/more timezone field');
+  if (!/Home terminal time zone/.test(pageOut(h, 'page-settings'))) throw new Error('disclaimer: Home terminal time zone picker must remain reachable in More → Rules');
+  ss({ tab: 'now' });
 
   // 4. Declutter (Lorico, 2026-11-20): load check entry removed from Now; prominent plan-item entry stays on Plan.
   setLaunchNotice(false);
@@ -2699,9 +2696,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/hossandbox\.github\.io/.test(readme)) throw new Error('patch 7: the README phone line must point at the deployed site');
 
   // leave the store as the other sections expect to find it
-  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', disclaimerAcked: false });
+  ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'now', disclaimerAcked: true });
   setLaunchNotice(true);
-  console.log('patch 7 (first open at 3 a.m.; compact disclaimer): OK');
+  console.log('patch 7 (first open at 3 a.m.; startup disclaimer): OK');
 }
 // --- patch 7.1: one load door on Now, a way to start the load question over, and the rename —
 // patch 7 left Now with two doors (the prominent plan-item entry and the quick row's smaller
@@ -2780,12 +2777,11 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (/Your HOS what-if planner\./.test(h)) throw new Error('D18 (audit): the About filler line is retired');
   if (/what-if machine/.test(h)) throw new Error('patch 7.1: the retired "machine" line must not render');
   if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: no rendered surface may carry the old name');
-  ss({ tab: 'now', disclaimerAcked: true });
-  setLaunchNotice(true);
-  h = out('patch 7.1/compact disclaimer name');
-  if (!/Split Decision is a planning scratchpad/.test(h)) throw new Error('patch 7.1: the compact disclaimer must carry the new name');
-  if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: the compact disclaimer must not carry the old name');
-  ss({ disclaimerAcked: false });
+  ss({ tab: 'now', disclaimerAcked: false });
+  h = out('patch 7.1/startup disclaimer name');
+  if (!/Split Decision — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: the startup disclaimer must carry the new name');
+  if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: the startup disclaimer must not carry the old name');
+  ss({ disclaimerAcked: true });
 
   // (e) the back buttons return to wherever the driver entered from (folded in after Lorico hit
   //     it on his Pixel against live patch 7: from Now, the load flow's back landed on Plan).
@@ -6074,13 +6070,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(rules('.dock').some((r) => /position: sticky; bottom: calc\(61px \+ env\(safe-area-inset-bottom\)\);/.test(r)), 'patch 19 B3: the dock stays sticky above the tab bar');
   {
     const at = getState().nowOverride ?? nowMin();
-    setState({ tab: 'now', nowOverride: null, tentative: [], segments: [{ status: 'OFF', start: at - 900, end: at - 300 }, { status: 'D', start: at - 300, end: at - 20 }], current: { status: 'ON', since: at - 20 }, nowCard: 'dial', nowCardAsked: true });
+    setState({ tab: 'now', nowOverride: null, disclaimerAcked: true, tentative: [], segments: [{ status: 'OFF', start: at - 900, end: at - 300 }, { status: 'D', start: at - 300, end: at - 20 }], current: { status: 'ON', since: at - 20 }, nowCard: 'dial', nowCardAsked: true });
     const h19 = render(h(App, {}));
     const iApp = h19.search(/<div class="app[ "]/), iTop = h19.indexOf('<header class="top"'), iMain = h19.indexOf('<main'), iDock = h19.indexOf('<div class="dock">'), iMainEnd = h19.indexOf('</main>'), iNav = h19.indexOf('<nav class="tabs"');
     need(iApp >= 0 && iApp < iTop && iTop < iMain && iMain < iDock && iDock < iMainEnd && iMainEnd < iNav, `patch 19 B3: the shell slots must render in order — .app > header.top, main (holding the dock), nav.tabs (got app ${iApp}, header ${iTop}, main ${iMain}, dock ${iDock}, /main ${iMainEnd}, nav ${iNav})`);
     need(new RegExp('<div class="app[^"]*">(?:<div class="backdrop"[\\s\\S]*?)?<header class="top"').test(h19), 'patch 19 B3: the header must be the shell\'s own child');
     need(/<\/main><nav class="tabs"/.test(h19), 'patch 19 B3: the tab bar must be the shell\'s own child, right after main');
-    need(h19.includes('Planning only — not a log, not an ELD'), 'patch 19 B: the header copy is unchanged');
+    need(!h19.includes('Planning only — not a log, not an ELD'), 'disclaimer patch: old TopBar header disclaimer line is removed from Now');
     // A (structural): the after-the-fact door is on Now, and the Log's live row still points there.
     need(/<button class="rowbtn">[^]*?On Duty since [^<]*<\/span><br\/?><b>Fix the start time<\/b>/.test(h19), 'patch 19 A: Now must show the current status with its "Fix the start time" control');
     setState({ tab: 'log' });
@@ -6276,21 +6272,23 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   A.setTestingUnlocked(false);
   need(A.TESTING_LONG_PRESS_MS >= 400, `C5: TESTING_LONG_PRESS_MS must be a deliberate long-press (>=400ms), got ${A.TESTING_LONG_PRESS_MS}`);
 
-  // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer consolidated into TopBar's details.disclaimer-line with Details toggle; .disclaimer-banner removed from Now.
+  // Startup disclaimer pop-up patch: TopBar disclaimer line removed; one-time modal shows when disclaimerAcked is false with verbatim More → About copy and single button.
   setState({ ...S.INITIAL_STATE, tab: 'now', nowOverride: null, disclaimerAcked: false, tzChosen: false, historyAcknowledged: false });
   const freshHtml = render(h(App, {}));
   const freshNow = pageOut(freshHtml, 'page-now');
   const freshHeader = (freshHtml.match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
-  need(!/disclaimer-banner/.test(freshHtml) && !/disclaimer-banner/.test(freshNow), 'C6: no .disclaimer-banner may render on Now');
-  need(/<details class="disclaimer-line"[^>]*>[\s\S]*?<summary>[\s\S]*?Planning only — not a log, not an ELD[\s\S]*?<span class="disclaimer-more">Details<\/span>[\s\S]*?<\/summary>/.test(freshHeader), 'C6: TopBar disclaimer-line must show "Planning only — not a log, not an ELD" with Details toggle');
-  need(/Split Decision is a planning scratchpad/.test(freshHeader) && /not FMCSA-registered/.test(freshHeader) && /when it and this app disagree, the ELD governs/.test(freshHeader) && /49 CFR 395\.34/.test(freshHeader) && /49 CFR part 395/.test(freshHeader), 'C6: TopBar disclaimer body must preserve full disclaimer copy');
-  need(/class="disclaimer-tz"/.test(freshHeader) && /Where is your home terminal\?/.test(freshHeader) && /Save terminal zone/.test(freshHeader), 'C6: TopBar disclaimer must show home-terminal zone picker when tzChosen is false');
-  setState({ tzChosen: true });
-  const tzDoneHeader = (render(h(App, {})).match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
-  need(!/Where is your home terminal\?/.test(tzDoneHeader) && /49 CFR 395\.34/.test(tzDoneHeader), 'C6: once zone is confirmed, picker disappears while disclaimer body remains');
-  setState({ tzChosen: false });
-  need(!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(freshHtml), 'C6: no blocking launch disclaimer dialog');
-  need(!/<header[^>]*\binert\b/.test(freshHtml) && !/<nav[^>]*\binert\b/.test(freshHtml), 'C6: header/nav must not be inert on launch');
+  const freshModal = (freshHtml.match(/<div class="backdrop"[^>]*role="dialog"[^>]*aria-labelledby="disclaimer-title"[\s\S]*?<\/div><\/div>/) || [''])[0];
+  const aboutCard = (pageOut(freshHtml, 'page-settings').match(/<h2>About<\/h2><p class="small">([\s\S]*?)<\/p>/) || ['', ''])[1];
+  need(!/disclaimer-banner|disclaimer-line|Planning only — not a log, not an ELD/.test(freshHtml) && !/disclaimer-banner/.test(freshNow), 'disclaimer: no .disclaimer-banner or TopBar disclaimer-line on Now');
+  need(!/disclaimer-line|Planning only — not a log, not an ELD/.test(freshHeader), 'disclaimer: TopBar must not render old header disclaimer line');
+  need(!!freshModal && aboutCard.length > 100 && freshModal.includes(aboutCard), 'disclaimer: startup modal must render verbatim More → About text');
+  need((freshModal.match(/<button\b/g) || []).length === 1 && />Understood — don(&#39;|')t show again<\/button>/.test(freshModal), 'disclaimer: startup modal must have exactly one "Understood — don\'t show again" button');
+  need(/<header[^>]*\binert\b/.test(freshHtml) && /<main[^>]*\binert\b/.test(freshHtml) && /<nav[^>]*\binert\b/.test(freshHtml), 'disclaimer: header/main/nav must be inert while startup modal is up');
+  setState({ disclaimerAcked: true });
+  const ackedHtml = render(h(App, {}));
+  need(!/role="dialog"[^>]*aria-labelledby="disclaimer-title"/.test(ackedHtml), 'disclaimer: startup modal must not render when disclaimerAcked is true');
+  need(!/<header[^>]*\binert\b/.test(ackedHtml) && !/<nav[^>]*\binert\b/.test(ackedHtml), 'disclaimer: header/nav must not be inert once disclaimerAcked is true');
+  need(/Home terminal time zone/.test(pageOut(ackedHtml, 'page-settings')), 'disclaimer: Home terminal time zone picker stays reachable in More → Rules');
 
   // Logpin (2026-11-20): header disclaimer Now-only, Log pinned top/bottom regions, BugButton removed from Log (kept on More).
   for (const offTab of ['log', 'plan', 'split', 'settings']) {

@@ -558,18 +558,10 @@ await pin('C2. the settings screen offers GitHub as the only report channel', as
   return (/Report a bug \(GitHub\)/.test(txt) && !/Prefer email instead/.test(txt)) || 'bug reports card wrong';
 });
 
-/* ---------------- (l) logpin (2026-11-20): Now-only header disclaimer, Log bug button removed, pinned Log layout ---------------- */
-await pin('L1. logpin: header planning-only disclaimer + Details renders on Now only (absent on Log, Plan, Split, More), and first-run Now surfaces timezone picker', async () => {
-  await seed({ tab: 'now', tzChosen: false, ...segs });
+/* ---------------- (l) logpin + startup disclaimer pop-up ---------------- */
+await pin('L1. header planning-only disclaimer line is absent on Now, Log, Plan, Split, and More', async () => {
   const hdr = () => all((n) => n.localName === 'header' && has(n, 'top'))[0];
-  const hasDisc = () => {
-    const h0 = hdr();
-    const d = h0 && all((n) => n.localName === 'details' && has(n, 'disclaimer-line'), h0)[0];
-    return !!d && /Planning only — not a log, not an ELD/.test(d.textContent) && /Details/.test(d.textContent);
-  };
-  if (!hasDisc()) return 'missing disclaimer-line on Now';
-  if (!/Where is your home terminal\?/.test(hdr().textContent)) return 'first-run timezone picker missing on Now';
-  for (const t of ['log', 'plan', 'split', 'settings']) {
+  for (const t of ['now', 'log', 'plan', 'split', 'settings']) {
     await seed({ tab: t, tzChosen: false, ...segs });
     const h0 = hdr();
     if (all((n) => n.localName === 'details' && has(n, 'disclaimer-line'), h0).length !== 0 || /Planning only — not a log, not an ELD/.test(h0.textContent)) {
@@ -577,6 +569,52 @@ await pin('L1. logpin: header planning-only disclaimer + Details renders on Now 
     }
   }
   return true;
+});
+await pin('D1. fresh state (disclaimerAcked false): startup pop-up renders verbatim About disclaimer and single "Understood — don\'t show again" button', async () => {
+  await seed({ tab: 'now', disclaimerAcked: false, segments: [], current: null });
+  const dlg = all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title')[0];
+  if (!dlg) return 'missing startup disclaimer dialog';
+  const morePg = pages()[3];
+  const aboutP = all((n) => n.localName === 'p' && /Split Decision — HOS What-If Planner\./.test(n.textContent), morePg)[0];
+  const modalP = all((n) => n.localName === 'p', dlg)[0];
+  const btns = all((n) => n.localName === 'button', dlg);
+  if (!aboutP || !modalP) return 'missing About or modal paragraph';
+  if (modalP.textContent !== aboutP.textContent) return `modal text differs from About: ${modalP.textContent}`;
+  if (btns.length !== 1) return `expected exactly 1 button in disclaimer modal, got ${btns.length}`;
+  if (btns[0].textContent.trim() !== "Understood — don't show again") return `wrong button label: ${btns[0].textContent}`;
+  return true;
+});
+await pin('D2. tapping "Understood — don\'t show again" dismisses pop-up, persists disclaimerAcked=true, and re-render shows no pop-up', async () => {
+  await seed({ tab: 'now', disclaimerAcked: false, segments: [], current: null });
+  const dlg = all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title')[0];
+  const btn = dlg && all((n) => n.localName === 'button', dlg)[0];
+  if (!btn) return 'missing acknowledge button';
+  fire(btn, 'click');
+  await sleep(60);
+  if (all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title').length !== 0) return 'dialog did not dismiss after click';
+  if (getState().disclaimerAcked !== true) return 'state.disclaimerAcked not true';
+  const persisted = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+  if (persisted.disclaimerAcked !== true) return `localStorage did not persist disclaimerAcked=true: ${JSON.stringify(persisted.disclaimerAcked)}`;
+  // Re-render from persisted state: no pop-up returns.
+  render(null, root); await sleep(20);
+  setState(S.parseSaved(localStorage.getItem('hos-sandbox-v1')));
+  render(h(App, {}), root); await sleep(80);
+  if (all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title').length !== 0) return 'dialog reappeared after reload from persisted state';
+  return true;
+});
+await pin('D3. acked state (disclaimerAcked true): no startup pop-up on launch and Now omits old header disclaimer line', async () => {
+  await seed({ tab: 'now', disclaimerAcked: true, ...segs });
+  const hasDlg = all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title').length > 0;
+  const nowPage = pages()[1];
+  const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
+  const hasOldHeader = /Planning only — not a log, not an ELD/.test(hdr.textContent) || /Planning only — not a log, not an ELD/.test(nowPage.textContent);
+  return (!hasDlg && !hasOldHeader) || `hasDlg=${hasDlg} hasOldHeader=${hasOldHeader}`;
+});
+await pin('D4. home-terminal timezone setting remains reachable in More → Rules', async () => {
+  await seed({ tab: 'settings', disclaimerAcked: true, tzChosen: false, ...segs });
+  const morePg = pages()[3];
+  const tzInput = all((n) => n.localName === 'input' && n.attributes?.['aria-label'] === 'Home terminal time zone', morePg)[0];
+  return (!!tzInput && /Home terminal time zone/.test(morePg.textContent)) || 'missing Home terminal time zone input in More → Rules';
 });
 await pin('L2. logpin: Log screen has NO "Report a bug (GitHub)" button; More screen keeps its Bug reports card', async () => {
   await seed({ tab: 'log', ...segs });

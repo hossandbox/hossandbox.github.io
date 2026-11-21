@@ -610,19 +610,19 @@ await pin('M14d. the address is cleaned with replaceState(history.state, \'\', \
   return (first && first[0] === marker && first[1] === '' && first[2] === './') || JSON.stringify(replaced.slice(0, 2));
 });
 
-// Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer now rides TopBar's details.disclaimer-line with Details toggle (no .disclaimer-banner on Now); go=stopped still opens immediately with no blocking modal.
-await pin('M14e. C6: go=stopped opens the status panel immediately (no blocking launch disclaimer modal) while TopBar keeps the consolidated disclaimer line', async () => {
+// Re-aimed (startup disclaimer patch): header disclaimer line is removed; with disclaimerAcked true, go=stopped opens the status panel immediately with no blocking modal.
+await pin('M14e. go=stopped opens the status panel immediately when acked (no modal, no TopBar disclaimer-line)', async () => {
   render(null, root); await sleep(20); openSheet(null);
   setState(driving({ tab: 'now', drivingView: false }));
   globalThis.location = { search: '?go=stopped' };
   render(h(App, {}), root); await sleep(120);
-  const noModal = !/I understand/.test(text());
+  const noModal = !/I understand|Understood — don't show again/.test(text());
   const panelOpen = /What are you doing now\?/.test(text());
   const noBanner = !root.querySelector('.disclaimer-banner');
-  const hdrLine = root.querySelector('header.top')?.querySelector('details.disclaimer-line');
-  const hasHeaderDisclaimer = !!hdrLine && /Planning only — not a log, not an ELD/.test(hdrLine.textContent) && hdrLine.querySelector('.disclaimer-more')?.textContent === 'Details';
+  const hdr = root.querySelector('header.top');
+  const noHeaderDisclaimer = !hdr?.querySelector('details.disclaimer-line') && !/Planning only — not a log, not an ELD/.test(hdr?.textContent ?? '');
   openSheet(null);
-  return (noModal && panelOpen && noBanner && hasHeaderDisclaimer) || JSON.stringify({ noModal, panelOpen, noBanner, hasHeaderDisclaimer });
+  return (noModal && panelOpen && noBanner && noHeaderDisclaimer) || JSON.stringify({ noModal, panelOpen, noBanner, noHeaderDisclaimer });
 });
 
 await pin('M14f. offline: the service worker still falls back to index.html on a miss, and its cache prefix is unchanged', async () => {

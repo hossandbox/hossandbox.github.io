@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, chooseTimeZone, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
@@ -1012,7 +1012,7 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
 
 /**
  * The header: slim and opaque (redesign, 2026-10-10). It carries only what every screen needs:
- * the status, the time, the theme switch, the driving alert, and (on Now only) the planning disclaimer.
+ * the status, the time, the theme switch, and the driving alert.
  */
 function TopBar({ ev, now, s, inert, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; onNow: boolean }) {
   const status = s.current?.status ?? 'OFF';
@@ -1042,8 +1042,6 @@ function TopBar({ ev, now, s, inert, onNow }: { ev: FullEvaluation; now: number;
       </div>
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
       {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
-      {/* Logpin (Lorico, 2026-11-20): planning-only disclaimer line + Details toggle shows on Now only. */}
-      {onNow && <HeaderDisclaimer s={s} />}
     </header>
   );
 }
@@ -5854,16 +5852,8 @@ function ConfirmSheet({ s, now, what }: { s: State; now: number; what: 'startove
 /* ============================================================ App */
 
 /**
- * Header disclaimer expander (C6 — owner decision, Lorico, 2026-11-20; consolidated 2026-11-20).
- *
- * Replaces the standing every-launch blocking disclaimer modal and consolidates the formerly
- * stacked Now banner into TopBar's single planning-only line with a Details toggle: never
- * intercepts the first tap while keeping the full planning-only / ELD-governs / 49 CFR 395.34
- * content (and the home-terminal zone picker until confirmed) one tap away.
- */
-/**
- * Kept exported for compatibility (capstone C1, decision C1-A): records disclaimer acknowledgement
- * and, on a first acknowledgement from a fresh empty record, sets Now to the Timeline card.
+ * Records disclaimer acknowledgement (capstone C1, decision C1-A) and, on a first acknowledgement
+ * from a fresh empty record, sets Now to the Timeline card.
  */
 export function acknowledgeDisclaimer() {
   setState((cur) => (cur.disclaimerAcked
@@ -5874,31 +5864,19 @@ export function acknowledgeDisclaimer() {
       }));
 }
 
-/** C6 consolidated (Lorico, 2026-11-20): single header disclaimer line with Details expander. Never intercepts the first tap. */
-function HeaderDisclaimer({ s }: { s: State }) {
-  const needsTz = !s.tzChosen;
-  const tz = s.config.timeZone;
-  const [choice, setChoice] = useState(tz);
-  useEffect(() => { setChoice(tz); }, [tz]);
+/**
+ * One-time startup disclaimer pop-up: shown on launch whenever disclaimerAcked is false.
+ * Body matches More → About verbatim; the single button calls acknowledgeDisclaimer() and dismisses.
+ */
+function DisclaimerDialog() {
   return (
-    <details class="disclaimer-line" role="note" aria-label="Planning disclaimer">
-      <summary>
-        <span class="disclaimer-text">Planning only — not a log, not an ELD</span>
-        <span class="disclaimer-more">Details</span>
-      </summary>
-      <div class="disclaimer-body">
-        <p class="small"><b>Split Decision is a planning scratchpad.</b> It is not an ELD, it is not FMCSA-registered, and it is not a legal record of duty status. It sends nothing anywhere — your log stays on this device.</p>
-        <p class="small">Your official record is your ELD — when it and this app disagree, the ELD governs. When an ELD fails, 49 CFR 395.34 still requires your own paper records. Always follow your carrier's rules and 49 CFR part 395.</p>
-        {needsTz && (
-          <div class="disclaimer-tz">
-            <h3>Where is your home terminal?</h3>
-            <p class="small">Clock times on screen are shown in your <b>phone's</b> time zone; your carrier day — and the recap hours that come back with it — is worked out in your <b>terminal's</b> time zone. It is set to <b>{tz}</b>{tz === deviceTz ? <>, your phone's zone right now</> : <>. Your phone's zone right now is <b>{deviceTz}</b></>}.</p>
-            <TimeZoneField value={choice} onChange={setChoice} />
-            <div class="row"><button class="mini primary" onClick={() => chooseTimeZone(choice)}>Save terminal zone</button></div>
-          </div>
-        )}
+    <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
+      <div class="modal">
+        <h2 id="disclaimer-title">Before you start</h2>
+        <p class="small">Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <button type="button" class="primary" onClick={() => acknowledgeDisclaimer()}>Understood — don't show again</button>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -5943,10 +5921,9 @@ function SpeakAskDialog() {
 declare const __BUILD__: string;
 
 /**
- * C6 (owner decision, Lorico, 2026-11-20): the blocking every-launch modal is retired and
- * replaced by the non-blocking header disclaimer expander (consolidated 2026-11-20). `launchNotice` / `setLaunchNotice`
- * stay exported as no-op compatibility state so test harnesses that import `setLaunchNotice`
- * continue to load cleanly.
+ * Startup disclaimer is driven by persisted `s.disclaimerAcked` (shown once until acknowledged).
+ * `launchNotice` / `setLaunchNotice` stay exported as no-op compatibility state so test harnesses
+ * that import `setLaunchNotice` continue to load cleanly.
  */
 let launchNotice = false;
 let backNav: BackNav | null = null;
@@ -6031,8 +6008,6 @@ export function App() {
   // at More = 2). `next` is the next intermediate panel index still to pass, `dir` the travel
   // direction. null = no tap glide in flight. Swipes never set it (they keep the one-tick-at-settle rule).
   const tapPass = useRef<{ next: number; dir: number; goal: number } | null>(null);
-  const disclaimer = launchNotice;
-  const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
   const printReport = usePrintReport();
   const lastPrintedSeq = useRef(0);
   useEffect(() => {
@@ -6170,9 +6145,10 @@ export function App() {
   ) : null;
   // A fresh clock is a demo, and the shell says so: the hero carries the stamp (see styles.css).
   const fresh = historyBasis(s, now) === 'fresh';
-  // C6 (taste, consolidated 2026-11-20): no launch disclaimer modal — the non-blocking expander sits in TopBar.
-  // Behind an open sheet, nothing else can take focus or be read as current.
-  const blocked = sheet !== null;
+  // One-time startup disclaimer pop-up: shown whenever disclaimerAcked is false.
+  const showDisclaimer = !s.disclaimerAcked;
+  // Behind an open sheet or the startup disclaimer, nothing else can take focus or be read as current.
+  const blocked = sheet !== null || showDisclaimer;
   // Panel strip: the bar lights the strip's nearest snapped panel while it scrolls
   // (rAF-throttled, like The Daily Number's pill); when the scroll settles, the store's
   // tab catches up — unless the current tab already lives on that panel (a planning
@@ -6199,7 +6175,7 @@ export function App() {
       // (the goal itself ticks at the lock, below). Reaching = the strip's left edge arrives at
       // that panel's offset (1px slack), so a glide ticks where the panel is fully on screen.
       const pass = tapPass.current;
-      if (pass && tapGoal.current === pass.goal && !launchNotice && currentSheet() === null) {
+      if (pass && tapGoal.current === pass.goal && getState().disclaimerAcked && currentSheet() === null) {
         while (pass.next !== pass.goal && (pass.dir > 0 ? el.scrollLeft >= pass.next * w - 1 : el.scrollLeft <= pass.next * w + 1)) {
           tapTick();
           pass.next += pass.dir;
@@ -6208,7 +6184,7 @@ export function App() {
       if (stripSettle.current) clearTimeout(stripSettle.current);
       stripSettle.current = setTimeout(() => {
         stripSettle.current = null;
-        if (launchNotice || currentSheet() !== null) return;
+        if (!getState().disclaimerAcked || currentSheet() !== null) return;
         const w2 = el.clientWidth || 0; if (!w2) return;
         const i2 = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w2)));
         if (Math.abs(el.scrollLeft - i2 * w2) > 2) return; // not resting on a page yet
@@ -6288,8 +6264,9 @@ export function App() {
         <div inert={blocked}>
           <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
-        {sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-        {sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
+        {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+        {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
+        {showDisclaimer && <DisclaimerDialog />}
       </div>
     );
   }
@@ -6350,19 +6327,20 @@ export function App() {
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
         return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
-      {sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-      {sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
-      {sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
-      {sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
-      {sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
-      {sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
-      {sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
-      {sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
-      {sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
-      {sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
-      {(sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
-      {sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
-      {s.speakAskOpen && <SpeakAskDialog />}
+      {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
+      {!showDisclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
+      {!showDisclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
+      {!showDisclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
+      {!showDisclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
+      {!showDisclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
+      {!showDisclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
+      {!showDisclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
+      {!showDisclaimer && s.speakAskOpen && <SpeakAskDialog />}
+      {showDisclaimer && <DisclaimerDialog />}
       {printReport && <LogSummaryReport s={s} req={printReport} />}
     </div>
   );
