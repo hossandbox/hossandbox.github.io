@@ -240,14 +240,15 @@ for (const [W, H] of SIZES) {
   const css = await page.evaluate(() => { const c = getComputedStyle(document.querySelector('.page')); return `${c.overscrollBehaviorX}/${c.overscrollBehaviorY}`; });
   ok(`${tag} (c) a page hands sideways overscroll up to the strip (overscroll-behavior x auto), and keeps vertical closed (y none)`, css === 'auto/none', css);
   await seated();
+  // Re-aimed (DESIGN-NAV §2.1, 2026-11-20): time order Log — Now — Plan — More (opens on Now at index 1).
   // [from-panel, content selector, dx, expected panel, label]
   const legs = [
     ['now', '.hero, .card, section', -1, 'plan', 'Now content'],
-    ['plan', 'button.plan-item b, button.plan-item', -1, 'log', 'a Plan row (button)'],
-    ['log', 'button.entry', -1, 'settings', 'a Log entry (button)'],
-    ['settings', 'label, .card', 1, 'log', 'a More/Settings row'],
-    ['log', 'button.entry', 1, 'plan', 'a Log entry, rightward'],
+    ['plan', 'button.plan-item b, button.plan-item', -1, 'settings', 'a Plan row (button)'],
+    ['settings', 'label, .card', 1, 'plan', 'a More/Settings row'],
     ['plan', 'button.plan-item b, button.plan-item', 1, 'now', 'a Plan row, rightward'],
+    ['now', '.hero, .card, section', 1, 'log', 'Now content, rightward'],
+    ['log', 'button.entry', -1, 'now', 'a Log entry (button)'],
   ];
   for (const [from, sel, dir, want, label] of legs) {
     const b = await st();
@@ -276,32 +277,32 @@ for (const [W, H] of SIZES) {
     const a = await st();
     ok(`${tag} (c) a vertical drag on Log content scrolls the page and leaves the strip on Log`, b.active === 'log' && a.active === 'log' && a.top > b.top && a.vib === b.vib, `${b.active}/${b.top} → ${a.active}/${a.top}, vibrate +${a.vib - b.vib}`);
   }
+  // Re-aimed (DESIGN-NAV §2.1 / §2.6, 2026-11-20): from Log(0), Now(1) is the adjacent tab (was More).
   // a tab-bar tap glides the strip and ticks ONCE, when it locks onto the new panel — never on
   // the tap itself (haptic timing, 2026-11-20: "The haptic feedback should happen only when the
   // screen locks into place. Both the swiping and the tapping."). A tap on the tab of the panel
   // already showing never ticks at all.
   {
     const b = await st();
-    const box = await page.evaluate(() => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('More')).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const box = await page.evaluate(() => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes('Now')).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
     const t0 = await page.evaluate(() => performance.now());
     await page.touchscreen.tap(box.x, box.y);
     await page.waitForTimeout(500); await seated(); await page.waitForTimeout(400);
     const a = await st();
     const early = await page.evaluate((t) => window.__vib.filter((v) => v.t >= t && v.t - t <= 100).length, t0);
     const late = await page.evaluate((t) => window.__vib.filter((v) => v.t - t > 100).length, t0);
-    ok(`${tag} (c) a tab-bar tap to another panel: no tick on the tap, exactly one when the strip locks on`, a.active === 'settings' && early === 0 && late === 1 && a.vib - b.vib === 1, `active ${a.active}; vibrate +${a.vib - b.vib} (${early} within 100ms of the tap, ${late} after)`);
+    ok(`${tag} (c) a tab-bar tap to another panel: no tick on the tap, exactly one when the strip locks on`, a.active === 'now' && early === 0 && late === 1 && a.vib - b.vib === 1, `active ${a.active}; vibrate +${a.vib - b.vib} (${early} within 100ms of the tap, ${late} after)`);
     const b2 = await st();
     await page.touchscreen.tap(box.x, box.y);
     await page.waitForTimeout(500); await seated(); await page.waitForTimeout(400);
     const a2 = await st();
-    ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'settings' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
+    ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'now' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
   }
-  // Owner amendment A (2026-11-20): a tab tap's glide ticks as the strip passes each panel on
-  // the way, plus once at the lock — More → Now and Now → More are 3 ticks each (none at press),
-  // and each pass tick lands where the strip has reached that panel; Now → Plan is exactly 1.
+  // Re-aimed (DESIGN-NAV §2.6, 2026-11-20): Log(0)–Now(1)–Plan(2)–More(3); Now↔More is 2 ticks,
+  // Log↔More is 3 ticks, Log→Plan is 2 ticks, Now→Log and Now→Plan are 1 tick each.
   {
     const tabBox = (label) => page.evaluate((l) => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l)).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, label);
-    const glide = async (label, want) => {
+    const glide = async (label) => {
       const box = await tabBox(label);
       const n0 = await page.evaluate(() => window.__vib.length);
       const t0 = await page.evaluate(() => performance.now());
@@ -313,15 +314,33 @@ for (const [W, H] of SIZES) {
       return { a, got, early, t0 };
     };
     const where = (g) => g.got.map((v) => `${Math.round(v.t - g.t0)}ms@${(v.sl / (v.w || 1)).toFixed(2)}`).join(' ');
-    const g1 = await glide('Now');
+    // Now(1) → More(3): pass Plan(2), lock More(3) = 2 ticks
+    const g1 = await glide('More');
     const pos1 = g1.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A: a More → Now tab tap ticks 3 times — passing Log, passing Plan, the lock on Now — none at press`, g1.a.active === 'now' && g1.got.length === 3 && g1.early === 0 && pos1[0] <= 2.01 && pos1[0] > 1.5 && pos1[1] <= 1.01 && pos1[1] > 0.5 && pos1[2] <= 0.01, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} within 100ms of the tap: ${where(g1)}`);
-    const g2 = await glide('More');
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → More ticks 2 times (pass Plan, lock More), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
+    // More(3) → Now(1): pass Plan(2), lock Now(1) = 2 ticks
+    const g2 = await glide('Now');
     const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A: a Now → More tab tap ticks exactly 3 times — Plan, Log, the lock on More — none at press`, g2.a.active === 'settings' && g2.got.length === 3 && g2.early === 0 && pos2[0] >= 0.99 && pos2[0] < 1.5 && pos2[1] >= 1.99 && pos2[1] < 2.5 && pos2[2] >= 2.99, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} within 100ms of the tap: ${where(g2)}`);
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): More → Now ticks 2 times (pass Plan, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
+    // Now(1) → Log(0): adjacent = 1 tick at lock
+    const g3 = await glide('Log');
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → Log ticks once, at the lock`, g3.a.active === 'log' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
+    // Log(0) → More(3): pass Now(1), pass Plan(2), lock More(3) = 3 ticks
+    const g4 = await glide('More');
+    const pos4 = g4.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Log → More ticks 3 times (Now, Plan, lock More), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
+    // More(3) → Log(0): pass Plan(2), pass Now(1), lock Log(0) = 3 ticks
+    const g5 = await glide('Log');
+    const pos5 = g5.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): More → Log ticks 3 times (Plan, Now, lock Log), none at press`, g5.a.active === 'log' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
+    // Log(0) → Plan(2): pass Now(1), lock Plan(2) = 2 ticks
+    const g6 = await glide('Plan');
+    const pos6 = g6.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Log → Plan ticks 2 times (Now, lock Plan), none at press`, g6.a.active === 'plan' && g6.got.length === 2 && g6.early === 0 && pos6[0] >= 0.99 && pos6[0] < 1.5 && Math.abs(pos6[1] - 2) <= 0.02, `active ${g6.a.active}; ${g6.got.length} ticks, ${g6.early} early: ${where(g6)}`);
     await glide('Now');
-    const g3 = await glide('Plan');
-    ok(`${tag} (c) amendment A: a Now → Plan tab tap ticks exactly once, at the lock`, g3.a.active === 'plan' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) >= 0.99, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
+    // Now(1) → Plan(2): adjacent = 1 tick at lock
+    const g7 = await glide('Plan');
+    ok(`${tag} (c) amendment A (DESIGN-NAV §2.6): Now → Plan ticks once, at the lock`, g7.a.active === 'plan' && g7.got.length === 1 && g7.early === 0 && Math.abs(g7.got[0].sl / (g7.got[0].w || 1) - 2) <= 0.02, `active ${g7.a.active}; ${g7.got.length} ticks: ${where(g7)}`);
   }
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -419,6 +438,225 @@ for (const [W, H] of SIZES) {
       ok(`${tag} (d) A: the Log title counts the live row it draws`, log && log.title === `Entries on this day (${log.rows})` && log.rows === 1, JSON.stringify(log && { title: log.title, rows: log.rows }));
     }
     ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+}
+// (e) DESIGN-NAV (2026-11-20): browser-verified pins for the time-order bar (Log — Now — Plan — More),
+// open-on-Now at frame 1 (R2), driving-view return (R1), Now-only dock & --dock-h stability,
+// tab-now plate ratio & theme colors, TimeHead headers, and zero overflow across both sizes & themes.
+for (const [W, H] of SIZES) {
+  for (const theme of ['day', 'night']) {
+    const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+    await ctx.addInitScript((save) => {
+      try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
+      window.__firstFrame = null;
+      const obs = new MutationObserver(() => {
+        const m = document.querySelector('main.pages');
+        if (!m || window.__firstFrame) return;
+        obs.disconnect();
+        requestAnimationFrame(() => {
+          const p = document.querySelector('.page.is-active');
+          const np = document.querySelector('.page-now');
+          window.__firstFrame = {
+            sl: m.scrollLeft,
+            iw: window.innerWidth,
+            active: p ? p.className : null,
+            nowLeft: np ? Math.round(np.getBoundingClientRect().left * 10) / 10 : null,
+          };
+        });
+      });
+      obs.observe(document, { childList: true, subtree: true });
+    }, JSON.stringify({ ...seedRecord('dial'), theme }));
+    const page = await ctx.newPage();
+    const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+    await page.waitForSelector('main.pages');
+    await page.waitForFunction(() => window.__firstFrame !== null, null, { timeout: 2000 });
+    await page.evaluate(() => document.fonts && document.fonts.ready);
+    await page.waitForTimeout(150);
+    const tag = `[${W}x${H} ${theme} nav]`;
+    const tapNav = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('no tab ' + l); b.click(); }, label);
+    const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
+
+    // 1 + 2. Order & Open-on-Now at the first animation frame after load (R2)
+    const open = await page.evaluate(() => {
+      const bar = [...document.querySelectorAll('nav.tabs button')].map((b) => b.textContent.trim());
+      const strip = [...document.querySelectorAll('main.pages > section.page')].map((s) => [...s.classList].find((c) => c.startsWith('page-')));
+      return { ff: window.__firstFrame, bar, strip };
+    });
+    ok(`${tag} (e) order: bar is Log/Now/Plan/More and strip is page-log/page-now/page-plan/page-settings`, JSON.stringify(open.bar) === '["Log","Now","Plan","More"]' && JSON.stringify(open.strip) === '["page-log","page-now","page-plan","page-settings"]', JSON.stringify(open));
+    ok(`${tag} (e) open on Now at first animation frame (R2): scrollLeft === innerWidth and page-now visible`, open.ff && open.ff.sl === W && open.ff.iw === W && /\bpage-now\b/.test(open.ff.active || '') && Math.abs(open.ff.nowLeft) <= 1, JSON.stringify(open.ff));
+
+    // 6. Now treatment (active)
+    const nowStyle = await page.evaluate(() => {
+      const nav = document.querySelector('nav.tabs');
+      const btns = [...nav.querySelectorAll('button')];
+      const nowBtns = [...nav.querySelectorAll('button.tab-now')];
+      const nb = btns[1], lb = btns[0];
+      const nr = nb.getBoundingClientRect(), lr = lb.getBoundingClientRect(), navR = nav.getBoundingClientRect();
+      const cs = getComputedStyle(nb), aft = getComputedStyle(nb, '::after');
+      const heights = btns.map((b) => Math.round(b.getBoundingClientRect().height * 10) / 10);
+      const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top * 10) / 10);
+      return {
+        count: nowBtns.length, isSecond: nowBtns[0] === nb, on: nb.classList.contains('on'),
+        ratio: Math.round((nr.width / lr.width) * 1000) / 1000,
+        heights, tops, navTop: Math.round(navR.top * 10) / 10,
+        aftRadius: aft.borderRadius, aftBg: aft.backgroundColor, color: cs.color,
+      };
+    });
+    const wantPlate = theme === 'day' ? 'rgb(11, 95, 168)' : 'rgb(27, 79, 125)';
+    const wantInk = theme === 'day' ? 'rgb(255, 255, 255)' : 'rgb(243, 238, 228)';
+    ok(`${tag} (e) tab-now hook: unique at index 1, width ratio 1.24 ±0.02, equal 60px height, nothing raised`,
+      nowStyle.count === 1 && nowStyle.isSecond && nowStyle.on
+      && nowStyle.ratio >= 1.22 && nowStyle.ratio <= 1.26
+      && nowStyle.heights.every((h) => Math.abs(h - 60) <= 1)
+      && nowStyle.tops.every((t) => Math.abs(t - nowStyle.tops[0]) <= 0.5 && t >= nowStyle.navTop),
+      JSON.stringify(nowStyle));
+    ok(`${tag} (e) tab-now active plate: 12px radius, exact --now-plate bg and --now-plate-ink color`,
+      nowStyle.aftRadius === '12px' && nowStyle.aftBg === wantPlate && nowStyle.color === wantInk,
+      `${JSON.stringify(nowStyle)} want bg=${wantPlate} ink=${wantInk}`);
+
+    // 4 + 5. Dock Now-only geometry & --dock-h stability across all 4 panels, plus TimeHead & overflow
+    const dockNow = await page.evaluate(() => {
+      const docks = [...document.querySelectorAll('.dock')];
+      const nowPg = document.querySelector('section.page-now');
+      const nav = document.querySelector('nav.tabs');
+      const dr = docks[0]?.getBoundingClientRect(), nr = nav.getBoundingClientRect();
+      return {
+        count: docks.length,
+        inNow: !!nowPg && nowPg.contains(docks[0]),
+        inNav: nav.contains(docks[0]),
+        hasDockClasses: [...document.querySelectorAll('main.pages > section.has-dock')].map((s) => [...s.classList].find((c) => c.startsWith('page-'))),
+        dockH: getComputedStyle(document.documentElement).getPropertyValue('--dock-h').trim(),
+        dockBottom: dr ? Math.round(dr.bottom * 10) / 10 : null,
+        navTop: Math.round(nr.top * 10) / 10,
+        dockLeft: dr ? Math.round(dr.left * 10) / 10 : null,
+        dockRight: dr ? Math.round(dr.right * 10) / 10 : null,
+        nowInert: nowPg.inert || nowPg.hasAttribute('inert'),
+        nowHidden: nowPg.getAttribute('aria-hidden'),
+      };
+    });
+    ok(`${tag} (e) dock on Now: unique in page-now, flush on bar, full width, not inert`,
+      dockNow.count === 1 && dockNow.inNow && !dockNow.inNav
+      && JSON.stringify(dockNow.hasDockClasses) === '["page-now"]'
+      && Math.abs(dockNow.dockBottom - dockNow.navTop) <= 1
+      && dockNow.dockLeft === 0 && dockNow.dockRight === W
+      && !dockNow.nowInert && dockNow.nowHidden !== 'true',
+      JSON.stringify(dockNow));
+
+    const offChecks = [];
+    for (const label of ['Log', 'Plan', 'More', 'Now']) {
+      await tapNav(label); await settle();
+      const snap = await page.evaluate((lbl) => {
+        const de = document.documentElement;
+        const pg = document.querySelector('.page.is-active');
+        const nowPg = document.querySelector('section.page-now');
+        const dock = document.querySelector('.dock');
+        const dr = dock.getBoundingClientRect();
+        const navBtns = [...document.querySelectorAll('nav.tabs button')];
+        const nb = navBtns[1];
+        const tabClips = navBtns.filter((b) => b.scrollWidth > b.clientWidth + 0.5 || b.getBoundingClientRect().height > 61.5).map((b) => `${b.textContent.trim()}:${b.scrollWidth}/${b.clientWidth}h${b.getBoundingClientRect().height}`);
+        const th = pg.querySelectorAll('p.timehead');
+        const thRect = th[0]?.getBoundingClientRect() ?? null;
+        const pgRect = pg.getBoundingClientRect();
+        const csPg = getComputedStyle(pg);
+        return {
+          lbl,
+          docOverflow: de.scrollWidth !== window.innerWidth,
+          pageOverflow: pg.scrollWidth !== pg.clientWidth,
+          tabClips,
+          dockH: getComputedStyle(de).getPropertyValue('--dock-h').trim(),
+          scrollPadBottom: csPg.scrollPaddingBottom,
+          dockRect: { left: Math.round(dr.left * 10) / 10, right: Math.round(dr.right * 10) / 10 },
+          nowInert: nowPg.inert || nowPg.hasAttribute('inert'),
+          nowHidden: nowPg.getAttribute('aria-hidden'),
+          nowBtnOn: nb.classList.contains('on'),
+          otherOn: navBtns.some((b) => b !== nb && b.classList.contains('on')),
+          nowAftBg: getComputedStyle(nb, '::after').backgroundColor,
+          nowColor: getComputedStyle(nb).color,
+          thCount: th.length,
+          thText: th[0] ? th[0].textContent.replace(/\u2019/g, "'").trim() : null,
+          thInBox: thRect ? (thRect.left >= pgRect.left - 0.5 && thRect.right <= pgRect.right + 0.5) : true,
+          thBeforeTarget: lbl === 'Log'
+            ? (th[0] && pg.querySelector('.daynav') ? !!(th[0].compareDocumentPosition(pg.querySelector('.daynav')) & Node.DOCUMENT_POSITION_FOLLOWING) : false)
+            : lbl === 'Plan'
+              ? (th[0] && pg.querySelector('h1.screen-title') ? !!(th[0].compareDocumentPosition(pg.querySelector('h1.screen-title')) & Node.DOCUMENT_POSITION_FOLLOWING) : false)
+              : true,
+        };
+      }, label);
+      offChecks.push(snap);
+    }
+    const wantPanel2 = theme === 'day' ? 'rgb(232, 236, 240)' : 'rgb(25, 33, 42)';
+    const wantText = theme === 'day' ? 'rgb(11, 17, 23)' : 'rgb(243, 238, 228)';
+    const offNow = offChecks.filter((s) => s.lbl !== 'Now');
+    ok(`${tag} (e) dock off Now: completely outside [0, ${W}) and page-now inert + aria-hidden on Log/Plan/More`,
+      offNow.every((s) => (s.dockRect.right <= 0.5 || s.dockRect.left >= W - 0.5) && s.nowInert && s.nowHidden === 'true'),
+      JSON.stringify(offNow.map((s) => ({ l: s.lbl, r: s.dockRect, inert: s.nowInert, hid: s.nowHidden }))));
+    ok(`${tag} (e) --dock-h unchanged off Now (${dockNow.dockH}) and other pages scroll-padding-bottom independent (73px)`,
+      offNow.every((s) => s.dockH === dockNow.dockH && s.scrollPadBottom === '73px'),
+      JSON.stringify(offNow.map((s) => ({ l: s.lbl, h: s.dockH, spb: s.scrollPadBottom }))));
+    const logSnap = offChecks.find((s) => s.lbl === 'Log');
+    const planSnap = offChecks.find((s) => s.lbl === 'Plan');
+    const moreSnap = offChecks.find((s) => s.lbl === 'More');
+    const nowSnap = offChecks.find((s) => s.lbl === 'Now');
+    ok(`${tag} (e) tab-now inactive on Log: ::after is --panel2, label is --text, another tab has .on`,
+      !logSnap.nowBtnOn && logSnap.otherOn && logSnap.nowAftBg === wantPanel2 && logSnap.nowColor === wantText,
+      JSON.stringify({ bg: logSnap.nowAftBg, wantPanel2, col: logSnap.nowColor, wantText, on: logSnap.nowBtnOn, other: logSnap.otherOn }));
+    ok(`${tag} (e) TimeHead on Log & Plan (placed & within content box) and absent on Now & More`,
+      logSnap.thCount === 1 && logSnap.thText === "The past — what's already done" && logSnap.thBeforeTarget && logSnap.thInBox
+      && planSnap.thCount === 1 && planSnap.thText === "The future — what's still ahead" && planSnap.thBeforeTarget && planSnap.thInBox
+      && nowSnap.thCount === 0 && moreSnap.thCount === 0,
+      JSON.stringify(offChecks.map((s) => ({ l: s.lbl, n: s.thCount, t: s.thText, before: s.thBeforeTarget, box: s.thInBox }))));
+    ok(`${tag} (e) no horizontal overflow, no tab wrap/clip on any of the 4 panels`,
+      offChecks.every((s) => !s.docOverflow && !s.pageOverflow && s.tabClips.length === 0),
+      JSON.stringify(offChecks.map((s) => ({ l: s.lbl, doc: s.docOverflow, pg: s.pageOverflow, clips: s.tabClips }))));
+
+    // Check TimeHead absence on a Plan sub-screen (Split Lab)
+    await tapNav('Plan'); await settle();
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.page-plan button.plan-item')].find((x) => x.textContent.includes('Plan a sleeper split')); if (b) b.click(); });
+    await page.waitForTimeout(150);
+    const subTh = await page.evaluate(() => document.querySelectorAll('.page-plan p.timehead').length);
+    ok(`${tag} (e) TimeHead absent on Plan sub-screen (Split Lab)`, subTh === 0, `count=${subTh}`);
+    ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+
+  // 3. Return from DrivingView (R1): seeded Driving + drivingView: true, tap Details → lands on Now (scrollLeft === W) with dock visible
+  {
+    const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+    await ctx.addInitScript((save) => {
+      try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
+      window.__vib = [];
+      Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { window.__vib.push(p); return true; } });
+    }, JSON.stringify({ ...seedRecord('dial'), current: { status: 'D', since: nowMinute - 20, createdAt: 13 }, drivingView: true, tab: 'now' }));
+    const page = await ctx.newPage();
+    const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+    await page.waitForSelector('main.drive');
+    await page.waitForTimeout(150);
+    await page.evaluate(() => { window.__vib.length = 0; });
+    await page.click('button.drive-details');
+    await page.waitForSelector('main.pages');
+    // Measure right on the next rAF (before any settle timer could run) to verify instant mount placement.
+    const ret = await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => {
+      const m = document.querySelector('main.pages');
+      const nowPg = document.querySelector('section.page-now');
+      const dock = document.querySelector('.dock');
+      const nav = document.querySelector('nav.tabs');
+      const dr = dock?.getBoundingClientRect(), nr = nav?.getBoundingClientRect();
+      r({
+        sl: m?.scrollLeft,
+        iw: window.innerWidth,
+        nowActive: !!nowPg && nowPg.classList.contains('is-active'),
+        nowLeft: nowPg ? Math.round(nowPg.getBoundingClientRect().left * 10) / 10 : null,
+        dockOnScreen: !!dr && !!nr && dr.left === 0 && dr.right === window.innerWidth && Math.abs(dr.bottom - nr.top) <= 1,
+        bar: document.querySelector('nav.tabs button.on')?.textContent.trim(),
+      });
+    })));
+    ok(`[${W}x${H} nav] (e) driving-view return via Details (R1): lands immediately on Now (scrollLeft === ${W}) with dock`,
+      ret.sl === W && ret.nowActive && Math.abs(ret.nowLeft) <= 1 && ret.dockOnScreen && ret.bar === 'Now',
+      JSON.stringify(ret));
+    ok(`[${W}x${H} nav] (e) driving-view return no page errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
 }

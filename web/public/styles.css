@@ -26,6 +26,7 @@ html {
   --bg: #090c10; --panel: #11161c; --panel2: #19212a; --line: #26303b; --tick: #3a4756;
   --text: #f3eee4; --muted: #aaa79d; --good: #3ee08f; --warn: #ffb547; --bad: #ff6464;
   --accent: #7cc8ff; --accent-solid: #1d6aa8; --on-accent: #fff; --chip-ink: #000; --link: #9fd6ff;
+  --now-plate: #1b4f7d; --now-plate-ink: #f3eee4; --now-plate-ring: #7cc8ff;
   --sb: #a993ff;
   --tint-warn: rgba(255,181,71,.15); --tint-bad: rgba(255,100,100,.15); --tint-accent: rgba(124,200,255,.10);
   /* materials: lit top edge, surface gradient, drop shadow, key faces, the recessed log screen, glow */
@@ -42,6 +43,7 @@ html {
   --bg: #e4e9ee; --panel: #f9fafb; --panel2: #e8ecf0; --line: #c3cbd3; --tick: #9aa6b2;
   --text: #0b1117; --muted: #45525f; --good: #0f7a40; --warn: #8a5200; --bad: #b32020;
   --accent: #0b5fa8; --accent-solid: #0b5fa8; --on-accent: #fff; --chip-ink: #fff; --link: #0b4f8c;
+  --now-plate: #0b5fa8; --now-plate-ink: #ffffff; --now-plate-ring: #0b5fa8;
   --sb: #5b3fc4;
   --tint-warn: rgba(138,82,0,.16); --tint-bad: rgba(179,32,32,.12); --tint-accent: rgba(11,95,168,.09);
   --edge-hi: rgba(255,255,255,.9); --surface-hi: #ffffff; --drop: rgba(30,45,60,.14);
@@ -75,7 +77,7 @@ main { flex: 1; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); dis
    so a swipe paged exactly once and never again. Native scrolling needs no guard:
    a drag scrolls, a tap lands, and the browser decides which it was. Each page carries
    the padding and column layout <main> used to give the one panel it held. */
-main.pages { flex-direction: row; padding: 0; gap: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: none; }
+main.pages { position: relative; z-index: 0; flex-direction: row; padding: 0; gap: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior: none; }
 main.pages::-webkit-scrollbar { display: none; }
 /* Feel round 2 (2026-11-19): a page's overscroll is closed VERTICALLY only. It used to be
    `overscroll-behavior: none` on both axes (as The Daily Number writes it), and every page is
@@ -86,7 +88,7 @@ main.pages::-webkit-scrollbar { display: none; }
    at auto the sideways scroll chains to the strip; the strip's own overscroll-behavior: none
    still stops it there, so nothing past the strip (shell, document, the browser's back
    gesture) ever sees it. Vertical stays none: no pull-to-refresh, no chaining to the shell. */
-.page { flex: 0 0 100%; width: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: auto; overscroll-behavior-y: none; scroll-snap-align: start; scroll-snap-stop: always; scrollbar-width: none; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); scroll-padding-top: 12px; }
+.page { position: relative; flex: 0 0 100%; width: 100%; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior-x: auto; overscroll-behavior-y: none; scroll-snap-align: start; scroll-snap-stop: always; scrollbar-width: none; padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--s-12); scroll-padding-top: 12px; }
 .page::-webkit-scrollbar { display: none; }
 /* D1 (audit): the page is a fixed-height column flexbox and every child is content to scroll,
    never to squeeze. A flex item with overflow:hidden (the demo hero, for its DEMO watermark)
@@ -136,7 +138,7 @@ p { margin: 8px 0; }
 .card.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
 .card .clocks { margin-top: 8px; }
 
-.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: repeat(4, 1fr); background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: 1fr 1.24fr 1fr 1fr; background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
 .tabs button { position: relative; background: none; border: 0; border-radius: 0; padding: 8px 4px 10px; min-height: 60px; color: var(--muted); font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-shadow: none; }
 .tabs button.on { color: var(--text); font-weight: 800; }
 .tabs button.on::before { content: ""; position: absolute; top: 0; left: 26%; right: 26%; height: 3px; border-radius: 0 0 var(--r-3) var(--r-3); background: var(--accent); box-shadow: 0 0 10px var(--glow); }
@@ -825,6 +827,7 @@ button { min-height: var(--ctl); border-radius: var(--r-12); font-weight: 700; b
 button.link, button.back, button.x, button.drive-details { min-height: var(--ctl-floor); }
 .icon-btn { min-height: var(--ctl-floor); }
 button.link, .icon-btn, button.back, button.x, button.ghost, button.entry, button.sheet-backdrop, .toggle button, button.drive-details, button.rowbtn.flat, button.taxis-row, button.addbtn, .tabs button, button.wk-day, button.pblock, .ed-clock-tap, button.vh { box-shadow: none; }
+button.vh { padding: 0; border: 0; min-height: 0; }
 /* A press sinks the key onto its skirt. (Faceless controls keep patch 16's 1px settle.) */
 button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):active { transform: translateY(2px); filter: none; box-shadow: var(--t-key-down); transition-duration: 0ms; }
 button:where(:not(.link, .icon-btn, .back, .x, .ghost, .entry, .sheet-backdrop, .taxis-row, .addbtn, .wk-day, .pblock, .ed-clock-tap, .drive-details, .vh)):disabled { box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 0 var(--key-base); }
@@ -1066,6 +1069,26 @@ html {
 .tabs button { font-size: 12px; letter-spacing: .08em; padding: 5px 4px 6px; gap: 2px; line-height: 1.2; }  /* the bar keeps its 60px slot: the dock above is pinned to it */
 .tabs button.on { color: var(--text); }
 .tabs button.on svg { color: var(--accent); }
+
+/* ---------- the time-order bar (DESIGN-NAV, 2026-11-20): Now is home ---------- */
+.tabs button { min-width: 0; }
+.tabs button.tab-now { isolation: isolate; color: var(--text); }
+.tabs button.tab-now svg { color: var(--text); }
+/* the plate: flat, printed inside the bar — never raised, never round, no outer shadow */
+.tabs button.tab-now::after { content: ""; position: absolute; z-index: -1; inset: 5px 6px; border-radius: var(--r-12); background: var(--panel2); box-shadow: inset 0 0 0 1px var(--tick); transition: background-color .12s ease, box-shadow .12s ease; }
+.tabs button.tab-now.on { background: none; color: var(--now-plate-ink); font-weight: 800; }
+.tabs button.tab-now.on svg { color: var(--now-plate-ink); }
+.tabs button.tab-now.on::after { background: var(--now-plate); box-shadow: inset 0 0 0 1px var(--now-plate-ring), inset 0 1px 0 rgba(255,255,255,.16); }
+@media (prefers-reduced-motion: reduce) { .tabs button.tab-now::after { transition: none; } }
+
+/* ---------- in-screen time headers (DESIGN-NAV §2.4): Log = the past, Plan = the future ---------- */
+.timehead { display: flex; align-items: center; gap: var(--s-8); margin: 2px 2px 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); }
+.timehead b { color: var(--text); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.timehead-rail { position: relative; flex: 0 0 34px; height: 10px; display: inline-flex; align-items: center; justify-content: space-between; }
+.timehead-rail::before { content: ""; position: absolute; left: 4px; right: 4px; top: 50%; height: 1px; margin-top: -.5px; background: var(--tick); }
+.timehead-rail i { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--tick); }
+.timehead-rail i:nth-child(2) { box-shadow: inset 0 0 0 1.5px var(--muted); }   /* the middle dot is Now */
+.timehead-past .timehead-rail i:nth-child(1), .timehead-future .timehead-rail i:nth-child(3) { background: var(--accent); box-shadow: none; }
 
 /* ---------- driving view ---------- */
 .drive-body > .sign { transform: scale(1.2); margin: 0 0 14px; }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useContext } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useState, useRef, useContext } from 'preact/hooks';
 import { Component, createContext, type ComponentChildren, type JSX } from 'preact';
 import { createBackNav, type BackNav } from './backnav.ts';
 import { alertTick, holdWakeLock, type WakeEnv, alertBanner, alertMessage, wantsWakeLock, unlockAudio, chime, buzz, tapTick, statusHaptic, sound, audioReady, clearPendingSound, notify, notifyState, askNotify, canKeepAwake, NO_ALERTS, type AlertMemory, type NotifyState, speechReady, shouldAskSpeech, alertSpeech, statusSpeech } from './alerts.ts';
@@ -54,6 +54,17 @@ export function displaySegLabel(status: DutyStatus, note?: string): string {
   return storeSegLabel(status, note);
 }
 const segLabel = displaySegLabel;
+
+/** DESIGN-NAV §2.4: time-direction cue at the top of Log (the past) and Plan (the future).
+ * A <p>, not a heading or a button: no role, no tabindex, no click handler. */
+function TimeHead({ kind }: { kind: 'past' | 'future' }) {
+  return (
+    <p class={`timehead timehead-${kind}`}>
+      <span class="timehead-rail" aria-hidden="true"><i /><i /><i /></span>
+      <span class="timehead-text"><b>{kind === 'past' ? 'The past' : 'The future'}</b> — {kind === 'past' ? 'what’s already done' : 'what’s still ahead'}</span>
+    </p>
+  );
+}
 
 function Card({ title, children, tone }: { title?: string; children: ComponentChildren; tone?: 'warn' | 'bad' | 'good' }) {
   return <section class={`card ${tone ?? ''}`}>{title && <h2>{title}</h2>}{children}</section>;
@@ -3251,6 +3262,7 @@ function LogTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
 
   return (
     <>
+      <TimeHead kind="past" />
       <div class="daynav">
         <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
         <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
@@ -4015,6 +4027,7 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
   );
   return (
     <>
+      <TimeHead kind="future" />
       <h1 class="screen-title">Plan</h1>
       {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
@@ -5696,9 +5709,10 @@ export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
 /* ============================================================ panel strip */
 
-/** Bottom-bar panels in display order (Lorico, 2026-11-18: Plan and Log swap places). The tab
- * ids are unchanged — only the order the bar shows them in, and the order the strip walks. */
-export const PANEL_ORDER: State['tab'][] = ['now', 'plan', 'log', 'settings'];
+/** Bottom-bar panels in display order (Lorico, 2026-11-20: time order — past, present, future,
+ * then More). The tab ids are unchanged — only the order the bar shows them in, and the order
+ * the strip walks. */
+export const PANEL_ORDER: State['tab'][] = ['log', 'now', 'plan', 'settings'];
 
 /** The panel the bottom bar lights for a tab: the planning screens sit under Plan (declutter
  * patch, 2026-11-05; Capstone C3 D10-A moved recap/history there too). */
@@ -5732,7 +5746,7 @@ export function App() {
   const barPanelRef = useRef(barPanel);
   const stripRaf = useRef(0);
   const stripSettle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stripPlaced = useRef(false);
+  const stripPlacedEl = useRef<HTMLElement | null>(null);
   // The panel index a programmatic scroll (tab tap, restore, back) is travelling to, or
   // null when the strip is the driver's own. A settle may never commit a different
   // panel than the goal while one is set: a smooth scroll can pause its events for
@@ -5748,9 +5762,9 @@ export function App() {
   const tapGoal = useRef<number | null>(null);
   // Pass-through ticks (owner amendment A, 2026-11-20): while a tab tap's SMOOTH glide crosses
   // panels on its way to the goal, one tick as the strip passes each intermediate panel
-  // (Now→More: Plan, Log, then the lock tick at More = 3). `next` is the next intermediate
-  // panel index still to pass, `dir` the travel direction. null = no tap glide in flight.
-  // Swipes never set it (they keep the one-tick-at-settle rule).
+  // (Log→More: Now, Plan, then the lock tick at More = 3; Now→More: Plan, then the lock tick
+  // at More = 2). `next` is the next intermediate panel index still to pass, `dir` the travel
+  // direction. null = no tap glide in flight. Swipes never set it (they keep the one-tick-at-settle rule).
   const tapPass = useRef<{ next: number; dir: number; goal: number } | null>(null);
   const disclaimer = launchNotice;
   const setDisclaimer = (open: boolean) => { setLaunchNotice(open); redraw((x) => x + 1); };
@@ -5860,7 +5874,7 @@ export function App() {
       </main></div>
     );
   }
-  const tabs: [State['tab'], string, string][] = [['now', 'Now', I.now], ['plan', 'Plan', I.plan], ['log', 'Log', I.log], ['settings', 'More', I.more]];
+  const TAB_META: Record<string, [string, string]> = { log: ['Log', I.log], now: ['Now', I.now], plan: ['Plan', I.plan], settings: ['More', I.more] };
   // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
   // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
   // and the last-8-days view it opens moved from More to Plan.
@@ -5892,6 +5906,12 @@ export function App() {
   const activePanel = navPanelOf(s.tab);
   const onPagesScroll = () => {
     const el = pagesRef.current; if (!el) return;
+    // Finish a programmatic smooth glide's sub-pixel tail once within 1px of its target snap
+    // offset so an adjacent panel's flush edge (e.g. Now's dock) never lingers 1px inside view.
+    if (stripGoal.current !== null && el.clientWidth > 0) {
+      const gx = stripGoal.current * el.clientWidth;
+      if (el.scrollLeft !== gx && Math.abs(el.scrollLeft - gx) <= 1) el.scrollLeft = gx;
+    }
     cancelRafOf(stripRaf.current);
     stripRaf.current = rafOf(() => {
       const w = el.clientWidth || 0; if (!w) return;
@@ -5939,24 +5959,32 @@ export function App() {
   // A hand on the strip is the driver's own scroll: any programmatic goal is off.
   // A grab also ends a tap glide's pass-through ticks (the swipe's own settle rule takes over).
   const onStripGrab = () => { stripGoal.current = null; tapPass.current = null; };
-  useEffect(() => {
+  // R1 & R2 (DESIGN-NAV §4): seat the strip before paint (useLayoutEffect) whenever
+  // activePanel changes OR <main class="pages"> mounts (including returning from the driving
+  // view, which unmounts the shell while activePanel stays 'now'). A freshly mounted strip
+  // jumps silently (behavior: 'auto') so first paint never flashes Log and driving-view return
+  // lands on Now.
+  useLayoutEffect(() => {
     if (barPanelRef.current !== activePanel) { barPanelRef.current = activePanel; setBarPanel(activePanel); }
-    const el = pagesRef.current; if (!el || typeof el.scrollTo !== 'function') return;
+    const el = pagesRef.current;
+    if (!el || driveUp) { stripPlacedEl.current = null; return; }
+    if (typeof el.scrollTo !== 'function') return;
     const w = el.clientWidth || 0; if (!w) return;
     const idx = PANEL_ORDER.indexOf(activePanel);
+    const mountedNew = stripPlacedEl.current !== el;
     const moving = Math.abs(el.scrollLeft - idx * w) > 2;
     // Only a tab tap's glide ticks at its lock (tapGoal names this very panel); any other
     // store-driven move (back button, shortcut, restore, an in-panel button, a swipe's own
-    // commit) takes its panel as the lock reference right away, silently — so a settle swallowed under a sheet can never
+    // commit, or a fresh mount) takes its panel as the lock reference right away, silently — so a settle swallowed under a sheet can never
     // leave a stale reference behind. A tap that needs no glide (already resting there,
     // no settle on its way) locks now, silently: nothing moved.
-    if (tapGoal.current !== idx || (!moving && stripSettle.current === null)) { lockedPanel.current = activePanel; tapGoal.current = null; }
+    if (mountedNew || tapGoal.current !== idx || (!moving && stripSettle.current === null)) { lockedPanel.current = activePanel; tapGoal.current = null; }
     tapPass.current = null;
     if (moving) {
-      stripGoal.current = idx;
-      const smooth = stripPlaced.current && !prefersReducedMotion();
+      const smooth = !mountedNew && !prefersReducedMotion();
+      stripGoal.current = smooth ? idx : null;
       // Amendment A: only a tab tap's SMOOTH glide passes panels on screen; an instant jump
-      // (reduced motion, first placement) shows nothing passing, so it keeps the lock tick only.
+      // (reduced motion, first placement / remount) shows nothing passing, so it keeps the lock tick only.
       if (smooth && tapGoal.current === idx) {
         const dir = idx * w > el.scrollLeft ? 1 : -1;
         const next = dir > 0 ? Math.floor((el.scrollLeft + 1) / w) + 1 : Math.ceil((el.scrollLeft - 1) / w) - 1;
@@ -5964,8 +5992,8 @@ export function App() {
       }
       el.scrollTo({ left: idx * w, behavior: smooth ? 'smooth' : 'auto' });
     }
-    stripPlaced.current = true;
-  }, [activePanel]);
+    stripPlacedEl.current = el;
+  }, [activePanel, driveUp]);
   // A rotated or resized phone changes the page width under the strip: re-seat it on the
   // current panel, instantly, so the snap points line up again.
   useEffect(() => {
@@ -5997,6 +6025,14 @@ export function App() {
           notices ride at the top of each page, as they rode at the top of the one
           scroller before; the planning sub-screens stay inside the Plan page. */}
       <main ref={pagesRef} class="pages" inert={blocked} onScroll={onPagesScroll} onPointerDown={onStripGrab} onTouchStart={onStripGrab} onWheel={onStripGrab}>
+        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
+          {warnbox}
+          {themeNoticeCard}
+          <Notices ev={ev} now={now} s={s} />
+          <TabBoundary key="log" tab="log">
+            <LogTab s={s} now={now} ev={ev} />
+          </TabBoundary>
+        </section>
         <section class={`page page-now has-dock${activePanel === 'now' ? ' is-active' : ''}`} inert={activePanel !== 'now'} aria-hidden={activePanel !== 'now'}>
           {warnbox}
           {themeNoticeCard}
@@ -6023,14 +6059,6 @@ export function App() {
             )}
           </TabBoundary>
         </section>
-        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
-          {warnbox}
-          {themeNoticeCard}
-          <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key="log" tab="log">
-            <LogTab s={s} now={now} ev={ev} />
-          </TabBoundary>
-        </section>
         <section class={`page page-settings${activePanel === 'settings' ? ' is-active' : ''}`} inert={activePanel !== 'settings'} aria-hidden={activePanel !== 'settings'}>
           {warnbox}
           {themeNoticeCard}
@@ -6040,11 +6068,13 @@ export function App() {
           </TabBoundary>
         </section>
       </main>
-      <nav class="tabs" inert={blocked}>{tabs.map(([k, l, icon]) => {
+      <nav class="tabs" inert={blocked}>{PANEL_ORDER.map((k) => {
+        const [l, icon] = TAB_META[k];
         const on = barPanel === k;
+        const cls = k === 'now' ? (on ? 'tab-now on' : 'tab-now') : (on ? 'on' : '');
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {sheet?.kind === 'since' && <SinceSheet s={s} now={now} />}
