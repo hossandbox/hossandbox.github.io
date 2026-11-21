@@ -64,7 +64,10 @@ const open = async (saved, { width = 412, reducedMotion } = {}) => {
   return { ctx, page, errors };
 };
 const click = (sel) => async (p) => { const l = typeof sel === 'string' ? p.locator(sel) : sel(p); await l.first().click({ timeout: 3000 }); await p.waitForTimeout(350); };
-const tab = (t) => click((p) => p.locator('nav.tabs button', { hasText: new RegExp(t + '$') }));
+// Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar ("More") to header gear ("Settings").
+const tab = (t) => click((p) => (t === 'More' || t === 'Settings')
+  ? p.locator('header.top button[aria-label="Settings"]')
+  : p.locator('nav.tabs button', { hasText: new RegExp(t + '$') }));
 const planItem = (i) => click((p) => p.locator('main button.plan-item').nth(i));
 const noOverflow = async (page, name) => {
   const o = await page.evaluate(() => ({ sw: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0), iw: window.innerWidth }));

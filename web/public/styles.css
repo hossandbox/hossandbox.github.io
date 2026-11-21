@@ -136,7 +136,7 @@ p { margin: 8px 0; }
 .card.bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
 .card .clocks { margin-top: 8px; }
 
-.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: 1fr 1fr 1fr; background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
 .tabs button { position: relative; background: none; border: 0; border-radius: 0; padding: 8px 4px 10px; min-height: 60px; color: var(--muted); font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; box-shadow: none; }
 .tabs button.on { color: var(--text); font-weight: 800; }
 .tabs button.on::before { content: ""; position: absolute; top: 0; left: 26%; right: 26%; height: 3px; border-radius: 0 0 var(--r-3) var(--r-3); background: var(--accent); box-shadow: 0 0 10px var(--glow); }
@@ -224,6 +224,8 @@ input.num { width: 100%; text-align: right; padding: 8px 10px; background: var(-
 :root:not([data-theme="day"]) .s-ON { filter: drop-shadow(0 0 3px rgba(255,181,71,.5)); }
 .top-right { display: flex; align-items: center; gap: var(--s-8); }
 .theme-btn { padding: 6px 12px; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; gap: 6px; min-height: 48px; }
+.gear-btn { padding: 6px; min-width: 48px; justify-content: center; }
+.gear-btn.on { border-color: var(--accent); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .viol li { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); margin-top: 6px; background: var(--tint-bad); border-left: 3px solid var(--bad); font-size: 14px; }
 .viol li.nominal { background: var(--tint-warn); border-left-color: var(--warn); }
 .checks li { padding: var(--s-6) 0; font-size: 15px; } .checks li::before { content: "✗  "; color: var(--bad); font-weight: 800; } .checks li.ok::before { content: "✓  "; color: var(--good); }
@@ -1141,6 +1143,7 @@ details.help > p { margin: 0 4px 8px; padding: 10px 12px; border-radius: var(--r
   /* the status capsule stays one line: the "· 20m" is what gives way, never the status */
   .top-row > .pill { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 40px; }
   .top-row > .pill::before { display: inline-block; vertical-align: middle; margin: -2px 9px 0 0; }
+  .top-right { gap: var(--s-6); }
   /* "STOP BY FRI 20", not "STOP BY FRI NOV 20" */
   .hero-stop .sd-mon { display: none; }
   /* the dock is one row: the four statuses and a compact "…" key for PC / yard move / earlier */

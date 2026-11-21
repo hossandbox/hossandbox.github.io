@@ -72,7 +72,8 @@ const toggles = (page) => page.evaluate(() => [...document.querySelectorAll('.to
     const r = t.onBg ? ratio(t.onBg, t.track) : 0;
     ok(`day/now: "${t.label}" chosen key stands out (bg ${t.onBg} on track ${t.track} = ${r.toFixed(2)}:1, shadow edge)`, t.onBg && r >= 1.2 && t.onShadow && t.onShadow !== 'none', `ratio ${r.toFixed(3)}, shadow ${t.onShadow}`);
   }
-  await page.getByRole('button', { name: /^More/ }).click(); await page.waitForTimeout(400);
+  // Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar ("More") to header gear ("Settings").
+  await page.getByRole('button', { name: /^Settings$/ }).click(); await page.waitForTimeout(400);
   const ms = await toggles(page);
   ok('day/more: the screen carries toggles', ms.length >= 3, `found ${ms.length}`);
   for (const t of ms) {

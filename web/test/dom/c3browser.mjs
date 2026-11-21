@@ -185,7 +185,8 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     await page.goBack(); await page.waitForTimeout(300);
     const after = await page.evaluate(() => document.querySelector('h1.screen-title')?.textContent);
     ok(`${tag} the phone's Back from Hours coming back lands on Plan`, after === 'Plan', after);
-    await tapText(page, 'nav.tabs button', /More$/); await page.waitForTimeout(150);
+    // Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar to header gear button.
+    await page.locator('header.top button[aria-label="Settings"]').click(); await page.waitForTimeout(150);
     const moved = await page.evaluate(() => { const b = [...document.querySelectorAll('button.rowbtn')].find((x) => x.textContent.trim() === 'Hours coming back has moved to Plan ›'); return b ? Math.round(b.getBoundingClientRect().height) : 0; });
     ok(`${tag} More: the pointer row is a >= 48px row`, moved >= 48, String(moved));
     ok(`${tag} no page errors (Plan / More)`, errors.length === 0, errors.join(' | '));

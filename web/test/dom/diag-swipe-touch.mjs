@@ -84,7 +84,12 @@ const state = () => page.evaluate(() => {
   return { left: Math.round(m.scrollLeft), active: a?.className.match(/page-(\w+)/)?.[1], bar: document.querySelector('nav.tabs button.on')?.textContent.trim() };
 });
 const seat = async (tab) => {
-  await page.evaluate((t) => [...document.querySelectorAll('nav.tabs button')].find((b) => b.textContent.includes(t)).click(), tab);
+  await page.evaluate((t) => {
+    const b = (t === 'More' || t === 'Settings')
+      ? document.querySelector('header.top button[aria-label="Settings"]')
+      : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(t));
+    b.click();
+  }, tab);
   await page.waitForTimeout(900);
 };
 const swipe = async (x, y, dx, dy = 0) => {

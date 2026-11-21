@@ -46,7 +46,7 @@ const { render, h } = await import('preact');
 const { readFileSync, readdirSync } = await import('node:fs');
 const A = await import('../../src/app.tsx');
 const S = await import('../../src/store.ts');
-const { App, setLaunchNotice, setDrivingPeek, openSheet, PANEL_ORDER } = A;
+const { App, setLaunchNotice, setDrivingPeek, openSheet, PANEL_ORDER, BAR_ORDER } = A;
 const { setState, getState, deviceTz } = S;
 setLaunchNotice?.(false);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
@@ -81,18 +81,20 @@ const freshMount = {
 // the strip moves and the snap lands it; the app's settle timer (120ms) then commits.
 const scrollStripTo = async (px) => { const el = strip(); el.scrollLeft = px; fire(el, 'scroll'); await sleep(220); };
 
-/* ---------------- (a) the bottom bar shows Plan, Now, Log, More ---------------- */
-// Re-aimed (2026-11-20 nowplain): Log and Plan swapped — bar order is Plan — Now — Log — More.
-await pin('A1. PANEL_ORDER is plan/now/log/settings', async () => {
+/* ---------------- (a) the bottom bar shows Plan, Now, Log (Settings in header gear) ---------------- */
+// PANEL_ORDER now describes the 4-panel horizontal swipe strip only (Plan — Now — Log — Settings);
+// bottom-bar tabs are driven by BAR_ORDER (Lorico, 2026-11-21 nav-gear).
+await pin('A1. PANEL_ORDER is plan/now/log/settings (strip order only)', async () => {
   return JSON.stringify(PANEL_ORDER) === JSON.stringify(['plan', 'now', 'log', 'settings']) || `got ${JSON.stringify(PANEL_ORDER)}`;
 });
-// Re-aimed (2026-11-20 nowplain): bottom bar is derived from PANEL_ORDER (Plan, Now, Log, More).
-await pin('A2. the rendered tab bar reads Plan, Now, Log, More in that order', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): bottom bar drops More/Settings and renders 3 tabs from BAR_ORDER (Plan, Now, Log).
+await pin('A2. BAR_ORDER is plan/now/log and the rendered tab bar reads Plan, Now, Log in that order', async () => {
   await seed({ ...segs });
+  if (JSON.stringify(BAR_ORDER) !== JSON.stringify(['plan', 'now', 'log'])) return `BAR_ORDER=${JSON.stringify(BAR_ORDER)}`;
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
   if (!nav) return 'no tab bar rendered';
   const labels = nav.childNodes.filter((n) => n.localName === 'button').map((b) => b.textContent.trim());
-  return JSON.stringify(labels) === JSON.stringify(['Plan', 'Now', 'Log', 'More']) || `got ${JSON.stringify(labels)}`;
+  return JSON.stringify(labels) === JSON.stringify(['Plan', 'Now', 'Log']) || `got ${JSON.stringify(labels)}`;
 });
 await pin('A3. the app still lands on Now by default, seated at 1 × width on fresh mount (DESIGN-NAV R2)', async () => {
   const ok = freshMount.tab === 'now'
@@ -104,17 +106,18 @@ await pin('A3. the app still lands on Now by default, seated at 1 × width on fr
 });
 
 /* ---------------- (s) the snap strip ---------------- */
-// Re-aimed (2026-11-20 nowplain): strip section order matches PANEL_ORDER (page-plan, page-now, page-log, page-settings) and the bar.
-await pin('S1. <main> is the strip: four pages side by side, Plan/Now/Log/More order, matching PANEL_ORDER and bar', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): strip section order stays PANEL_ORDER (4 pages: page-plan, page-now, page-log, page-settings);
+// bottom-bar button ids/order match BAR_ORDER (3 tabs: plan, now, log).
+await pin('S1. <main> is the 4-page strip matching PANEL_ORDER; bottom bar renders 3 tabs matching BAR_ORDER', async () => {
   const ps = pages();
   if (ps.length !== 4) return `pages=${ps.length}`;
   const want = ['page-plan', 'page-now', 'page-log', 'page-settings'];
   const got = ps.map((p) => cls(p).split(/\s+/).find((c) => c.startsWith('page-')));
   const expectedFromOrder = PANEL_ORDER.map((k) => `page-${k}`);
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
-  const barIds = nav.childNodes.filter((n) => n.localName === 'button').map((b) => ({ Plan: 'plan', Now: 'now', Log: 'log', More: 'settings' }[b.textContent.trim()]));
-  return (JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(got) === JSON.stringify(expectedFromOrder) && JSON.stringify(barIds) === JSON.stringify(PANEL_ORDER))
-    || `strip=${JSON.stringify(got)} bar=${JSON.stringify(barIds)} PANEL_ORDER=${JSON.stringify(PANEL_ORDER)}`;
+  const barIds = nav.childNodes.filter((n) => n.localName === 'button').map((b) => ({ Plan: 'plan', Now: 'now', Log: 'log' }[b.textContent.trim()]));
+  return (JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(got) === JSON.stringify(expectedFromOrder) && JSON.stringify(barIds) === JSON.stringify(BAR_ORDER))
+    || `strip=${JSON.stringify(got)} bar=${JSON.stringify(barIds)} PANEL_ORDER=${JSON.stringify(PANEL_ORDER)} BAR_ORDER=${JSON.stringify(BAR_ORDER)}`;
 });
 await pin('S2. all four panels stay mounted at once (the strip never unmounts a page)', async () => {
   await seed({ tab: 'now', ...segs });
@@ -125,10 +128,10 @@ await pin('S2. all four panels stay mounted at once (the strip never unmounts a 
   if (!entry) missing.push('log entry');
   return missing.length === 0 || `missing while tab=now: ${missing.join('; ')}`;
 });
-// Re-aimed (2026-11-20 nowplain): snap stops 0=plan, 400=now, 800=log, 1200=settings.
-await pin('S3. scrolling the strip walks the tab — and the bar follows — at every snap point', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): snap stops 0=plan/Plan, 400=now/Now, 800=log/Log, 1200=settings (no bar tab lit).
+await pin('S3. scrolling the strip walks the tab — and the bar follows — at every snap point (no bar tab lit on Settings)', async () => {
   await seed({ tab: 'now', ...segs });
-  const stops = [[0, 'plan', 'Plan'], [400, 'now', 'Now'], [800, 'log', 'Log'], [1200, 'settings', 'More']];
+  const stops = [[0, 'plan', 'Plan'], [400, 'now', 'Now'], [800, 'log', 'Log'], [1200, 'settings', null]];
   for (const [px, tab, label] of stops) {
     await scrollStripTo(px);
     if (getState().tab !== tab) return `at ${px}px tab=${getState().tab}, want ${tab}`;
@@ -151,19 +154,26 @@ await pin('S5. the page nodes are the same objects after the walks (scroll state
   const after = pages();
   return (before.length === 4 && after.length === 4 && before.every((p, i) => p === after[i])) || 'a page node was replaced';
 });
-// Re-aimed (2026-11-20 nowplain): tapping each tab (Plan, Now, Log, More) opens its own screen and scrolls to its snap offset.
-await pin('S6. each tab tap scrolls the strip to its own page (Plan=0, Now=400, Log=800, More=1200)', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): header gear opens Settings (1200px, no bar button lit); Plan/Log/Now bar taps scroll to 0/800/400 and light themselves.
+await pin('S6. header gear and each bar tap scroll the strip to their page (Settings=1200, Plan=0, Log=800, Now=400)', async () => {
   await seed({ tab: 'now', ...segs });
   strip().scrollLeft = 400; scrollCalls.length = 0;
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
-  const btn = (lbl) => nav.childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === lbl);
-  for (const [lbl, tab, px, pageCls] of [['More', 'settings', 1200, 'page-settings'], ['Plan', 'plan', 0, 'page-plan'], ['Log', 'log', 800, 'page-log'], ['Now', 'now', 400, 'page-now']]) {
+  const btn = (lbl) => lbl === 'Settings'
+    ? all((n) => n.localName === 'button' && n.attributes?.['aria-label'] === 'Settings')[0]
+    : nav.childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === lbl);
+  for (const [lbl, tab, px, pageCls, wantLit] of [
+    ['Settings', 'settings', 1200, 'page-settings', null],
+    ['Plan', 'plan', 0, 'page-plan', 'Plan'],
+    ['Log', 'log', 800, 'page-log', 'Log'],
+    ['Now', 'now', 400, 'page-now', 'Now'],
+  ]) {
     scrollCalls.length = 0;
     fire(btn(lbl), 'click');
     await sleep(60);
     const last = scrollCalls[scrollCalls.length - 1];
     const activePg = pages().find((p) => has(p, 'is-active'));
-    if (getState().tab !== tab || !last || last.left !== px || litTab() !== lbl || !activePg || !has(activePg, pageCls)) {
+    if (getState().tab !== tab || !last || last.left !== px || litTab() !== wantLit || !activePg || !has(activePg, pageCls)) {
       return `tap ${lbl}: tab=${getState().tab} scrollTo=${JSON.stringify(last)} lit=${litTab()} active=${activePg && cls(activePg)}`;
     }
   }
@@ -280,6 +290,7 @@ const realClick = (node) => {
   finally { if (had) node.closest = prev; else delete node.closest; }
 };
 const navBtn = (label) => all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button').find((b) => b.textContent.trim() === label);
+const gearBtn = () => all((n) => n.localName === 'button' && n.attributes?.['aria-label'] === 'Settings')[0];
 // Re-aimed (2026-11-20 nowplain): Plan(0) → Log(800) crosses Now(400) for 2 ticks, then Log(800) → Now(400) is 1 tick at lock.
 await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Plan → Log ticks once passing Now and once at the lock', async () => {
   await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
@@ -310,14 +321,14 @@ await pin('H4. a tab-bar tap to a DIFFERENT panel: zero ticks at tap time; Plan 
   await scrollStripTo(400); await sleep(60);
   return (getState().tab === 'now' && vib.length === 3) || `tab=${getState().tab} vibrate×${vib.length}: ${JSON.stringify(vib)}`;
 });
-// Amendment A (Lorico 2026-11-20; re-aimed 2026-11-20 nowplain): a tab tap's glide ticks as it
-// passes each panel, plus the lock. glideTap taps `label` with a travelling (smooth) scrollTo,
-// walks the strip through `path` in scroll events closer together than the settle window, and
-// lets the last px settle.
+// Amendment A (Lorico 2026-11-20; re-aimed 2026-11-21 nav-gear): a panel-nav tap's glide ticks as it
+// passes each panel, plus the lock. glideTap taps `label` (or header Settings gear) with a travelling
+// (smooth) scrollTo, walks the strip through `path` in scroll events closer together than the settle
+// window, and lets the last px settle.
 const glideTap = async (label, path) => {
   const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); };
   vib.length = 0;
-  realClick(navBtn(label));
+  realClick(label === 'Settings' ? gearBtn() : navBtn(label));
   const atPress = vib.length;
   await sleep(60); // the store → strip effect sends the glide on its way (travelling, not landed)
   el.scrollTo = applyingScrollTo(el);
@@ -329,21 +340,21 @@ const glideTap = async (label, path) => {
   await sleep(220);
   return { atPress, seen, beforeLock, total: vib.length };
 };
-// Re-aimed (2026-11-20 nowplain): Plan→More=3 (pass Now, Log, lock More); Now→More=2 (pass Log, lock More).
-await pin('H10. amendment A (nowplain): Plan → More yields 3 ticks (Now, Log, lock); Now → More yields 2 ticks (Log, lock)', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): Settings is opened via header gear; Plan→Settings=3 (pass Now, Log, lock Settings); Now→Settings=2 (pass Log, lock Settings).
+await pin('H10. amendment A (nav-gear): Plan → Settings (gear) yields 3 ticks (Now, Log, lock); Now → Settings (gear) yields 2 ticks (Log, lock)', async () => {
   await seed({ tab: 'plan', ...segs }); strip().scrollLeft = 0; fire(strip(), 'scroll'); await sleep(220);
-  const r = await glideTap('More', [150, 350, 420, 600, 790, 810, 1000, 1150, 1200]);
+  const r = await glideTap('Settings', [150, 350, 420, 600, 790, 810, 1000, 1150, 1200]);
   const want = [0, 0, 1, 1, 1, 2, 2, 2];
-  if (r.atPress !== 0) return `Plan→More ticked at press: ${r.atPress}`;
-  if (JSON.stringify(r.seen) !== JSON.stringify(want)) return `Plan→More glide ${JSON.stringify(r.seen)}, want ${JSON.stringify(want)}`;
-  if (r.beforeLock !== 2 || getState().tab !== 'settings' || r.total !== 3) return `Plan→More beforeLock=${r.beforeLock} total=${r.total} tab=${getState().tab}`;
+  if (r.atPress !== 0) return `Plan→Settings ticked at press: ${r.atPress}`;
+  if (JSON.stringify(r.seen) !== JSON.stringify(want)) return `Plan→Settings glide ${JSON.stringify(r.seen)}, want ${JSON.stringify(want)}`;
+  if (r.beforeLock !== 2 || getState().tab !== 'settings' || r.total !== 3) return `Plan→Settings beforeLock=${r.beforeLock} total=${r.total} tab=${getState().tab}`;
   await sleep(200);
-  if (vib.length !== 3) return `Plan→More ticked again at rest: ${vib.length}`;
-  // Now → More (1 → 3): pass Log (800), lock More (1200) = 2 ticks
+  if (vib.length !== 3) return `Plan→Settings ticked again at rest: ${vib.length}`;
+  // Now → Settings (1 → 3): pass Log (800), lock Settings (1200) = 2 ticks
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220);
-  const r2 = await glideTap('More', [550, 780, 810, 1050, 1200]);
+  const r2 = await glideTap('Settings', [550, 780, 810, 1050, 1200]);
   return (r2.atPress === 0 && JSON.stringify(r2.seen) === '[0,0,1,1]' && r2.beforeLock === 1 && r2.total === 2 && getState().tab === 'settings')
-    || `Now→More press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total}`;
+    || `Now→Settings press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total}`;
 });
 // Re-aimed (2026-11-20 nowplain): Now(400) → Log(800) = 1 tick, Now(400) → Plan(0) = 1 tick, both at lock only.
 await pin('H11. amendment A (nowplain): Now → Log and Now → Plan (adjacent) each yield exactly 1 tick, at the lock', async () => {
@@ -357,16 +368,16 @@ await pin('H11. amendment A (nowplain): Now → Log and Now → Plan (adjacent) 
   return (r2.atPress === 0 && r2.seen.every((n) => n === 0) && r2.beforeLock === 0 && r2.total === 1 && getState().tab === 'plan')
     || `Now→Plan press=${r2.atPress} glide=${JSON.stringify(r2.seen)} beforeLock=${r2.beforeLock} total=${r2.total} tab=${getState().tab}`;
 });
-// Re-aimed (2026-11-20 nowplain): backwards More→Plan=3, More→Now=2, fast glide Plan→More skipping 2 panels still counts 3.
-await pin('H12. amendment A, backwards (nowplain): More → Plan ticks 3, More → Now ticks 2; fast glide skipping two panels still counts each', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): backwards Settings→Plan=3, Settings→Now=2, fast glide Plan→Settings (via gear) skipping 2 panels still counts 3.
+await pin('H12. amendment A, backwards (nav-gear): Settings → Plan ticks 3, Settings → Now ticks 2; fast glide Plan → Settings (gear) skipping two panels still counts each', async () => {
   await seed({ tab: 'settings', ...segs }); strip().scrollLeft = 1200; fire(strip(), 'scroll'); await sleep(220);
   const r1 = await glideTap('Plan', [1000, 790, 600, 390, 0]);
-  if (!(r1.atPress === 0 && JSON.stringify(r1.seen) === '[0,1,1,2]' && r1.total === 3 && getState().tab === 'plan')) return `More→Plan: press=${r1.atPress} glide=${JSON.stringify(r1.seen)} total=${r1.total} tab=${getState().tab}`;
-  const r2 = await glideTap('More', [900, 1200]); // Now and Log both passed between two frames
-  if (!(r2.atPress === 0 && JSON.stringify(r2.seen) === '[2]' && r2.total === 3 && getState().tab === 'settings')) return `Plan→More skip: press=${r2.atPress} glide=${JSON.stringify(r2.seen)} total=${r2.total}`;
-  const r3 = await glideTap('Now', [1000, 790, 600, 400]); // More → Now: passes Log, locks Now = 2
+  if (!(r1.atPress === 0 && JSON.stringify(r1.seen) === '[0,1,1,2]' && r1.total === 3 && getState().tab === 'plan')) return `Settings→Plan: press=${r1.atPress} glide=${JSON.stringify(r1.seen)} total=${r1.total} tab=${getState().tab}`;
+  const r2 = await glideTap('Settings', [900, 1200]); // Now and Log both passed between two frames
+  if (!(r2.atPress === 0 && JSON.stringify(r2.seen) === '[2]' && r2.total === 3 && getState().tab === 'settings')) return `Plan→Settings skip: press=${r2.atPress} glide=${JSON.stringify(r2.seen)} total=${r2.total}`;
+  const r3 = await glideTap('Now', [1000, 790, 600, 400]); // Settings → Now: passes Log, locks Now = 2
   return (r3.atPress === 0 && JSON.stringify(r3.seen) === '[0,1,1]' && r3.beforeLock === 1 && r3.total === 2 && getState().tab === 'now')
-    || `More→Now: press=${r3.atPress} glide=${JSON.stringify(r3.seen)} beforeLock=${r3.beforeLock} total=${r3.total} tab=${getState().tab}`;
+    || `Settings→Now: press=${r3.atPress} glide=${JSON.stringify(r3.seen)} beforeLock=${r3.beforeLock} total=${r3.total} tab=${getState().tab}`;
 });
 // Re-aimed (2026-11-20 nowplain): swipe fling Now(400) → Log(800) → More(1200) is 1 tick at settle; reduced-motion More → Plan is 1 tick at lock.
 await pin('H13. amendment A leaves swipes alone (nowplain): fling Now → Log → More is ONE tick at settle; reduced-motion tap is one tick at lock', async () => {
@@ -400,22 +411,22 @@ await pin('H7. a tap on the tab of the panel already showing never ticks — not
   realClick(navBtn('Plan')); await sleep(60); fire(strip(), 'scroll'); await sleep(220);
   return (getState().tab === 'plan' && vib.length === 0) || `tab=${getState().tab} vibrate×${vib.length}`;
 });
-// Re-aimed (2026-11-20 nowplain): Now(400) → More(1200) grabbed mid-glide (700) back to Now(400) or on to Log(800).
-await pin('H8. a tab tap whose glide the driver grabs and swipes back to where it started is silent; one swiped on to a third panel ticks once', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): Now(400) → Settings(1200) via header gear grabbed mid-glide (700) back to Now(400) or on to Log(800).
+await pin('H8. a Settings gear tap whose glide the driver grabs and swipes back to where it started is silent; one swiped on to a third panel ticks once', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220); vib.length = 0;
   const el = strip(); el.scrollTo = (opts) => { scrollCalls.push(opts); };
-  realClick(navBtn('More')); el.scrollTo = applyingScrollTo(el); await sleep(60);
+  realClick(gearBtn()); el.scrollTo = applyingScrollTo(el); await sleep(60);
   el.scrollLeft = 700; fire(el, 'scroll'); await sleep(30);
   grab(); await scrollStripTo(400); await sleep(60);
   if (getState().tab !== 'now' || vib.length) return `back to start: tab=${getState().tab} vibrate×${vib.length}`;
   el.scrollTo = (opts) => { scrollCalls.push(opts); };
-  realClick(navBtn('More')); el.scrollTo = applyingScrollTo(el); await sleep(60);
+  realClick(gearBtn()); el.scrollTo = applyingScrollTo(el); await sleep(60);
   el.scrollLeft = 700; fire(el, 'scroll'); await sleep(30);
   grab(); await scrollStripTo(800); await sleep(60);
   return (getState().tab === 'log' && vib.length === 1) || `swiped on to Log: tab=${getState().tab} vibrate×${vib.length}`;
 });
-// Re-aimed (DESIGN-NAV §2.1): Now rests at 400px.
-await pin('H9. every other button keeps its instant click tick (the global handler is untouched); only the four tab buttons opt out', async () => {
+// Re-aimed (2026-11-21 nav-gear, Lorico): 3 bottom-bar tab buttons + header Settings gear carry data-haptic="lock"; every other button keeps its instant click tick.
+await pin('H9. every other button keeps its instant click tick (the global handler is untouched); only the 3 tab buttons and header Settings gear opt out', async () => {
   await seed({ tab: 'now', ...segs }); strip().scrollLeft = 400; fire(strip(), 'scroll'); await sleep(220);
   const btns = all((n) => n.localName === 'button' && n.attributes['data-haptic'] == null && !n.attributes.disabled && !(n.parentNode && n.parentNode.localName === 'nav'));
   if (btns.length < 3) return `only ${btns.length} plain buttons found`;
@@ -424,9 +435,12 @@ await pin('H9. every other button keeps its instant click tick (the global handl
   realClick(b);
   const got = vib.slice(); openSheet(null); await sleep(60);
   if (got.length !== 1 || got[0] !== 12) return `plain button "${b.textContent.trim().slice(0, 30)}": ${JSON.stringify(got)}, want [12] at the click`;
-  // the tab buttons are the only new opt-out: each carries data-haptic, nothing else changed
+  // the 3 tab buttons + header Settings gear are the panel-navigation lock opt-outs
   const tabs = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button');
-  if (tabs.length !== 4 || !tabs.every((t) => t.attributes['data-haptic'] === 'lock')) return `tab buttons: ${tabs.map((t) => t.attributes['data-haptic']).join(',')}`;
+  const gear = gearBtn();
+  if (tabs.length !== 3 || !tabs.every((t) => t.attributes['data-haptic'] === 'lock') || gear?.attributes?.['data-haptic'] !== 'lock') {
+    return `tab buttons=${tabs.length} (${tabs.map((t) => t.attributes['data-haptic']).join(',')}) gear=${gear?.attributes?.['data-haptic']}`;
+  }
   return true;
 });
 // Re-aimed (2026-11-20 nowplain): Now rests at 400px, Log at 800px.
@@ -1246,6 +1260,101 @@ await pin('R9. recovery "Use earliest workable appointment" updates stored appoi
 
   return (beforePair === '2026-11-12 10:00' && afterPair !== beforePair && sheetDate === afterDate && sheetTime === afterTime)
     || JSON.stringify({ beforePair, afterPair, sheetDate, sheetTime });
+});
+
+/* ---------------- (g) nav-gear (2026-11-21, Lorico): 3-tab bar + header Settings gear ---------------- */
+await pin('G1. nav-gear: bottom bar renders exactly 3 equal buttons (Plan, Now, Log) matching BAR_ORDER with 3-column CSS grid and no More/Settings tab', async () => {
+  await seed({ tab: 'now', ...segs });
+  const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
+  if (!nav) return 'no nav.tabs';
+  const btns = nav.childNodes.filter((n) => n.localName === 'button');
+  const labels = btns.map((b) => b.textContent.trim());
+  const classes = btns.map((b) => cls(b).trim());
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const tabsRule = css.match(/(?:^|\n)\.tabs \{([^}]*)\}/)?.[1] ?? '';
+  const has3Col = /grid-template-columns:\s*(?:1fr 1fr 1fr|repeat\(3,\s*1fr\))\s*;/.test(tabsRule);
+  const ok = btns.length === 3
+    && JSON.stringify(labels) === JSON.stringify(['Plan', 'Now', 'Log'])
+    && JSON.stringify(BAR_ORDER) === JSON.stringify(['plan', 'now', 'log'])
+    && classes[0] === '' && classes[1] === 'on' && classes[2] === ''
+    && !labels.some((l) => /More|Settings/i.test(l))
+    && has3Col;
+  return ok || JSON.stringify({ labels, classes, BAR_ORDER, tabsRule });
+});
+
+await pin('G2. nav-gear: TopBar .top-right DOM order is clock → gear → theme; gear has aria-label/title "Settings", theme-btn family class, and cog SVG', async () => {
+  await seed({ tab: 'now', ...segs });
+  const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
+  const topRight = hdr && all((n) => has(n, 'top-right'), hdr)[0];
+  if (!topRight) return 'missing .top-right in header.top';
+  const kids = topRight.childNodes.filter((n) => n.localName);
+  if (kids.length !== 3) return `expected 3 children in .top-right, got ${kids.length}: ${kids.map((k) => `${k.localName}.${cls(k)}`).join(', ')}`;
+  const [clk, gear, theme] = kids;
+  const clkOk = clk.localName === 'span' && has(clk, 'muted') && has(clk, 'clock');
+  const gearOk = gear.localName === 'button'
+    && has(gear, 'theme-btn')
+    && gear.attributes?.['aria-label'] === 'Settings'
+    && gear.attributes?.title === 'Settings';
+  const gearPath = all((n) => n.localName === 'path', gear)[0]?.attributes?.d ?? '';
+  const isCog = gearPath.length > 60 && gearPath !== 'M5 12h.01M12 12h.01M19 12h.01';
+  const themeOk = theme.localName === 'button' && has(theme, 'theme-btn') && /Switch to (day|night) theme/.test(theme.attributes?.['aria-label'] || '');
+  return (clkOk && gearOk && isCog && themeOk)
+    || JSON.stringify({ clkOk, gearOk, isCog, gearPathLen: gearPath.length, themeOk, kids: kids.map((k) => `${k.localName}.${cls(k)}`) });
+});
+
+await pin('G3. nav-gear: activating header gear lands on Settings screen with all content present and NO bottom-bar button active', async () => {
+  await seed({ tab: 'now', ...segs });
+  strip().scrollLeft = 400; scrollCalls.length = 0;
+  const gear = gearBtn();
+  if (!gear) return 'missing gear button';
+  fire(gear, 'click'); await sleep(80);
+  const settingsPg = pages()[3];
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  const navBtns = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button');
+  const anyBarOn = navBtns.some((b) => has(b, 'on') || b.attributes?.['aria-current'] === 'page');
+  const txt = settingsPg.textContent;
+  const sections = ['Rules', 'Planning', 'Driving alerts', 'Break buttons', 'Bug reports', 'Data', 'About'];
+  const missing = sections.filter((s) => !txt.includes(s));
+  const last = scrollCalls[scrollCalls.length - 1];
+  const ok = getState().tab === 'settings'
+    && !!last && last.left === 1200
+    && has(settingsPg, 'page-settings') && has(settingsPg, 'is-active')
+    && !off(settingsPg) && !hid(settingsPg)
+    && !anyBarOn && litTab() === null
+    && missing.length === 0;
+  return ok || JSON.stringify({ tab: getState().tab, last, active: cls(settingsPg), off: off(settingsPg), hid: hid(settingsPg), anyBarOn, lit: litTab(), missing });
+});
+
+await pin('G4. nav-gear: navigating back from Settings to Plan, Now, and Log via the bottom bar works and lights the right button', async () => {
+  for (const [label, tab, px, pageCls] of [
+    ['Plan', 'plan', 0, 'page-plan'],
+    ['Now', 'now', 400, 'page-now'],
+    ['Log', 'log', 800, 'page-log'],
+  ]) {
+    await seed({ tab: 'settings', ...segs });
+    strip().scrollLeft = 1200; scrollCalls.length = 0;
+    if (litTab() !== null) return `on settings before ${label}: lit=${litTab()}`;
+    const btn = navBtn(label);
+    if (!btn) return `missing bar button ${label}`;
+    fire(btn, 'click'); await sleep(80);
+    const last = scrollCalls[scrollCalls.length - 1];
+    const activePg = pages().find((p) => has(p, 'is-active'));
+    const navBtns = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0].childNodes.filter((n) => n.localName === 'button');
+    const onBtns = navBtns.filter((b) => has(b, 'on'));
+    const curBtns = navBtns.filter((b) => b.attributes?.['aria-current'] === 'page');
+    const gear = gearBtn();
+    const ok = getState().tab === tab
+      && !!last && last.left === px
+      && !!activePg && has(activePg, pageCls)
+      && onBtns.length === 1 && onBtns[0].textContent.trim() === label
+      && curBtns.length === 1 && curBtns[0].textContent.trim() === label
+      && gear.attributes?.['aria-current'] == null && !has(gear, 'on');
+    if (!ok) {
+      return `Settings→${label}: tab=${getState().tab} last=${JSON.stringify(last)} active=${activePg && cls(activePg)} lit=${litTab()} gearCur=${gear.attributes?.['aria-current']}`;
+    }
+  }
+  return true;
 });
 
 let fails = 0;

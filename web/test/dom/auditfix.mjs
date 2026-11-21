@@ -94,7 +94,11 @@ const tap = async (p, sel, text, ms = 300) => {
   }, [sel, text ? text.source ?? text : null]);
   await wait(p, ms);
 };
-const go = async (p, tab) => { await tap(p, 'nav.tabs button', new RegExp(tab), 900); };
+// Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar to header gear button.
+const go = async (p, tab) => {
+  if (tab === 'More' || tab === 'Settings') await tap(p, 'header.top button[aria-label="Settings"]', null, 900);
+  else await tap(p, 'nav.tabs button', new RegExp(tab), 900);
+};
 const sheetText = (p) => p.evaluate(() => document.querySelector('.sheet')?.innerText ?? '');
 const pageText = (p) => p.evaluate(() => document.querySelector('.page.is-active')?.innerText ?? document.body.innerText);
 const rect = (p, sel) => p.evaluate((q) => { const e = document.querySelector(q); if (!e) return null; const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width, h: r.height }; }, sel);

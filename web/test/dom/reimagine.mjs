@@ -60,7 +60,14 @@ const open = async (saved, width = 412) => {
   await page.waitForTimeout(350);
   return { ctx, page, errors };
 };
-const tab = async (page, t) => { await page.locator('nav.tabs button', { hasText: new RegExp(t + '$') }).first().click(); await page.waitForTimeout(300); };
+// Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar ("More") to header gear ("Settings").
+const tab = async (page, t) => {
+  const loc = (t === 'More' || t === 'Settings')
+    ? page.locator('header.top button[aria-label="Settings"]')
+    : page.locator('nav.tabs button', { hasText: new RegExp(t + '$') });
+  await loc.first().click();
+  await page.waitForTimeout(300);
+};
 
 // ---- seeds: one per state the sign has to name
 const OFF0 = { status: 'OFF', start: N - 1500, end: N - 640, createdAt: 1 };

@@ -102,6 +102,7 @@ for (const [W, H] of SIZES) {
       // the tab bar, and the lane must still reach every tab to report it.
       const tap = (sel, text) => page.evaluate(([q, t]) => { const b = [...document.querySelectorAll(q)].find((x) => x.textContent.includes(t)); if (!b) throw new Error('no ' + q + ' with ' + t); b.click(); }, [sel, text]);
       if (tab === 'Split') { await tap('nav.tabs button', 'Plan'); await page.waitForTimeout(100); await tap('main button', 'Plan a sleeper split'); }
+      else if (tab === 'More') { await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); }
       else await tap('nav.tabs button', tab);
       await page.waitForTimeout(250);
       // a tab tap now ANIMATES the strip to the page (smooth scroll): measure at rest,
@@ -270,7 +271,8 @@ for (const [W, H] of SIZES) {
     await drag(at.x, at.y, dir * Math.round(W * 0.7), 0);
     await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250);
     const a = await st();
-    ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && a.bar === { now: 'Now', plan: 'Plan', log: 'Log', settings: 'More' }[want], `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
+    // Re-aimed (2026-11-21 nav-gear, Lorico): Settings stays 4th strip panel; no bottom-bar tab is lit when active === 'settings'.
+    ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && (want === 'settings' ? !a.bar : a.bar === { now: 'Now', plan: 'Plan', log: 'Log' }[want]), `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
     ok(`${tag} (c) …and its settle gives exactly one haptic click`, a.vib - b.vib === 1, `vibrate calls +${a.vib - b.vib}`);
   }
   // Re-aimed (2026-11-20 nowplain): leftward diagonal swipe from Now pages to Log (index 2).
@@ -316,10 +318,16 @@ for (const [W, H] of SIZES) {
     const a2 = await st();
     ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'now' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
   }
-  // Re-aimed (2026-11-20 nowplain): Plan(0)–Now(1)–Log(2)–More(3); Now↔More is 2 ticks (pass Log),
-  // Plan↔More is 3 ticks, Plan→Log is 2 ticks, Now→Plan and Now→Log are 1 tick each.
+  // Re-aimed (2026-11-21 nav-gear, Lorico): strip is Plan(0)–Now(1)–Log(2)–Settings(3); Settings reached via header gear.
+  // Now↔Settings is 2 ticks (pass Log), Plan↔Settings is 3 ticks, Plan→Log is 2 ticks, Now→Plan and Now→Log are 1 tick each.
   {
-    const tabBox = (label) => page.evaluate((l) => { const r = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l)).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, label);
+    const tabBox = (label) => page.evaluate((l) => {
+      const el = l === 'Settings'
+        ? document.querySelector('header.top button[aria-label="Settings"]')
+        : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l));
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, label);
     const glide = async (label) => {
       const box = await tabBox(label);
       const n0 = await page.evaluate(() => window.__vib.length);
@@ -332,25 +340,25 @@ for (const [W, H] of SIZES) {
       return { a, got, early, t0 };
     };
     const where = (g) => g.got.map((v) => `${Math.round(v.t - g.t0)}ms@${(v.sl / (v.w || 1)).toFixed(2)}`).join(' ');
-    // Now(1) → More(3): pass Log(2), lock More(3) = 2 ticks
-    const g1 = await glide('More');
+    // Now(1) → Settings(3) via header gear: pass Log(2), lock Settings(3) = 2 ticks
+    const g1 = await glide('Settings');
     const pos1 = g1.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nowplain): Now → More ticks 2 times (pass Log, lock More), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
-    // More(3) → Now(1): pass Log(2), lock Now(1) = 2 ticks
+    ok(`${tag} (c) amendment A (nav-gear): Now → Settings (gear) ticks 2 times (pass Log, lock Settings), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
+    // Settings(3) → Now(1): pass Log(2), lock Now(1) = 2 ticks
     const g2 = await glide('Now');
     const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nowplain): More → Now ticks 2 times (pass Log, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
+    ok(`${tag} (c) amendment A (nav-gear): Settings → Now ticks 2 times (pass Log, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
     // Now(1) → Plan(0): adjacent = 1 tick at lock
     const g3 = await glide('Plan');
     ok(`${tag} (c) amendment A (nowplain): Now → Plan ticks once, at the lock`, g3.a.active === 'plan' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
-    // Plan(0) → More(3): pass Now(1), pass Log(2), lock More(3) = 3 ticks
-    const g4 = await glide('More');
+    // Plan(0) → Settings(3) via header gear: pass Now(1), pass Log(2), lock Settings(3) = 3 ticks
+    const g4 = await glide('Settings');
     const pos4 = g4.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nowplain): Plan → More ticks 3 times (Now, Log, lock More), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
-    // More(3) → Plan(0): pass Log(2), pass Now(1), lock Plan(0) = 3 ticks
+    ok(`${tag} (c) amendment A (nav-gear): Plan → Settings (gear) ticks 3 times (Now, Log, lock Settings), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
+    // Settings(3) → Plan(0): pass Log(2), pass Now(1), lock Plan(0) = 3 ticks
     const g5 = await glide('Plan');
     const pos5 = g5.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nowplain): More → Plan ticks 3 times (Log, Now, lock Plan), none at press`, g5.a.active === 'plan' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
+    ok(`${tag} (c) amendment A (nav-gear): Settings → Plan ticks 3 times (Log, Now, lock Plan), none at press`, g5.a.active === 'plan' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
     // Plan(0) → Log(2): pass Now(1), lock Log(2) = 2 ticks
     const g6 = await glide('Log');
     const pos6 = g6.got.map((v) => v.sl / (v.w || 1));
@@ -441,7 +449,7 @@ for (const [W, H] of SIZES) {
       });
       ok(`${tag} (d) C: load step 2's Next scrolled into view lands clear of the tab bar`, step2.a.bottom <= step2.a.navTop + 0.5, `next bottom ${step2.a.bottom.toFixed(1)}, bar top ${step2.a.navTop.toFixed(1)}`);
       ok(`${tag} (d) C: …and at the end of the scroll it clears the bar`, step2.b.bottom <= step2.b.navTop, `next bottom ${step2.b.bottom.toFixed(1)}, bar top ${step2.b.navTop.toFixed(1)}`);
-      await tap('nav.tabs button', 'More'); await settle();
+      await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); await settle();
       const eMore = await banner();
       ok(`${tag} (d) E: the "History incomplete" button sits inside its banner on Plan, the load check and More`, [eHub, eLoad, eMore].every((x) => x !== null && x <= 0), `plan ${eHub}, load ${eLoad}, more ${eMore} (px past the inner bottom edge)`);
       // ---- D (+A): the Log's live row
@@ -494,17 +502,24 @@ for (const [W, H] of SIZES) {
     await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.waitForTimeout(150);
     const tag = `[${W}x${H} ${theme} nav]`;
-    const tapNav = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('no tab ' + l); b.click(); }, label);
+    const tapNav = (label) => page.evaluate((l) => {
+      const b = (l === 'More' || l === 'Settings')
+        ? document.querySelector('header.top button[aria-label="Settings"]')
+        : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
+      if (!b) throw new Error('no tab ' + l);
+      b.click();
+    }, label);
     const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
     // 1 + 2. Order & Open-on-Now at the first animation frame after load (R2)
-    // Re-aimed (2026-11-20 nowplain): Log and Plan swapped — bar is Plan/Now/Log/More and strip is page-plan/page-now/page-log/page-settings.
+    // Re-aimed (2026-11-21 nav-gear, Lorico): bar is 3 tabs Plan/Now/Log; strip stays 4 pages page-plan/page-now/page-log/page-settings; TopBar .top-right order is clock → gear → theme.
     const open = await page.evaluate(() => {
       const bar = [...document.querySelectorAll('nav.tabs button')].map((b) => b.textContent.trim());
       const strip = [...document.querySelectorAll('main.pages > section.page')].map((s) => [...s.classList].find((c) => c.startsWith('page-')));
-      return { ff: window.__firstFrame, bar, strip };
+      const topRight = [...document.querySelectorAll('header.top .top-right > *')].map((el) => (el.classList.contains('clock') ? 'clock' : el.getAttribute('aria-label') === 'Settings' ? 'gear' : el.classList.contains('theme-btn') ? 'theme' : el.tagName));
+      return { ff: window.__firstFrame, bar, strip, topRight };
     });
-    ok(`${tag} (e) order: bar is Plan/Now/Log/More and strip is page-plan/page-now/page-log/page-settings`, JSON.stringify(open.bar) === '["Plan","Now","Log","More"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log","page-settings"]', JSON.stringify(open));
+    ok(`${tag} (e) order: bar is Plan/Now/Log, strip is page-plan/page-now/page-log/page-settings, header .top-right is clock/gear/theme`, JSON.stringify(open.bar) === '["Plan","Now","Log"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log","page-settings"]' && JSON.stringify(open.topRight) === '["clock","gear","theme"]', JSON.stringify(open));
     ok(`${tag} (e) open on Now at first animation frame (R2): scrollLeft === innerWidth and page-now visible`, open.ff && open.ff.sl === W && open.ff.iw === W && /\bpage-now\b/.test(open.ff.active || '') && Math.abs(open.ff.nowLeft) <= 1, JSON.stringify(open.ff));
 
     // 6. Equal-width tabs & plain Now treatment (active)
@@ -540,9 +555,11 @@ for (const [W, H] of SIZES) {
     const wantText = theme === 'day' ? 'rgb(11, 17, 23)' : 'rgb(243, 238, 228)';
     const wantMuted = theme === 'day' ? 'rgb(69, 82, 95)' : 'rgb(170, 167, 157)';
     const wantAccent = theme === 'day' ? 'rgb(11, 95, 168)' : 'rgb(124, 200, 255)';
+    // Re-aimed (2026-11-21 nav-gear, Lorico): three equal-width columns (1fr 1fr 1fr) spanning exact viewport width.
     const maxW = Math.max(...nowStyle.widths), minW = Math.min(...nowStyle.widths);
-    ok(`${tag} (e) equal-width tabs: all four measure equal width (${W / 4}px), span [0..${W}], 60px height, nothing raised`,
-      maxW - minW <= 0.5
+    ok(`${tag} (e) equal-width tabs: all three measure equal width (${(W / 3).toFixed(1)}px), span [0..${W}], 60px height, nothing raised`,
+      nowStyle.widths.length === 3
+      && maxW - minW <= 0.5
       && Math.abs(nowStyle.sumWidth - W) <= 0.5
       && Math.abs(nowStyle.firstLeft) <= 0.5
       && Math.abs(nowStyle.lastRight - W) <= 0.5
@@ -642,8 +659,9 @@ for (const [W, H] of SIZES) {
       offChecks.push(snap);
     }
     const wantPage = { Plan: 'page-plan', Now: 'page-now', Log: 'page-log', More: 'page-settings' };
-    ok(`${tag} (e) each tab in Plan/Now/Log/More opens its own screen and lights only itself`,
-      offChecks.every((s) => s.activePage === wantPage[s.lbl] && s.litBar === s.lbl),
+    // Re-aimed (2026-11-21 nav-gear, Lorico): Settings (gear) opens page-settings with no bottom-bar tab lit; Plan/Now/Log light only themselves.
+    ok(`${tag} (e) Plan/Now/Log tabs open their screen and light only themselves; Settings gear opens page-settings with no bar tab lit`,
+      offChecks.every((s) => s.activePage === wantPage[s.lbl] && (s.lbl === 'More' ? s.litBar === null : s.litBar === s.lbl)),
       JSON.stringify(offChecks.map((s) => ({ l: s.lbl, pg: s.activePage, lit: s.litBar }))));
     const offNow = offChecks.filter((s) => s.lbl !== 'Now');
     ok(`${tag} (e) dock off Now: completely outside [0, ${W}) and page-now inert + aria-hidden on Plan/Log/More`,
@@ -764,7 +782,13 @@ for (const [W, H] of SIZES) {
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
   const tag = `[${W}x${H} logpin]`;
-  const tapNav = (label) => page.evaluate((l) => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l); if (!b) throw new Error('no tab ' + l); b.click(); }, label);
+  const tapNav = (label) => page.evaluate((l) => {
+    const b = (l === 'More' || l === 'Settings')
+      ? document.querySelector('header.top button[aria-label="Settings"]')
+      : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
+    if (!b) throw new Error('no tab ' + l);
+    b.click();
+  }, label);
   const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
   // Header disclaimer Now-only + no gap on Log, Plan, Split, More
@@ -977,7 +1001,7 @@ for (const [W, H] of SIZES) {
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
   const tag = `[${W}x${H} pdf]`;
-  await page.evaluate(() => { const b = [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === 'More'); b.click(); });
+  await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); });
   await page.waitForTimeout(300);
 
   const init = await page.evaluate(() => {

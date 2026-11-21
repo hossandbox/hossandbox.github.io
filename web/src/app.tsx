@@ -340,6 +340,7 @@ const I = {
   plan: 'M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14',
   recap: 'M4 5h16v15H4zM4 10h16M9 3v4M15 3v4',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
+  gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
   sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5',
@@ -1028,7 +1029,7 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
  * The header: slim and opaque (redesign, 2026-10-10). It carries only what every screen needs:
  * the status, the time, the theme switch, and the driving alert.
  */
-function TopBar({ ev, now, s, inert, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; onNow: boolean }) {
+function TopBar({ ev, now, s, inert, onNow, onSettings, settingsActive }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; onNow: boolean; onSettings: () => void; settingsActive: boolean }) {
   const status = s.current?.status ?? 'OFF';
   // The switch flips what is on screen — the effective theme — and the tap records the choice, so
   // from then on the phone's setting no longer moves it (patch 7).
@@ -1051,6 +1052,7 @@ function TopBar({ ev, now, s, inert, onNow }: { ev: FullEvaluation; now: number;
         <span class="pill" style={`--led: ${STATUS_COLOR[status]}`}>{segLabel(status, s.current?.note)}{s.current ? ` · ${dur(now - currentRunStart(s, now))}` : ''}</span>
         <span class="top-right">
           <span class="muted clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
+          <button type="button" data-haptic="lock" class={settingsActive ? 'theme-btn gear-btn on' : 'theme-btn gear-btn'} aria-label="Settings" title="Settings" aria-current={settingsActive ? 'page' : undefined} onClick={onSettings}><Icon d={I.gear} size={18} /></button>
           <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /> {next === 'night' ? 'Night' : 'Day'}</button>
         </span>
       </div>
@@ -7033,10 +7035,12 @@ export function setLaunchNotice(open: boolean) { launchNotice = open; }
 
 /* ============================================================ panel strip */
 
-/** Bottom-bar panels in display order (Lorico, 2026-11-20: Plan — Now — Log — More).
- * The tab ids are unchanged — only the order the bar shows them in, and the order
- * the strip walks. */
+/** Strip panels in swipe order (Plan — Now — Log — Settings).
+ * Drives the 4-panel horizontal snap strip, scroll/settle logic, and tapGoal indexing. */
 export const PANEL_ORDER: State['tab'][] = ['plan', 'now', 'log', 'settings'];
+
+/** Bottom-bar tabs in display order (Lorico, 2026-11-21: Plan — Now — Log; Settings moved to header gear). */
+export const BAR_ORDER: State['tab'][] = ['plan', 'now', 'log'];
 
 /** The panel the bottom bar lights for a tab: the planning screens sit under Plan (declutter
  * patch, 2026-11-05; Capstone C3 D10-A moved recap/history there too). */
@@ -7214,7 +7218,7 @@ export function App() {
       </main></div>
     );
   }
-  const TAB_META: Record<string, [string, string]> = { log: ['Log', I.log], now: ['Now', I.now], plan: ['Plan', I.plan], settings: ['More', I.more] };
+  const TAB_META: Record<string, [string, string]> = { log: ['Log', I.log], now: ['Now', I.now], plan: ['Plan', I.plan] };
   // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
   // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
   // and the last-8-days view it opens moved from More to Plan.
@@ -7360,7 +7364,7 @@ export function App() {
   }
   return (
     <div class={`${fresh ? 'app is-demo' : 'app'}${printReport ? ' has-print-report' : ''}`}>
-      <TopBar ev={ev} now={now} s={s} inert={blocked} onNow={s.tab === 'now'} />
+      <TopBar ev={ev} now={now} s={s} inert={blocked} onNow={s.tab === 'now'} onSettings={() => { if (navPanelOf(getState().tab) !== 'settings') tapGoal.current = PANEL_ORDER.indexOf('settings'); setState({ tab: 'settings' }); }} settingsActive={barPanel === 'settings'} />
       {/* The four panels side by side in the snap strip. Every page stays mounted and
           keeps its own scroll position; the pages off the settled panel are inert and
           aria-hidden so nothing in them can be focused or read as current. The global
@@ -7409,7 +7413,7 @@ export function App() {
           </TabBoundary>
         </section>
       </main>
-      <nav class="tabs" inert={blocked}>{PANEL_ORDER.map((k) => {
+      <nav class="tabs" inert={blocked}>{BAR_ORDER.map((k) => {
         const [l, icon] = TAB_META[k];
         const on = barPanel === k;
         const cls = on ? 'on' : '';
