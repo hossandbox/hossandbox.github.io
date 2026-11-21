@@ -829,6 +829,86 @@ await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5
   }
 });
 
+/* ---------------- (w) Weekly Recap vs. 34-Hour Reset & Home-Time Planner ---------------- */
+await pin('W1. Plan hub lists 5 .plan-item tools with "Weekly recap vs. 34" at the bottom; tapping opens verdict banner first and Back returns to Plan', async () => {
+  A.openWeekPlanner(false);
+  await seed({ tab: 'plan', ...segs });
+  const planPg = pages()[0];
+  const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
+  if (items.length !== 5 || titles[4] !== 'Weekly recap vs. 34') return `items=${JSON.stringify(titles)}`;
+  fire(items[4], 'click'); await sleep(60);
+  const txt = planPg.textContent;
+  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
+  const verdict = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', planPg)[0];
+  if (h1 !== 'Weekly recap vs. 34' || !verdict) return `h1=${h1} verdict=${!!verdict}`;
+  if (txt.indexOf(verdict.textContent) > txt.indexOf('Day-by-day forecast')) return 'verdict banner is not before Day-by-day forecast';
+  const back = all((n) => n.localName === 'button' && has(n, 'back'), planPg)[0];
+  if (!back || !/Plan/.test(back.textContent)) return `back=${back?.textContent}`;
+  fire(back, 'click'); await sleep(60);
+  const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  return afterItems.length === 5 || `after back items=${afterItems.length}`;
+});
+
+await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset net gain; changing budget preset & target home time updates live', async () => {
+  A.openWeekPlanner(false);
+  const E = await import('../../../engine/src/index.ts');
+  const cfg = { ...getState().config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago' };
+  const todayStart = E.carrierDayStart(T, cfg);
+  const starts = [todayStart];
+  for (let i = 1; i < 8; i++) starts.unshift(E.carrierDayStart(starts[0] - 1, cfg));
+  const hrs = [6, 4, 3, 10, 11, 11, 11, 9];
+  const tightSegs = hrs.map((h, i) => ({ status: 'D', start: starts[i] + 60, end: starts[i] + 60 + h * 60, createdAt: i + 1 }));
+  await seed({ tab: 'plan', config: cfg, segments: tightSegs, current: null });
+  const planPg = pages()[0];
+  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  fire(lastBtn, 'click'); await sleep(60);
+  const v1 = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', planPg)[0]?.textContent ?? '';
+  if (!/Recaps pinch to 5h 00m/.test(v1) || !/nets \+/.test(v1)) return `unexpected verdict: ${v1}`;
+  // Select Target Home Time = 4 shifts -> Home Time summary card + cruise cap appears
+  const sel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Target home time or day off', planPg)[0];
+  if (!sel) return 'missing home-time select';
+  sel.value = '4';
+  fire(sel, 'change'); await sleep(60);
+  const txt = planPg.textContent;
+  const okHome = /Recap cruise cap/.test(txt) && /cap shifts at/.test(txt);
+  // Tap 8h 30m preset button -> updates projection
+  const btn85 = all((n) => n.localName === 'button' && n.textContent.trim() === '8h 30m', planPg)[0];
+  if (!btn85) return 'missing 8h 30m preset button';
+  fire(btn85, 'click'); await sleep(60);
+  const okPreset = has(btn85, 'on');
+  A.openWeekPlanner(false);
+  return (okHome && okPreset) || `okHome=${okHome} okPreset=${okPreset} txt=${txt.slice(0, 300)}`;
+});
+
+await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cycle and explicitly notes unlogged days counted as 0h', async () => {
+  A.openWeekPlanner(false);
+  const cfg60 = { ...getState().config, cycle: '60/7', dayStartHour: 0, timeZone: 'America/Chicago' };
+  await seed({ tab: 'plan', config: cfg60, segments: [], current: null, historyAcknowledged: false });
+  const planPg = pages()[0];
+  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  fire(lastBtn, 'click'); await sleep(60);
+  const txt = planPg.textContent;
+  const ok = /60-hour \/ 7-day cycle/.test(txt)
+    && /7 of your last 7 carrier days have no logged entries and are counted as 0h/.test(txt)
+    && /Recap wall/.test(txt);
+  A.openWeekPlanner(false);
+  return ok || `60/7 text: ${txt.slice(0, 400)}`;
+});
+
+await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 5-item hub', async () => {
+  A.openWeekPlanner(false);
+  await seed({ tab: 'plan', ...segs });
+  const planPg = pages()[0];
+  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  fire(lastBtn, 'click'); await sleep(60);
+  if (!A.isWeekPlannerOpen()) return 'did not open';
+  await seed({ tab: 'now', ...segs });
+  await seed({ tab: 'plan', ...segs });
+  const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
+  return (!A.isWeekPlannerOpen() && items.length === 5) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
+});
+
 let fails = 0;
 for (const [st, name, why] of res) { console.log(`${st} ${name}${why ? ` — ${why}` : ''}`); if (st === 'FAIL') fails++; }
 console.log(`revisions: ${res.length - fails}/${res.length} pins pass`);

@@ -22,11 +22,15 @@ class TabBoundary extends Component<{ tab: string; children: ComponentChildren }
   }
 }
 import {
-  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
+  evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, dayLabel, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
+import {
+  projectRecapVs34, defaultResetStart, wallMinuteInCarrierDay, fmtWallHM, parseIsoDay,
+  PROJECTION_SHIFTS, SHIFT_BUDGET_PRESETS, SHIFT_START_PRESETS, RESET_TIME_PRESETS,
+} from './recap.ts';
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
@@ -346,6 +350,7 @@ const I = {
   check: 'M5 12l5 5 9-10',
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  week: 'M4 19h16M6 16v-5M11 16V8M16 16v-8M20 16v-3M4 5h16',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -4020,6 +4025,25 @@ function BackToPlan({ s }: { s: State }) {
   return <button class="back" onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /> {label}</button>;
 }
 
+/**
+ * Reactive sub-screen flag for the Weekly Recap vs. 34-Hour Reset & Home-Time Planner.
+ * Held outside `store.ts` (store is frozen) in the exact style of `useSheet()` above:
+ * lives under the Plan tab and resets automatically when navigating away or tapping Plan/Back.
+ */
+let weekPlannerOpen = false;
+const weekPlannerSubs = new Set<() => void>();
+export function openWeekPlanner(open = true) {
+  weekPlannerOpen = open;
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  weekPlannerSubs.forEach((f) => f());
+}
+export function isWeekPlannerOpen(): boolean { return weekPlannerOpen; }
+function useWeekPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); weekPlannerSubs.add(f); return () => { weekPlannerSubs.delete(f); }; }, []);
+  return weekPlannerOpen;
+}
+
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
 function PlanTab({ ev }: { ev: FullEvaluation }) {
   const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
@@ -4037,6 +4061,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
       {/* Capstone C3 (D10-A): one of the two founding workflows leaves the settings drawer. */}
       {item('recap', I.recap, 'Hours coming back', `When your ${ev.cycle.limit / 60}-hour hours return, day by day.`)}
+      <button class="plan-item" onClick={() => openWeekPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.week} size={26} /></span>
+        <span class="plan-text"><b>Weekly recap vs. 34</b><span class="muted small">Compare recaps against a 34-hour reset and plan home time.</span></span>
+        <Icon d={I.next} />
+      </button>
     </>
   );
 }
@@ -4762,6 +4791,454 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
         <span class="plan-text"><b>Your last 8 days</b><span class="muted small">What you logged, day by day — for your own review.</span></span>
         <Icon d={I.next} />
       </button>
+    </>
+  );
+}
+
+/* ============================================================ Weekly recap vs. 34-hour reset & home-time planner */
+
+/** Parse "HH:MM" from a time input into minutes from midnight (0..1439), or null when invalid. */
+function parseWallHM(raw: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(raw.trim());
+  if (!m) return null;
+  const h = Number(m[1]), min = Number(m[2]);
+  if (!Number.isInteger(h) || !Number.isInteger(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * Weekly Recap vs. 34-Hour Reset & Home-Time Planner.
+ * Derives past-window on-duty totals strictly from the store's logged segments (`loggedSegments`),
+ * projects the next 7 shifts across 7–8 carrier days side-by-side (Recaps vs. 34-Hour Reset),
+ * splits overnight shifts across the carrier-day boundary (`config.dayStartHour` in `config.timeZone`),
+ * and evaluates optional Home-Time targets with the exact daily hour cap needed to cruise on recaps.
+ */
+function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const [defaultShiftMin, setDefaultShiftMin] = useState(600); // 10h 00m default
+  const [shiftStartMin, setShiftStartMin] = useState(21 * 60); // 21:00 overnight default
+  const [customShifts, setCustomShifts] = useState<(number | null)[]>(() => Array(PROJECTION_SHIFTS).fill(null));
+  const [resetDayOffset, setResetDayOffset] = useState(1); // Tomorrow by default
+  const [resetWallMin, setResetWallMin] = useState(8 * 60); // 08:00 parking sweet spot
+  const [homeTarget, setHomeTarget] = useState<number | null>(null);
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const resetStart = useMemo(
+    () => defaultResetStart(now, s.config, resetDayOffset, resetWallMin),
+    [now, s.config, resetDayOffset, resetWallMin],
+  );
+
+  const plan = useMemo(
+    () => projectRecapVs34({
+      segments: logged,
+      now,
+      config: s.config,
+      defaultShiftMinutes: defaultShiftMin,
+      customShiftMinutes: customShifts,
+      shiftStartMinutes: shiftStartMin,
+      resetStart,
+      homeTargetShifts: homeTarget,
+    }),
+    [logged, now, s.config, defaultShiftMin, customShifts, shiftStartMin, resetStart, homeTarget],
+  );
+
+  // Upcoming carrier-day choices for the 34-hour reset start day picker (0..6 days from today)
+  const resetDayOptions = useMemo(() => {
+    const out: { offset: number; label: string; dayStart: number; dayEnd: number }[] = [];
+    let ds = carrierDayStart(now, s.config);
+    for (let i = 0; i < PROJECTION_SHIFTS; i++) {
+      const de = nextCarrierDayStart(ds, s.config);
+      const p = parseIsoDay(plan.pastDays[plan.pastDays.length - 1]?.label ?? '');
+      const lbl = i === 0 ? `Today (${p.dayShort})` : parseIsoDay(dayLabel(ds, s.config)).shortLabel;
+      out.push({ offset: i, label: lbl, dayStart: ds, dayEnd: de });
+      ds = de;
+    }
+    return out;
+  }, [now, s.config, plan.pastDays]);
+
+  const setCustomFor = (idx: number, val: number | null) => {
+    setCustomShifts((prev) => prev.map((x, i) => (i === idx ? val : x)));
+  };
+
+  const applyBestReset = () => {
+    if (!plan.bestReset) return;
+    const targetDayStart = carrierDayStart(plan.bestReset.resetStart, s.config);
+    const hit = resetDayOptions.find((o) => o.dayStart === targetDayStart);
+    if (hit) setResetDayOffset(hit.offset);
+  };
+
+  const applyCruiseCap = () => {
+    if (!plan.homeTime) return;
+    setDefaultShiftMin(plan.homeTime.cruiseCapMinutes);
+    setCustomShifts(Array(PROJECTION_SHIFTS).fill(null));
+  };
+
+  const hist = cycleBasis(s, now, plan.windowDays);
+  const signKind: SignKind = plan.verdict.tone === 'bad' ? 'stop' : plan.verdict.tone === 'warn' ? 'warn' : 'go';
+  const signWord = plan.verdict.tone === 'bad' ? 'Recap wall' : plan.verdict.tone === 'warn' ? 'Tight cycle' : 'Clear on recaps';
+  const tzWord = zoneShort(s.config.timeZone);
+  const rollWord = s.config.dayStartHour === 0 ? 'midnight' : `${String(s.config.dayStartHour).padStart(2, '0')}:00`;
+  const hasCustom = customShifts.some((x) => x !== null);
+  const sampleShift = plan.recaps.shifts[0];
+  const delta = plan.netDeltaMinutes;
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Weekly recap vs. 34</h1>
+
+      {/* 1. Plain-English VERDICT BANNER first */}
+      <Card tone={plan.verdict.tone}>
+        <div class="wrecap-verdict" data-wrecap-verdict="1">
+          <Sign kind={signKind}>{signWord}</Sign>
+          <p class="wrecap-headline">{plan.verdict.headline}</p>
+          {plan.verdict.homeLine && <p class="wrecap-subline"><b>{plan.verdict.homeLine}</b></p>}
+          {plan.verdict.tipLine && (
+            <div class="wrecap-tip">
+              <span class="small muted">{plan.verdict.tipLine}</span>
+              <button class="mini" onClick={applyBestReset}>Use {plan.bestReset?.startLabel}</button>
+            </div>
+          )}
+          <p class="muted small" style="margin:0">
+            {plan.limit / 60}-hour / {plan.windowDays}-day cycle · rolls at {rollWord} {tzWord}
+            {deviceTz !== s.config.timeZone && <> ({terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)} device time)</>}.
+          </p>
+        </div>
+      </Card>
+
+      {/* 2. Side-by-side 7-day usable hours comparison */}
+      <div class="wrecap-compare" role="region" aria-label="7-day strategy comparison">
+        <div class={`wrecap-colcard${delta <= 0 && !plan.recaps.wall ? ' win' : plan.recaps.wall ? (plan.recaps.wall.usableMinutes < 180 ? ' bad' : ' warn') : ''}`}>
+          <div class="stat-label">A · Keep recaps</div>
+          <div class="stat-value mono">{dur(plan.recaps.totalUsableMinutes)}</div>
+          <div class="stat-sub">
+            {plan.recaps.wall
+              ? <>Recap wall: <b>{plan.recaps.wall.shortLabel}</b> ({dur(plan.recaps.wall.usableMinutes)})</>
+              : <>No recap wall in 7 shifts</>}
+          </div>
+        </div>
+        <div class={`wrecap-colcard${delta > 0 ? ' win' : ''}`}>
+          <div class="stat-label">B · 34-hour reset</div>
+          <div class="stat-value mono">{dur(plan.reset34.totalUsableMinutes)}</div>
+          <div class="stat-sub">
+            {delta > 0 ? <><b>+{dur(delta)}</b> vs. recaps</> : delta < 0 ? <><b>−{dur(-delta)}</b> vs. recaps</> : <>Even with recaps</>}
+            {' · '}starts {plan.resetStartLabel}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Home-time target summary when enabled */}
+      {plan.homeTime && (
+        <Card title={`Home time · ${plan.homeTime.homeDayShortDate}`} tone={plan.homeTime.reachesLegally ? 'good' : 'warn'}>
+          <div class="clocks">
+            <Stat
+              label="Current pace"
+              value={plan.homeTime.reachesLegally ? 'Legal' : `Short ${dur(plan.homeTime.shortfallMinutes)}`}
+              sub={`${plan.homeTime.targetShifts} ${plan.homeTime.targetShifts === 1 ? 'shift' : 'shifts'} before home`}
+              tone={plan.homeTime.reachesLegally ? 'good' : 'warn'}
+            />
+            <Stat
+              label="Recap cruise cap"
+              value={`${dur(plan.homeTime.cruiseCapMinutes)}/night`}
+              sub="Max uniform shift on recaps"
+            />
+          </div>
+          <p class="small" style="margin-top:8px">
+            Before {plan.homeTime.homeDayShort}: <b>{dur(plan.homeTime.usableBeforeHomeRecaps)}</b> on recaps vs. <b>{dur(plan.homeTime.usableBeforeHomeReset34)}</b> with a 34-hour reset.
+          </p>
+          {!plan.homeTime.reachesLegally && plan.homeTime.cruiseCapMinutes > 0 && (
+            <div class="row">
+              <button class="mini" onClick={applyCruiseCap}>Set nightly budget to {dur(plan.homeTime.cruiseCapMinutes)}</button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* 4. Data basis disclosure (derived strictly from store's existing log data) */}
+      {(plan.unloggedPastDays > 0 || hist !== 'known') && (
+        <div class="warnbox small">
+          {plan.unloggedPastDays > 0
+            ? <><b>{plan.unloggedPastDays} of your last {plan.windowDays} carrier days</b> have no logged entries and are counted as 0h. </>
+            : <>Your log does not cover all {plan.windowDays} days yet, so earlier days count as 0h. </>}
+          Update past days in <b>Log</b> or{' '}
+          <button class="link" style="display:inline;padding:0;min-height:0" onClick={() => { openWeekPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}>Hours coming back → Fix a day</button>.
+        </div>
+      )}
+
+      {/* 5. Planner controls */}
+      <Card title="Your week plan">
+        <div>
+          <span class="stat-label">Planned nightly shift budget</span>
+          <div class="wrecap-chips" role="group" aria-label="Planned nightly shift budget presets">
+            {SHIFT_BUDGET_PRESETS.map((p) => (
+              <button
+                key={p.minutes}
+                class={!hasCustom && defaultShiftMin === p.minutes ? 'on' : ''}
+                onClick={() => { setDefaultShiftMin(p.minutes); setCustomShifts(Array(PROJECTION_SHIFTS).fill(null)); }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <span class="stat-label">Shift start ({tzWord})</span>
+          <div class="wrecap-chips" role="group" aria-label="Shift start time presets">
+            {SHIFT_START_PRESETS.map((p) => (
+              <button key={p.minutes} class={shiftStartMin === p.minutes ? 'on' : ''} onClick={() => setShiftStartMin(p.minutes)}>
+                {p.label} <span class="muted small">{p.tag}</span>
+              </button>
+            ))}
+          </div>
+          <div class="wrecap-fieldrow">
+            <label>Custom shift start ({tzWord})
+              <input
+                type="time"
+                aria-label="Custom shift start time"
+                value={fmtWallHM(shiftStartMin)}
+                onInput={(e) => {
+                  const v = parseWallHM((e.target as HTMLInputElement).value);
+                  if (v !== null) setShiftStartMin(v);
+                }}
+              />
+            </label>
+          </div>
+          {sampleShift && sampleShift.plannedMinutes > 0 && (
+            <p class="muted small" style="margin:6px 0 0">
+              {sampleShift.crossesBoundary
+                ? <>Overnight split: <b>{dur(sampleShift.plannedLeg1)}</b> before {rollWord} + <b>{dur(sampleShift.plannedLeg2)}</b> after {rollWord} ({tzWord}).</>
+                : <>Runs within one carrier day ({fmtWallHM(shiftStartMin)} for {dur(sampleShift.plannedMinutes)}).</>}
+            </p>
+          )}
+        </div>
+
+        <div style="margin-top:12px">
+          <span class="stat-label">34-hour reset start ({tzWord})</span>
+          <div class="wrecap-chips" role="group" aria-label="34-hour reset start day">
+            {resetDayOptions.map((d) => (
+              <button key={d.offset} class={resetDayOffset === d.offset ? 'on' : ''} onClick={() => setResetDayOffset(d.offset)}>
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <div class="wrecap-chips" role="group" aria-label="34-hour reset start time presets">
+            {RESET_TIME_PRESETS.map((p) => (
+              <button key={p.minutes} class={resetWallMin === p.minutes ? 'on' : ''} onClick={() => setResetWallMin(p.minutes)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div class="wrecap-fieldrow">
+            <label>Custom 34h reset start time ({tzWord})
+              <input
+                type="time"
+                aria-label="Custom 34-hour reset start time"
+                value={fmtWallHM(resetWallMin)}
+                onInput={(e) => {
+                  const v = parseWallHM((e.target as HTMLInputElement).value);
+                  if (v !== null) setResetWallMin(v);
+                }}
+              />
+            </label>
+          </div>
+          <p class="muted small" style="margin:6px 0 0">
+            34h reset window: <b>{plan.resetStartLabel}</b> → <b>{plan.resetEndLabel}</b> ({tzWord}).
+          </p>
+        </div>
+
+        <div class="wrecap-fieldrow" style="margin-top:12px">
+          <label>Target home time / day off (optional)
+            <select
+              aria-label="Target home time or day off"
+              value={homeTarget === null ? '' : String(homeTarget)}
+              onChange={(e) => {
+                const raw = (e.target as HTMLSelectElement).value;
+                setHomeTarget(raw === '' ? null : Number(raw));
+              }}
+            >
+              <option value="">None — show full 7-day comparison</option>
+              {plan.recaps.days.slice(1).map((d, idx) => {
+                const count = idx + 1;
+                return (
+                  <option key={d.label} value={String(count)}>
+                    Home {parseIsoDay(d.label).longShort} ({count} {count === 1 ? 'shift' : 'shifts'} to get there)
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+        </div>
+
+        <Help label={`Custom per-night hours${hasCustom ? ' (edited)' : ''}`}>
+          <p class="muted small">Override any individual night in hours and minutes, or tap <b>Off</b> for a planned day off.</p>
+          <ul class="wrecap-custom-list">
+            {plan.recaps.shifts.map((sh, idx) => {
+              const cur = customShifts[idx] ?? defaultShiftMin;
+              const ch = Math.floor(cur / 60);
+              const cm = cur % 60;
+              return (
+                <li key={sh.label} class="wrecap-custom-row">
+                  <span class="wrecap-custom-day">{sh.shortLabel}</span>
+                  <span class="wrecap-custom-inputs">
+                    <input
+                      type="number"
+                      class="num"
+                      inputMode="numeric"
+                      min={0}
+                      max={14}
+                      aria-label={`${sh.shortLabel} shift hours`}
+                      value={ch}
+                      onInput={(e) => {
+                        const nh = Math.max(0, Math.min(14, Number((e.target as HTMLInputElement).value) || 0));
+                        setCustomFor(idx, Math.min(840, nh * 60 + cm));
+                      }}
+                    />
+                    <span class="small muted">h</span>
+                    <input
+                      type="number"
+                      class="num"
+                      inputMode="numeric"
+                      min={0}
+                      max={59}
+                      aria-label={`${sh.shortLabel} shift minutes`}
+                      value={cm}
+                      onInput={(e) => {
+                        const nm = Math.max(0, Math.min(59, Number((e.target as HTMLInputElement).value) || 0));
+                        setCustomFor(idx, Math.min(840, ch * 60 + nm));
+                      }}
+                    />
+                    <span class="small muted">m</span>
+                    <button class="mini" onClick={() => setCustomFor(idx, 0)}>Off</button>
+                    {customShifts[idx] !== null && <button class="mini" onClick={() => setCustomFor(idx, null)}>Reset</button>}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {hasCustom && (
+            <div class="row">
+              <button class="mini" onClick={() => setCustomShifts(Array(PROJECTION_SHIFTS).fill(null))}>Reset all nights to {dur(defaultShiftMin)}</button>
+            </div>
+          )}
+        </Help>
+
+        <Help label={`Past ${plan.windowDays} days from your log (${dur(plan.usedNow)} used · ${dur(plan.remainingNow)} left)`}>
+          <p class="muted small">Derived directly from your logged entries (excluding what-if rows). Days with no entries are dashed and counted as 0h.</p>
+          <div class="wrecap-past-pills">
+            {plan.pastDays.map((d) => (
+              <span key={d.label} class={`wrecap-past-pill${!d.hasEntries && !d.clearedByRestart ? ' empty' : ''}${d.isToday ? ' today' : ''}`}>
+                <span>{d.isToday ? 'Today' : d.shortLabel}</span>
+                <b class="mono">{dur(d.onDuty)}</b>
+              </span>
+            ))}
+          </div>
+        </Help>
+      </Card>
+
+      {/* 6. Day-by-day side-by-side forecast */}
+      <Card title="Day-by-day forecast">
+        <p class="muted small" style="margin-top:0">
+          Each night compares <b>Recaps (A)</b> vs. <b>34-Hour Reset (B)</b>, showing exact {rollWord} drop-offs and cycle hours available.
+        </p>
+        <ul class="wrecap-days">
+          {plan.recaps.shifts.map((a, idx) => {
+            const b = plan.reset34.shifts[idx];
+            const isWall = plan.recaps.wall?.shiftIndex === idx;
+            const isHomeNext = plan.homeTime && idx === plan.homeTime.targetShifts - 1;
+            const wallClass = isWall ? (a.usableMinutes < 180 ? ' wall-bad' : ' wall') : '';
+            const nextDay = plan.recaps.days[idx + 1];
+            return (
+              <li key={a.label} class={`wrecap-day${wallClass}`}>
+                <div class="wrecap-day-head">
+                  <span class="wrecap-day-title">
+                    <span>{a.shortLabel}</span>
+                    {isWall && <span class={`wrecap-badge ${a.usableMinutes < 180 ? 'wall-bad' : 'wall'}`}>Recap wall</span>}
+                    {b.blockedByReset && <span class="wrecap-badge reset">34h reset</span>}
+                    {b.resetCompletesHere && !b.blockedByReset && <span class="wrecap-badge reset">34h done</span>}
+                    {isHomeNext && <span class="wrecap-badge home">Last shift before home</span>}
+                  </span>
+                  <span class={`wrecap-drop mono${a.dropsOffAtDayStart > 0 ? '' : ' zero'}`}>
+                    {a.dropsOffAtDayStart > 0 ? `+${dur(a.dropsOffAtDayStart)} back` : '+0m back'}
+                  </span>
+                </div>
+
+                <div class="wrecap-ab">
+                  <div class="wrecap-side">
+                    <span class="wrecap-side-head">A · Recaps</span>
+                    <span class={`wrecap-side-val mono${a.pinched ? (a.usableMinutes < 180 ? ' bad' : ' warn') : ' good'}`}>
+                      {a.plannedMinutes === 0 ? 'Off' : dur(a.usableMinutes)}
+                    </span>
+                    <span class="wrecap-side-meta">
+                      {a.pinched
+                        ? <>of {dur(a.plannedMinutes)} (−{dur(a.shortfallMinutes)})</>
+                        : a.plannedMinutes > 0 ? <>Full shift</> : <>Planned off</>}
+                    </span>
+                    <span class="wrecap-side-meta">
+                      Start {rollWord}: <b class="mono">{dur(a.availAtDayStart)}</b>
+                      {a.availBeforeShift !== a.availAtDayStart && <> · pre-shift <b class="mono">{dur(a.availBeforeShift)}</b></>}
+                    </span>
+                  </div>
+
+                  <div class="wrecap-side">
+                    <span class="wrecap-side-head">B · 34h reset</span>
+                    <span class={`wrecap-side-val mono${b.blockedByReset && b.usableMinutes === 0 ? '' : b.pinched ? ' warn' : ' good'}`}>
+                      {b.plannedMinutes === 0 ? 'Off' : b.blockedByReset && b.usableMinutes === 0 ? '0m (34h)' : dur(b.usableMinutes)}
+                    </span>
+                    <span class="wrecap-side-meta">
+                      {b.blockedByReset
+                        ? (b.usableMinutes === 0 ? <>Resting in 34h reset</> : <>Trimmed by 34h (−{dur(b.resetOverlapMinutes)})</>)
+                        : b.pinched ? <>of {dur(b.plannedMinutes)} (−{dur(b.shortfallMinutes)})</> : b.plannedMinutes > 0 ? <>Full shift</> : <>Planned off</>}
+                    </span>
+                    <span class="wrecap-side-meta">
+                      {b.resetCompletesHere
+                        ? <>Fresh <b class="mono">{dur(plan.limit)}</b> after {plan.resetEndLabel}</>
+                        : <>Pre-shift: <b class="mono">{dur(b.availBeforeShift)}</b></>}
+                    </span>
+                  </div>
+                </div>
+
+                {a.crossesBoundary && a.plannedMinutes > 0 && nextDay && (
+                  <div class="wrecap-split-note">
+                    Split across {rollWord}: {a.dayShort} <b class="mono">{dur(a.usableLeg1)}</b> + {nextDay.dayShort} <b class="mono">{dur(a.usableLeg2)}</b>
+                    {a.dropsOffAtNextRoll > 0 && <> (after <b class="mono">+{dur(a.dropsOffAtNextRoll)}</b> {nextDay.dayShort} {rollWord} drop-off)</>}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+          {/* Final 8th carrier day showing the next carrier-day roll drop-off & post-week availability */}
+          {plan.recaps.days.length > PROJECTION_SHIFTS && (() => {
+            const tailA = plan.recaps.days[PROJECTION_SHIFTS];
+            const tailB = plan.reset34.days[PROJECTION_SHIFTS];
+            const isHomeDay = plan.homeTime && plan.homeTime.homeDayLabel === tailA.label;
+            return (
+              <li key={tailA.label} class="wrecap-day">
+                <div class="wrecap-day-head">
+                  <span class="wrecap-day-title">
+                    <span>{tailA.shortLabel} (day {PROJECTION_SHIFTS + 1})</span>
+                    {isHomeDay && <span class="wrecap-badge home">Home day</span>}
+                  </span>
+                  <span class={`wrecap-drop mono${tailA.dropsOff > 0 ? '' : ' zero'}`}>
+                    {tailA.dropsOff > 0 ? `+${dur(tailA.dropsOff)} back` : '+0m back'}
+                  </span>
+                </div>
+                <div class="wrecap-ab">
+                  <div class="wrecap-side">
+                    <span class="wrecap-side-head">A · Recaps</span>
+                    <span class="wrecap-side-meta">Avail at {rollWord}: <b class="mono">{dur(tailA.availAtStart)}</b></span>
+                    <span class="wrecap-side-meta">After overnight tail: <b class="mono">{dur(tailA.availAtEnd)}</b></span>
+                  </div>
+                  <div class="wrecap-side">
+                    <span class="wrecap-side-head">B · 34h reset</span>
+                    <span class="wrecap-side-meta">Avail at {rollWord}: <b class="mono">{dur(tailB.availAtStart)}</b></span>
+                    <span class="wrecap-side-meta">After overnight tail: <b class="mono">{dur(tailB.availAtEnd)}</b></span>
+                  </div>
+                </div>
+              </li>
+            );
+          })()}
+        </ul>
+      </Card>
     </>
   );
 }
@@ -6072,6 +6549,8 @@ export function App() {
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
+  const weekOpen = useWeekPlanner();
+  useEffect(() => { if (s.tab !== 'plan' && weekPlannerOpen) openWeekPlanner(false); }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
   // before the back-nav is created, so its entries are built for the screen the shortcut chose.
@@ -6099,15 +6578,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => setState({ tab }) });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' && isWeekPlannerOpen() ? 'week' : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { openWeekPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -6283,10 +6762,11 @@ export function App() {
           {warnbox}
           {themeNoticeCard}
           <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key={planFamily ? s.tab : 'plan'} tab={planFamily ? s.tab : 'plan'}>
+          <TabBoundary key={planFamily ? (s.tab === 'plan' && weekOpen ? 'week' : s.tab) : 'plan'} tab={planFamily ? (s.tab === 'plan' && weekOpen ? 'week' : s.tab) : 'plan'}>
             {planFamily ? (
               <>
-                {s.tab === 'plan' && <PlanTab ev={ev} />}
+                {s.tab === 'plan' && !weekOpen && <PlanTab ev={ev} />}
+                {s.tab === 'plan' && weekOpen && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
                 {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
                 {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
                 {s.tab === 'history' && <HistoryTab s={s} now={now} />}
@@ -6325,7 +6805,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan' && isWeekPlannerOpen()) openWeekPlanner(false); if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}

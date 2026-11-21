@@ -321,13 +321,15 @@ await pin('M4e. the button rides the No verdict\'s fix line, says "Plan it", and
 
 /* ============================ D10-A + M8: Hours coming back ============================ */
 
-await pin('D10a. the Plan hub lists 4 items; the 4th, "Hours coming back", opens tab recap with planReturn plan', async () => {
+await pin('D10a. the Plan hub lists 5 items; 4th is "Hours coming back" (opens recap), 5th at bottom is "Weekly recap vs. 34"', async () => {
   WALL = CD(9, 3, 4);
   await mount(driving({ tab: 'plan' }));
   const items = byClass('plan-item', planPage());
-  if (items.length !== 4) return `${items.length} items`;
+  if (items.length !== 5) return `${items.length} items`;
   const fourth = items[3];
+  const fifth = items[4];
   if (!/Hours coming back/.test(fourth.textContent) || !/When your 70-hour hours return, day by day\./.test(fourth.textContent)) return fourth.textContent;
+  if (!/Weekly recap vs\. 34/.test(fifth.textContent)) return `5th item: ${fifth.textContent}`;
   await click(fourth, 80);
   return (getState().tab === 'recap' && getState().planReturn === 'plan') || `${getState().tab}/${getState().planReturn}`;
 });

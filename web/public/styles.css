@@ -1280,6 +1280,67 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
   display: none;
 }
 
+/* ===================================================================================
+   WEEKLY RECAP VS. 34-HOUR RESET & HOME-TIME PLANNER (Plan tab tool #5)
+   Uses only existing palette tokens so both day and night themes keep WCAG AA contrast.
+   =================================================================================== */
+.wrecap-verdict { display: flex; flex-direction: column; gap: var(--s-8); }
+.wrecap-headline { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.3; color: var(--text); }
+.wrecap-subline { margin: 0; font-size: 14px; color: var(--text); }
+.wrecap-tip { display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); flex-wrap: wrap; padding-top: var(--s-6); border-top: 1px solid var(--line); }
+
+.wrecap-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-8); }
+.wrecap-colcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-14); padding: var(--s-12); display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
+.wrecap-colcard.win { border-color: var(--accent); background: var(--tint-accent); }
+.wrecap-colcard.warn { border-color: color-mix(in srgb, var(--warn) 65%, var(--line)); }
+.wrecap-colcard.bad { border-color: color-mix(in srgb, var(--bad) 65%, var(--line)); }
+.wrecap-colcard .stat-value { font-size: 22px; }
+
+.wrecap-chips { display: flex; flex-wrap: wrap; gap: var(--s-6); margin-top: var(--s-6); }
+.wrecap-chips button { flex: 1 1 auto; min-width: 68px; min-height: 48px; padding: var(--s-8) var(--s-10); font-size: 14px; font-weight: 700; }
+.wrecap-chips button.on { border: 2px solid var(--accent); background: var(--tint-accent); color: var(--text); }
+
+.wrecap-fieldrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); margin-top: var(--s-8); }
+.wrecap-fieldrow label { margin-top: 0; }
+.wrecap-fieldrow input, .wrecap-fieldrow select { min-height: 56px; }
+
+.wrecap-past-pills { display: flex; flex-wrap: wrap; gap: var(--s-6); margin-top: var(--s-8); }
+.wrecap-past-pill { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-10); padding: 4px 8px; font-size: 13px; display: inline-flex; gap: 6px; align-items: baseline; }
+.wrecap-past-pill.empty { border-style: dashed; color: var(--muted); }
+.wrecap-past-pill.today { border-color: var(--accent); }
+
+.wrecap-custom-list { list-style: none; margin: var(--s-8) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-8); }
+.wrecap-custom-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); flex-wrap: wrap; padding-top: var(--s-8); border-top: 1px solid var(--line); }
+.wrecap-custom-day { font-weight: 700; font-size: 14px; min-width: 72px; }
+.wrecap-custom-inputs { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.wrecap-custom-inputs input.num { width: 58px; min-height: 56px; padding: 6px 8px; text-align: center; }
+.wrecap-custom-inputs button.mini { min-height: 48px; padding: 6px 10px; font-size: 13px; }
+
+.wrecap-days { list-style: none; margin: var(--s-8) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-10); }
+.wrecap-day { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-14); padding: var(--s-10) var(--s-12); display: flex; flex-direction: column; gap: var(--s-8); }
+.wrecap-day.wall { border-color: color-mix(in srgb, var(--warn) 70%, var(--line)); background: var(--tint-warn); }
+.wrecap-day.wall-bad { border-color: color-mix(in srgb, var(--bad) 70%, var(--line)); background: var(--tint-bad); }
+.wrecap-day-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-6); flex-wrap: wrap; }
+.wrecap-day-title { font-weight: 800; font-size: 15px; display: inline-flex; align-items: center; gap: var(--s-6); flex-wrap: wrap; }
+.wrecap-drop { font-size: 13px; font-weight: 700; color: var(--good); }
+.wrecap-drop.zero { color: var(--muted); font-weight: 600; }
+
+.wrecap-badge { display: inline-block; padding: 2px 8px; border-radius: var(--r-pill); font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+.wrecap-badge.wall { background: var(--warn); color: var(--chip-ink); }
+.wrecap-badge.wall-bad { background: var(--bad); color: var(--chip-ink); }
+.wrecap-badge.reset { background: var(--accent-solid); color: var(--on-accent); }
+.wrecap-badge.home { background: var(--good); color: var(--chip-ink); }
+
+.wrecap-ab { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-8); }
+.wrecap-side { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-10); padding: var(--s-8) var(--s-10); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wrecap-side-head { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.wrecap-side-val { font-size: 17px; font-weight: 800; }
+.wrecap-side-val.good { color: var(--good); }
+.wrecap-side-val.warn { color: var(--warn); }
+.wrecap-side-val.bad { color: var(--bad); }
+.wrecap-side-meta { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.wrecap-split-note { font-size: 12px; color: var(--muted); }
+
 @page {
   size: letter portrait;
   margin: 0.45in 0.5in;

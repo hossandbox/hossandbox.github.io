@@ -6504,4 +6504,133 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('log summary PDF (More Data controls, validation, carrier-day range, engine totals, disclaimers): OK');
 }
+// --- Weekly Recap vs. 34-Hour Reset & Home-Time Planner (Plan tab tool #5)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const R = await import('../src/recap.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  // Fixture: Tue Nov 10 2026 14:00 CST (America/Chicago, dayStartHour=0, 70/8 cycle).
+  // Past 8 days (oldest first: Tue Nov 3 .. Tue Nov 10):
+  //   Nov 3: 6h, Nov 4: 4h, Nov 5: 3h, Nov 6: 10h, Nov 7: 11h, Nov 8: 11h, Nov 9: 11h, Nov 10 (today): 9h
+  //   Total used = 65h (3900m), remaining = 5h (300m).
+  const cfg70 = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago' };
+  const nowT = E.localToMinute(2026, 11, 10, 14, 'America/Chicago'); // Tue Nov 10 14:00 CST
+  const todayStart = E.carrierDayStart(nowT, cfg70);
+  const pastHours = [6, 4, 3, 10, 11, 11, 11, 9]; // oldest -> today (sum = 65h)
+  const dayStarts = [todayStart];
+  for (let i = 1; i < 8; i++) dayStarts.unshift(E.carrierDayStart(dayStarts[0] - 1, cfg70));
+  const segs70 = pastHours.map((h, i) => ({ status: 'D', start: dayStarts[i] + 60, end: dayStarts[i] + 60 + h * 60, createdAt: i + 1 }));
+
+  // Overnight 10h shifts (21:00 -> 07:00): splits 3h pre-midnight + 7h post-midnight.
+  // 34h reset starts Wed Nov 11 08:00 CST -> finishes Thu Nov 12 18:00 CST.
+  const resetWed08 = R.defaultResetStart(nowT, cfg70, 1, 8 * 60);
+  const res70 = R.projectRecapVs34({
+    segments: segs70,
+    now: nowT,
+    config: cfg70,
+    defaultShiftMinutes: 600,
+    shiftStartMinutes: 21 * 60,
+    resetStart: resetWed08,
+    homeTargetShifts: 4, // Home Sat Nov 14 (4 shifts: Tue/Wed/Thu/Fri nights)
+  });
+
+  need(res70.usedNow === 65 * 60 && res70.remainingNow === 5 * 60, `recap70: used/rem ${res70.usedNow}/${res70.remainingNow}`);
+  need(res70.unloggedPastDays === 0, `recap70: unloggedPastDays=${res70.unloggedPastDays}`);
+  need(res70.recaps.shifts.length === 7 && res70.reset34.shifts.length === 7, 'recap70: must project 7 shifts');
+
+  // 1. Midnight-crossing shift split check (Shift 0: Tue Nov 10 21:00 -> Wed Nov 11 07:00)
+  //    Before shift: 5h remaining. Leg 1 (21:00-24:00) = 3h usable (leaves 2h).
+  //    At Wed 00:00: Nov 3 (6h) drops off -> 2h + 6h = 8h avail. Leg 2 (00:00-07:00) = 7h usable!
+  const s0 = res70.recaps.shifts[0];
+  need(s0.crossesBoundary && s0.plannedLeg1 === 180 && s0.plannedLeg2 === 420, `recap70 s0 split: ${s0.plannedLeg1}+${s0.plannedLeg2}`);
+  need(s0.usableLeg1 === 180 && s0.usableLeg2 === 420 && s0.usableMinutes === 600 && !s0.pinched, `recap70 s0 usable: ${s0.usableLeg1}+${s0.usableLeg2}`);
+  need(s0.dropsOffAtNextRoll === 360 && s0.availAfterRoll === 480, `recap70 s0 roll: drop=${s0.dropsOffAtNextRoll} avail=${s0.availAfterRoll}`);
+
+  // 2. Recap Wall detection (Shift 1: Wed Nov 11 21:00 -> Thu Nov 12 07:00)
+  //    Before shift: 8h - 7h = 1h left on Wed! Leg 1 gets 1h (of 3h).
+  //    At Thu 00:00: Nov 4 (4h) drops off -> 0h + 4h = 4h avail. Leg 2 gets 4h (of 7h).
+  //    Total usable on Wed night = 1h + 4h = 5h (300m) -> RECAP WALL!
+  const s1 = res70.recaps.shifts[1];
+  need(s1.usableLeg1 === 60 && s1.usableLeg2 === 240 && s1.usableMinutes === 300 && s1.pinched, `recap70 s1 wall: ${s1.usableLeg1}+${s1.usableLeg2}=${s1.usableMinutes}`);
+  need(res70.recaps.wall !== null && res70.recaps.wall.shiftIndex === 1 && res70.recaps.wall.usableMinutes === 300 && res70.recaps.wall.shortfallMinutes === 300,
+    `recap70 wall mismatch: ${JSON.stringify(res70.recaps.wall)}`);
+
+  // 3. Strategy B (34-Hour Reset starting Wed 08:00 -> Thu 18:00):
+  //    Shift 0 (Tue 21:00-Wed 07:00): finishes before Wed 08:00 -> 10h usable.
+  //    Shift 1 (Wed 21:00-Thu 07:00): inside [Wed 08:00, Thu 18:00) -> 0h (blockedByReset=true).
+  //    Shifts 2..6 (Thu..Mon nights): start after Thu 18:00 with fresh 70h -> 5 * 10h = 50h!
+  //    Strategy B total = 60h (3600m) vs Strategy A total (severely pinched Wed/Thu/Fri) -> 34h reset nets positive!
+  const b0 = res70.reset34.shifts[0], b1 = res70.reset34.shifts[1], b2 = res70.reset34.shifts[2];
+  need(b0.usableMinutes === 600 && !b0.blockedByReset, `reset34 b0: ${b0.usableMinutes}`);
+  need(b1.usableMinutes === 0 && b1.blockedByReset, `reset34 b1: ${b1.usableMinutes} blocked=${b1.blockedByReset}`);
+  need(b2.usableMinutes === 600 && b2.availBeforeShift === 4200 && b2.resetCompletesHere, `reset34 b2: usable=${b2.usableMinutes} avail=${b2.availBeforeShift}`);
+  need(res70.reset34.totalUsableMinutes === 3600, `reset34 total=${res70.reset34.totalUsableMinutes}, want 3600`);
+  need(res70.netDeltaMinutes === res70.reset34.totalUsableMinutes - res70.recaps.totalUsableMinutes && res70.netDeltaMinutes > 0,
+    `reset34 delta=${res70.netDeltaMinutes} (B=${res70.reset34.totalUsableMinutes} vs A=${res70.recaps.totalUsableMinutes})`);
+  need(/Recaps pinch to 5h 00m on Wed; a 34 starting Wed 08:00 nets \+/.test(res70.verdict.headline),
+    `verdict headline unexpected: ${res70.verdict.headline}`);
+
+  // 4. Engine cross-check: simulated segments from both Strategy A and Strategy B must have 0 cycle violations in evaluate().
+  const checkEnd = res70.recaps.shifts[6].shiftEnd + 60;
+  const evSimA = E.evaluate([...segs70, ...res70.recaps.simSegments], { asOf: checkEnd, config: cfg70 });
+  const evSimB = E.evaluate([...segs70, ...res70.reset34.simSegments], { asOf: checkEnd, config: cfg70 });
+  need(evSimA.violations.filter((v) => v.kind === 'CYCLE').length === 0, `simA engine cycle violations: ${JSON.stringify(evSimA.violations)}`);
+  need(evSimB.violations.filter((v) => v.kind === 'CYCLE').length === 0, `simB engine cycle violations: ${JSON.stringify(evSimB.violations)}`);
+
+  // 5. Home-Time target & binary-searched cruise cap optimality check
+  need(res70.homeTime !== null && !res70.homeTime.reachesLegally && res70.homeTime.cruiseCapMinutes > 0 && res70.homeTime.cruiseCapMinutes < 600,
+    `homeTime: ${JSON.stringify(res70.homeTime)}`);
+  const cap = res70.homeTime.cruiseCapMinutes;
+  const atCap = R.projectRecapVs34({ segments: segs70, now: nowT, config: cfg70, defaultShiftMinutes: cap, shiftStartMinutes: 21 * 60, resetStart: resetWed08, homeTargetShifts: 4 });
+  const overCap = R.projectRecapVs34({ segments: segs70, now: nowT, config: cfg70, defaultShiftMinutes: cap + 1, shiftStartMinutes: 21 * 60, resetStart: resetWed08, homeTargetShifts: 4 });
+  need(atCap.homeTime.reachesLegally === true && overCap.homeTime.reachesLegally === false,
+    `cruiseCap ${cap} not tight: atCap=${atCap.homeTime.reachesLegally} overCap=${overCap.homeTime.reachesLegally}`);
+
+  // 6. Non-zero dayStartHour (06:00) overnight split check: 21:00 -> 07:00 splits 9h before 06:00 + 1h after 06:00.
+  const cfg06 = { ...cfg70, dayStartHour: 6 };
+  const res06 = R.projectRecapVs34({ segments: [], now: nowT, config: cfg06, defaultShiftMinutes: 600, shiftStartMinutes: 21 * 60, resetStart: R.defaultResetStart(nowT, cfg06, 1, 8 * 60) });
+  need(res06.recaps.shifts[0].plannedLeg1 === 540 && res06.recaps.shifts[0].plannedLeg2 === 60 && res06.recaps.shifts[0].crossesBoundary,
+    `dayStartHour=6 split: ${res06.recaps.shifts[0].plannedLeg1}+${res06.recaps.shifts[0].plannedLeg2}`);
+  need(res06.unloggedPastDays === 8, `empty log unloggedPastDays=${res06.unloggedPastDays}`);
+
+  // 7. 60/7 cycle variant: 7-day rolling window, 60h limit (3600m).
+  //    Empty log + overnight 10h/night (21:00->07:00): Tue gets 3h, Wed..Sun get 10h each, Mon gets 7h (=60h);
+  //    on Shift 6 (Mon night), 0h left pre-midnight, then Tue's 3h drops off at Tue 00:00 -> 180m usable (total 3780m)!
+  //    For daytime 10h/day (06:00->16:00), Shifts 0..5 use 60h on 6 days -> Shift 6 gets 0m usable (total 3600m).
+  const cfg60 = { ...S.INITIAL_STATE.config, cycle: '60/7', dayStartHour: 0, timeZone: 'America/Chicago' };
+  const res60 = R.projectRecapVs34({ segments: [], now: nowT, config: cfg60, defaultShiftMinutes: 600, shiftStartMinutes: 21 * 60, resetStart: R.defaultResetStart(nowT, cfg60, 1, 8 * 60) });
+  const res60Day = R.projectRecapVs34({ segments: [], now: nowT, config: cfg60, defaultShiftMinutes: 600, shiftStartMinutes: 6 * 60, resetStart: R.defaultResetStart(nowT, cfg60, 1, 8 * 60) });
+  const res70Fresh = R.projectRecapVs34({ segments: [], now: nowT, config: cfg70, defaultShiftMinutes: 600, shiftStartMinutes: 21 * 60, resetStart: R.defaultResetStart(nowT, cfg70, 1, 8 * 60) });
+  need(res60.limit === 3600 && res60.windowDays === 7 && res60.pastDays.length === 7, `60/7 params: ${res60.limit}/${res60.windowDays}/${res60.pastDays.length}`);
+  need(res60.recaps.wall !== null && res60.recaps.wall.shiftIndex === 6 && res60.recaps.wall.usableMinutes === 180 && res60.recaps.totalUsableMinutes === 3780,
+    `60/7 overnight wall: ${JSON.stringify(res60.recaps.wall)} total=${res60.recaps.totalUsableMinutes}`);
+  need(res60Day.recaps.wall !== null && res60Day.recaps.wall.shiftIndex === 6 && res60Day.recaps.wall.usableMinutes === 0 && res60Day.recaps.totalUsableMinutes === 3600,
+    `60/7 daytime wall: ${JSON.stringify(res60Day.recaps.wall)} total=${res60Day.recaps.totalUsableMinutes}`);
+  need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
+    `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
+
+  // 8. Plan tab placement (bottom / 5th .plan-item) & WeekRecapTab SSR render order (verdict banner first)
+  A.openWeekPlanner(false);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const planHtml = pageOut(render(h(App, {})), 'page-plan');
+  const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
+  need(itemTitles.length === 5 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34',
+    `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
+
+  A.openWeekPlanner(true);
+  const weekHtml = pageOut(render(h(App, {})), 'page-plan');
+  const verdictAt = weekHtml.indexOf('data-wrecap-verdict');
+  const forecastAt = weekHtml.indexOf('Day-by-day forecast');
+  need(verdictAt > 0 && forecastAt > verdictAt, `Verdict banner must appear before Day-by-day forecast (${verdictAt} vs ${forecastAt})`);
+  need(weekHtml.includes('Recaps pinch to 5h 00m on Wed') && weekHtml.includes('Recap wall'), 'Rendered WeekRecapTab missing verdict or recap wall badge');
+  A.openWeekPlanner(false);
+
+  if (bad.length) throw new Error(`weekly recap vs 34: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('weekly recap vs 34 (midnight split, wall detection, 34h totals, 60/7, home-time cap, Plan bottom entry): OK');
+}
 console.log('OK');
