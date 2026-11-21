@@ -94,10 +94,16 @@ const tap = async (p, sel, text, ms = 300) => {
   }, [sel, text ? text.source ?? text : null]);
   await wait(p, ms);
 };
-// Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar to header gear button.
+// Re-aimed (2026-11-21 nav-gear + transitions, Lorico): Settings opens via header gear as its own room
+// (bottom bar hidden while in Settings); leaving Settings uses button.settings-back first.
 const go = async (p, tab) => {
-  if (tab === 'More' || tab === 'Settings') await tap(p, 'header.top button[aria-label="Settings"]', null, 900);
-  else await tap(p, 'nav.tabs button', new RegExp(tab), 900);
+  if (tab === 'More' || tab === 'Settings') {
+    await tap(p, 'header.top button[aria-label="Settings"]', null, 400);
+    return;
+  }
+  const inSettings = await p.evaluate(() => !!document.querySelector('.app.in-settings'));
+  if (inSettings) await tap(p, 'section.page-settings button.settings-back', null, 400);
+  await tap(p, 'nav.tabs button', new RegExp(tab), 900);
 };
 const sheetText = (p) => p.evaluate(() => document.querySelector('.sheet')?.innerText ?? '');
 const pageText = (p) => p.evaluate(() => document.querySelector('.page.is-active')?.innerText ?? document.body.innerText);

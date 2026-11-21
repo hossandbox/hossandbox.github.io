@@ -132,16 +132,17 @@ for (const theme of ['day', 'night']) for (const width of [412, 360]) {
     const lg = await page.evaluate(() => [...document.querySelectorAll('main .page-log svg.grid .grid-hour')].map((e) => e.textContent));
     ok(`${T} Log day graph: the ruler reads like the paper log (M … N …)`, lg[0] === 'M' && lg.includes('N') && lg.includes('6') && lg.includes('18'), lg);
     // ---- More: the explanations fold, the safety line does not
+    // Re-aimed (2026-11-21 transitions, Lorico): Settings lives outside <main class="pages"> as section.page-settings.settings-room.
     await tab(page, 'More');
     const mo = await page.evaluate(() => {
-      const ds = [...document.querySelectorAll('main details.help')];
-      const safety = [...document.querySelectorAll('main p')].find((p) => /Your ELD is your official warning/.test(p.textContent));
+      const ds = [...document.querySelectorAll('section.page-settings details.help')];
+      const safety = [...document.querySelectorAll('section.page-settings p')].find((p) => /Your ELD is your official warning/.test(p.textContent));
       return { n: ds.length, open: ds.filter((x) => x.open).length, sumH: ds.map((x) => x.querySelector('summary').getBoundingClientRect().height), safetyShown: !!safety && !safety.closest('details') && safety.getBoundingClientRect().height > 0 };
     });
     ok(`${T} More: at least 5 explanations are folded (closed) behind ≥48px rows`, mo.n >= 5 && mo.open === 0 && mo.sumH.every((h) => h >= 48), mo);
     ok(`${T} More: the alert safety line ("Your ELD is your official warning") is never folded`, mo.safetyShown, mo);
-    await page.locator('main details.help summary').first().click(); await page.waitForTimeout(200);
-    const opened = await page.evaluate(() => { const d = document.querySelector('main details.help'); return d.open && d.querySelector('p').getBoundingClientRect().height > 0; });
+    await page.locator('section.page-settings details.help summary').first().click(); await page.waitForTimeout(200);
+    const opened = await page.evaluate(() => { const d = document.querySelector('section.page-settings details.help'); return d.open && d.querySelector('p').getBoundingClientRect().height > 0; });
     ok(`${T} More: a tap unfolds the explanation`, opened);
     ok(`${T} dock/log/More: no page errors`, errors.length === 0, errors.join('|'));
     await ctx.close();

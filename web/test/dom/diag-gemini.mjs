@@ -52,6 +52,7 @@ if (process.argv.includes('--sweep')) {
     r.step2 = await page.evaluate(async () => { const pg = document.querySelector('.page.is-active'); const nav = document.querySelector('nav.tabs'); const nb = () => pg.querySelector('button.flow-next').getBoundingClientRect().bottom; const top = nav.getBoundingClientRect().top; const at0 = nb() - top; pg.scrollTop = 1e6; await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))); const atMax = nb() - top; pg.scrollTop = 0; return { overNavAt0: +at0.toFixed(1), overNavAtMax: +atMax.toFixed(1), scrollable: pg.scrollHeight - pg.clientHeight, navH: +nav.getBoundingClientRect().height.toFixed(1) }; });
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/sweep-step2-${W}x${H}.png` });
     await page.evaluate(() => document.querySelector('header.top button[aria-label="Settings"]')?.click()); await settle(); r.more = await banner();
+    await page.evaluate(() => document.querySelector('section.page-settings button.settings-back')?.click()); await settle();
     await tap('nav.tabs button', 'Now'); await settle();
     r.now = await page.evaluate(async () => { const pg = document.querySelector('.page.is-active'); const dock = pg.querySelector('.dock'); const card = [...pg.querySelectorAll('.card')].find((c) => /Last 24 hours/i.test(c.textContent)); const d0 = dock.getBoundingClientRect(), c0 = card.getBoundingClientRect(); const at0 = { cardTop: +c0.top.toFixed(1), cardBottom: +c0.bottom.toFixed(1), dockTop: +d0.top.toFixed(1), coveredPx: +Math.max(0, Math.min(c0.bottom, d0.bottom) - Math.max(c0.top, d0.top)).toFixed(1) }; card.scrollIntoView({ block: 'end' }); await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))); const c1 = card.getBoundingClientRect(), d1 = dock.getBoundingClientRect(); pg.scrollTop = 1e6; await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))); const rest = [...pg.querySelectorAll('.now-rest > *')].filter((e) => !e.classList.contains('dock') && e.getBoundingClientRect().height > 0); const last = rest[rest.length - 1].getBoundingClientRect(); const d2 = dock.getBoundingClientRect(); pg.scrollTop = 0; return { at0, cardFullyClearAfterScrollIntoView: c1.bottom <= d1.top + 0.5, lastClearsDockAtMax: +(d2.top - last.bottom).toFixed(1) }; });
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/sweep-now-${W}x${H}.png` });
@@ -117,6 +118,7 @@ for (const [W, H] of [[412, 915], [360, 640]]) for (const nowCard of ['dial', 't
   const bannerMore = await banner('more');
   if (SHOTS && nowCard === 'dial') await page.screenshot({ path: `${SHOTS}/more-${W}.png` });
   // ---- LOG
+  await page.evaluate(() => document.querySelector('section.page-settings button.settings-back')?.click()); await settle();
   await tap('nav.tabs button', 'Log'); await settle();
   const log = await page.evaluate(() => {
     const pg = document.querySelector('.page.is-active');

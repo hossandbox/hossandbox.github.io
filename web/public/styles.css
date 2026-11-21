@@ -1457,6 +1457,145 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
   .rescue-clocks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* ===================================================================================
+   TRANSITION POLISH (Lorico, 2026-11-21)
+   1. Settings as "another room": tapping the header gear dissolves out all main-app
+      chrome (TopBar, 3-panel strip, bottom tab bar) and dissolves in the full-screen
+      Settings room (220ms ease-out). No horizontal strip scrolling on Settings leg.
+   2. Day/Night theme ease: calm 280ms color/background/border-color cross-fade only —
+      never geometry, no flash, no layout shift. Respects prefers-reduced-motion.
+   =================================================================================== */
+@property --bg { syntax: '<color>'; inherits: true; initial-value: #090c10; }
+@property --ground-hi { syntax: '<color>'; inherits: true; initial-value: #131b23; }
+@property --ground-lo { syntax: '<color>'; inherits: true; initial-value: #090c10; }
+@property --panel { syntax: '<color>'; inherits: true; initial-value: #11161c; }
+@property --panel2 { syntax: '<color>'; inherits: true; initial-value: #19212a; }
+@property --surface-hi { syntax: '<color>'; inherits: true; initial-value: #151b22; }
+@property --line { syntax: '<color>'; inherits: true; initial-value: #26303b; }
+@property --tick { syntax: '<color>'; inherits: true; initial-value: #3a4756; }
+@property --text { syntax: '<color>'; inherits: true; initial-value: #f3eee4; }
+@property --muted { syntax: '<color>'; inherits: true; initial-value: #aaa79d; }
+@property --key-hi { syntax: '<color>'; inherits: true; initial-value: #1b232b; }
+@property --key-lo { syntax: '<color>'; inherits: true; initial-value: #10151b; }
+@property --key-base { syntax: '<color>'; inherits: true; initial-value: #040608; }
+@property --screen { syntax: '<color>'; inherits: true; initial-value: #070a0d; }
+@property --t-well { syntax: '<color>'; inherits: true; initial-value: #090c10; }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #7cc8ff; }
+@property --accent-solid { syntax: '<color>'; inherits: true; initial-value: #1d6aa8; }
+@property --link { syntax: '<color>'; inherits: true; initial-value: #9fd6ff; }
+@property --good { syntax: '<color>'; inherits: true; initial-value: #3ee08f; }
+@property --warn { syntax: '<color>'; inherits: true; initial-value: #ffb547; }
+@property --bad { syntax: '<color>'; inherits: true; initial-value: #ff6464; }
+@property --sb { syntax: '<color>'; inherits: true; initial-value: #a993ff; }
+@property --tint-warn { syntax: '<color>'; inherits: true; initial-value: rgba(255,181,71,.15); }
+@property --tint-bad { syntax: '<color>'; inherits: true; initial-value: rgba(255,100,100,.15); }
+@property --tint-accent { syntax: '<color>'; inherits: true; initial-value: rgba(124,200,255,.10); }
+@property --edge-hi { syntax: '<color>'; inherits: true; initial-value: rgba(255,255,255,.06); }
+@property --drop { syntax: '<color>'; inherits: true; initial-value: rgba(0,0,0,.5); }
+@property --dial-track { syntax: '<color>'; inherits: true; initial-value: #19212a; }
+
+html {
+  --ground-hi: #131b23;
+  --ground-lo: #090c10;
+  transition: --bg 280ms ease, --ground-hi 280ms ease, --ground-lo 280ms ease, --panel 280ms ease, --panel2 280ms ease, --surface-hi 280ms ease, --line 280ms ease, --tick 280ms ease, --text 280ms ease, --muted 280ms ease, --key-hi 280ms ease, --key-lo 280ms ease, --key-base 280ms ease, --screen 280ms ease, --t-well 280ms ease, --accent 280ms ease, --accent-solid 280ms ease, --link 280ms ease, --good 280ms ease, --warn 280ms ease, --bad 280ms ease, --sb 280ms ease, --tint-warn 280ms ease, --tint-bad 280ms ease, --tint-accent 280ms ease, --edge-hi 280ms ease, --drop 280ms ease, --dial-track 280ms ease, background-color 280ms ease, color 280ms ease;
+}
+html[data-theme="day"] {
+  --ground-hi: #e9edf1;
+  --ground-lo: #dce2e7;
+}
+.app {
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, var(--ground-hi) 0%, var(--ground-lo) 100%);
+}
+body, .app, .card, .hero, .dock, .stat, .modal, .sheet, .pill, .toggle, .warnbox, .alertbox, .plan-icon, .bignum, .limit-plate, .ed-clock, .grid, .filebtn, input, select {
+  transition: background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+button {
+  transition: transform 90ms ease-out, box-shadow 90ms ease-out, filter 120ms ease-out, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+
+/* Settings room dissolve: main-app chrome fades out while Settings fades in as its own space. */
+.app > header.top,
+.app > main.pages,
+.app > nav.tabs {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 220ms ease-out, visibility 0s linear 0s, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+.app.in-settings > header.top,
+.app.in-settings > main.pages,
+.app.in-settings > nav.tabs {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 220ms ease-out, visibility 0s linear 220ms, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+.page.settings-room {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  flex: none;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, var(--ground-hi) 0%, var(--ground-lo) 100%);
+  overscroll-behavior: none;
+  scroll-snap-align: none;
+  scroll-snap-stop: normal;
+  padding: 0 12px calc(24px + env(safe-area-inset-bottom));
+  scroll-padding-top: calc(64px + env(safe-area-inset-top));
+  scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 220ms ease-out, visibility 0s linear 220ms, background-color 280ms ease, color 280ms ease;
+}
+.page.settings-room.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 220ms ease-out, visibility 0s linear 0s, background-color 280ms ease, color 280ms ease;
+}
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -12px;
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  background-color: var(--bg);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 var(--edge-hi), 0 8px 14px -10px var(--t-cast);
+  display: flex;
+  align-items: center;
+  gap: var(--s-8);
+  transition: background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+button.back.settings-back {
+  min-height: var(--ctl-floor);
+  min-width: var(--ctl-floor);
+  padding: 0 var(--s-12) 0 0;
+  align-self: center;
+}
+.settings-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body, .app, .card, .hero, .dock, .stat, .modal, .sheet, .pill, .toggle, .warnbox, .alertbox, .plan-icon, .bignum, .limit-plate, .ed-clock, .grid, .filebtn, input, select,
+  button,
+  .app > header.top, .app > main.pages, .app > nav.tabs,
+  .app.in-settings > header.top, .app.in-settings > main.pages, .app.in-settings > nav.tabs,
+  .page.settings-room, .page.settings-room.is-active, .settings-head {
+    transition: none;
+  }
+}
+
 @page {
   size: letter portrait;
   margin: 0.45in 0.5in;

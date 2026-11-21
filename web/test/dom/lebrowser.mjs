@@ -128,12 +128,13 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     const card1 = await page.evaluate(() => ({ dial: !!document.querySelector('main .dial'), taxis: !!document.querySelector('.taxis') }));
     ok(`${tag} item 5: tapping Dial on the card swaps the card to the dial and stores it`, card1.dial && !card1.taxis && (await stored(page)) === 'dial' && s1?.keys.find((k) => k.on === 'true')?.t === 'Dial', JSON.stringify({ card1, s1 }));
     await shot(page, `switch-${W}x${H}-dial`);
-    // Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar to header gear button.
-    await page.locator('header.top button[aria-label="Settings"]').click(); await page.waitForTimeout(200);
+    // Re-aimed (2026-11-21 nav-gear + transitions, Lorico): Settings opens as its own room via header gear
+    // (bottom bar hidden); return to Now via the Settings Back button.
+    await page.locator('header.top button[aria-label="Settings"]').click(); await page.waitForTimeout(300);
     const lbl = page.locator('label', { hasText: 'Main card on Now' });
     ok(`${tag} item 5: More → "Main card on Now" shows Dial (the card's choice)`, (await lbl.count()) === 1 && (await pressed(lbl.locator('button'))).join() === 'Dial', JSON.stringify(await pressed(lbl.locator('button'))));
     await lbl.locator('button', { hasText: 'Timeline' }).click(); await page.waitForTimeout(150);
-    await page.locator('nav.tabs button', { hasText: /Now$/ }).click(); await page.waitForTimeout(250);
+    await page.locator('section.page-settings button.settings-back').click(); await page.waitForTimeout(300);
     const s2 = await switchInfo(page);
     const card2 = await page.evaluate(() => ({ taxis: !!document.querySelector('.taxis') }));
     ok(`${tag} item 5: Timeline picked in More → the Now card is the timeline and its switch says so`, card2.taxis && s2?.keys.find((k) => k.on === 'true')?.t === 'Timeline' && (await stored(page)) === 'timeline', JSON.stringify({ card2, s2 }));

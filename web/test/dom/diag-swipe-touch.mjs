@@ -85,10 +85,13 @@ const state = () => page.evaluate(() => {
 });
 const seat = async (tab) => {
   await page.evaluate((t) => {
+    if (document.querySelector('.app.in-settings') && t !== 'More' && t !== 'Settings') {
+      document.querySelector('section.page-settings button.settings-back')?.click();
+    }
     const b = (t === 'More' || t === 'Settings')
       ? document.querySelector('header.top button[aria-label="Settings"]')
       : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(t));
-    b.click();
+    b?.click();
   }, tab);
   await page.waitForTimeout(900);
 };
@@ -103,10 +106,9 @@ const rows = [];
 for (const [from, label, x, y, dx, dy] of [
   ['Now', 'Now content (mid-panel)', 206, 450, -300, 0],
   ['Plan', 'Plan row (button)', 206, 300, -300, 0],
-  ['Log', 'Log content (mid-panel)', 206, 450, -300, 0],
-  ['Log', 'Log content, slight diagonal', 206, 450, -300, 40],
+  ['Log', 'Log content (mid-panel)', 206, 450, 300, 0],
+  ['Now', 'Now content, slight diagonal', 206, 450, -300, 40],
   ['Plan', 'Tab bar (icons)', 206, 885, -300, 0],
-  ['More', 'More content, swipe right', 206, 450, 300, 0],
 ]) {
   await seat(from);
   const b = await state();

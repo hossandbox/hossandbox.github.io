@@ -104,14 +104,16 @@ for (const [W, H] of SIZES) {
       if (tab === 'Split') { await tap('nav.tabs button', 'Plan'); await page.waitForTimeout(100); await tap('main button', 'Plan a sleeper split'); }
       else if (tab === 'More') { await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); }
       else await tap('nav.tabs button', tab);
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(300);
       // a tab tap now ANIMATES the strip to the page (smooth scroll): measure at rest,
-      // not mid-flight — wait for the strip to seat on the active page's snap point.
-      await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {});
+      // not mid-flight — wait for the strip to seat on the active page's snap point (when active page is in the strip).
+      await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || !m.contains(p) || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {});
       const m = await page.evaluate(async () => {
         const de = document.documentElement, body = document.body;
         const app = document.querySelector('.app'), header = document.querySelector('header.top'), nav = document.querySelector('nav.tabs'), dock = document.querySelector('.dock'), main = document.querySelector('main');
         const page = document.querySelector('.page.is-active');
+        const inStrip = !!(main && page && main.contains(page));
+        const inSettings = !!(app && app.classList.contains('in-settings'));
         const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top * 100) / 100, bottom: Math.round(r.bottom * 100) / 100, left: Math.round(r.left * 100) / 100, right: Math.round(r.right * 100) / 100 }; };
         const vw = de.clientWidth, vh = window.innerHeight, innerW = window.innerWidth;
         // every element of the screen in view reaching past the viewport's side edges
@@ -121,6 +123,7 @@ for (const [W, H] of SIZES) {
         for (const el of document.querySelectorAll('body *')) {
           const pg = el.closest('.page');
           if (pg && pg !== page) continue;
+          if (inSettings && (el.closest('header.top') || el.closest('nav.tabs') || el.closest('main.pages'))) continue;
           // the page frame itself is the strip's own box: Chromium seats a snap up to
           // a pixel off the exact point, which is the strip working, not overflow —
           // the page's CONTENTS are still scanned below.
@@ -135,22 +138,33 @@ for (const [W, H] of SIZES) {
         }
         // the scroller: whichever of document / shell actually has overflow to scroll
         const docScrollable = de.scrollHeight - de.clientHeight;
-        const before = { header: rect(header), nav: rect(nav), dock: rect(dock) };
+        const before = { header: rect(header), nav: rect(nav), dock: rect(dock), page: rect(page) };
+        const chromeHidden = inSettings ? {
+          hdrVis: header ? getComputedStyle(header).visibility : null,
+          hdrOp: header ? getComputedStyle(header).opacity : null,
+          hdrInert: !!header && (header.inert || header.hasAttribute('inert')),
+          navVis: nav ? getComputedStyle(nav).visibility : null,
+          navOp: nav ? getComputedStyle(nav).opacity : null,
+          navInert: !!nav && (nav.inert || nav.hasAttribute('inert')),
+          roomVis: page ? getComputedStyle(page).visibility : null,
+          roomOp: page ? getComputedStyle(page).opacity : null,
+        } : null;
         // Re-aimed (2026-11-20 logpin): on Log the vertical scroller is .log-scroll inside non-scrolling .page-log; other pages scroll on .page.
         const isLog = !!(page && page.classList.contains('page-log'));
         const scroller = isLog ? (page.querySelector('.log-scroll') || page) : page;
         // try to scroll everything, both axes, the way a thumb would. The strip itself
         // may move sideways — that is its job — so its seat is restored in the same
         // task, before the app's settle timer can read the probe as a page change.
+        const stripPrev = main ? main.scrollLeft : 0;
         window.scrollTo(200, 100000);
         if (app) { app.scrollTop = 100000; app.scrollLeft = 200; }
         if (page) page.scrollTop = 100000;
         if (scroller && scroller !== page) scroller.scrollTop = 100000;
-        if (main) { main.scrollLeft = 200; }
+        if (main && inStrip) { main.scrollLeft = 200; }
         const stripMoved = main ? main.scrollLeft : null;
-        if (main && page) main.scrollLeft = page.offsetLeft;
+        if (main) main.scrollLeft = inStrip ? page.offsetLeft : stripPrev;
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        const after = { header: rect(header), nav: rect(nav), dock: rect(dock) };
+        const after = { header: rect(header), nav: rect(nav), dock: rect(dock), page: rect(page) };
         const moved = { winX: window.scrollX, winY: window.scrollY, appX: app ? app.scrollLeft : null, appY: app ? app.scrollTop : null, pageY: page ? page.scrollTop : null, scrollerY: scroller ? scroller.scrollTop : null, stripMoved, vvX: window.visualViewport ? window.visualViewport.offsetLeft + window.visualViewport.pageLeft : 0 };
         const out = {
           vw, vh, innerW, docScrollW: de.scrollWidth, docClientW: de.clientWidth, bodyScrollW: body.scrollWidth,
@@ -159,11 +173,11 @@ for (const [W, H] of SIZES) {
           appComputedH: app ? getComputedStyle(app).height : null, appOverflowY: app ? getComputedStyle(app).overflowY : null,
           pageScrollH: page ? page.scrollHeight : null, pageClientH: page ? page.clientHeight : null, pageOverflowY: page ? getComputedStyle(page).overflowY : null,
           scrollerScrollH: scroller ? scroller.scrollHeight : null, scrollerClientH: scroller ? scroller.clientHeight : null, scrollerOverflowY: scroller ? getComputedStyle(scroller).overflowY : null,
-          isLog,
+          isLog, inSettings, chromeHidden,
           docScrollable, wide: wide.slice(0, 12), wideCount: wide.length, before, after, moved,
           slots: { header: !!header && header.parentElement === app, nav: !!nav && nav.parentElement === app, dockInMain: !dock || (!!main && main.contains(dock)), mainInApp: !!main && main.parentElement === app },
         };
-        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (page) page.scrollTop = 0; if (scroller && scroller !== page) scroller.scrollTop = 0; if (main && page) main.scrollLeft = page.offsetLeft;
+        window.scrollTo(0, 0); if (app) { app.scrollTop = 0; app.scrollLeft = 0; } if (page) page.scrollTop = 0; if (scroller && scroller !== page) scroller.scrollTop = 0; if (main) main.scrollLeft = inStrip ? page.offsetLeft : stripPrev;
         return out;
       });
       const tag = `[${W}x${H} ${nowCard} ${tab}]`;
@@ -185,8 +199,18 @@ for (const [W, H] of SIZES) {
       // fraction of a pixel off its slot, so for the dock "stays put" means within 1px; the header
       // and the tab bar are held to the exact pixel.
       const near = (a, b) => a && b && Math.abs(a.top - b.top) < 1 && Math.abs(a.bottom - b.bottom) < 1 && a.left === b.left && a.right === b.right;
-      ok(`${tag} (b) header stays at the top edge while content scrolls`, m.before.header && m.before.header.top === 0 && same(m.before.header, m.after.header), `${JSON.stringify(m.before.header)} → ${JSON.stringify(m.after.header)}`);
-      ok(`${tag} (b) tab bar stays at the bottom edge while content scrolls`, m.before.nav && m.before.nav.bottom === m.vh && same(m.before.nav, m.after.nav), `${JSON.stringify(m.before.nav)} → ${JSON.stringify(m.after.nav)} (viewport ${m.vh})`);
+      // Re-aimed (2026-11-21 transitions, Lorico): Settings is its own full-viewport room with main-app header & bottom bar hidden.
+      if (tab === 'More') {
+        ok(`${tag} (b) Settings room fills the viewport and hides main-app header & bottom bar`,
+          m.inSettings && m.chromeHidden && m.chromeHidden.hdrVis === 'hidden' && m.chromeHidden.hdrOp === '0' && m.chromeHidden.hdrInert
+          && m.chromeHidden.navVis === 'hidden' && m.chromeHidden.navOp === '0' && m.chromeHidden.navInert
+          && m.chromeHidden.roomVis === 'visible' && m.chromeHidden.roomOp === '1'
+          && m.before.page && m.before.page.top === 0 && m.before.page.bottom === m.vh,
+          JSON.stringify({ chromeHidden: m.chromeHidden, page: m.before.page, vh: m.vh }));
+      } else {
+        ok(`${tag} (b) header stays at the top edge while content scrolls`, m.before.header && m.before.header.top === 0 && same(m.before.header, m.after.header), `${JSON.stringify(m.before.header)} → ${JSON.stringify(m.after.header)}`);
+        ok(`${tag} (b) tab bar stays at the bottom edge while content scrolls`, m.before.nav && m.before.nav.bottom === m.vh && same(m.before.nav, m.after.nav), `${JSON.stringify(m.before.nav)} → ${JSON.stringify(m.after.nav)} (viewport ${m.vh})`);
+      }
       if (tab === 'Now') {
         ok(`${tag} (b) status dock sits on the tab bar and stays put while content scrolls`, m.after.dock && m.after.nav && Math.abs(m.after.dock.bottom - m.after.nav.top) <= 1 && m.after.dock.left === 0 && m.after.dock.right === m.vw && near(m.before.dock, m.after.dock), `${JSON.stringify(m.before.dock)} → ${JSON.stringify(m.after.dock)}; nav ${JSON.stringify(m.after.nav)}`);
         ok(`${tag} (b) status dock is pinned from the first frame (no scroll needed)`, m.before.dock && Math.abs(m.before.dock.bottom - m.before.nav.top) <= 1, `${JSON.stringify(m.before.dock)}; nav ${JSON.stringify(m.before.nav)}`);
@@ -253,12 +277,10 @@ for (const [W, H] of SIZES) {
   const css = await page.evaluate(() => { const c = getComputedStyle(document.querySelector('.page')); return `${c.overscrollBehaviorX}/${c.overscrollBehaviorY}`; });
   ok(`${tag} (c) a page hands sideways overscroll up to the strip (overscroll-behavior x auto), and keeps vertical closed (y none)`, css === 'auto/none', css);
   await seated();
-  // Re-aimed (2026-11-20 nowplain): bar order Plan(0) — Now(1) — Log(2) — More(3) (opens on Now at index 1).
+  // Re-aimed (2026-11-21 transitions, Lorico): 3-panel strip Plan(0) — Now(1) — Log(2); Settings is no longer a swipe destination.
   // [from-panel, content selector, dx, expected panel, label]
   const legs = [
     ['now', '.hero, .card, section', -1, 'log', 'Now content'],
-    ['log', 'button.entry', -1, 'settings', 'a Log entry (button)'],
-    ['settings', 'label, .card', 1, 'log', 'a More/Settings row'],
     ['log', 'button.entry', 1, 'now', 'a Log entry, rightward'],
     ['now', '.hero, .card, section', 1, 'plan', 'Now content, rightward'],
     ['plan', 'button.plan-item b, button.plan-item', -1, 'now', 'a Plan row (button)'],
@@ -271,8 +293,7 @@ for (const [W, H] of SIZES) {
     await drag(at.x, at.y, dir * Math.round(W * 0.7), 0);
     await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250);
     const a = await st();
-    // Re-aimed (2026-11-21 nav-gear, Lorico): Settings stays 4th strip panel; no bottom-bar tab is lit when active === 'settings'.
-    ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && (want === 'settings' ? !a.bar : a.bar === { now: 'Now', plan: 'Plan', log: 'Log' }[want]), `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
+    ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, a.active === want && a.bar === { now: 'Now', plan: 'Plan', log: 'Log' }[want], `start on ${at.hit} (in a control: ${at.inControl}) → active ${a.active}, bar ${a.bar}`);
     ok(`${tag} (c) …and its settle gives exactly one haptic click`, a.vib - b.vib === 1, `vibrate calls +${a.vib - b.vib}`);
   }
   // Re-aimed (2026-11-20 nowplain): leftward diagonal swipe from Now pages to Log (index 2).
@@ -282,6 +303,11 @@ for (const [W, H] of SIZES) {
     if (at) { await drag(at.x, at.y, -Math.round(W * 0.7), 40); await page.waitForTimeout(400); await seated(); await page.waitForTimeout(250); }
     const a = await st();
     ok(`${tag} (c) a slightly diagonal swipe on Now content still pages to Log`, b.active === 'now' && a.active === 'log', `${b.active} → ${a.active}`);
+    // Swiping further left on Log must NOT land on Settings (Settings is not a swipe destination).
+    const atLog = await spot('button.entry');
+    if (atLog) { await drag(atLog.x, atLog.y, -Math.round(W * 0.7), 0); await page.waitForTimeout(350); }
+    const afterEdge = await st();
+    ok(`${tag} (c) swiping left past Log stays on Log (Settings is not a swipe destination)`, afterEdge.active === 'log' && afterEdge.vib === a.vib, `active=${afterEdge.active} vib +${afterEdge.vib - a.vib}`);
   }
   // vertical scrolling is untouched: a vertical drag on Log scrolls the page, never the strip
   {
@@ -318,13 +344,16 @@ for (const [W, H] of SIZES) {
     const a2 = await st();
     ok(`${tag} (c) a tap on the tab of the panel already showing never ticks`, a2.active === 'now' && a2.vib === b2.vib, `active ${a2.active}; vibrate +${a2.vib - b2.vib}`);
   }
-  // Re-aimed (2026-11-21 nav-gear, Lorico): strip is Plan(0)–Now(1)–Log(2)–Settings(3); Settings reached via header gear.
-  // Now↔Settings is 2 ticks (pass Log), Plan↔Settings is 3 ticks, Plan→Log is 2 ticks, Now→Plan and Now→Log are 1 tick each.
+  // Re-aimed (2026-11-21 transitions, Lorico): strip is 3 panels Plan(0)–Now(1)–Log(2); Settings dissolves
+  // in as its own room with zero strip scrolling and 1 crisp tap tick on enter & exit.
+  // Plan↔Log is 2 ticks (pass Now, lock target); Now↔Plan and Now↔Log are 1 tick at lock.
   {
     const tabBox = (label) => page.evaluate((l) => {
       const el = l === 'Settings'
         ? document.querySelector('header.top button[aria-label="Settings"]')
-        : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l));
+        : l === 'SettingsBack'
+          ? document.querySelector('section.page-settings button.settings-back')
+          : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.includes(l));
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     }, label);
@@ -340,33 +369,64 @@ for (const [W, H] of SIZES) {
       return { a, got, early, t0 };
     };
     const where = (g) => g.got.map((v) => `${Math.round(v.t - g.t0)}ms@${(v.sl / (v.w || 1)).toFixed(2)}`).join(' ');
-    // Now(1) → Settings(3) via header gear: pass Log(2), lock Settings(3) = 2 ticks
-    const g1 = await glide('Settings');
-    const pos1 = g1.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nav-gear): Now → Settings (gear) ticks 2 times (pass Log, lock Settings), none at press`, g1.a.active === 'settings' && g1.got.length === 2 && g1.early === 0 && pos1[0] >= 1.99 && pos1[0] < 2.5 && pos1[1] >= 2.99, `active ${g1.a.active}; ${g1.got.length} ticks, ${g1.early} early: ${where(g1)}`);
-    // Settings(3) → Now(1): pass Log(2), lock Now(1) = 2 ticks
-    const g2 = await glide('Now');
-    const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nav-gear): Settings → Now ticks 2 times (pass Log, lock Now), none at press`, g2.a.active === 'now' && g2.got.length === 2 && g2.early === 0 && pos2[0] <= 2.01 && pos2[0] > 1.5 && Math.abs(pos2[1] - 1) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
     // Now(1) → Plan(0): adjacent = 1 tick at lock
-    const g3 = await glide('Plan');
-    ok(`${tag} (c) amendment A (nowplain): Now → Plan ticks once, at the lock`, g3.a.active === 'plan' && g3.got.length === 1 && g3.early === 0 && g3.got[0].sl / (g3.got[0].w || 1) <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks: ${where(g3)}`);
-    // Plan(0) → Settings(3) via header gear: pass Now(1), pass Log(2), lock Settings(3) = 3 ticks
-    const g4 = await glide('Settings');
-    const pos4 = g4.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nav-gear): Plan → Settings (gear) ticks 3 times (Now, Log, lock Settings), none at press`, g4.a.active === 'settings' && g4.got.length === 3 && g4.early === 0 && pos4[0] >= 0.99 && pos4[0] < 1.5 && pos4[1] >= 1.99 && pos4[1] < 2.5 && pos4[2] >= 2.99, `active ${g4.a.active}; ${g4.got.length} ticks, ${g4.early} early: ${where(g4)}`);
-    // Settings(3) → Plan(0): pass Log(2), pass Now(1), lock Plan(0) = 3 ticks
-    const g5 = await glide('Plan');
-    const pos5 = g5.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nav-gear): Settings → Plan ticks 3 times (Log, Now, lock Plan), none at press`, g5.a.active === 'plan' && g5.got.length === 3 && g5.early === 0 && pos5[0] <= 2.01 && pos5[0] > 1.5 && pos5[1] <= 1.01 && pos5[1] > 0.5 && pos5[2] <= 0.02, `active ${g5.a.active}; ${g5.got.length} ticks, ${g5.early} early: ${where(g5)}`);
+    const g1 = await glide('Plan');
+    ok(`${tag} (c) amendment A (transitions): Now → Plan ticks once, at the lock`, g1.a.active === 'plan' && g1.got.length === 1 && g1.early === 0 && g1.got[0].sl / (g1.got[0].w || 1) <= 0.02, `active ${g1.a.active}; ${g1.got.length} ticks: ${where(g1)}`);
     // Plan(0) → Log(2): pass Now(1), lock Log(2) = 2 ticks
-    const g6 = await glide('Log');
-    const pos6 = g6.got.map((v) => v.sl / (v.w || 1));
-    ok(`${tag} (c) amendment A (nowplain): Plan → Log ticks 2 times (Now, lock Log), none at press`, g6.a.active === 'log' && g6.got.length === 2 && g6.early === 0 && pos6[0] >= 0.99 && pos6[0] < 1.5 && Math.abs(pos6[1] - 2) <= 0.02, `active ${g6.a.active}; ${g6.got.length} ticks, ${g6.early} early: ${where(g6)}`);
+    const g2 = await glide('Log');
+    const pos2 = g2.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A (transitions): Plan → Log ticks 2 times (Now, lock Log), none at press`, g2.a.active === 'log' && g2.got.length === 2 && g2.early === 0 && pos2[0] >= 0.99 && pos2[0] < 1.5 && Math.abs(pos2[1] - 2) <= 0.02, `active ${g2.a.active}; ${g2.got.length} ticks, ${g2.early} early: ${where(g2)}`);
+    // Log(2) → Plan(0): pass Now(1), lock Plan(0) = 2 ticks
+    const g3 = await glide('Plan');
+    const pos3 = g3.got.map((v) => v.sl / (v.w || 1));
+    ok(`${tag} (c) amendment A (transitions): Log → Plan ticks 2 times (Now, lock Plan), none at press`, g3.a.active === 'plan' && g3.got.length === 2 && g3.early === 0 && pos3[0] <= 1.01 && pos3[0] > 0.5 && pos3[1] <= 0.02, `active ${g3.a.active}; ${g3.got.length} ticks, ${g3.early} early: ${where(g3)}`);
     await glide('Now');
     // Now(1) → Log(2): adjacent = 1 tick at lock
-    const g7 = await glide('Log');
-    ok(`${tag} (c) amendment A (nowplain): Now → Log ticks once, at the lock`, g7.a.active === 'log' && g7.got.length === 1 && g7.early === 0 && Math.abs(g7.got[0].sl / (g7.got[0].w || 1) - 2) <= 0.02, `active ${g7.a.active}; ${g7.got.length} ticks: ${where(g7)}`);
+    const g4 = await glide('Log');
+    ok(`${tag} (c) amendment A (transitions): Now → Log ticks once, at the lock`, g4.a.active === 'log' && g4.got.length === 1 && g4.early === 0 && Math.abs(g4.got[0].sl / (g4.got[0].w || 1) - 2) <= 0.02, `active ${g4.a.active}; ${g4.got.length} ticks: ${where(g4)}`);
+    // Gear → Settings room dissolve (from Log): zero strip scroll, main chrome hidden, 1 tap tick
+    const slBeforeGear = await page.evaluate(() => document.querySelector('main.pages').scrollLeft);
+    const nGear = await page.evaluate(() => window.__vib.length);
+    const gearBox = await tabBox('Settings');
+    await page.touchscreen.tap(gearBox.x, gearBox.y);
+    await page.waitForTimeout(350);
+    const gearRes = await page.evaluate((n) => {
+      const m = document.querySelector('main.pages'), h = document.querySelector('header.top'), nav = document.querySelector('nav.tabs'), sr = document.querySelector('section.page-settings');
+      return {
+        sl: m.scrollLeft,
+        vib: window.__vib.slice(n).length,
+        inSettings: document.querySelector('.app').classList.contains('in-settings'),
+        hdrVis: getComputedStyle(h).visibility,
+        navVis: getComputedStyle(nav).visibility,
+        srVis: getComputedStyle(sr).visibility,
+        srOp: getComputedStyle(sr).opacity,
+        backText: sr.querySelector('button.settings-back')?.textContent?.trim() ?? '',
+      };
+    }, nGear);
+    ok(`${tag} (c) transitions: Gear → Settings dissolves without scrolling strip (sl=${slBeforeGear}), hides chrome, 1 tap tick`,
+      gearRes.sl === slBeforeGear && gearRes.vib === 1 && gearRes.inSettings && gearRes.hdrVis === 'hidden' && gearRes.navVis === 'hidden' && gearRes.srVis === 'visible' && gearRes.srOp === '1' && gearRes.backText === 'Log',
+      JSON.stringify(gearRes));
+    // Settings Back → Log: zero strip scroll, chrome restored, lands back on Log, 1 tap tick
+    const nBack = await page.evaluate(() => window.__vib.length);
+    const backBox = await tabBox('SettingsBack');
+    await page.touchscreen.tap(backBox.x, backBox.y);
+    await page.waitForTimeout(350);
+    const backRes = await page.evaluate((n) => {
+      const m = document.querySelector('main.pages'), h = document.querySelector('header.top'), nav = document.querySelector('nav.tabs'), sr = document.querySelector('section.page-settings');
+      return {
+        sl: m.scrollLeft,
+        vib: window.__vib.slice(n).length,
+        inSettings: document.querySelector('.app').classList.contains('in-settings'),
+        hdrVis: getComputedStyle(h).visibility,
+        navVis: getComputedStyle(nav).visibility,
+        srVis: getComputedStyle(sr).visibility,
+        active: document.querySelector('.page.is-active')?.className ?? '',
+        bar: document.querySelector('nav.tabs button.on')?.textContent?.trim() ?? null,
+      };
+    }, nBack);
+    ok(`${tag} (c) transitions: Settings Back dissolves back to Log without scrolling strip, restores chrome, 1 tap tick`,
+      backRes.sl === slBeforeGear && backRes.vib === 1 && !backRes.inSettings && backRes.hdrVis === 'visible' && backRes.navVis === 'visible' && backRes.srVis === 'hidden' && /\bpage-log\b/.test(backRes.active) && backRes.bar === 'Log',
+      JSON.stringify(backRes));
   }
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -449,10 +509,11 @@ for (const [W, H] of SIZES) {
       });
       ok(`${tag} (d) C: load step 2's Next scrolled into view lands clear of the tab bar`, step2.a.bottom <= step2.a.navTop + 0.5, `next bottom ${step2.a.bottom.toFixed(1)}, bar top ${step2.a.navTop.toFixed(1)}`);
       ok(`${tag} (d) C: …and at the end of the scroll it clears the bar`, step2.b.bottom <= step2.b.navTop, `next bottom ${step2.b.bottom.toFixed(1)}, bar top ${step2.b.navTop.toFixed(1)}`);
-      await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); await settle();
+      await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); await page.waitForTimeout(300);
       const eMore = await banner();
       ok(`${tag} (d) E: the "History incomplete" button sits inside its banner on Plan, the load check and More`, [eHub, eLoad, eMore].every((x) => x !== null && x <= 0), `plan ${eHub}, load ${eLoad}, more ${eMore} (px past the inner bottom edge)`);
-      // ---- D (+A): the Log's live row
+      // ---- D (+A): the Log's live row (exit Settings room first so bottom bar is restored)
+      await page.evaluate(() => { document.querySelector('section.page-settings button.settings-back')?.click(); }); await page.waitForTimeout(300);
       await tap('nav.tabs button', 'Log'); await settle();
       const log = await page.evaluate(() => {
         const pg = document.querySelector('.page.is-active');
@@ -502,24 +563,34 @@ for (const [W, H] of SIZES) {
     await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.waitForTimeout(150);
     const tag = `[${W}x${H} ${theme} nav]`;
-    const tapNav = (label) => page.evaluate((l) => {
-      const b = (l === 'More' || l === 'Settings')
-        ? document.querySelector('header.top button[aria-label="Settings"]')
-        : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
-      if (!b) throw new Error('no tab ' + l);
-      b.click();
-    }, label);
-    const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
+    const tapNav = async (label) => {
+      if (label !== 'More' && label !== 'Settings') {
+        const wasSettings = await page.evaluate(() => !!document.querySelector('.app.in-settings'));
+        if (wasSettings) {
+          await page.evaluate(() => { document.querySelector('section.page-settings button.settings-back')?.click(); });
+          await page.waitForTimeout(300);
+        }
+      }
+      await page.evaluate((l) => {
+        const b = (l === 'More' || l === 'Settings')
+          ? document.querySelector('header.top button[aria-label="Settings"]')
+          : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
+        if (!b) throw new Error('no tab ' + l);
+        b.click();
+      }, label);
+    };
+    const settle = async () => { await page.waitForTimeout(300); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || !m.contains(p) || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
     // 1 + 2. Order & Open-on-Now at the first animation frame after load (R2)
-    // Re-aimed (2026-11-21 nav-gear, Lorico): bar is 3 tabs Plan/Now/Log; strip stays 4 pages page-plan/page-now/page-log/page-settings; TopBar .top-right order is clock → gear → theme.
+    // Re-aimed (2026-11-21 transitions, Lorico): bar & strip are both 3 panels (Plan/Now/Log); Settings lives outside main.pages as section.page-settings.settings-room; TopBar .top-right is clock → gear → theme.
     const open = await page.evaluate(() => {
       const bar = [...document.querySelectorAll('nav.tabs button')].map((b) => b.textContent.trim());
       const strip = [...document.querySelectorAll('main.pages > section.page')].map((s) => [...s.classList].find((c) => c.startsWith('page-')));
+      const sr = document.querySelector('.app > section.page-settings.settings-room');
       const topRight = [...document.querySelectorAll('header.top .top-right > *')].map((el) => (el.classList.contains('clock') ? 'clock' : el.getAttribute('aria-label') === 'Settings' ? 'gear' : el.classList.contains('theme-btn') ? 'theme' : el.tagName));
-      return { ff: window.__firstFrame, bar, strip, topRight };
+      return { ff: window.__firstFrame, bar, strip, hasSettingsRoom: !!sr, topRight };
     });
-    ok(`${tag} (e) order: bar is Plan/Now/Log, strip is page-plan/page-now/page-log/page-settings, header .top-right is clock/gear/theme`, JSON.stringify(open.bar) === '["Plan","Now","Log"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log","page-settings"]' && JSON.stringify(open.topRight) === '["clock","gear","theme"]', JSON.stringify(open));
+    ok(`${tag} (e) order: bar is Plan/Now/Log, strip is 3 pages (page-plan/page-now/page-log), Settings room sits outside strip, header .top-right is clock/gear/theme`, JSON.stringify(open.bar) === '["Plan","Now","Log"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log"]' && open.hasSettingsRoom && JSON.stringify(open.topRight) === '["clock","gear","theme"]', JSON.stringify(open));
     ok(`${tag} (e) open on Now at first animation frame (R2): scrollLeft === innerWidth and page-now visible`, open.ff && open.ff.sl === W && open.ff.iw === W && /\bpage-now\b/.test(open.ff.active || '') && Math.abs(open.ff.nowLeft) <= 1, JSON.stringify(open.ff));
 
     // 6. Equal-width tabs & plain Now treatment (active)
@@ -667,8 +738,9 @@ for (const [W, H] of SIZES) {
     ok(`${tag} (e) dock off Now: completely outside [0, ${W}) and page-now inert + aria-hidden on Plan/Log/More`,
       offNow.every((s) => (s.dockRect.right <= 0.5 || s.dockRect.left >= W - 0.5) && s.nowInert && s.nowHidden === 'true'),
       JSON.stringify(offNow.map((s) => ({ l: s.lbl, r: s.dockRect, inert: s.nowInert, hid: s.nowHidden }))));
-    ok(`${tag} (e) --dock-h unchanged off Now (${dockNow.dockH}) and other pages scroll-padding-bottom independent (73px)`,
-      offNow.every((s) => s.dockH === dockNow.dockH && s.scrollPadBottom === '73px'),
+    // Re-aimed (2026-11-21 transitions, Lorico): Plan & Log reserve the 61px tab bar (73px scroll-padding-bottom); Settings room has no bottom bar (24px).
+    ok(`${tag} (e) --dock-h unchanged off Now (${dockNow.dockH}) and strip pages scroll-padding-bottom independent (73px; Settings 24px)`,
+      offNow.every((s) => s.dockH === dockNow.dockH && s.scrollPadBottom === (s.lbl === 'More' ? '24px' : '73px')),
       JSON.stringify(offNow.map((s) => ({ l: s.lbl, h: s.dockH, spb: s.scrollPadBottom }))));
     const logSnap = offChecks.find((s) => s.lbl === 'Log');
     const planSnap = offChecks.find((s) => s.lbl === 'Plan');
@@ -696,6 +768,32 @@ for (const [W, H] of SIZES) {
     await page.waitForTimeout(150);
     const subTh = await page.evaluate(() => document.querySelectorAll('.page-plan p.timehead').length);
     ok(`${tag} (e) TimeHead absent on Plan sub-screen (Split Lab)`, subTh === 0, `count=${subTh}`);
+    // Transitions (d): verify theme CSS transition rule on color/background (no geometry) and theme flip + persistence
+    const themeCheck = await page.evaluate(() => {
+      const appCs = getComputedStyle(document.querySelector('.app'));
+      const cardCs = getComputedStyle(document.querySelector('.card'));
+      const btn = [...document.querySelectorAll('header.top button.theme-btn')].find((b) => /Switch to (day|night) theme/.test(b.getAttribute('aria-label') || ''));
+      const beforeAttr = document.documentElement.getAttribute('data-theme');
+      btn?.click();
+      return {
+        appProps: appCs.transitionProperty,
+        appDurs: appCs.transitionDuration,
+        cardProps: cardCs.transitionProperty,
+        beforeAttr,
+      };
+    });
+    await page.waitForTimeout(350);
+    const themeAfter = await page.evaluate(() => ({
+      afterAttr: document.documentElement.getAttribute('data-theme'),
+      savedTheme: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').theme,
+    }));
+    const wantAfterAttr = theme === 'day' ? null : 'day';
+    const wantSaved = theme === 'day' ? 'night' : 'day';
+    ok(`${tag} (e) transitions (d): theme toggle applies color/background CSS transition and flips + persists theme`,
+      /background-color/.test(themeCheck.appProps) && /color/.test(themeCheck.appProps)
+      && /background-color/.test(themeCheck.cardProps) && /border-color/.test(themeCheck.cardProps)
+      && themeAfter.afterAttr === wantAfterAttr && themeAfter.savedTheme === wantSaved,
+      JSON.stringify({ themeCheck, themeAfter, wantAfterAttr, wantSaved }));
     ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }
@@ -782,14 +880,23 @@ for (const [W, H] of SIZES) {
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
   const tag = `[${W}x${H} logpin]`;
-  const tapNav = (label) => page.evaluate((l) => {
-    const b = (l === 'More' || l === 'Settings')
-      ? document.querySelector('header.top button[aria-label="Settings"]')
-      : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
-    if (!b) throw new Error('no tab ' + l);
-    b.click();
-  }, label);
-  const settle = async () => { await page.waitForTimeout(250); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
+  const tapNav = async (label) => {
+    if (label !== 'More' && label !== 'Settings') {
+      const wasSettings = await page.evaluate(() => !!document.querySelector('.app.in-settings'));
+      if (wasSettings) {
+        await page.evaluate(() => { document.querySelector('section.page-settings button.settings-back')?.click(); });
+        await page.waitForTimeout(300);
+      }
+    }
+    await page.evaluate((l) => {
+      const b = (l === 'More' || l === 'Settings')
+        ? document.querySelector('header.top button[aria-label="Settings"]')
+        : [...document.querySelectorAll('nav.tabs button')].find((x) => x.textContent.trim() === l);
+      if (!b) throw new Error('no tab ' + l);
+      b.click();
+    }, label);
+  };
+  const settle = async () => { await page.waitForTimeout(300); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || !m.contains(p) || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
   // Header disclaimer Now-only + no gap on Log, Plan, Split, More
   const hdrCheck = async (label) => {
@@ -797,12 +904,14 @@ for (const [W, H] of SIZES) {
     return page.evaluate((lbl) => {
       const hdr = document.querySelector('header.top');
       const pg = document.querySelector('.page.is-active');
+      const inSettings = document.querySelector('.app').classList.contains('in-settings');
       const disc = hdr.querySelector('details.disclaimer-line');
       const compact = hdr.querySelector('.compact');
       const topRow = hdr.querySelector('.top-row');
       const hr = hdr.getBoundingClientRect(), pr = pg.getBoundingClientRect(), tr = topRow.getBoundingClientRect();
       return {
         lbl,
+        inSettings,
         hasDisc: !!disc,
         hasCompact: !!compact || /of driving · Stop by|drive again at/.test(hdr.textContent),
         discText: disc?.querySelector('.disclaimer-text')?.textContent?.trim() ?? null,
@@ -822,10 +931,12 @@ for (const [W, H] of SIZES) {
   ok(`${tag} (f) header disclaimer ("Planning only" + Details) absent on Now/Plan/More/Log`,
     !hNow.hasDisc && !hPlan.hasDisc && !hMore.hasDisc && !hLog.hasDisc,
     JSON.stringify({ now: hNow, plan: hPlan, more: hMore, log: hLog }));
+  // Re-aimed (2026-11-21 transitions, Lorico): Settings room starts at top 0 (header hidden); main panels sit flush under header with no gap.
   ok(`${tag} (f) header summary strip (.compact) absent on Plan/More/Log/Now with no empty header gap`,
     [hNow, hPlan, hMore, hLog].every((x) => !x.hasCompact)
-    && [hNow, hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && x.hdrH <= x.topRowH + 20 && !x.over),
-    JSON.stringify([hNow, hPlan, hMore, hLog].map((x) => ({ l: x.lbl, compact: x.hasCompact, hdrH: x.hdrH, rowH: x.topRowH, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
+    && [hNow, hPlan, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && x.hdrH <= x.topRowH + 20 && !x.over)
+    && hMore.inSettings && Math.abs(hMore.pgTop) <= 1 && !hMore.over,
+    JSON.stringify([hNow, hPlan, hMore, hLog].map((x) => ({ l: x.lbl, inS: x.inSettings, compact: x.hasCompact, hdrH: x.hdrH, rowH: x.topRowH, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
 
   // BugButton absent on Log, present on More
   const bugCheck = await page.evaluate(() => {
@@ -1045,16 +1156,17 @@ for (const [W, H] of SIZES) {
   await page.waitForTimeout(150);
   const screenAfter8 = await page.evaluate(() => {
     const rep = document.querySelector('.print-report');
+    const sr = document.querySelector('section.page-settings');
     return {
       prints: window.__printCalls,
       repDisplay: rep ? getComputedStyle(rep).display : null,
-      headerDisplay: getComputedStyle(document.querySelector('header.top')).display,
-      navDisplay: getComputedStyle(document.querySelector('nav.tabs')).display,
+      settingsDisplay: sr ? getComputedStyle(sr).display : null,
+      settingsVis: sr ? getComputedStyle(sr).visibility : null,
       over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok(`${tag} (g) after 8-day trigger, window.print fired and on-screen UI stays unchanged (.print-report display:none)`,
-    screenAfter8.prints === 1 && screenAfter8.repDisplay === 'none' && screenAfter8.headerDisplay !== 'none' && screenAfter8.navDisplay !== 'none' && !screenAfter8.over,
+  ok(`${tag} (g) after 8-day trigger, window.print fired and on-screen Settings room stays unchanged (.print-report display:none)`,
+    screenAfter8.prints === 1 && screenAfter8.repDisplay === 'none' && screenAfter8.settingsDisplay !== 'none' && screenAfter8.settingsVis === 'visible' && !screenAfter8.over,
     JSON.stringify(screenAfter8));
 
   await page.emulateMedia({ media: 'print' });
@@ -1071,6 +1183,7 @@ for (const [W, H] of SIZES) {
       appHeaderDisplay: getComputedStyle(document.querySelector('header.top')).display,
       appNavDisplay: getComputedStyle(document.querySelector('nav.tabs')).display,
       appMainDisplay: getComputedStyle(document.querySelector('main.pages')).display,
+      appSettingsDisplay: getComputedStyle(document.querySelector('section.page-settings')).display,
       secCount: secs.length,
       svgCount: secs.filter((s) => { const g = s.querySelector('svg.grid'); return g && g.getBoundingClientRect().height > 30; }).length,
       newestFirst: secs.every((s, i) => i === 0 || Number(s.dataset.dayStart) < Number(secs[i - 1].dataset.dayStart)),
@@ -1083,7 +1196,7 @@ for (const [W, H] of SIZES) {
     };
   });
   ok(`${tag} (g) @media print hides app chrome and shows 8-day report (newest-first) with visible Grids, exact engine totals, no-duty day, and header+footer disclaimers`,
-    print8.repDisplay === 'block' && print8.appHeaderDisplay === 'none' && print8.appNavDisplay === 'none' && print8.appMainDisplay === 'none'
+    print8.repDisplay === 'block' && print8.appHeaderDisplay === 'none' && print8.appNavDisplay === 'none' && print8.appMainDisplay === 'none' && print8.appSettingsDisplay === 'none'
     && print8.secCount === 8 && print8.svgCount === 8 && print8.newestFirst
     && JSON.stringify(print8.day0Totals) === JSON.stringify(['Driving2h 00m', 'On Duty2h 00m', 'Off Duty1h 00m', 'Sleeper0m'])
     && JSON.stringify(print8.day1Totals) === JSON.stringify(['Driving5h 00m', 'On Duty1h 00m', 'Off Duty0m', 'Sleeper10h 00m'])
