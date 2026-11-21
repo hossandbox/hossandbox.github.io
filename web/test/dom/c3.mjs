@@ -321,17 +321,19 @@ await pin('M4e. the button rides the No verdict\'s fix line, says "Plan it", and
 
 /* ============================ D10-A + M8: Hours coming back ============================ */
 
-await pin('D10a. the Plan hub lists 6 items; 4th is "Hours coming back" (opens recap), 5th is "Weekly recap vs. 34", 6th at bottom is "When to roll & PTA"', async () => {
+await pin('D10a. the Plan hub lists 7 items; 4th is "Hours coming back" (opens recap), 5th is "Weekly recap vs. 34", 6th is "When to roll & PTA", 7th at bottom is "Split-sleeper rescue"', async () => {
   WALL = CD(9, 3, 4);
   await mount(driving({ tab: 'plan' }));
   const items = byClass('plan-item', planPage());
-  if (items.length !== 6) return `${items.length} items`;
+  if (items.length !== 7) return `${items.length} items`;
   const fourth = items[3];
   const fifth = items[4];
   const sixth = items[5];
+  const seventh = items[6];
   if (!/Hours coming back/.test(fourth.textContent) || !/When your 70-hour hours return, day by day\./.test(fourth.textContent)) return fourth.textContent;
   if (!/Weekly recap vs\. 34/.test(fifth.textContent)) return `5th item: ${fifth.textContent}`;
   if (!/When to roll & PTA/.test(sixth.textContent)) return `6th item: ${sixth.textContent}`;
+  if (!/Split-sleeper rescue/.test(seventh.textContent)) return `7th item: ${seventh.textContent}`;
   await click(fourth, 80);
   return (getState().tab === 'recap' && getState().planReturn === 'plan') || `${getState().tab}/${getState().planReturn}`;
 });

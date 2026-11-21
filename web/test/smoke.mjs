@@ -6613,13 +6613,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
     `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
 
-  // 8. Plan tab placement (5th .plan-item, above tool #6) & WeekRecapTab SSR render order (verdict banner first)
+  // 8. Plan tab placement (5th .plan-item, above tool #6 and #7) & WeekRecapTab SSR render order (verdict banner first)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 6 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA',
+  need(itemTitles.length === 7 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6872,13 +6873,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(!pCycleInf.feasible && /70-hour cycle/.test(pCycleInf.headline) && pCycleInf.recovery !== null,
     `f6 cycle infeasible: feasible=${pCycleInf.feasible} headline="${pCycleInf.headline}"`);
 
-  // Fixture 7: Plan hub bottom placement (6th item) & RolloutTab SSR render order (verdict first, checklist, PTA)
+  // Fixture 7: Plan hub placement (6th item, above tool #7) & RolloutTab SSR render order (verdict first, checklist, PTA)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 6 && titles2[5] === 'When to roll &amp; PTA', `f7 Plan hub bottom entry: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 7 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-plan');
@@ -6891,6 +6893,56 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   if (bad.length) throw new Error(`when to roll & PTA: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
-  console.log('when to roll & PTA (backwards chain, timezone toggle, miles/hours eq, infeasible, PTA, Plan bottom entry): OK');
+  console.log('when to roll & PTA (backwards chain, timezone toggle, miles/hours eq, infeasible, PTA, Plan entry): OK');
+}
+// --- Split-Sleeper Rescue Simulator ("Split-sleeper rescue", Plan tab tool #7)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const RS = await import('../src/rescue.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago') + m0;
+  const now13 = chi(11, 13, 0);
+  const segsMid = [
+    { status: 'OFF', start: chi(10, 20, 0), end: chi(11, 6, 0), createdAt: 1 },
+    { status: 'D', start: chi(11, 6, 0), end: chi(11, 11, 0), createdAt: 2 },
+    { status: 'ON', start: chi(11, 11, 0), end: now13, createdAt: 3 },
+  ];
+  const sim = RS.simulateRescue({
+    segments: segsMid,
+    now: now13,
+    config: cfgChi,
+    dockWaitMinutes: 120,
+    distanceMode: 'hours',
+    miles: 0,
+    mph: 55,
+    driveMinutesDirect: 360,
+    deadlineMinute: chi(11, 21, 30),
+  });
+  need(!sim.noRescue && sim.recommended?.id === 'split82' && sim.straight10?.makesIt === false,
+    `rescue smoke R1: noRescue=${sim.noRescue} rec=${sim.recommended?.id} s10=${sim.straight10?.makesIt}`);
+  const fail9 = RS.evaluateSplitPairing(segsMid, now13, cfgChi, 120, 360, 420, 120, 'short-first');
+  need(!fail9.pairQualified && !fail9.hosLegal && fail9.violations.some((v) => v.kind === 'WINDOW_14' && v.minutes === 60),
+    `rescue smoke R7: pair=${fail9.pairQualified} legal=${fail9.hosLegal} viols=${JSON.stringify(fail9.violations)}`);
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now13, config: cfgChi, segments: segsMid, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const rescueHtml = pageOut(render(h(App, {})), 'page-plan');
+  const vAt = rescueHtml.indexOf('data-rescue-verdict="1"');
+  const sAt = rescueHtml.indexOf('data-rescue-strategies="1"');
+  need(vAt > 0 && sAt > vAt, `rescue SSR order wrong: verdict=${vAt} strategies=${sAt}`);
+  need(rescueHtml.includes(RS.SPLIT_SB_CALLOUT), 'rescue SSR missing SB-only callout');
+  need(!/<input[^>]+type="time"/.test(rescueHtml), 'rescue SSR must not contain plain <input type="time">');
+  A.openRescuePlanner(false);
+
+  if (bad.length) throw new Error(`split-sleeper rescue: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('split-sleeper rescue (8/2 rescue vs 10, 2h+7h=9h reject, SSR verdict-first & SB callout): OK');
 }
 console.log('OK');

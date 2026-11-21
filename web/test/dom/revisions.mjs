@@ -844,14 +844,15 @@ await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5
 });
 
 /* ---------------- (w) Weekly Recap vs. 34-Hour Reset & Home-Time Planner ---------------- */
-await pin('W1. Plan hub lists 6 .plan-item tools with "Weekly recap vs. 34" 5th and "When to roll & PTA" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
+await pin('W1. Plan hub lists 7 .plan-item tools with "Weekly recap vs. 34" 5th, "When to roll & PTA" 6th, and "Split-sleeper rescue" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 6 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA') return `items=${JSON.stringify(titles)}`;
+  if (items.length !== 7 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue') return `items=${JSON.stringify(titles)}`;
   fire(items[4], 'click'); await sleep(60);
   const txt = planPg.textContent;
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
@@ -862,7 +863,7 @@ await pin('W1. Plan hub lists 6 .plan-item tools with "Weekly recap vs. 34" 5th 
   if (!back || !/Plan/.test(back.textContent)) return `back=${back?.textContent}`;
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return afterItems.length === 6 || `after back items=${afterItems.length}`;
+  return afterItems.length === 7 || `after back items=${afterItems.length}`;
 });
 
 await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset net gain; changing budget preset & target home time updates live', async () => {
@@ -913,9 +914,10 @@ await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cy
   return ok || `60/7 text: ${txt.slice(0, 400)}`;
 });
 
-await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 6-item hub', async () => {
+await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 7-item hub', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
@@ -924,7 +926,7 @@ await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returni
   await seed({ tab: 'now', ...segs });
   await seed({ tab: 'plan', ...segs });
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!A.isWeekPlannerOpen() && items.length === 6) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
+  return (!A.isWeekPlannerOpen() && items.length === 7) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
 });
 
 /* ---------------- (r) Work-Backwards Appointment & Departure Planner ("When to roll & PTA") ---------------- */
@@ -944,14 +946,15 @@ const setRolloutAppt = async (planPg, dateStr, timeStr) => {
   return null;
 };
 
-await pin('R1. Plan hub lists 6 .plan-item tools with "When to roll & PTA" at the bottom; tapping opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
+await pin('R1. Plan hub lists 7 .plan-item tools with "When to roll & PTA" 6th and "Split-sleeper rescue" at the bottom; tapping When to roll opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 6 || titles[5] !== 'When to roll & PTA') return `items=${JSON.stringify(titles)}`;
+  if (items.length !== 7 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue') return `items=${JSON.stringify(titles)}`;
   fire(items[5], 'click'); await sleep(60);
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
   const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planPg)[0];
@@ -963,7 +966,7 @@ await pin('R1. Plan hub lists 6 .plan-item tools with "When to roll & PTA" at th
   const back = all((n) => n.localName === 'button' && has(n, 'back'), planPg)[0];
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return afterItems.length === 6 || `after back items=${afterItems.length}`;
+  return afterItems.length === 7 || `after back items=${afterItems.length}`;
 });
 
 await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Central (home terminal) yields identical dual-displayed roll-out, 08:00-10:00 sweet spot & PTA', async () => {
@@ -1076,9 +1079,10 @@ await pin('R4. infeasible run (10h break cannot complete before roll-out): shows
   return (okChecklist && okPta) || `after shift chk=${okChecklist} pta=${okPta}`;
 });
 
-await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returning to Plan shows the 6-item hub', async () => {
+await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returning to Plan shows the 7-item hub', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5];
@@ -1087,7 +1091,7 @@ await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returnin
   await seed({ tab: 'now', ...segs });
   await seed({ tab: 'plan', ...segs });
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!A.isRolloutPlannerOpen() && items.length === 6) || `open=${A.isRolloutPlannerOpen()} items=${items.length}`;
+  return (!A.isRolloutPlannerOpen() && items.length === 7) || `open=${A.isRolloutPlannerOpen()} items=${items.length}`;
 });
 
 await pin('R6. rollout screen has no raw <input type="time"> or <input type="date"> of its own; ClockPick inputs only appear inside the open sheet', async () => {

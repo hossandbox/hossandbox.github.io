@@ -38,6 +38,13 @@ import {
   type ZoneEntryMode, type DistanceMode,
 } from './rollout.ts';
 import {
+  simulateRescue, resolveRescueDeadline, fmtRescueShort, fmtRescueFull,
+  SPLIT_SB_CALLOUT, RESCUE_MIN_MPH, RESCUE_MAX_MPH, RESCUE_DEFAULT_MPH,
+  RESCUE_DEFAULT_MILES, RESCUE_DEFAULT_WAIT_MIN, RESCUE_DEFAULT_DRIVE_DIRECT,
+  RESCUE_WAIT_PRESETS, RESCUE_MILES_PRESETS, RESCUE_MPH_PRESETS, RESCUE_HOURS_PRESETS,
+  type RescueDistanceMode, type RescueStrategyResult,
+} from './rescue.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -359,6 +366,7 @@ const I = {
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   week: 'M4 19h16M6 16v-5M11 16V8M16 16v-8M20 16v-3M4 5h16',
   rollout: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
+  rescue: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -434,6 +442,8 @@ export type SheetKind =
   | { kind: 'triptime' }
   // Clock-picker fix: "When to roll & PTA" appointment date & time on the shared clock picker.
   | { kind: 'rollouttime'; apptDate: string; apptTime: string; entryZoneName: string; entryTimeZone: string; fallbackMinute: number | null; onApply: (date: string, time: string) => void }
+  // Split-sleeper rescue simulator: optional target delivery deadline on the shared clock picker.
+  | { kind: 'rescuetime'; deadlineMinute: number; homeZoneName: string; homeTimeZone: string; onApply: (minute: number) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
@@ -4049,6 +4059,10 @@ export function openWeekPlanner(open = true) {
     rolloutPlannerOpen = false;
     rolloutPlannerSubs.forEach((f) => f());
   }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4072,6 +4086,10 @@ export function openRolloutPlanner(open = true) {
     weekPlannerOpen = false;
     weekPlannerSubs.forEach((f) => f());
   }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
 }
@@ -4080,6 +4098,33 @@ function useRolloutPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); rolloutPlannerSubs.add(f); return () => { rolloutPlannerSubs.delete(f); }; }, []);
   return rolloutPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for the Split-Sleeper Rescue Simulator ("Split-sleeper rescue").
+ * Held outside `store.ts` (store is frozen) in the exact style of `useWeekPlanner()` / `useRolloutPlanner()`.
+ */
+let rescuePlannerOpen = false;
+const rescuePlannerSubs = new Set<() => void>();
+export function openRescuePlanner(open = true) {
+  rescuePlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'rescuetime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  rescuePlannerSubs.forEach((f) => f());
+}
+export function isRescuePlannerOpen(): boolean { return rescuePlannerOpen; }
+function useRescuePlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); rescuePlannerSubs.add(f); return () => { rescuePlannerSubs.delete(f); }; }, []);
+  return rescuePlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4107,6 +4152,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openRolloutPlanner(true)}>
         <span class="plan-icon"><Icon d={I.rollout} size={26} /></span>
         <span class="plan-text"><b>When to roll &amp; PTA</b><span class="muted small">Work backwards from a hard appointment for shutdown, roll-out, break, and dispatch PTA.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openRescuePlanner(true)}>
+        <span class="plan-icon"><Icon d={I.rescue} size={26} /></span>
+        <span class="plan-text"><b>Split-sleeper rescue</b><span class="muted small">Stuck at the dock? Compare a straight 10 against 7/3 and 8/2 splits before you commit.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -5850,6 +5900,410 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
   );
 }
 
+/* ============================================================ Split-sleeper rescue simulator ("Split-sleeper rescue") */
+
+/**
+ * Split-Sleeper Rescue Simulator: optional target delivery deadline on the shared ClockPick.
+ * Converts home-terminal wall-clock strings through `deviceTz` in the exact pattern of `RolloutTimeSheet`.
+ */
+function RescueTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rescuetime' }>; now: number }) {
+  const nowWall = formatWallDateTime(now, k.homeTimeZone);
+  const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
+  const [at, setAt] = useState<number>(() => {
+    const wall = formatWallDateTime(k.deadlineMinute, k.homeTimeZone);
+    const parsed = resolveWallDateTime(wall.date, wall.time, deviceTz);
+    return parsed ?? nextHour(pickerNow);
+  });
+  const apply = () => {
+    const wall = formatWallDateTime(at, deviceTz);
+    const resolved = resolveRescueDeadline(wall.date, wall.time, k.homeTimeZone);
+    if (resolved !== null) k.onApply(resolved);
+    openSheet(null);
+  };
+  return (
+    <Sheet title={`Target deadline (${k.homeZoneName})`}>
+      <p class="muted small" style="margin:0">Wall-clock deadline in <b>{k.homeZoneName}</b> (home terminal) time.</p>
+      <ClockPick at={at} set={setAt} now={pickerNow} future={true} say="Deadline" name="Target deadline" keys={KEYS_HOURS} />
+      <button class="primary wide ed-go" onClick={apply}>Apply · {clockFull(at)} ({k.homeZoneName})</button>
+    </Sheet>
+  );
+}
+
+function RescueStrategyCard({ st, deadlineShort }: { st: RescueStrategyResult; deadlineShort: string | null }) {
+  const badgeTone = st.recommended ? 'good' : st.tone;
+  return (
+    <section
+      class={`card rescue-card ${st.recommended ? 'is-rec' : ''} ${st.tone === 'bad' ? 'bad' : st.tone === 'warn' ? 'warn' : ''}`}
+      data-rescue-card={st.id}
+      data-rescue-recommended={st.recommended ? '1' : '0'}
+      data-rescue-legal={st.hosLegal ? '1' : '0'}
+      data-rescue-makes-it={st.makesIt ? '1' : '0'}
+    >
+      <div class="rescue-card-head">
+        <div class="rescue-card-title-wrap">
+          <h3 class="rescue-card-title">{st.title}</h3>
+          <span class="rescue-card-order">{st.orderLabel}</span>
+        </div>
+        <div class="rescue-badges">
+          {st.recommended && <span class="rescue-badge good" data-rescue-rec-badge="1">Recommended</span>}
+          <span class={`rescue-badge ${badgeTone}`}>{st.badge}</span>
+        </div>
+      </div>
+
+      <p class="rescue-verdict-line">{st.verdictLine}</p>
+
+      <div class="rescue-times">
+        <div class="rescue-time-box" data-rescue-release={st.id}>
+          <span class="rescue-time-lbl">Release (drive again)</span>
+          <span class="rescue-time-val mono">{st.releaseShort}</span>
+          <span class="rescue-time-sub">{st.insertedBreakMinutes > 0 ? `Includes ${dur(st.insertedBreakMinutes)} 30m break` : 'Earliest legal roll'}</span>
+        </div>
+        <div class="rescue-time-box" data-rescue-finish={st.id}>
+          <span class="rescue-time-lbl">Projected finish</span>
+          <span class="rescue-time-val mono">{st.finishShort}</span>
+          <span class="rescue-time-sub">
+            {st.deadlineSlack !== null && deadlineShort
+              ? st.deadlineSlack >= 0
+                ? `${st.deadlineSlack === 0 ? 'On' : `${dur(st.deadlineSlack)} before`} ${deadlineShort}`
+                : `${dur(-st.deadlineSlack)} past ${deadlineShort}`
+              : st.savedVsStraight10 > 0
+                ? `${dur(st.savedVsStraight10)} faster than Straight 10`
+                : st.id === 'straight10'
+                  ? 'Baseline full rest'
+                  : 'Same or slower than Straight 10'}
+          </span>
+        </div>
+      </div>
+
+      {st.steps.length > 0 && (
+        <ol class="rescue-steps">
+          {st.steps.map((step, idx) => (
+            <li key={idx} class={`rescue-step ${step.isLongSB ? 'is-sb' : ''}`}>
+              <span class="rescue-step-lbl">{idx + 1}. {step.label}</span>
+              <span class="rescue-step-win mono">{step.startShort} → {step.endShort} ({dur(step.minutes)})</span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {st.isSplit && st.longSbBlock && (
+        <div class="rescue-sb-box" data-rescue-sb-callout={st.id}>
+          <span class="rescue-sb-title">
+            {st.longSbBlock.alreadyLogged ? 'Prior Sleeper Berth long leg' : 'Required Sleeper Berth block'}
+          </span>
+          <span class="rescue-sb-block mono">
+            {st.longSbBlock.startShort} → {st.longSbBlock.endShort} ({dur(st.longSbBlock.minutes)} consecutive SB)
+          </span>
+          <span class="rescue-sb-callout">{st.longSbBlock.callout || SPLIT_SB_CALLOUT}</span>
+        </div>
+      )}
+
+      {st.isSplit && st.nextShift && (
+        <div class={`rescue-trap ${st.nextShift.trapTone}`} data-rescue-next-shift={st.id}>
+          <span class="rescue-trap-head">
+            Next-shift trap ({st.nextShift.atLabel} at {st.nextShift.atShort})
+          </span>
+          <div class="rescue-trap-grid">
+            <div class="rescue-trap-metric" data-rescue-next-drive={st.id}>
+              <span>11h drive left</span>
+              <b class="mono">{dur(st.nextShift.driveRemaining)}</b>
+            </div>
+            <div class="rescue-trap-metric" data-rescue-next-window={st.id}>
+              <span>14h window left</span>
+              <b class="mono">{dur(st.nextShift.windowRemaining)}</b>
+            </div>
+          </div>
+          <p class="rescue-trap-note">{st.nextShift.trapSummary}</p>
+        </div>
+      )}
+
+      {!st.isSplit && st.id === 'straight10' && st.nextShift && (
+        <div class="rescue-trap" data-rescue-next-shift="straight10">
+          <span class="rescue-trap-head">Follow-on shift after 10-hour rest</span>
+          <p class="rescue-trap-note">{st.nextShift.trapSummary}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Split-Sleeper Rescue Simulator ("Split-sleeper rescue").
+ * Seeded from the driver's logged clocks (`loggedSegments(s, now)`). Compares Straight 10,
+ * 8/2 split, 7/3 split, and Roll now side-by-side through `engine/src/index.ts`.
+ */
+function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const [waitHours, setWaitHours] = useState(Math.floor(RESCUE_DEFAULT_WAIT_MIN / 60));
+  const [waitMins, setWaitMins] = useState(RESCUE_DEFAULT_WAIT_MIN % 60);
+  const [distanceMode, setDistanceMode] = useState<RescueDistanceMode>('hours');
+  const [miles, setMiles] = useState(RESCUE_DEFAULT_MILES);
+  const [mph, setMph] = useState(() => Math.max(RESCUE_MIN_MPH, Math.min(RESCUE_MAX_MPH, Math.round(s.mph || RESCUE_DEFAULT_MPH))));
+  const [driveHours, setDriveHours] = useState(Math.floor(RESCUE_DEFAULT_DRIVE_DIRECT / 60));
+  const [driveMins, setDriveMins] = useState(RESCUE_DEFAULT_DRIVE_DIRECT % 60);
+  const [useDeadline, setUseDeadline] = useState(false);
+  const [deadlineMin, setDeadlineMin] = useState<number>(() => now + 10 * 60);
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const dockWaitMinutes = waitHours * 60 + waitMins;
+  const driveMinutesDirect = driveHours * 60 + driveMins;
+
+  const sim = useMemo(
+    () => simulateRescue({
+      segments: logged,
+      now,
+      config: s.config,
+      dockWaitMinutes,
+      distanceMode,
+      miles,
+      mph,
+      driveMinutesDirect,
+      deadlineMinute: useDeadline ? deadlineMin : null,
+    }),
+    [logged, now, s.config, dockWaitMinutes, distanceMode, miles, mph, driveMinutesDirect, useDeadline, deadlineMin],
+  );
+
+  const hist = cycleBasis(s, now, sim.cycleWindowDays);
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Split-sleeper rescue</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Stuck at the dock or running tight? Compare Straight 10, 8/2 split, 7/3 split, and rolling now before you commit.
+      </p>
+
+      {/* 1. VERDICT FIRST */}
+      <Card tone={sim.tone}>
+        <div
+          class="rescue-verdict"
+          data-rescue-verdict="1"
+          data-rescue-no-rescue={sim.noRescue ? '1' : '0'}
+        >
+          <Sign kind={sim.verdictSign}>{sim.verdictLabel}</Sign>
+          <p class="rescue-headline">{sim.headline}</p>
+          <p class="rescue-subline">{sim.subline}</p>
+          <div class="rescue-clocks">
+            <div class="rescue-clock-pill">
+              <span>11h drive left</span>
+              <b class="mono">{dur(sim.driveRemainingNow)}</b>
+            </div>
+            <div class="rescue-clock-pill">
+              <span>14h window left</span>
+              <b class="mono">{dur(sim.windowRemainingNow)}</b>
+            </div>
+            <div class="rescue-clock-pill">
+              <span>{sim.cycleLimit / 60}h cycle left</span>
+              <b class="mono">{dur(sim.cycleRemainingNow)}</b>
+            </div>
+          </div>
+          <p class="muted small" style="margin:0">
+            Seeded from your log at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
+            {sim.pendingSplitLeg && (
+              <> · Pending split leg on log: <b>{dur(sim.pendingSplitLeg.duration)}</b> ({sim.pendingSplitLeg.qualifiesLongSB ? 'Sleeper Berth' : 'OFF/SB'})</>
+            )}
+            .
+          </p>
+        </div>
+      </Card>
+
+      {/* 2. STACKED STRATEGY COMPARISON CARDS (BEST-FIRST) */}
+      {sim.validInput && sim.strategies.length > 0 && (
+        <div class="rescue-stack" data-rescue-strategies="1">
+          {sim.strategies.map((st) => (
+            <RescueStrategyCard key={st.id} st={st} deadlineShort={sim.deadlineShort} />
+          ))}
+        </div>
+      )}
+
+      {/* 3. LOG BASIS DISCLOSURE */}
+      {hist !== 'known' && (
+        <div class="warnbox small" style="margin-top:10px">
+          Your log does not cover a full {sim.cycleWindowDays}-day cycle yet, so unlogged past days count as 0h. Update past days in <b>Log</b> or{' '}
+          <button class="link" style="display:inline;padding:0;min-height:0" onClick={() => { openRescuePlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}>Hours coming back</button>.
+        </div>
+      )}
+
+      {/* 4. INPUTS CARD */}
+      <Card title="Dock delay &amp; remaining drive">
+        {/* A. Dock wait / delay as a DURATION (never a time input) */}
+        <div class="rollout-section">
+          <span class="stat-label">Planned dock wait / delay (duration)</span>
+          <div class="rollout-chips" role="group" aria-label="Dock wait presets">
+            {RESCUE_WAIT_PRESETS.map((p) => (
+              <button
+                key={p.minutes}
+                class={dockWaitMinutes === p.minutes ? 'on' : ''}
+                onClick={() => { setWaitHours(Math.floor(p.minutes / 60)); setWaitMins(p.minutes % 60); }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div class="rollout-fieldgrid">
+            <label>Wait hours
+              <input
+                type="number"
+                class="num"
+                inputMode="numeric"
+                min={0}
+                max={24}
+                data-rescue-wait-h="1"
+                aria-label="Dock wait hours"
+                value={waitHours}
+                onInput={(e) => setWaitHours(Math.max(0, Math.min(24, Number((e.target as HTMLInputElement).value) || 0)))}
+              />
+            </label>
+            <label>Wait minutes
+              <input
+                type="number"
+                class="num"
+                inputMode="numeric"
+                min={0}
+                max={59}
+                data-rescue-wait-m="1"
+                aria-label="Dock wait minutes"
+                value={waitMins}
+                onInput={(e) => setWaitMins(Math.max(0, Math.min(59, Number((e.target as HTMLInputElement).value) || 0)))}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* B. Remaining drive still needed (miles + mph OR drive hours) */}
+        <div class="rollout-section">
+          <span class="stat-label">Remaining drive still needed</span>
+          <div class="rollout-seg" role="group" aria-label="Remaining drive entry mode">
+            <button class={distanceMode === 'hours' ? 'on' : ''} onClick={() => setDistanceMode('hours')}>Direct drive hours</button>
+            <button class={distanceMode === 'miles' ? 'on' : ''} onClick={() => setDistanceMode('miles')}>Miles + speed</button>
+          </div>
+
+          {distanceMode === 'miles' ? (
+            <>
+              <div class="rollout-chips" role="group" aria-label="Remaining miles presets">
+                {RESCUE_MILES_PRESETS.map((m) => (
+                  <button key={m} class={miles === m ? 'on' : ''} onClick={() => setMiles(m)}>{m} mi</button>
+                ))}
+              </div>
+              <div class="rollout-fieldgrid">
+                <label>Remaining miles
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={1}
+                    max={2000}
+                    aria-label="Remaining miles"
+                    value={miles}
+                    onInput={(e) => setMiles(Math.max(0, Math.min(2000, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+                <label>Avg speed (45–65 mph)
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={RESCUE_MIN_MPH}
+                    max={RESCUE_MAX_MPH}
+                    aria-label="Average speed mph"
+                    value={mph}
+                    onInput={(e) => {
+                      const v = Number((e.target as HTMLInputElement).value);
+                      if (Number.isFinite(v)) setMph(Math.max(RESCUE_MIN_MPH, Math.min(RESCUE_MAX_MPH, Math.round(v))));
+                    }}
+                  />
+                </label>
+              </div>
+              <div class="rollout-chips" role="group" aria-label="Average speed presets">
+                {RESCUE_MPH_PRESETS.map((v) => (
+                  <button key={v} class={mph === v ? 'on' : ''} onClick={() => setMph(v)}>{v} mph</button>
+                ))}
+              </div>
+              <p class="muted small" style="margin:6px 0 0">
+                Remaining drive: <b class="mono">{dur(sim.driveMinutes)}</b> at {sim.effectiveMph} mph.
+              </p>
+            </>
+          ) : (
+            <>
+              <div class="rollout-chips" role="group" aria-label="Remaining drive presets">
+                {RESCUE_HOURS_PRESETS.map((p) => (
+                  <button
+                    key={p.minutes}
+                    class={driveMinutesDirect === p.minutes ? 'on' : ''}
+                    onClick={() => { setDriveHours(Math.floor(p.minutes / 60)); setDriveMins(p.minutes % 60); }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div class="rollout-fieldgrid">
+                <label>Drive hours
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={0}
+                    max={24}
+                    data-rescue-drive-h="1"
+                    aria-label="Remaining drive hours"
+                    value={driveHours}
+                    onInput={(e) => setDriveHours(Math.max(0, Math.min(24, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+                <label>Drive minutes
+                  <input
+                    type="number"
+                    class="num"
+                    inputMode="numeric"
+                    min={0}
+                    max={59}
+                    data-rescue-drive-m="1"
+                    aria-label="Remaining drive minutes"
+                    value={driveMins}
+                    onInput={(e) => setDriveMins(Math.max(0, Math.min(59, Number((e.target as HTMLInputElement).value) || 0)))}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* C. Optional delivery deadline using THE shared ClockPick component */}
+        <div class="rollout-section">
+          <span class="stat-label">Target delivery deadline (optional)</span>
+          <div class="rollout-seg" role="group" aria-label="Target deadline mode">
+            <button class={!useDeadline ? 'on' : ''} onClick={() => setUseDeadline(false)}>No deadline</button>
+            <button class={useDeadline ? 'on' : ''} onClick={() => setUseDeadline(true)}>Set deadline</button>
+          </div>
+          {useDeadline && (
+            <div class="rollout-fieldrow">
+              <button
+                class="rowbtn"
+                data-rescue-deadline-btn="1"
+                data-rescue-deadline-min={String(deadlineMin)}
+                aria-label={`Target deadline (${sim.homeZoneName}): ${fmtRescueFull(deadlineMin, sim.homeTimeZone)}. Change`}
+                onClick={() => openSheet({
+                  kind: 'rescuetime',
+                  deadlineMinute: deadlineMin,
+                  homeZoneName: sim.homeZoneName,
+                  homeTimeZone: sim.homeTimeZone,
+                  onApply: (m) => setDeadlineMin(m),
+                })}
+              >
+                <span>
+                  <b class="mono">{fmtRescueFull(deadlineMin, sim.homeTimeZone)}</b>
+                  <br />
+                  <span class="muted small">Compare which strategies finish on or before {fmtRescueShort(deadlineMin, sim.homeTimeZone)}</span>
+                </span>
+                <span class="muted small">Change</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -7160,9 +7614,11 @@ export function App() {
   const sheet = useSheet();
   const weekOpen = useWeekPlanner();
   const rolloutOpen = useRolloutPlanner();
+  const rescueOpen = useRescuePlanner();
   useEffect(() => {
     if (s.tab !== 'plan' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && rolloutPlannerOpen) openRolloutPlanner(false);
+    if (s.tab !== 'plan' && rescuePlannerOpen) openRescuePlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -7191,15 +7647,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { openWeekPlanner(false); openRolloutPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -7375,12 +7831,13 @@ export function App() {
           {warnbox}
           {themeNoticeCard}
           <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : 'plan') : s.tab) : 'plan'} tab={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : 'plan') : s.tab) : 'plan'}>
+          <TabBoundary key={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : rescueOpen ? 'rescue' : 'plan') : s.tab) : 'plan'} tab={planFamily ? (s.tab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : rescueOpen ? 'rescue' : 'plan') : s.tab) : 'plan'}>
             {planFamily ? (
               <>
-                {s.tab === 'plan' && !weekOpen && !rolloutOpen && <PlanTab ev={ev} />}
+                {s.tab === 'plan' && !weekOpen && !rolloutOpen && !rescueOpen && <PlanTab ev={ev} />}
                 {s.tab === 'plan' && weekOpen && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
                 {s.tab === 'plan' && rolloutOpen && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
+                {s.tab === 'plan' && rescueOpen && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
                 {s.tab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
                 {s.tab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
                 {s.tab === 'history' && <HistoryTab s={s} now={now} />}
@@ -7419,7 +7876,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
@@ -7432,6 +7889,7 @@ export function App() {
       {!showDisclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
       {!showDisclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'rollouttime' && s.tab === 'plan' && rolloutOpen && <RolloutTimeSheet key={`${sheet.apptDate}-${sheet.apptTime}-${sheet.entryTimeZone}`} k={sheet} now={now} />}
+      {!showDisclaimer && sheet?.kind === 'rescuetime' && s.tab === 'plan' && rescueOpen && <RescueTimeSheet key={sheet.deadlineMinute} k={sheet} now={now} />}
       {!showDisclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
       {!showDisclaimer && s.speakAskOpen && <SpeakAskDialog />}
