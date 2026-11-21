@@ -55,17 +55,6 @@ export function displaySegLabel(status: DutyStatus, note?: string): string {
 }
 const segLabel = displaySegLabel;
 
-/** DESIGN-NAV §2.4: time-direction cue at the top of Log (the past) and Plan (the future).
- * A <p>, not a heading or a button: no role, no tabindex, no click handler. */
-function TimeHead({ kind }: { kind: 'past' | 'future' }) {
-  return (
-    <p class={`timehead timehead-${kind}`}>
-      <span class="timehead-rail" aria-hidden="true"><i /><i /><i /></span>
-      <span class="timehead-text"><b>{kind === 'past' ? 'The past' : 'The future'}</b> — {kind === 'past' ? 'what’s already done' : 'what’s still ahead'}</span>
-    </p>
-  );
-}
-
 function Card({ title, children, tone }: { title?: string; children: ComponentChildren; tone?: 'warn' | 'bad' | 'good' }) {
   return <section class={`card ${tone ?? ''}`}>{title && <h2>{title}</h2>}{children}</section>;
 }
@@ -1014,13 +1003,10 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
 /* ============================================================ header and notices */
 
 /**
- * The header: slim and opaque (redesign, 2026-10-10). It used to hold the four clocks and every
- * notice, which took 29% of the phone — 47% out of hours — and stayed pinned while scrolling; its
- * see-through bottom edge put the "drive again at" line on top of the status buttons. Now it carries
- * only what every screen needs: the status, the time, the theme switch, one line of driving time on the
- * screens that are not Now, and the driving alert.
+ * The header: slim and opaque (redesign, 2026-10-10). It carries only what every screen needs:
+ * the status, the time, the theme switch, the driving alert, and (on Now only) the planning disclaimer.
  */
-function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; again: DriveAgain | null; onNow: boolean }) {
+function TopBar({ ev, now, s, inert, onNow }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; onNow: boolean }) {
   const status = s.current?.status ?? 'OFF';
   // The switch flips what is on screen — the effective theme — and the tap records the choice, so
   // from then on the phone's setting no longer moves it (patch 7).
@@ -1046,9 +1032,6 @@ function TopBar({ ev, now, s, inert, again, onNow }: { ev: FullEvaluation; now: 
           <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /> {next === 'night' ? 'Night' : 'Day'}</button>
         </span>
       </div>
-      {!onNow && (ev.driveNow > 0
-        ? <div class="compact"><b>{dur(ev.driveNow)}</b> of driving · Stop by <b>{clockFull(ev.mustStopBy)}</b></div>
-        : again && again.off !== null && status !== 'D' && <div class="compact">{ev.binding === 'BREAK_30' ? '30-min break due' : ev.binding === 'CYCLE' ? `Out of ${ev.cycle.limit / 60}-hour hours` : 'Out of hours'} · <b>drive again at {clock(again.off)}</b></div>)}
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
       {!(onNow && ev.driveNow <= 0) && <AlertBanner s={s} ev={ev} />}
       {/* Logpin (Lorico, 2026-11-20): planning-only disclaimer line + Details toggle shows on Now only. */}
@@ -3212,7 +3195,6 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   const [back, setBack] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [back]);
-  const undo = useUndo();
   const day = carrierDay(now, back, s);
   const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
   const canBack = day.start > earliest;
@@ -3266,7 +3248,6 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   return (
     <>
       <div class="log-pin">
-        <TimeHead kind="past" />
         <div class="daynav">
           <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
           <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
@@ -3289,12 +3270,6 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
             <ul class="seglist">{overlaps.map((seg, i) => (
               <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
             ))}</ul>
-          </div>
-        )}
-        {undo && (
-          <div class="row undo">
-            <span class="muted small">{undo.label}.</span>
-            <button class="mini" onClick={() => { undoLast(); }}>Undo</button>
           </div>
         )}
         <Card title={showResolved ? `What the clocks count (${resolved.length})` : `Entries on this day (${entryCount})`}>
@@ -4036,7 +4011,6 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
   );
   return (
     <>
-      <TimeHead kind="future" />
       <h1 class="screen-title">Plan</h1>
       {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
@@ -6299,7 +6273,7 @@ export function App() {
   }
   return (
     <div class={`${fresh ? 'app is-demo' : 'app'}${printReport ? ' has-print-report' : ''}`}>
-      <TopBar ev={ev} now={now} s={s} inert={blocked} again={again} onNow={s.tab === 'now'} />
+      <TopBar ev={ev} now={now} s={s} inert={blocked} onNow={s.tab === 'now'} />
       {/* The four panels side by side in the snap strip. Every page stays mounted and
           keeps its own scroll position; the pages off the settled panel are inert and
           aria-hidden so nothing in them can be focused or read as current. The global

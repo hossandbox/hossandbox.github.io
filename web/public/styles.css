@@ -1071,15 +1071,6 @@ html {
 /* equal-width tab cells keep min-width: 0 so nothing overflows the bar */
 .tabs button { min-width: 0; }
 
-/* ---------- in-screen time headers (DESIGN-NAV §2.4): Log = the past, Plan = the future ---------- */
-.timehead { display: flex; align-items: center; gap: var(--s-8); margin: 2px 2px 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); }
-.timehead b { color: var(--text); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.timehead-rail { position: relative; flex: 0 0 34px; height: 10px; display: inline-flex; align-items: center; justify-content: space-between; }
-.timehead-rail::before { content: ""; position: absolute; left: 4px; right: 4px; top: 50%; height: 1px; margin-top: -.5px; background: var(--tick); }
-.timehead-rail i { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--tick); }
-.timehead-rail i:nth-child(2) { box-shadow: inset 0 0 0 1.5px var(--muted); }   /* the middle dot is Now */
-.timehead-past .timehead-rail i:nth-child(1), .timehead-future .timehead-rail i:nth-child(3) { background: var(--accent); box-shadow: none; }
-
 /* ---------- driving view ---------- */
 .drive-body > .sign { transform: scale(1.2); margin: 0 0 14px; }
 button.drive-stop { min-height: 112px; font-size: 28px; letter-spacing: .01em; }
@@ -1212,7 +1203,6 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
   position: relative;
   z-index: 2;
 }
-.page.page-log > .log-pin > .timehead { margin: 0 2px; }
 .page.page-log > .log-pin > .log-graph-card { padding: var(--s-10) var(--s-12); }
 .page.page-log > .log-pin .daytotals { margin-top: var(--s-8); padding-top: var(--s-6); }
 .page.page-log > .log-scroll {

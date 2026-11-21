@@ -283,8 +283,12 @@ await section(async () => {
   ok('D8 what was disclosed is what was saved: Driving unchanged, still starts 18:50 (the end-fixed edit never reached it)', drv && drv.start === N - 250, drv);
   const onRow = st.segments.find((x) => x.status === 'ON' && x.end === N - 250);
   ok('D8 the edited row saved with its end fixed: On Duty 17:45 → 18:50', !!onRow && onRow.start === N - 315, onRow);
-  const undoRow = await p.evaluate(() => document.querySelector('.page.is-active .row.undo')?.textContent ?? '');
-  ok('D10 the undo line leads with the NEW times and says the old ones as "was"', /^Changed to On Duty Fri 17:45 → Fri 18:50 · was Fri 18:00 → Fri 18:50\./.test(undoRow), undoRow);
+  // Re-aimed (2026-11-21 removals): Log undo row removed from .log-scroll; undo machinery (hos-sandbox-undo-v1) still records the D10 "was" label.
+  const d10 = await p.evaluate(() => ({
+    logUndoEl: !!document.querySelector('.page.is-active .row.undo'),
+    storedLabel: (() => { try { return JSON.parse(localStorage.getItem('hos-sandbox-undo-v1') || 'null')?.label ?? ''; } catch { return ''; } })(),
+  }));
+  ok('D10 Log undo row is absent after log edit while undo machinery still records NEW times and "was"', !d10.logUndoEl && /^Changed to On Duty Fri 17:45 → Fri 18:50 · was Fri 18:00 → Fri 18:50$/.test(d10.storedLabel), d10);
   ok('D8 no page errors', p.errors.length === 0, p.errors.join(' | '));
   await p.ctx.close();
 });

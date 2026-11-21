@@ -511,33 +511,23 @@ await pin('N3. nowplain: zero button.tab-now anywhere in nav.tabs; Now uses plai
   }
   return true;
 });
-// Re-aimed (2026-11-20 nowplain): TimeHead travels with its screen — Log (index 2) keeps past, Plan (index 0) keeps future.
-await pin('N4. TimeHead travels with its screen: past on Log (index 2, before .daynav, including resolved view) and future on Plan (index 0, before h1.screen-title)', async () => {
-  const checkHead = (pg, kind, wantText, beforePred) => {
-    const flat = []; const w = (n) => { flat.push(n); n.childNodes.forEach(w); }; w(pg);
-    const heads = flat.filter((n) => n.localName === 'p' && has(n, 'timehead') && has(n, `timehead-${kind}`));
-    if (heads.length !== 1) return `${kind}: count=${heads.length}`;
-    const hd = heads[0];
-    const txt = hd.textContent.replace(/\u2019/g, "'").trim();
-    if (txt !== wantText) return `${kind}: text="${txt}"`;
-    const target = flat.find(beforePred);
-    if (!target || flat.indexOf(hd) >= flat.indexOf(target)) return `${kind}: not before target`;
-    const rail = all((n) => has(n, 'timehead-rail'), hd)[0];
-    if (!rail || rail.attributes['aria-hidden'] !== 'true') return `${kind}: rail missing aria-hidden`;
-    if (hd.attributes.role || hd.attributes.tabindex != null) return `${kind}: interactive attrs on p`;
-    const badChild = all((n) => n.localName === 'button' || n.localName === 'a' || n.attributes.tabindex != null, hd);
-    if (badChild.length) return `${kind}: interactive child`;
-    return null;
-  };
+// Re-aimed (2026-11-21 removals): TimeHead eyebrows removed on both Log and Plan; .log-pin starts directly with .daynav and Plan keeps h1.screen-title.
+await pin('N4. removals: TimeHead is ABSENT on Log (both entries and resolved views; .log-pin starts with .daynav) and ABSENT on Plan (h1.screen-title stays)', async () => {
   await seed({ tab: 'log', logResolved: false, ...segs });
-  const errLog1 = checkHead(pages()[2], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
-  if (errLog1) return errLog1;
+  const logPg1 = pages()[2];
+  if (all((n) => has(n, 'timehead'), logPg1).length !== 0 || /The past/.test(logPg1.textContent)) return 'timehead still on Log (entries)';
+  const pin1 = all((n) => has(n, 'log-pin'), logPg1)[0];
+  const pinFirst = pin1?.childNodes.find((n) => n.localName);
+  if (!pinFirst || !has(pinFirst, 'daynav')) return `log-pin first child not daynav: ${pinFirst?.localName}.${pinFirst?.attributes?.class}`;
   await seed({ tab: 'log', logResolved: true, ...segs });
-  const errLog2 = checkHead(pages()[2], 'past', "The past — what's already done", (n) => has(n, 'daynav'));
-  if (errLog2) return `resolved: ${errLog2}`;
+  const logPg2 = pages()[2];
+  if (all((n) => has(n, 'timehead'), logPg2).length !== 0 || /The past/.test(logPg2.textContent)) return 'timehead still on Log (resolved)';
   await seed({ tab: 'plan', ...segs });
-  const errPlan = checkHead(pages()[0], 'future', "The future — what's still ahead", (n) => n.localName === 'h1' && has(n, 'screen-title'));
-  return errPlan || true;
+  const planPg = pages()[0];
+  if (all((n) => has(n, 'timehead'), planPg).length !== 0 || /The future/.test(planPg.textContent)) return 'timehead still on Plan';
+  const planH1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0];
+  if (!planH1 || planH1.textContent.trim() !== 'Plan') return `Plan heading missing: ${planH1?.textContent}`;
+  return true;
 });
 // Re-aimed (2026-11-20 nowplain): Plan sub-screens sit on pages()[0]; Now (1) and More (3) unchanged.
 await pin('N5. DESIGN-NAV §2.4: TimeHead is ABSENT on Now, More, and every Plan sub-screen (split, trip, load, recap, history)', async () => {
@@ -631,6 +621,34 @@ await pin('L3. logpin: Log splits into .log-pin (.daynav + graph card), .log-scr
   fire(nextBtn, 'click'); await sleep(60);
   const titleBack = all((n) => has(n, 'daynav-title'), pinEl)[0].textContent;
   return titleBack === titleBefore || `Next day did not restore Today: "${titleBack}" vs "${titleBefore}"`;
+});
+
+/* ---------------- (r) removals (2026-11-21): header summary strip & Log undo row absent ---------------- */
+await pin('R1. removals: header summary strip (.compact / "of driving · Stop by" / "drive again at") is ABSENT on Plan, Log, More, Split, and Now (driving left & out of hours)', async () => {
+  const hdr = () => all((n) => n.localName === 'header' && has(n, 'top'))[0];
+  const outSegs = { segments: [{ status: 'OFF', start: T - 1200, end: T - 600 }, { status: 'D', start: T - 600, end: T - 10 }], current: { status: 'ON', since: T - 10 } };
+  for (const [label, data] of [['hours-left', segs], ['out-of-hours', outSegs]]) {
+    for (const t of ['now', 'plan', 'log', 'split', 'settings']) {
+      await seed({ tab: t, ...data });
+      const h0 = hdr();
+      if (all((n) => has(n, 'compact'), h0).length !== 0 || /of driving · Stop by|drive again at/.test(h0.textContent)) {
+        return `${label} on ${t}: "${h0.textContent}"`;
+      }
+    }
+  }
+  return true;
+});
+await pin('R2. removals: Log undo row is ABSENT on page-log even when undo is armed; Now keeps .status-undo and undoLast restores', async () => {
+  await seed({ tab: 'log', ...segs });
+  A.tapStatus('OFF', T); await sleep(40);
+  if (!A.currentUndo()) return 'undo was not armed by tapStatus';
+  const logPg = pages()[2], nowPg = pages()[1];
+  const logUndoRows = all((n) => has(n, 'undo'), logPg);
+  const nowUndoRows = all((n) => has(n, 'status-undo'), nowPg);
+  const restored = A.undoLast(); await sleep(40);
+  if (logUndoRows.length !== 0) return `Log still rendered undo row: ${logUndoRows[0].textContent}`;
+  if (nowUndoRows.length !== 1) return `Now missing status-undo: count=${nowUndoRows.length}`;
+  return (restored && getState().current?.status === 'ON') || 'undoLast did not restore status';
 });
 
 /* ---------------- (p) log summary PDF follow-on (2026-11-20) ---------------- */

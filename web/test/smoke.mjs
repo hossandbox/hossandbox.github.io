@@ -823,12 +823,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   // The other half: once the counter has genuinely run out, it must still say so.
   setState({ segments: [{ status: 'D', start: t - 500, end: t }] });
-  // Redesign: with no driving time left, Now leads with the out-of-hours card instead of a "limited by"
-  // line, and the other screens carry it in the header. Both must still say the break is due.
+  // Redesign: with no driving time left, Now leads with the out-of-hours card.
+  // Removals (2026-11-21): header summary strip ("drive again at" / "of driving · Stop by") is removed on Plan, Log, and More.
   const ox = out('now/break genuinely due');
   if (!/30-min break needed/.test(ox)) throw new Error('a break the driver has actually run out of must still read as due');
-  setState({ tab: 'log' });
-  if (!/30-min break due · <b>drive again at/.test(out('log/break genuinely due'))) throw new Error('away from Now, the header must still say the break is due');
+  for (const offTab of ['log', 'plan', 'settings']) {
+    setState({ tab: offTab });
+    const oh = (out(`${offTab}/break genuinely due`).match(/<header[\s\S]*?<\/header>/) || [''])[0];
+    if (/class="compact"|30-min break due ·|drive again at/.test(oh)) throw new Error(`header summary strip must be absent on ${offTab} when out of hours`);
+  }
   setState({ tab: 'now' });
 
   // Re-aimed (2026-11-20, Lorico banner consolidation): C6 disclaimer moved from .disclaimer-banner on Now into TopBar's details.disclaimer-line with Details toggle.
@@ -1029,7 +1032,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const offAt6 = { status: 'OFF', since: H(-2), createdAt: 5 };
   let p = pillOf([...day, { status: 'D', start: H(-2.5), end: H(-1.5), createdAt: 9 }], offAt6);
   if (p !== 'Off Duty · 1h 30m') throw new Error(`a correction "drove until 06:30" must move the pill's start to 06:30 (got "${p}")`);
-  if (!render(h(App, {})).includes(`drive again at ${clock(H(8.5))}`)) throw new Error('the pill and "drive again at" must describe the same rest');
+  // Re-aimed (2026-11-21 removals): header summary strip is removed on Log, so check the pill against Now's RestHero ("You can drive again at HH:MM") and assert the Log header omits it.
+  const hRest = render(h(App, {}));
+  const hRestHdr = (hRest.match(/<header[\s\S]*?<\/header>/) || [''])[0];
+  if (/drive again at|class="compact"/.test(hRestHdr)) throw new Error('removals: Log header must not render the drive-again summary strip');
+  const plainRest = hRest.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  if (!plainRest.includes(`You can drive again at ${clock(H(8.5))}`)) throw new Error('the pill and Now "drive again at" must describe the same rest');
   p = pillOf(day, offAt6);
   if (p !== 'Off Duty · 2h 00m') throw new Error(`control without a correction (got "${p}")`);
   p = pillOf([...day, { status: 'OFF', start: H(-2), end: H(-1), createdAt: 5 }], { status: 'OFF', since: H(-1), createdAt: 6 });
@@ -1170,10 +1178,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const px = (rule) => Number((rule.match(/font-size: (\d+)px/) || [])[1] || 0);
   if (!(px(stopDate) > 0) || !(px(stopTime) > px(stopDate))) throw new Error(`the stacked stop-by needs a quiet date line over a larger time (patch #1.1): date ${stopDate} · time ${stopTime}`);
 
-  // 4. away from Now, one line of driving time in the header
-  setState({ tab: 'log' });
-  h = out('log/header line');
-  if (!txt(header(h)).includes(`7h 30m of driving · Stop by ${clockFull(L(18, 15))}`)) throw new Error('other screens must keep one line of driving time in the header');
+  // 4. Removals (2026-11-21): header summary strip is absent on Plan, Log, and More too.
+  for (const offTab of ['log', 'plan', 'settings']) {
+    setState({ tab: offTab });
+    h = out(`${offTab}/header line`);
+    if (/class="compact"|of driving · Stop by|drive again at/.test(header(h))) throw new Error(`header summary strip must be absent on ${offTab}`);
+  }
 
   // 5. Why: every rule's own end time, the earliest marked
   setState({ tab: 'now' });
@@ -6287,14 +6297,26 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     setState({ tab: offTab });
     const offHdr = (render(h(App, {})).match(/<header class="top"[\s\S]*?<\/header>/) || [''])[0];
     need(!/disclaimer-line/.test(offHdr) && !/Planning only — not a log, not an ELD/.test(offHdr), `logpin: header disclaimer line must be absent on ${offTab}`);
+    need(!/class="compact"|of driving · Stop by|drive again at/.test(offHdr), `removals: header summary strip must be absent on ${offTab}`);
   }
   setState({ tab: 'log' });
   const logFull = render(h(App, {}));
   const logPg = pageOut(logFull, 'page-log');
+  const planPg = pageOut(logFull, 'page-plan');
+  const nowPg = pageOut(logFull, 'page-now');
   const morePg = pageOut(logFull, 'page-settings');
   need(/class="log-pin"[\s\S]*?class="daynav"[\s\S]*?class="card log-graph-card"[\s\S]*?<svg[^>]*class="grid"[\s\S]*?class="daytotals"[\s\S]*?class="log-scroll"[\s\S]*?class="log-foot"[\s\S]*?class="addbtn"/.test(logPg), 'logpin: Log page must structure .log-pin (.daynav + .log-graph-card), .log-scroll, and .log-foot (.addbtn)');
   need(!/Report a bug \(GitHub\)/.test(logPg), 'logpin: Log screen must not render "Report a bug (GitHub)"');
   need(/<h2>Bug reports<\/h2>[\s\S]*?Report a bug \(GitHub\)/.test(morePg), 'logpin: More screen must keep its Bug reports card with "Report a bug (GitHub)"');
+  // Removals (2026-11-21): TimeHead absent on Plan and Log; .log-pin starts directly with .daynav; Log undo row absent even when undo is armed (Now keeps .status-undo).
+  need(!/timehead|The past|The future/.test(logPg) && !/timehead|The past|The future/.test(planPg) && !/timehead/.test(nowPg) && !/timehead/.test(morePg), 'removals: TimeHead must be absent on Plan, Log, Now, and More');
+  need(/<div class="log-pin"><div class="daynav">/.test(logPg), 'removals: .log-pin must start directly with .daynav');
+  need(/<h1 class="screen-title">Plan<\/h1>/.test(planPg), 'removals: Plan heading stays after Plan eyebrow removal');
+  A.tapStatus('OFF', nowT);
+  need(A.currentUndo() !== null && /^.+ since \d{2}:\d{2}$/.test(A.currentUndo().label), 'removals: status tap still arms undo machinery');
+  const armedHtml = render(h(App, {}));
+  need(!/class="row undo"/.test(pageOut(armedHtml, 'page-log')), 'removals: Log screen must not render an undo row even when undo is armed');
+  need(A.undoLast() && A.currentUndo() === null, 'removals: undoLast stays intact');
   setState({ tab: 'now' });
 
   // C7: Plain-language labels and trip-step reasons.

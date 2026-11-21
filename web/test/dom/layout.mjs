@@ -627,12 +627,16 @@ for (const [W, H] of SIZES) {
           otherInactiveBgImg: otherCs?.backgroundImage ?? null,
           thCount: th.length,
           thText: th[0] ? th[0].textContent.replace(/\u2019/g, "'").trim() : null,
-          thInBox: thRect ? (thRect.left >= pgRect.left - 0.5 && thRect.right <= pgRect.right + 0.5) : true,
-          thBeforeTarget: lbl === 'Log'
-            ? (th[0] && pg.querySelector('.daynav') ? !!(th[0].compareDocumentPosition(pg.querySelector('.daynav')) & Node.DOCUMENT_POSITION_FOLLOWING) : false)
-            : lbl === 'Plan'
-              ? (th[0] && pg.querySelector('h1.screen-title') ? !!(th[0].compareDocumentPosition(pg.querySelector('h1.screen-title')) & Node.DOCUMENT_POSITION_FOLLOWING) : false)
-              : true,
+          logPinStartsDaynav: lbl === 'Log'
+            ? (pg.querySelector('.log-pin')?.firstElementChild?.classList.contains('daynav') ?? false)
+            : true,
+          planTitleInBox: lbl === 'Plan'
+            ? (() => {
+                const h1 = pg.querySelector('h1.screen-title');
+                const r = h1?.getBoundingClientRect();
+                return !!h1 && h1.textContent.trim() === 'Plan' && r.left >= pgRect.left - 0.5 && r.right <= pgRect.right + 0.5;
+              })()
+            : true,
         };
       }, label);
       offChecks.push(snap);
@@ -659,11 +663,11 @@ for (const [W, H] of SIZES) {
       && logSnap.nowBg === 'rgba(0, 0, 0, 0)' && logSnap.nowBgImg === 'none'
       && logSnap.nowColor === wantMuted && logSnap.nowColor === logSnap.otherInactiveColor && logSnap.nowBgImg === logSnap.otherInactiveBgImg,
       JSON.stringify({ aftC: logSnap.nowAftContent, aftBg: logSnap.nowAftBg, bg: logSnap.nowBg, bgImg: logSnap.nowBgImg, col: logSnap.nowColor, wantMuted, otherCol: logSnap.otherInactiveColor }));
-    ok(`${tag} (e) TimeHead travels with Log & Plan (placed & within content box) and absent on Now & More`,
-      logSnap.thCount === 1 && logSnap.thText === "The past — what's already done" && logSnap.thBeforeTarget && logSnap.thInBox
-      && planSnap.thCount === 1 && planSnap.thText === "The future — what's still ahead" && planSnap.thBeforeTarget && planSnap.thInBox
-      && nowSnap.thCount === 0 && moreSnap.thCount === 0,
-      JSON.stringify(offChecks.map((s) => ({ l: s.lbl, n: s.thCount, t: s.thText, before: s.thBeforeTarget, box: s.thInBox }))));
+    // Re-aimed (2026-11-21 removals): TimeHead eyebrows removed on Plan and Log (absent on all 4 panels); .log-pin starts with .daynav and Plan keeps h1.screen-title.
+    ok(`${tag} (e) TimeHead absent on all 4 panels (Log, Plan, Now, More); .log-pin starts with .daynav and Plan keeps heading`,
+      logSnap.thCount === 0 && planSnap.thCount === 0 && nowSnap.thCount === 0 && moreSnap.thCount === 0
+      && logSnap.logPinStartsDaynav && planSnap.planTitleInBox,
+      JSON.stringify(offChecks.map((s) => ({ l: s.lbl, n: s.thCount, pinDaynav: s.logPinStartsDaynav, planH1: s.planTitleInBox }))));
     ok(`${tag} (e) no horizontal overflow, no tab wrap/clip on any of the 4 panels`,
       offChecks.every((s) => !s.docOverflow && !s.pageOverflow && s.tabClips.length === 0),
       JSON.stringify(offChecks.map((s) => ({ l: s.lbl, doc: s.docOverflow, pg: s.pageOverflow, clips: s.tabClips }))));
@@ -770,13 +774,17 @@ for (const [W, H] of SIZES) {
       const hdr = document.querySelector('header.top');
       const pg = document.querySelector('.page.is-active');
       const disc = hdr.querySelector('details.disclaimer-line');
-      const hr = hdr.getBoundingClientRect(), pr = pg.getBoundingClientRect();
+      const compact = hdr.querySelector('.compact');
+      const topRow = hdr.querySelector('.top-row');
+      const hr = hdr.getBoundingClientRect(), pr = pg.getBoundingClientRect(), tr = topRow.getBoundingClientRect();
       return {
         lbl,
         hasDisc: !!disc,
+        hasCompact: !!compact || /of driving · Stop by|drive again at/.test(hdr.textContent),
         discText: disc?.querySelector('.disclaimer-text')?.textContent?.trim() ?? null,
         discMore: disc?.querySelector('.disclaimer-more')?.textContent?.trim() ?? null,
         hdrH: Math.round(hr.height * 10) / 10,
+        topRowH: Math.round(tr.height * 10) / 10,
         hdrBottom: Math.round(hr.bottom * 10) / 10,
         pgTop: Math.round(pr.top * 10) / 10,
         over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -791,9 +799,10 @@ for (const [W, H] of SIZES) {
     hNow.hasDisc && hNow.discText === 'Planning only — not a log, not an ELD' && hNow.discMore === 'Details'
     && !hPlan.hasDisc && !hMore.hasDisc && !hLog.hasDisc,
     JSON.stringify({ now: hNow, plan: hPlan, more: hMore, log: hLog }));
-  ok(`${tag} (f) no leftover gap or overlap when header disclaimer is absent on Plan/More/Log`,
-    [hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && !x.over),
-    JSON.stringify([hPlan, hMore, hLog].map((x) => ({ l: x.lbl, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
+  ok(`${tag} (f) header summary strip (.compact) absent on Plan/More/Log/Now with no empty header gap`,
+    [hNow, hPlan, hMore, hLog].every((x) => !x.hasCompact)
+    && [hPlan, hMore, hLog].every((x) => Math.abs(x.pgTop - x.hdrBottom) <= 1 && x.hdrH <= x.topRowH + 20 && !x.over),
+    JSON.stringify([hNow, hPlan, hMore, hLog].map((x) => ({ l: x.lbl, compact: x.hasCompact, hdrH: x.hdrH, rowH: x.topRowH, hdrB: x.hdrBottom, pgT: x.pgTop, over: x.over }))));
 
   // BugButton absent on Log, present on More
   const bugCheck = await page.evaluate(() => {
@@ -830,6 +839,7 @@ for (const [W, H] of SIZES) {
       pin: R(pin), daynav: R(daynav), graphCard: R(graphCard), svg: R(svg), totals: R(totals),
       scroll: R(scroll), foot: R(foot), addBtn: R(addBtn), nav: R(nav), hdr: R(hdr),
       firstEntry: R(firstEntry),
+      pinFirstIsDaynav: pin.firstElementChild === daynav,
       labelsInsideSvg: [...svg.querySelectorAll('.grid-label, .grid-hour')].every((t) => {
         const sr = svg.getBoundingClientRect(), tr = t.getBoundingClientRect();
         return tr.left >= sr.left - 1 && tr.right <= sr.right + 1 && tr.top >= sr.top - 1 && tr.bottom <= sr.bottom + 1;
@@ -873,11 +883,13 @@ for (const [W, H] of SIZES) {
     eq(geom.before.pin, geom.after.pin) && eq(geom.before.daynav, geom.after.daynav)
     && eq(geom.before.graphCard, geom.after.graphCard) && eq(geom.before.svg, geom.after.svg) && eq(geom.before.totals, geom.after.totals),
     JSON.stringify({ pinB: geom.before.pin, pinA: geom.after.pin, svgB: geom.before.svg, svgA: geom.after.svg }));
-  ok(`${tag} (f) pinned graph stays fully inside viewport with unclipped axis labels and clean boundary above scroll list`,
-    geom.before.pin.top >= geom.before.hdr.bottom - 0.5 && geom.before.pin.bottom <= geom.before.scroll.top + 0.5
+  ok(`${tag} (f) pinned graph starts with daynav, stays inside viewport with unclipped axis labels, no overlap and no dead gap above scroll list`,
+    geom.before.pinFirstIsDaynav
+    && Math.abs(geom.before.pin.top - geom.before.hdr.bottom) <= 1
+    && Math.abs(geom.before.scroll.top - geom.before.pin.bottom) <= 1
     && geom.before.svg.left >= 0 && geom.before.svg.right <= geom.vw && geom.before.svg.h >= 60 && geom.before.labelsInsideSvg
     && geom.before.firstEntry.top >= geom.before.pin.bottom - 0.5,
-    JSON.stringify({ hdrB: geom.before.hdr.bottom, pin: geom.before.pin, scrollT: geom.before.scroll.top, svg: geom.before.svg, labels: geom.before.labelsInsideSvg, firstEntry: geom.before.firstEntry }));
+    JSON.stringify({ pinDaynav: geom.before.pinFirstIsDaynav, hdrB: geom.before.hdr.bottom, pin: geom.before.pin, scrollT: geom.before.scroll.top, svg: geom.before.svg, labels: geom.before.labelsInsideSvg, firstEntry: geom.before.firstEntry }));
   ok(`${tag} (f) pinned bottom addbtn sits directly above tab bar, never moves on scroll, and is fully tappable`,
     eq(geom.before.foot, geom.after.foot) && eq(geom.before.addBtn, geom.after.addBtn)
     && Math.abs(geom.before.foot.bottom - geom.before.nav.top) <= 1
