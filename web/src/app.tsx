@@ -892,7 +892,7 @@ function useDriveAgain(s: State, now: number, ev: FullEvaluation | null): DriveA
  * again, and tapping On duty after 6 hours off reset the only rest number on screen without saying the
  * rest had ended — or that on-duty work was allowed all along.
  */
-function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain; tail?: ComponentChildren }) {
+function RestHero({ s, now, ev, again, tail, dissolve }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain; tail?: ComponentChildren; dissolve?: boolean }) {
   const status = s.current?.status ?? 'OFF';
   const resting = status === 'OFF' || status === 'SB';
   const { off, sb, before } = again;
@@ -900,9 +900,10 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   const lead = status === 'D' ? <p class="hero-lead">No driving time left — stop driving.</p> : null;
   const why = <button class="link" onClick={() => openSheet({ kind: 'why' })}><Icon d={I.info} size={18} /> Why?</button>;
   const share = useShareButton(shareText(ev, again.off));
+  const heroCls = (tone?: string) => ['hero', tone, dissolve ? 'now-card-dissolve' : ''].filter(Boolean).join(' ');
   if (off === null) {
     return (
-      <section class="hero bad">
+      <section class={heroCls('bad')}>
         <Sign kind="stop">Out of hours</Sign>
         {lead}
         <div class="hero-label">Out of driving time</div>
@@ -926,7 +927,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   );
   if (ev.binding === 'BREAK_30') {
     return (
-      <section class="hero warn">
+      <section class={heroCls('warn')}>
         {status === 'D' ? <Sign kind="stop">Out of hours</Sign> : resting ? <Sign kind="rest">On break</Sign> : <Sign kind="warn">Break due</Sign>}
         {lead}
         {time('30-min break needed — you can drive again at')}
@@ -939,7 +940,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   }
   if (ev.binding === 'CYCLE') {
     return (
-      <section class="hero warn">
+      <section class={heroCls('warn')}>
         {resting ? <Sign kind="rest">Resting</Sign> : <Sign kind="stop">Out of hours</Sign>}
         {lead}
         {time(`Out of ${cycleWord} hours — ${resting ? 'if you stay off duty, you' : 'go off duty now and you'} can drive again at`)}
@@ -952,7 +953,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
   }
   if (resting) {
     return (
-      <section class="hero">
+      <section class={heroCls()}>
         <Sign kind="rest">Resting</Sign>
         {time('You can drive again at')}
         <p class="hero-text">Going on duty before then is allowed (only driving is not), but it ends this rest: you will need 10 consecutive hours off, or a sleeper-berth split, before you drive.</p>
@@ -963,7 +964,7 @@ function RestHero({ s, now, ev, again, tail }: { s: State; now: number; ev: Full
     );
   }
   return (
-    <section class="hero warn">
+    <section class={heroCls('warn')}>
       <Sign kind="stop">Out of hours</Sign>
       {lead ?? <div class="hero-label">Out of driving hours</div>}
       <p class="hero-text"><b>On-duty work is allowed; driving is not.</b></p>
@@ -1355,7 +1356,7 @@ function StopDate({ d }: { d: string }) {
   const m = /^(\S+) (\S+) (\S+)$/.exec(d);
   return m ? <>{m[1]} <span class="sd-mon">{m[2]} </span>{m[3]}</> : <>{d}</>;
 }
-function HeroDrive({ ev, basis }: { ev: FullEvaluation; basis?: 'log' | 'estimate' | 'demo' }) {
+function HeroDrive({ ev, basis, dissolve }: { ev: FullEvaluation; basis?: 'log' | 'estimate' | 'demo'; dissolve?: boolean }) {
   const share = useShareButton(shareText(ev, null));
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const left = dur(ev.driveNow);
@@ -1365,7 +1366,7 @@ function HeroDrive({ ev, basis }: { ev: FullEvaluation; basis?: 'log' | 'estimat
   // disagree with the wording every other surface shows.
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
-    <section class="hero">
+    <section class={dissolve ? 'hero now-card-dissolve' : 'hero'}>
       {tone === 'warn' ? <Sign kind="warn">Under 1 hour</Sign> : <Sign kind="go">Hours left</Sign>}
       <Dial share={bindingShare(ev)} hours={bindingHours(ev)} tone={tone === 'warn' ? 'warn' : 'calm'} size={270} basis={basis}>
         <div class="hero-label">You can drive</div>
@@ -1632,12 +1633,12 @@ export function comebackTwin(ev: FullEvaluation, again: DriveAgain, sleeperAt: n
  * hero label, value and stacked stop-by, the same limit plate and Why link — with the
  * ring become lanes. Only the picture under the number is new.
  */
-function TimelineDrive({ s, now, ev, basis, onTrack }: { s: State; now: number; ev: FullEvaluation; basis: 'log' | 'estimate' | 'demo'; onTrack?: (t: number) => void }) {
+function TimelineDrive({ s, now, ev, basis, onTrack, dissolve }: { s: State; now: number; ev: FullEvaluation; basis: 'log' | 'estimate' | 'demo'; onTrack?: (t: number) => void; dissolve?: boolean }) {
   const share = useShareButton(shareText(ev, null));
   const tone = ev.driveNow < 60 ? 'warn' : 'good';
   const [stopDate, stopTime] = clockFull(ev.mustStopBy).split(', ');
   return (
-    <section class="hero">
+    <section class={dissolve ? 'hero now-card-dissolve' : 'hero'}>
       {tone === 'warn' ? <Sign kind="warn">Under 1 hour</Sign> : <Sign kind="go">Hours left</Sign>}
       <div class="tl-head">
         <div class="tl-main">
@@ -2100,6 +2101,34 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
     const t = setTimeout(() => setSnap(false), 200);
     return () => clearTimeout(t);
   }, [snap]);
+  // Soft dissolve on Now hero card body when toggling s.nowCard (Timeline <-> Dial).
+  // Fires ONLY on an actual s.nowCard change (never on initial mount), skipped under
+  // prefers-reduced-motion: reduce, and cleans up after the 200ms fade completes.
+  const prevCardRef = useRef<State['nowCard']>(s.nowCard);
+  const cardFadeEpochRef = useRef(0);
+  const activeFadeRef = useRef(0);
+  const [, setCardFadeDone] = useState(0);
+  if (prevCardRef.current !== s.nowCard) {
+    prevCardRef.current = s.nowCard;
+    activeFadeRef.current = prefersReducedMotion() ? 0 : ++cardFadeEpochRef.current;
+  }
+  const cardDissolve = !preview && !prefersReducedMotion() && activeFadeRef.current > 0;
+  useEffect(() => {
+    const epoch = activeFadeRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeFadeRef.current = 0;
+      setCardFadeDone((n) => n + 1);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (activeFadeRef.current === epoch) {
+        activeFadeRef.current = 0;
+        setCardFadeDone((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [s.nowCard]);
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
@@ -2112,10 +2141,12 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
               onStep={(d) => setPv({ t: previewInBounds(preview.t + d, now) ? preview.t + d : preview.t, cont: preview.cont })}
               onBack={backToNow} onTrack={enterPreview} />
           : ev.driveNow > 0 || !again
-          ? <TimelineDrive s={s} now={now} ev={ev} basis={basis} onTrack={onTrack} />
-          : <RestHero s={s} now={now} ev={ev} again={again} tail={<TimeAxis from={now} lanes={comebackLanes(s, ev, again, l3?.sbAt ?? null, l3 ? () => openSheet({ kind: 'lever', lever: l3 }) : undefined)} hazard={status === 'ON' || status === 'D'} twin={comebackTwin(ev, again, l3?.sbAt ?? null)} onTrack={onTrack} />} />
+          ? <TimelineDrive key={s.nowCard} s={s} now={now} ev={ev} basis={basis} onTrack={onTrack} dissolve={cardDissolve} />
+          : <RestHero key={s.nowCard} s={s} now={now} ev={ev} again={again} dissolve={cardDissolve} tail={<TimeAxis from={now} lanes={comebackLanes(s, ev, again, l3?.sbAt ?? null, l3 ? () => openSheet({ kind: 'lever', lever: l3 }) : undefined)} hazard={status === 'ON' || status === 'D'} twin={comebackTwin(ev, again, l3?.sbAt ?? null)} onTrack={onTrack} />} />
       ) : (
-        ev.driveNow > 0 || !again ? <HeroDrive ev={ev} basis={basis} /> : <RestHero s={s} now={now} ev={ev} again={again} />
+        ev.driveNow > 0 || !again
+          ? <HeroDrive key={s.nowCard} ev={ev} basis={basis} dissolve={cardDissolve} />
+          : <RestHero key={s.nowCard} s={s} now={now} ev={ev} again={again} dissolve={cardDissolve} />
       )}
       </CardSwitchCtx.Provider>
       {/* The scrubber's entry without the picture (the axis is aria-hidden): one plain

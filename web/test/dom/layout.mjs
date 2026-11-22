@@ -1438,6 +1438,109 @@ for (const [W, H] of SIZES) {
   await ctx.close();
 }
 
+/* ---------- (i) dialfade (2026-11-22, Lorico): Now hero card soft dissolve (Timeline <-> Dial) ---------- */
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord('timeline')));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('section.page-now .hero .card-switch', { timeout: 5000 });
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(100);
+  const tag = `[${W}x${H} dialfade]`;
+
+  const readHeroState = () => page.evaluate(() => {
+    const hero = document.querySelector('section.page-now .hero');
+    const dial = hero?.querySelector(':scope > .dial');
+    const taxis = hero?.querySelector('.taxis');
+    const tlHead = hero?.querySelector(':scope > .tl-head');
+    const sw = hero?.querySelector(':scope > .card-switch');
+    const body = dial || tlHead || hero?.querySelector(':scope > :not(.card-switch)');
+    const bodyCs = body ? getComputedStyle(body) : null;
+    const swCs = sw ? getComputedStyle(sw) : null;
+    const pressed = [...(sw?.querySelectorAll('button') ?? [])].find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent?.trim() ?? null;
+    return {
+      hasDissolve: !!hero?.classList.contains('now-card-dissolve'),
+      hasDial: !!dial,
+      hasTaxis: !!taxis,
+      pressed,
+      bodyAnim: bodyCs?.animationName ?? null,
+      bodyDur: bodyCs?.animationDuration ?? null,
+      bodyOpacity: bodyCs?.opacity ?? null,
+      swAnim: swCs?.animationName ?? null,
+      docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+
+  // Initial load: no unprompted dissolve animation
+  const init = await readHeroState();
+  ok(`${tag} (i) initial load has no dissolve animation and zero horizontal overflow`,
+    !init.hasDissolve && init.hasTaxis && !init.hasDial && init.bodyAnim === 'none' && !init.docOver,
+    JSON.stringify(init));
+
+  // Pin 1a + 3a: Timeline -> Dial applies 0.2s dissolve on incoming body, keeps switch solid, lands on Dial
+  await page.click('section.page-now .card-switch button:has-text("Dial")');
+  await page.waitForTimeout(20);
+  const toDialMid = await readHeroState();
+  await page.waitForTimeout(260);
+  const toDialDone = await readHeroState();
+  ok(`${tag} (i) Timeline -> Dial applies ~0.2s now-card-dissolve on incoming card body (switch stays solid)`,
+    toDialMid.hasDissolve && toDialMid.hasDial && !toDialMid.hasTaxis
+    && toDialMid.bodyAnim === 'now-card-dissolve' && toDialMid.bodyDur === '0.2s'
+    && toDialMid.swAnim === 'none' && !toDialMid.docOver,
+    JSON.stringify(toDialMid));
+  ok(`${tag} (i) Timeline -> Dial lands cleanly on Dial view after animation completes`,
+    !toDialDone.hasDissolve && toDialDone.hasDial && !toDialDone.hasTaxis
+    && toDialDone.pressed === 'Dial' && toDialDone.bodyOpacity === '1' && !toDialDone.docOver,
+    JSON.stringify(toDialDone));
+
+  // Pin 1b + 3b: Dial -> Timeline applies 0.2s dissolve on incoming body, keeps switch solid, lands on Timeline
+  await page.click('section.page-now .card-switch button:has-text("Timeline")');
+  await page.waitForTimeout(20);
+  const toTlMid = await readHeroState();
+  await page.waitForTimeout(260);
+  const toTlDone = await readHeroState();
+  ok(`${tag} (i) Dial -> Timeline applies ~0.2s now-card-dissolve on incoming card body (switch stays solid)`,
+    toTlMid.hasDissolve && toTlMid.hasTaxis && !toTlMid.hasDial
+    && toTlMid.bodyAnim === 'now-card-dissolve' && toTlMid.bodyDur === '0.2s'
+    && toTlMid.swAnim === 'none' && !toTlMid.docOver,
+    JSON.stringify(toTlMid));
+  ok(`${tag} (i) Dial -> Timeline lands cleanly on Timeline view after animation completes`,
+    !toTlDone.hasDissolve && toTlDone.hasTaxis && !toTlDone.hasDial
+    && toTlDone.pressed === 'Timeline' && toTlDone.bodyOpacity === '1' && !toTlDone.docOver,
+    JSON.stringify(toTlDone));
+
+  // Rapid repeated taps do not break state or leave card stuck/hidden
+  await page.click('section.page-now .card-switch button:has-text("Dial")');
+  await page.waitForTimeout(40);
+  await page.click('section.page-now .card-switch button:has-text("Timeline")');
+  await page.waitForTimeout(40);
+  await page.click('section.page-now .card-switch button:has-text("Dial")');
+  await page.waitForTimeout(280);
+  const afterRapid = await readHeroState();
+  ok(`${tag} (i) rapid repeated taps land cleanly on Dial at opacity 1 with no stuck class or overflow`,
+    !afterRapid.hasDissolve && afterRapid.hasDial && !afterRapid.hasTaxis
+    && afterRapid.pressed === 'Dial' && afterRapid.bodyOpacity === '1' && !afterRapid.docOver,
+    JSON.stringify(afterRapid));
+
+  // Pin 2: Under emulateMedia reduced-motion, toggling swaps instantly with no animation in both directions
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.click('section.page-now .card-switch button:has-text("Timeline")');
+  await page.waitForTimeout(20);
+  const rmToTl = await readHeroState();
+  await page.click('section.page-now .card-switch button:has-text("Dial")');
+  await page.waitForTimeout(20);
+  const rmToDial = await readHeroState();
+  ok(`${tag} (i) prefers-reduced-motion swaps Dial -> Timeline and Timeline -> Dial instantly with no animation`,
+    !rmToTl.hasDissolve && rmToTl.hasTaxis && !rmToTl.hasDial && rmToTl.bodyAnim === 'none' && rmToTl.bodyOpacity === '1' && rmToTl.pressed === 'Timeline'
+    && !rmToDial.hasDissolve && rmToDial.hasDial && !rmToDial.hasTaxis && rmToDial.bodyAnim === 'none' && rmToDial.bodyOpacity === '1' && rmToDial.pressed === 'Dial',
+    JSON.stringify({ rmToTl, rmToDial }));
+
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

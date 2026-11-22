@@ -1691,6 +1691,26 @@ button.back.settings-back {
   }
 }
 
+/* ===================================================================================
+   NOW HERO CARD DISSOLVE (Lorico, 2026-11-22)
+   Soft ~200ms opacity dissolve when toggling the Now hero card between Timeline and
+   Dial (s.nowCard). Scoped strictly to .hero.now-card-dissolve body content
+   (excluding the top-right .card-switch toggle so the switch stays solid under the
+   thumb). Pure opacity fade — no slide or scale. Respects prefers-reduced-motion.
+   =================================================================================== */
+.hero.now-card-dissolve > :not(.card-switch) {
+  animation: now-card-dissolve 200ms ease-out both;
+}
+@keyframes now-card-dissolve {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero.now-card-dissolve > :not(.card-switch) {
+    animation: none;
+  }
+}
+
 @page {
   size: letter portrait;
   margin: 0.45in 0.5in;

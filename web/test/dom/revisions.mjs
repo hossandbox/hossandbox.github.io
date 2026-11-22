@@ -1880,6 +1880,108 @@ await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS
   return ok || JSON.stringify({ hasKfUp, hasKfDown, hasSlideRules, hasReducedCss, immediateUnmount });
 });
 
+/* ---------------- (o) dialfade (2026-11-22, Lorico): Now hero card soft dissolve (Timeline <-> Dial) ---------------- */
+const nowCardKey = (label) => all((n) => n.localName === 'button' && n.textContent.trim() === label, all((n) => has(n, 'card-switch'), pages()[1])[0])[0];
+const nowHero = () => all((n) => n.localName === 'section' && has(n, 'hero'), pages()[1])[0];
+
+await pin('DF1. dialfade: Timeline <-> Dial applies .now-card-dissolve (~200ms pure opacity fade) on incoming Now hero card body in both directions and cleans up cleanly', async () => {
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+  // Let any cross-seed fade settle first, then verify steady state carries no dissolve class.
+  await sleep(260);
+  const steadyNoFade = !!nowHero() && !has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length > 0;
+  // Timeline -> Dial
+  fire(nowCardKey('Dial'), 'click'); await sleep(30);
+  const heroToDial = nowHero();
+  const midDial = !!heroToDial && has(heroToDial, 'now-card-dissolve')
+    && all((n) => has(n, 'dial'), pages()[1]).length > 0
+    && all((n) => has(n, 'taxis'), pages()[1]).length === 0
+    && getState().nowCard === 'dial';
+  await sleep(250);
+  const settledDial = !!nowHero() && !has(nowHero(), 'now-card-dissolve')
+    && all((n) => has(n, 'dial'), pages()[1]).length > 0
+    && nowCardKey('Dial')?.attributes['aria-pressed'] === 'true';
+  // Dial -> Timeline
+  fire(nowCardKey('Timeline'), 'click'); await sleep(30);
+  const heroToTl = nowHero();
+  const midTl = !!heroToTl && has(heroToTl, 'now-card-dissolve')
+    && all((n) => has(n, 'taxis'), pages()[1]).length > 0
+    && all((n) => has(n, 'dial'), pages()[1]).length === 0
+    && getState().nowCard === 'timeline';
+  await sleep(250);
+  const settledTl = !!nowHero() && !has(nowHero(), 'now-card-dissolve')
+    && all((n) => has(n, 'taxis'), pages()[1]).length > 0
+    && nowCardKey('Timeline')?.attributes['aria-pressed'] === 'true';
+  // CSS rules: pure opacity dissolve ~200ms ease-out on hero body (:not(.card-switch)), no slide/scale, reduced-motion override
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const startIdx = css.indexOf('\n.hero.now-card-dissolve');
+  const endIdx = css.indexOf('@page', startIdx);
+  const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
+  const hasRule = /\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)\s*\{[^}]*animation:\s*now-card-dissolve\s+200ms\s+ease-out/.test(block);
+  const hasKf = /@keyframes\s+now-card-dissolve\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
+  const noTransform = !/transform|translate|scale/i.test(block);
+  const hasReduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)\s*\{[^}]*animation:\s*none;/.test(block);
+  const ok = steadyNoFade && midDial && settledDial && midTl && settledTl && hasRule && hasKf && noTransform && hasReduced;
+  return ok || JSON.stringify({ steadyNoFade, midDial, settledDial, midTl, settledTl, hasRule, hasKf, noTransform, hasReduced });
+});
+
+await pin('DF2. dialfade: rapid repeated taps stay intact (never stuck/hidden) and RestHero out-of-hours toggles also dissolve cleanly in both directions', async () => {
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+  await sleep(260);
+  // Rapid toggle burst: Timeline -> Dial -> Timeline -> Dial -> Timeline
+  fire(nowCardKey('Dial'), 'click'); await sleep(40);
+  fire(nowCardKey('Timeline'), 'click'); await sleep(40);
+  fire(nowCardKey('Dial'), 'click'); await sleep(40);
+  fire(nowCardKey('Timeline'), 'click'); await sleep(30);
+  const rapidMid = getState().nowCard === 'timeline' && has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length > 0;
+  await sleep(260);
+  const rapidSettled = getState().nowCard === 'timeline' && !has(nowHero(), 'now-card-dissolve')
+    && all((n) => has(n, 'taxis'), pages()[1]).length > 0
+    && all((n) => has(n, 'dial'), pages()[1]).length === 0
+    && nowCardKey('Timeline')?.attributes['aria-pressed'] === 'true';
+  // Out-of-hours RestHero (ev.driveNow === 0): Timeline (with TimeAxis) <-> Dial (without TimeAxis)
+  const CD = (day, hh, m = 0) => Math.floor(new Date(2026, 10, day, hh, m).getTime() / 60000);
+  await seed({
+    tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false,
+    segments: [{ status: 'OFF', start: CD(8, 0), end: CD(8, 10) }, { status: 'D', start: CD(8, 10), end: CD(8, 21) }],
+    current: { status: 'OFF', since: CD(8, 21) },
+    nowOverride: CD(8, 22),
+  });
+  await sleep(260);
+  fire(nowCardKey('Dial'), 'click'); await sleep(30);
+  const restDialMid = has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length === 0;
+  await sleep(250);
+  const restDialDone = !has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length === 0;
+  fire(nowCardKey('Timeline'), 'click'); await sleep(30);
+  const restTlMid = has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length > 0;
+  await sleep(250);
+  const restTlDone = !has(nowHero(), 'now-card-dissolve') && all((n) => has(n, 'taxis'), pages()[1]).length > 0;
+  const ok = rapidMid && rapidSettled && restDialMid && restDialDone && restTlMid && restTlDone;
+  return ok || JSON.stringify({ rapidMid, rapidSettled, restDialMid, restDialDone, restTlMid, restTlDone });
+});
+
+await pin('DF3. dialfade: prefers-reduced-motion: reduce swaps Timeline <-> Dial instantly with no .now-card-dissolve animation in either direction', async () => {
+  const origMM = globalThis.window.matchMedia;
+  let toDialInstant = false, toTlInstant = false;
+  try {
+    globalThis.window.matchMedia = (q) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(q), addEventListener() {}, removeEventListener() {} });
+    await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+    await sleep(40);
+    fire(nowCardKey('Dial'), 'click'); await sleep(20);
+    toDialInstant = getState().nowCard === 'dial'
+      && !has(nowHero(), 'now-card-dissolve')
+      && all((n) => has(n, 'dial'), pages()[1]).length > 0
+      && all((n) => has(n, 'taxis'), pages()[1]).length === 0;
+    fire(nowCardKey('Timeline'), 'click'); await sleep(20);
+    toTlInstant = getState().nowCard === 'timeline'
+      && !has(nowHero(), 'now-card-dissolve')
+      && all((n) => has(n, 'taxis'), pages()[1]).length > 0
+      && all((n) => has(n, 'dial'), pages()[1]).length === 0;
+  } finally {
+    globalThis.window.matchMedia = origMM;
+  }
+  return (toDialInstant && toTlInstant) || JSON.stringify({ toDialInstant, toTlInstant });
+});
+
 let fails = 0;
 for (const [st, name, why] of res) { console.log(`${st} ${name}${why ? ` — ${why}` : ''}`); if (st === 'FAIL') fails++; }
 console.log(`revisions: ${res.length - fails}/${res.length} pins pass`);
