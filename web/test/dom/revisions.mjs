@@ -1861,8 +1861,8 @@ await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS
   const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
   const hasKfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
   const hasKfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
-  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block)
-    && /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block)
+  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block)
+    && /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block)
     && /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block)
     && /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
   const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
@@ -2119,13 +2119,13 @@ await pin('ES4. eldslide regression: LeverSheet still slides up with .sheet.slid
 });
 
 /* ---------------- (q) retime (2026-11-22, Lorico): Slide-up entrance retimed (300ms cubic-bezier), exit untouched (200ms ease-out) ---------------- */
-await pin('RT1. retime: slide-up entrance declares 300ms cubic-bezier(0.32, 0.72, 0.35, 1) (sheet + backdrop) while close exit stays 200ms ease-out with unchanged 220ms retained-exit lifecycle', async () => {
+await pin('RT1. retime: slide-up entrance declares 450ms cubic-bezier(0.33, 0.35, 0.25, 1) (sheet + backdrop) while close exit stays 200ms ease-out with unchanged 220ms retained-exit lifecycle', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
   const startIdx = css.indexOf('NOW "COMES BACK" STRIP');
   const endIdx = css.indexOf('NOW HERO CARD DISSOLVE', startIdx);
   const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
-  const sheetIn = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block);
-  const bdIn = /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block);
+  const sheetIn = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block);
+  const bdIn = /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block);
   const sheetOut = /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block);
   const bdOut = /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
   const kfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);

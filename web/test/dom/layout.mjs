@@ -1267,7 +1267,7 @@ for (const [W, H] of SIZES) {
 //   (a) At 360x640 and 412x915, the L4 "comes back" strip (button.lever under the Now timeline)
 //       renders the FULL line (time, +duration, available figure — no truncation) cleanly inside
 //       its strip with zero horizontal overflow, keeping the 64px row floor.
-//   (b) Tapping the strip opens LeverSheet with .sheet.slide-up (300ms cubic-bezier(0.32, 0.72, 0.35, 1)
+//   (b) Tapping the strip opens LeverSheet with .sheet.slide-up (450ms cubic-bezier(0.33, 0.35, 0.25, 1)
 //       slide-up entrance and 200ms ease-out slide-down exit via .is-closing before unmount), while other
 //       sheet kinds (e.g. Why?) keep their current behavior (no .slide-up, no slide animation).
 //   (c) Under prefers-reduced-motion: reduce, the slide animation is disabled (animationName: none)
@@ -1343,7 +1343,7 @@ for (const [W, H] of SIZES) {
     && fit.txtInsideBtn && fit.boldInsideTxt && fit.svgInsideBtn && fit.noEllipsis && fit.lines <= 2,
     JSON.stringify(fit));
 
-  // (b) Tapping button.lever opens scoped .sheet.slide-up with 300ms cubic-bezier entrance & 200ms ease-out exit
+  // (b) Tapping button.lever opens scoped .sheet.slide-up with 450ms cubic-bezier entrance & 200ms ease-out exit
   await page.click('section.page-now button.lever');
   await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
   const openInfo = await page.evaluate(() => {
@@ -1368,10 +1368,10 @@ for (const [W, H] of SIZES) {
       h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
     };
   });
-  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 300ms cubic-bezier slide-up entrance (sheet + backdrop) and fitted header`,
+  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 450ms cubic-bezier slide-up entrance (sheet + backdrop) and fitted header`,
     openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
-    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.3s' && openInfo.animTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
-    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.3s' && openInfo.bdAnimTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.45s' && openInfo.animTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.45s' && openInfo.bdAnimTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
     && openInfo.h2Fits,
     JSON.stringify(openInfo));
 
@@ -1580,7 +1580,7 @@ for (const [W, H] of SIZES) {
     await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
   };
 
-  // Pin 1: DriftSheet carries .slide-up (and its wrap) with 300ms cubic-bezier slide-up entrance and zero horizontal overflow
+  // Pin 1: DriftSheet carries .slide-up (and its wrap) with 450ms cubic-bezier slide-up entrance and zero horizontal overflow
   await clickEldBtn();
   const openInfo = await page.evaluate(() => {
     const wrap = document.querySelector('.sheet-wrap');
@@ -1606,10 +1606,10 @@ for (const [W, H] of SIZES) {
       docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 300ms cubic-bezier slide-up entrance (sheet + backdrop) and zero overflow`,
+  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 450ms cubic-bezier slide-up entrance (sheet + backdrop) and zero overflow`,
     openInfo.title === 'Check against my ELD' && openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
-    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.3s' && openInfo.animTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
-    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.3s' && openInfo.bdAnimTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.45s' && openInfo.animTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.45s' && openInfo.bdAnimTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
     && openInfo.h2Fits && !openInfo.docOver,
     JSON.stringify(openInfo));
 
@@ -1695,7 +1695,7 @@ for (const [W, H] of SIZES) {
   await ctx.close();
 }
 
-/* ---------- (k) retime (2026-11-22, Lorico): Slide-up entrance 300ms cubic-bezier vs untouched 200ms ease-out exit ---------- */
+/* ---------- (k) retime (2026-11-22, Lorico): Slide-up entrance 450ms cubic-bezier vs untouched 200ms ease-out exit ---------- */
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
   await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(nowstripSeed()));
@@ -1744,8 +1744,8 @@ for (const [W, H] of SIZES) {
     });
     await page.waitForTimeout(260);
     const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
-    const pass = enter.sheetName === 'sheet-slide-up' && enter.sheetDur === '0.3s' && enter.sheetTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
-      && enter.bdName === 'sheet-backdrop-in' && enter.bdDur === '0.3s' && enter.bdTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    const pass = enter.sheetName === 'sheet-slide-up' && enter.sheetDur === '0.45s' && enter.sheetTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+      && enter.bdName === 'sheet-backdrop-in' && enter.bdDur === '0.45s' && enter.bdTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
       && !enter.docOver
       && exit.sheetName === 'sheet-slide-down' && exit.sheetDur === '0.2s' && exit.sheetTiming === 'ease-out'
       && exit.bdName === 'sheet-backdrop-out' && exit.bdDur === '0.2s' && exit.bdTiming === 'ease-out'
@@ -1759,7 +1759,7 @@ for (const [W, H] of SIZES) {
     if (!b) throw new Error('no Check against my ELD button on Now');
     b.click();
   }));
-  ok(`${tag} (k) slide-up sheets (LeverSheet + DriftSheet) enter at 0.3s cubic-bezier(0.32, 0.72, 0.35, 1) while close stays 0.2s ease-out with zero overflow`,
+  ok(`${tag} (k) slide-up sheets (LeverSheet + DriftSheet) enter at 0.45s cubic-bezier(0.33, 0.35, 0.25, 1) while close stays 0.2s ease-out with zero overflow`,
     leverProbe.pass && driftProbe.pass && errors.length === 0,
     JSON.stringify({ leverProbe, driftProbe, errors }));
   await ctx.close();

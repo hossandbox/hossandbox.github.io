@@ -1611,7 +1611,7 @@ button.back.settings-back {
       +duration, or available figures. Keeps the 64px row floor and existing palette tokens.
    2. Scoped slide-up pop-up (.sheet.slide-up): ONLY the comeback/lever detail sheet
       (LeverSheet) and the "Check against my ELD" drift check sheet (DriftSheet) slide up
-      from the bottom (300ms cubic-bezier(0.32, 0.72, 0.35, 1) entrance to match perceived
+      from the bottom (450ms cubic-bezier(0.33, 0.35, 0.25, 1) entrance to match perceived
       speed of the 200ms ease-out slide-down exit).
       All other sheets keep their current behavior. Respects prefers-reduced-motion.
    =================================================================================== */
@@ -1650,7 +1650,7 @@ button.back.settings-back {
   pointer-events: none;
 }
 .sheet-wrap.slide-up > button.sheet-backdrop {
-  animation: sheet-backdrop-in 300ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+  animation: sheet-backdrop-in 450ms cubic-bezier(0.33, 0.35, 0.25, 1) both;
 }
 .sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
   animation: sheet-backdrop-out 200ms ease-out both;
@@ -1661,7 +1661,7 @@ button.back.settings-back {
    animation ends at the same parked position. */
 .sheet.slide-up {
   transform: translateY(100%);
-  animation: sheet-slide-up 300ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+  animation: sheet-slide-up 450ms cubic-bezier(0.33, 0.35, 0.25, 1) both;
   will-change: transform;
 }
 .sheet.slide-up.is-closing {
