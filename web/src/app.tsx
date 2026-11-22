@@ -2650,7 +2650,7 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
  * (planDriftFill). ELD shows more: no fix is offered — this check never takes driving out of
  * a log; the likely missing break belongs on the Log.
  */
-function DriftSheet({ s, now }: { s: State; now: number }) {
+function DriftSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
   const [txt, setTxt] = useState<[string, string]>(['', '']);
   const [err, setErr] = useState<string | null>(null);
   const [found, setFound] = useState<{ check: DriftComparison; at: number; eld: number } | null>(null);
@@ -2660,7 +2660,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
   // start that creates one instead of running a comparison against assumed numbers.
   if (historyBasis(s, now) === 'fresh') {
     return (
-      <Sheet title="Check against my ELD">
+      <Sheet title="Check against my ELD" slideUp closing={closing}>
         <p class="small">There's nothing to check yet — this app is still on its demo clock, so there's no real day to compare with your ELD. Start from your ELD clocks first; the check works once your real day is in.</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button></div>
       </Sheet>
@@ -2688,7 +2688,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
   if (filled && found) {
     const { plan, after } = filled;
     return (
-      <Sheet title="Check against my ELD">
+      <Sheet title="Check against my ELD" slideUp closing={closing}>
         {after.verdict === 'sync' ? (
           <p><b>Now in sync</b> — drive time left matches your ELD: {dur(after.eldLeft)}.</p>
         ) : (
@@ -2704,7 +2704,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
     const { check, at, eld } = found;
     if (check.verdict === 'sync') {
       return (
-        <Sheet title="Check against my ELD">
+        <Sheet title="Check against my ELD" slideUp closing={closing}>
           <p><b>You're in sync</b> — this app and your ELD agree. Drive time left: {dur(check.appLeft)} either way you read it.</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">Nothing was changed.</p>
@@ -2714,7 +2714,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
     }
     if (check.verdict === 'extra') {
       return (
-        <Sheet title="Check against my ELD">
+        <Sheet title="Check against my ELD" slideUp closing={closing}>
           <p>Your ELD shows <b>{dur(check.gap)} more</b> driving left than this app ({dur(check.eldLeft)} against {dur(check.appLeft)}).</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">This check never takes driving out of a log, so there's no one-tap fix in this direction. The usual reason: a break or an off-duty stretch your ELD counted isn't in the log yet. Add it on the Log and the two will line up.</p>
@@ -2727,7 +2727,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
     }
     const plan = planDriftFill(getState(), -check.gap, at);
     return (
-      <Sheet title="Check against my ELD">
+      <Sheet title="Check against my ELD" slideUp closing={closing}>
         <p>Your ELD shows <b>{dur(-check.gap)} less</b> driving left than this app — about {dur(-check.gap)} of driving isn't in the log yet. Until it's in, every answer here runs optimistic.</p>
         <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
         {plan && plan.filled > 0 ? (
@@ -2752,7 +2752,7 @@ function DriftSheet({ s, now }: { s: State; now: number }) {
   }
 
   return (
-    <Sheet title="Check against my ELD">
+    <Sheet title="Check against my ELD" slideUp closing={closing}>
       <p class="small">Your ELD is the official record — this just lines the app up with it. Type the drive time left your ELD shows, and the app compares it with its own.</p>
       <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
       <div class="qs-row">
@@ -7747,6 +7747,30 @@ export function App() {
     const id = setTimeout(() => setRetainedLever(null), 220);
     return () => clearTimeout(id);
   }, [leverOpen, sheet, s.disclaimerAcked, driveUp]);
+  // Keep the closing "Check against my ELD" drift sheet mounted (inert + aria-hidden) across its
+  // 200ms slide-down exit, then unmount cleanly. Under prefers-reduced-motion: reduce (or direct
+  // sheet switch, disclaimer, or driving view), skip exit retention and unmount immediately.
+  const driftOpen = s.disclaimerAcked && !driveUp && sheet?.kind === 'drift';
+  const driftEpochRef = useRef(0);
+  const prevDriftOpenRef = useRef(driftOpen);
+  if (driftOpen && !prevDriftOpenRef.current) driftEpochRef.current++;
+  prevDriftOpenRef.current = driftOpen;
+  const [retainedDrift, setRetainedDrift] = useState<boolean>(() => driftOpen);
+  const driftClosing = !driftOpen && retainedDrift && s.disclaimerAcked && !driveUp && sheet === null && !prefersReducedMotion();
+  const showDrift = driftOpen || driftClosing;
+  useEffect(() => {
+    if (driftOpen) {
+      if (!retainedDrift) setRetainedDrift(true);
+      return;
+    }
+    if (!retainedDrift) return;
+    if (!s.disclaimerAcked || driveUp || sheet !== null || prefersReducedMotion()) {
+      setRetainedDrift(false);
+      return;
+    }
+    const id = setTimeout(() => setRetainedDrift(false), 220);
+    return () => clearTimeout(id);
+  }, [driftOpen, sheet, s.disclaimerAcked, driveUp]);
   useEffect(() => {
     if (s.tab !== 'plan' && s.tab !== 'settings' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
@@ -8053,7 +8077,7 @@ export function App() {
       {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
       {!showDisclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
-      {!showDisclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
+      {!showDisclaimer && showDrift && <DriftSheet key={driftEpochRef.current} s={s} now={now} closing={driftClosing} />}
       {!showDisclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!showDisclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
       {!showDisclaimer && displayedLever && <LeverSheet s={s} now={now} ev={ev} lever={displayedLever} closing={leverClosing} />}

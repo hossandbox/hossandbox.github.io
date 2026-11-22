@@ -1541,6 +1541,120 @@ for (const [W, H] of SIZES) {
   await ctx.close();
 }
 
+/* ---------- (j) eldslide (2026-11-22, Lorico): "Check against my ELD" DriftSheet scoped slide-up/slide-down ---------- */
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord('timeline')));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('section.page-now button.plan-item', { timeout: 5000 });
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(100);
+  const tag = `[${W}x${H} eldslide]`;
+
+  const clickEldBtn = async () => {
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('section.page-now button.plan-item')].find((x) => x.textContent.includes('Check against my ELD'));
+      if (!b) throw new Error('no Check against my ELD button on Now');
+      b.click();
+    });
+    await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
+  };
+
+  // Pin 1: DriftSheet carries .slide-up (and its wrap) with 200ms slide-up entrance and zero horizontal overflow
+  await clickEldBtn();
+  const openInfo = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    const h2 = sh.querySelector('#sheet-title');
+    const cs = getComputedStyle(sh);
+    const hr = h2.getBoundingClientRect();
+    const sr = sh.getBoundingClientRect();
+    return {
+      title: h2.textContent.trim(),
+      wrapSlide: wrap.classList.contains('slide-up'),
+      sheetSlide: sh.classList.contains('slide-up'),
+      closing: sh.classList.contains('is-closing'),
+      animName: cs.animationName,
+      animDur: cs.animationDuration,
+      h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
+      docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 200ms slide-up entrance and zero overflow`,
+    openInfo.title === 'Check against my ELD' && openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.2s' && openInfo.h2Fits && !openInfo.docOver,
+    JSON.stringify(openInfo));
+
+  // Pin 2: Closing via Close button, backdrop tap, and Escape plays 200ms slide-down (.is-closing, inert) then unmounts
+  const verifyClose = async (label, closeAction) => {
+    await page.waitForTimeout(240);
+    await closeAction();
+    await page.waitForTimeout(40);
+    const mid = await page.evaluate(() => {
+      const wrap = document.querySelector('.sheet-wrap');
+      const sh = document.querySelector('.sheet');
+      const cs = sh ? getComputedStyle(sh) : null;
+      return {
+        present: !!sh,
+        closing: !!sh?.classList.contains('is-closing'),
+        wrapInert: !!(wrap && (wrap.inert || wrap.hasAttribute('inert'))),
+        animName: cs?.animationName ?? null,
+        animDur: cs?.animationDuration ?? null,
+      };
+    });
+    await page.waitForTimeout(260);
+    const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+    return { label, mid, unmounted, ok: mid.present && mid.closing && mid.wrapInert && mid.animName === 'sheet-slide-down' && mid.animDur === '0.2s' && unmounted };
+  };
+  const closeBtnRes = await verifyClose('close-btn', () => page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click()));
+  await clickEldBtn();
+  const backdropRes = await verifyClose('backdrop', () => page.evaluate(() => document.querySelector('.sheet-wrap > button.sheet-backdrop')?.click()));
+  await clickEldBtn();
+  const escapeRes = await verifyClose('escape', () => page.keyboard.press('Escape'));
+  ok(`${tag} (j) closing DriftSheet (Close, backdrop, Escape) plays 200ms slide-down (.is-closing, inert) then unmounts`,
+    closeBtnRes.ok && backdropRes.ok && escapeRes.ok,
+    JSON.stringify({ closeBtnRes, backdropRes, escapeRes }));
+
+  // Sample non-slide-up sheet (Why?) keeps existing behavior: no .slide-up, animationName none, immediate unmount
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('section.page-now button')].find((x) => x.textContent.includes('Why?'));
+    if (!b) throw new Error('no Why? button on Now');
+    b.click();
+  });
+  await page.waitForSelector('.sheet', { timeout: 2000 });
+  const whyInfo = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    return { wrapSlide: wrap.classList.contains('slide-up'), sheetSlide: sh.classList.contains('slide-up'), animName: getComputedStyle(sh).animationName };
+  });
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(40);
+  const whyImmediate = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (j) non-slide-up sheet (Why?) carries no .slide-up, no slide animation, and unmounts immediately`,
+    !whyInfo.wrapSlide && !whyInfo.sheetSlide && whyInfo.animName === 'none' && whyImmediate,
+    JSON.stringify({ whyInfo, whyImmediate }));
+
+  // Pin 3: Under prefers-reduced-motion: reduce, DriftSheet has no slide animation and unmounts immediately on close
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await clickEldBtn();
+  const rmOpen = await page.evaluate(() => {
+    const sh = document.querySelector('.sheet.slide-up');
+    const bd = document.querySelector('.sheet-wrap.slide-up > button.sheet-backdrop');
+    return { sheetAnim: getComputedStyle(sh).animationName, backdropAnim: getComputedStyle(bd).animationName };
+  });
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(40);
+  const rmImmediate = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (j) prefers-reduced-motion disables slide animation and unmounts DriftSheet immediately`,
+    rmOpen.sheetAnim === 'none' && rmOpen.backdropAnim === 'none' && rmImmediate,
+    JSON.stringify({ rmOpen, rmImmediate }));
+
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;

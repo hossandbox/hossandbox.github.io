@@ -1610,7 +1610,8 @@ button.back.settings-back {
       inside the strip at phone width (~360–400px) without truncating or dropping time,
       +duration, or available figures. Keeps the 64px row floor and existing palette tokens.
    2. Scoped slide-up pop-up (.sheet.slide-up): ONLY the comeback/lever detail sheet
-      slides up quickly from the bottom (200ms ease-out) and slides back down on close.
+      (LeverSheet) and the "Check against my ELD" drift check sheet (DriftSheet) slide up
+      quickly from the bottom (200ms ease-out) and slide back down on close.
       All other sheets keep their current behavior. Respects prefers-reduced-motion.
    =================================================================================== */
 .lever {

@@ -1801,7 +1801,9 @@ await pin('N1. nowstrip (a): L4 "comes back" strip renders full text (time, +dur
   return ok || JSON.stringify({ txt, hasFull, hasReflow, hasSize, hasNarrow, hasSvgShrink, noTruncate });
 });
 
-await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.slide-up; all other sheet kinds (why, status, exceptions, drift, add) do NOT', async () => {
+// Re-aimed (2026-11-22 eldslide, Lorico): DriftSheet now also uses .sheet.slide-up alongside LeverSheet;
+// all other sheet kinds (why, status, exceptions, add, quickstart) do NOT.
+await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.slide-up; non-slide-up sheet kinds (why, status, exceptions, add, quickstart) do NOT', async () => {
   await seed(nowstripL4Seed());
   const btn = await waitForLeverBtn();
   if (!btn) return 'missing L4 lever strip';
@@ -1813,8 +1815,8 @@ await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.sl
     ['why', { kind: 'why' }],
     ['status', { kind: 'status' }],
     ['exceptions', { kind: 'exceptions' }],
-    ['drift', { kind: 'drift' }],
     ['add', { kind: 'add' }],
+    ['quickstart', { kind: 'quickstart' }],
   ];
   const otherBad = [];
   for (const [name, desc] of others) {
@@ -1980,6 +1982,138 @@ await pin('DF3. dialfade: prefers-reduced-motion: reduce swaps Timeline <-> Dial
     globalThis.window.matchMedia = origMM;
   }
   return (toDialInstant && toTlInstant) || JSON.stringify({ toDialInstant, toTlInstant });
+});
+
+/* ---------------- (p) eldslide (2026-11-22, Lorico): "Check against my ELD" DriftSheet scoped slide-up/slide-down ---------------- */
+const eldCheckBtn = () => all((n) => n.localName === 'button' && has(n, 'plan-item') && /Check against my ELD/.test(n.textContent), pages()[1])[0];
+
+await pin('ES1. eldslide: DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up when open; sample of other sheet kinds (why, status, exceptions, add) do NOT', async () => {
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+  const btn = eldCheckBtn();
+  if (!btn) return 'missing "Check against my ELD" button on Now';
+  fire(btn, 'click'); await sleep(40);
+  const driftWrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const driftSheet = all((n) => has(n, 'sheet'))[0];
+  const driftOk = !!driftWrap && !!driftSheet && has(driftWrap, 'slide-up') && has(driftSheet, 'slide-up') && !has(driftSheet, 'is-closing')
+    && /Check against my ELD/.test(driftSheet.textContent);
+  const others = [
+    ['why', { kind: 'why' }],
+    ['status', { kind: 'status' }],
+    ['exceptions', { kind: 'exceptions' }],
+    ['add', { kind: 'add' }],
+  ];
+  const otherBad = [];
+  for (const [name, desc] of others) {
+    openSheet(desc); await sleep(40);
+    const wraps = all((n) => has(n, 'sheet-wrap'));
+    const sheets = all((n) => has(n, 'sheet'));
+    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'slide-up') || has(wraps[0], 'slide-up')) {
+      otherBad.push(`${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
+    }
+  }
+  openSheet(null); await sleep(40);
+  return (driftOk && otherBad.length === 0) || JSON.stringify({ driftOk, driftWrap: driftWrap && cls(driftWrap), driftSheet: driftSheet && cls(driftSheet), otherBad });
+});
+
+await pin('ES2. eldslide: closing DriftSheet (Close button, backdrop, Escape, hardware Back) retains .is-closing (inert) then unmounts while releasing blocked immediately; direct switch/disclaimer/driving/other sheets unmount immediately', async () => {
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+
+  const checkClosePath = async (label, closeFn) => {
+    const btn = eldCheckBtn();
+    if (!btn) return `${label}: missing ELD button`;
+    fire(btn, 'click'); await sleep(40);
+    if (all((n) => has(n, 'sheet') && has(n, 'slide-up')).length !== 1) return `${label}: DriftSheet did not open`;
+    closeFn(); await sleep(30);
+    const midWrap = all((n) => has(n, 'sheet-wrap'))[0];
+    const midSheet = all((n) => has(n, 'sheet'))[0];
+    const mainEl = strip();
+    const midOk = A.currentSheet() === null && !off(mainEl)
+      && !!midWrap && !!midSheet
+      && has(midWrap, 'slide-up') && has(midWrap, 'is-closing') && off(midWrap) && hid(midWrap)
+      && has(midSheet, 'slide-up') && has(midSheet, 'is-closing');
+    if (!midOk) return `${label}: mid-close failed sheet=${JSON.stringify(A.currentSheet())} mainInert=${off(mainEl)} wrap=${midWrap && cls(midWrap)} sh=${midSheet && cls(midSheet)}`;
+    await sleep(250);
+    if (all((n) => has(n, 'sheet')).length !== 0) return `${label}: did not unmount after exit window`;
+    return null;
+  };
+
+  for (const [label, fn] of [
+    ['close-btn', () => fire(all((n) => n.localName === 'button' && n.attributes?.['aria-label'] === 'Close', all((n) => has(n, 'sheet'))[0])[0], 'click')],
+    ['backdrop', () => fire(all((n) => n.localName === 'button' && has(n, 'sheet-backdrop'))[0], 'click')],
+    ['escape', () => { for (const f of [...(document.listeners.keydown ?? [])]) f({ key: 'Escape', type: 'keydown', preventDefault() {}, stopPropagation() {} }); }],
+    ['hw-back', () => pressHardwareBack()],
+  ]) {
+    const err = await checkClosePath(label, fn);
+    if (err) return err;
+  }
+
+  // Direct switch to another sheet skips exit retention immediately
+  fire(eldCheckBtn(), 'click'); await sleep(40);
+  openSheet({ kind: 'why' }); await sleep(30);
+  const swSheets = all((n) => has(n, 'sheet'));
+  const swOk = swSheets.length === 1 && !has(swSheets[0], 'slide-up') && !has(swSheets[0], 'is-closing');
+  openSheet(null); await sleep(30);
+  const whyImmediate = all((n) => has(n, 'sheet')).length === 0;
+
+  // Showing disclaimer skips exit retention immediately
+  fire(eldCheckBtn(), 'click'); await sleep(40);
+  setState({ disclaimerAcked: false }); openSheet(null); await sleep(30);
+  const discImmediate = all((n) => has(n, 'sheet')).length === 0;
+  setState({ disclaimerAcked: true }); await sleep(40);
+
+  // Entering driving view skips exit retention immediately
+  fire(eldCheckBtn(), 'click'); await sleep(40);
+  setDrivingPeek(null);
+  setState({ current: { status: 'D', since: T - 10 }, drivingView: true }); openSheet(null); await sleep(30);
+  const driveImmediate = all((n) => has(n, 'sheet')).length === 0;
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+
+  return (swOk && whyImmediate && discImmediate && driveImmediate)
+    || JSON.stringify({ swOk, whyImmediate, discImmediate, driveImmediate });
+});
+
+await pin('ES3. eldslide: under prefers-reduced-motion: reduce, DriftSheet has no slide animation CSS and unmounts immediately on close', async () => {
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
+  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
+  const origMM = globalThis.window.matchMedia;
+  let immediateUnmount = false;
+  try {
+    globalThis.window.matchMedia = (q) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(q), addEventListener() {}, removeEventListener() {} });
+    await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+    const btn = eldCheckBtn();
+    if (!btn) return 'missing ELD button under reduced motion';
+    fire(btn, 'click'); await sleep(40);
+    if (all((n) => has(n, 'sheet') && has(n, 'slide-up')).length !== 1) return 'DriftSheet did not open under reduced motion';
+    openSheet(null); await sleep(30);
+    immediateUnmount = all((n) => has(n, 'sheet')).length === 0;
+  } finally {
+    globalThis.window.matchMedia = origMM;
+  }
+  return (hasReducedCss && immediateUnmount) || JSON.stringify({ hasReducedCss, immediateUnmount });
+});
+
+await pin('ES4. eldslide regression: LeverSheet still slides up with .sheet.slide-up, retains .is-closing (inert) on close, then unmounts cleanly', async () => {
+  await seed(nowstripL4Seed());
+  const btn = await waitForLeverBtn();
+  if (!btn) return 'missing L4 lever strip';
+  fire(btn, 'click'); await sleep(40);
+  const openSheetEl = all((n) => has(n, 'sheet'))[0];
+  const openWrapEl = all((n) => has(n, 'sheet-wrap'))[0];
+  const openOk = !!openSheetEl && !!openWrapEl && has(openSheetEl, 'slide-up') && has(openWrapEl, 'slide-up') && !has(openSheetEl, 'is-closing');
+  openSheet(null); await sleep(30);
+  const midWrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const midSheet = all((n) => has(n, 'sheet'))[0];
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  const midOk = A.currentSheet() === null && !!midWrap && !!midSheet
+    && has(midWrap, 'slide-up') && has(midWrap, 'is-closing') && off(midWrap) && hid(midWrap)
+    && has(midSheet, 'slide-up') && has(midSheet, 'is-closing');
+  await sleep(250);
+  const unmounted = all((n) => has(n, 'sheet')).length === 0;
+  return (openOk && midOk && unmounted) || JSON.stringify({ openOk, midOk, unmounted });
 });
 
 let fails = 0;
