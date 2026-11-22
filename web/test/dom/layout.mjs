@@ -1267,9 +1267,9 @@ for (const [W, H] of SIZES) {
 //   (a) At 360x640 and 412x915, the L4 "comes back" strip (button.lever under the Now timeline)
 //       renders the FULL line (time, +duration, available figure — no truncation) cleanly inside
 //       its strip with zero horizontal overflow, keeping the 64px row floor.
-//   (b) Tapping the strip opens LeverSheet with .sheet.slide-up (200ms slide-up entrance and
-//       matching 200ms slide-down exit via .is-closing before unmount), while other sheet kinds
-//       (e.g. Why?) keep their current behavior (no .slide-up, no slide animation).
+//   (b) Tapping the strip opens LeverSheet with .sheet.slide-up (300ms cubic-bezier(0.32, 0.72, 0.35, 1)
+//       slide-up entrance and 200ms ease-out slide-down exit via .is-closing before unmount), while other
+//       sheet kinds (e.g. Why?) keep their current behavior (no .slide-up, no slide animation).
 //   (c) Under prefers-reduced-motion: reduce, the slide animation is disabled (animationName: none)
 //       and closing unmounts immediately.
 const nowstripSeed = () => {
@@ -1343,14 +1343,16 @@ for (const [W, H] of SIZES) {
     && fit.txtInsideBtn && fit.boldInsideTxt && fit.svgInsideBtn && fit.noEllipsis && fit.lines <= 2,
     JSON.stringify(fit));
 
-  // (b) Tapping button.lever opens scoped .sheet.slide-up with 200ms slide-up entrance & 200ms slide-down exit
+  // (b) Tapping button.lever opens scoped .sheet.slide-up with 300ms cubic-bezier entrance & 200ms ease-out exit
   await page.click('section.page-now button.lever');
   await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
   const openInfo = await page.evaluate(() => {
     const wrap = document.querySelector('.sheet-wrap');
+    const bd = wrap.querySelector(':scope > button.sheet-backdrop');
     const sh = document.querySelector('.sheet');
     const h2 = sh.querySelector('#sheet-title');
     const cs = getComputedStyle(sh);
+    const bcs = getComputedStyle(bd);
     const hr = h2.getBoundingClientRect();
     const sr = sh.getBoundingClientRect();
     return {
@@ -1359,14 +1361,21 @@ for (const [W, H] of SIZES) {
       closing: sh.classList.contains('is-closing'),
       animName: cs.animationName,
       animDur: cs.animationDuration,
+      animTiming: cs.animationTimingFunction,
+      bdAnimName: bcs.animationName,
+      bdAnimDur: bcs.animationDuration,
+      bdAnimTiming: bcs.animationTimingFunction,
       h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
     };
   });
-  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 200ms slide-up entrance and fitted header`,
-    openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.2s' && openInfo.h2Fits,
+  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 300ms cubic-bezier slide-up entrance (sheet + backdrop) and fitted header`,
+    openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.3s' && openInfo.animTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.3s' && openInfo.bdAnimTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.h2Fits,
     JSON.stringify(openInfo));
 
-  await page.waitForTimeout(240);
+  await page.waitForTimeout(340);
   await page.evaluate(() => {
     const btn = [...document.querySelectorAll('.sheet button')].find((b) => b.textContent.trim() === 'Close');
     btn.click();
@@ -1374,20 +1383,29 @@ for (const [W, H] of SIZES) {
   await page.waitForTimeout(40);
   const closingInfo = await page.evaluate(() => {
     const wrap = document.querySelector('.sheet-wrap');
+    const bd = wrap?.querySelector(':scope > button.sheet-backdrop');
     const sh = document.querySelector('.sheet');
     const cs = sh ? getComputedStyle(sh) : null;
+    const bcs = bd ? getComputedStyle(bd) : null;
     return {
       present: !!sh,
       closing: !!sh?.classList.contains('is-closing'),
       wrapInert: !!(wrap && (wrap.inert || wrap.hasAttribute('inert'))),
       animName: cs?.animationName ?? null,
       animDur: cs?.animationDuration ?? null,
+      animTiming: cs?.animationTimingFunction ?? null,
+      bdAnimName: bcs?.animationName ?? null,
+      bdAnimDur: bcs?.animationDuration ?? null,
+      bdAnimTiming: bcs?.animationTimingFunction ?? null,
     };
   });
   await page.waitForTimeout(260);
   const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
-  ok(`${tag} (h) closing LeverSheet plays 200ms slide-down exit (.is-closing, inert) then unmounts`,
-    closingInfo.present && closingInfo.closing && closingInfo.wrapInert && closingInfo.animName === 'sheet-slide-down' && closingInfo.animDur === '0.2s' && unmounted,
+  ok(`${tag} (h) closing LeverSheet plays 200ms ease-out slide-down exit (sheet + backdrop, .is-closing, inert) then unmounts`,
+    closingInfo.present && closingInfo.closing && closingInfo.wrapInert
+    && closingInfo.animName === 'sheet-slide-down' && closingInfo.animDur === '0.2s' && closingInfo.animTiming === 'ease-out'
+    && closingInfo.bdAnimName === 'sheet-backdrop-out' && closingInfo.bdAnimDur === '0.2s' && closingInfo.bdAnimTiming === 'ease-out'
+    && unmounted,
     JSON.stringify({ closingInfo, unmounted }));
 
   // Other sheet kinds (e.g. Why?) do NOT carry .slide-up
@@ -1562,13 +1580,15 @@ for (const [W, H] of SIZES) {
     await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
   };
 
-  // Pin 1: DriftSheet carries .slide-up (and its wrap) with 200ms slide-up entrance and zero horizontal overflow
+  // Pin 1: DriftSheet carries .slide-up (and its wrap) with 300ms cubic-bezier slide-up entrance and zero horizontal overflow
   await clickEldBtn();
   const openInfo = await page.evaluate(() => {
     const wrap = document.querySelector('.sheet-wrap');
+    const bd = wrap.querySelector(':scope > button.sheet-backdrop');
     const sh = document.querySelector('.sheet');
     const h2 = sh.querySelector('#sheet-title');
     const cs = getComputedStyle(sh);
+    const bcs = getComputedStyle(bd);
     const hr = h2.getBoundingClientRect();
     const sr = sh.getBoundingClientRect();
     return {
@@ -1578,42 +1598,62 @@ for (const [W, H] of SIZES) {
       closing: sh.classList.contains('is-closing'),
       animName: cs.animationName,
       animDur: cs.animationDuration,
+      animTiming: cs.animationTimingFunction,
+      bdAnimName: bcs.animationName,
+      bdAnimDur: bcs.animationDuration,
+      bdAnimTiming: bcs.animationTimingFunction,
       h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
       docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 200ms slide-up entrance and zero overflow`,
+  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 300ms cubic-bezier slide-up entrance (sheet + backdrop) and zero overflow`,
     openInfo.title === 'Check against my ELD' && openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
-    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.2s' && openInfo.h2Fits && !openInfo.docOver,
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.3s' && openInfo.animTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.3s' && openInfo.bdAnimTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+    && openInfo.h2Fits && !openInfo.docOver,
     JSON.stringify(openInfo));
 
-  // Pin 2: Closing via Close button, backdrop tap, and Escape plays 200ms slide-down (.is-closing, inert) then unmounts
+  // Pin 2: Closing via Close button, backdrop tap, and Escape plays 200ms ease-out slide-down (.is-closing, inert) then unmounts
   const verifyClose = async (label, closeAction) => {
-    await page.waitForTimeout(240);
+    await page.waitForTimeout(340);
     await closeAction();
     await page.waitForTimeout(40);
     const mid = await page.evaluate(() => {
       const wrap = document.querySelector('.sheet-wrap');
+      const bd = wrap?.querySelector(':scope > button.sheet-backdrop');
       const sh = document.querySelector('.sheet');
       const cs = sh ? getComputedStyle(sh) : null;
+      const bcs = bd ? getComputedStyle(bd) : null;
       return {
         present: !!sh,
         closing: !!sh?.classList.contains('is-closing'),
         wrapInert: !!(wrap && (wrap.inert || wrap.hasAttribute('inert'))),
         animName: cs?.animationName ?? null,
         animDur: cs?.animationDuration ?? null,
+        animTiming: cs?.animationTimingFunction ?? null,
+        bdAnimName: bcs?.animationName ?? null,
+        bdAnimDur: bcs?.animationDuration ?? null,
+        bdAnimTiming: bcs?.animationTimingFunction ?? null,
       };
     });
     await page.waitForTimeout(260);
     const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
-    return { label, mid, unmounted, ok: mid.present && mid.closing && mid.wrapInert && mid.animName === 'sheet-slide-down' && mid.animDur === '0.2s' && unmounted };
+    return {
+      label,
+      mid,
+      unmounted,
+      ok: mid.present && mid.closing && mid.wrapInert
+        && mid.animName === 'sheet-slide-down' && mid.animDur === '0.2s' && mid.animTiming === 'ease-out'
+        && mid.bdAnimName === 'sheet-backdrop-out' && mid.bdAnimDur === '0.2s' && mid.bdAnimTiming === 'ease-out'
+        && unmounted,
+    };
   };
   const closeBtnRes = await verifyClose('close-btn', () => page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click()));
   await clickEldBtn();
   const backdropRes = await verifyClose('backdrop', () => page.evaluate(() => document.querySelector('.sheet-wrap > button.sheet-backdrop')?.click()));
   await clickEldBtn();
   const escapeRes = await verifyClose('escape', () => page.keyboard.press('Escape'));
-  ok(`${tag} (j) closing DriftSheet (Close, backdrop, Escape) plays 200ms slide-down (.is-closing, inert) then unmounts`,
+  ok(`${tag} (j) closing DriftSheet (Close, backdrop, Escape) plays 200ms ease-out slide-down (sheet + backdrop, .is-closing, inert) then unmounts`,
     closeBtnRes.ok && backdropRes.ok && escapeRes.ok,
     JSON.stringify({ closeBtnRes, backdropRes, escapeRes }));
 
@@ -1652,6 +1692,76 @@ for (const [W, H] of SIZES) {
     JSON.stringify({ rmOpen, rmImmediate }));
 
   ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+/* ---------- (k) retime (2026-11-22, Lorico): Slide-up entrance 300ms cubic-bezier vs untouched 200ms ease-out exit ---------- */
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(nowstripSeed()));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('section.page-now button.lever', { timeout: 5000 });
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(100);
+  const tag = `[${W}x${H} retime]`;
+
+  const probeSlideSheet = async (label, openAction) => {
+    await openAction();
+    await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
+    const enter = await page.evaluate(() => {
+      const sh = document.querySelector('.sheet.slide-up');
+      const bd = document.querySelector('.sheet-wrap.slide-up > button.sheet-backdrop');
+      const scs = getComputedStyle(sh);
+      const bcs = getComputedStyle(bd);
+      return {
+        sheetName: scs.animationName,
+        sheetDur: scs.animationDuration,
+        sheetTiming: scs.animationTimingFunction,
+        bdName: bcs.animationName,
+        bdDur: bcs.animationDuration,
+        bdTiming: bcs.animationTimingFunction,
+        docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    await page.waitForTimeout(340);
+    await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+    await page.waitForTimeout(40);
+    const exit = await page.evaluate(() => {
+      const sh = document.querySelector('.sheet.slide-up.is-closing');
+      const bd = document.querySelector('.sheet-wrap.slide-up.is-closing > button.sheet-backdrop');
+      const scs = sh ? getComputedStyle(sh) : null;
+      const bcs = bd ? getComputedStyle(bd) : null;
+      return {
+        sheetName: scs?.animationName ?? null,
+        sheetDur: scs?.animationDuration ?? null,
+        sheetTiming: scs?.animationTimingFunction ?? null,
+        bdName: bcs?.animationName ?? null,
+        bdDur: bcs?.animationDuration ?? null,
+        bdTiming: bcs?.animationTimingFunction ?? null,
+      };
+    });
+    await page.waitForTimeout(260);
+    const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+    const pass = enter.sheetName === 'sheet-slide-up' && enter.sheetDur === '0.3s' && enter.sheetTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+      && enter.bdName === 'sheet-backdrop-in' && enter.bdDur === '0.3s' && enter.bdTiming === 'cubic-bezier(0.32, 0.72, 0.35, 1)'
+      && !enter.docOver
+      && exit.sheetName === 'sheet-slide-down' && exit.sheetDur === '0.2s' && exit.sheetTiming === 'ease-out'
+      && exit.bdName === 'sheet-backdrop-out' && exit.bdDur === '0.2s' && exit.bdTiming === 'ease-out'
+      && unmounted;
+    return { label, enter, exit, unmounted, pass };
+  };
+
+  const leverProbe = await probeSlideSheet('LeverSheet', () => page.click('section.page-now button.lever'));
+  const driftProbe = await probeSlideSheet('DriftSheet', () => page.evaluate(() => {
+    const b = [...document.querySelectorAll('section.page-now button.plan-item')].find((x) => x.textContent.includes('Check against my ELD'));
+    if (!b) throw new Error('no Check against my ELD button on Now');
+    b.click();
+  }));
+  ok(`${tag} (k) slide-up sheets (LeverSheet + DriftSheet) enter at 0.3s cubic-bezier(0.32, 0.72, 0.35, 1) while close stays 0.2s ease-out with zero overflow`,
+    leverProbe.pass && driftProbe.pass && errors.length === 0,
+    JSON.stringify({ leverProbe, driftProbe, errors }));
   await ctx.close();
 }
 

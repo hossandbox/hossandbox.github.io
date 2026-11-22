@@ -1861,8 +1861,10 @@ await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS
   const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
   const hasKfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
   const hasKfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
-  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+200ms\s+ease-out/.test(block)
-    && /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out/.test(block);
+  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block)
+    && /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block)
+    && /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block)
+    && /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
   const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
   const origMM = globalThis.window.matchMedia;
   let immediateUnmount = false;
@@ -2114,6 +2116,47 @@ await pin('ES4. eldslide regression: LeverSheet still slides up with .sheet.slid
   await sleep(250);
   const unmounted = all((n) => has(n, 'sheet')).length === 0;
   return (openOk && midOk && unmounted) || JSON.stringify({ openOk, midOk, unmounted });
+});
+
+/* ---------------- (q) retime (2026-11-22, Lorico): Slide-up entrance retimed (300ms cubic-bezier), exit untouched (200ms ease-out) ---------------- */
+await pin('RT1. retime: slide-up entrance declares 300ms cubic-bezier(0.32, 0.72, 0.35, 1) (sheet + backdrop) while close exit stays 200ms ease-out with unchanged 220ms retained-exit lifecycle', async () => {
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const startIdx = css.indexOf('NOW "COMES BACK" STRIP');
+  const endIdx = css.indexOf('NOW HERO CARD DISSOLVE', startIdx);
+  const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
+  const sheetIn = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block);
+  const bdIn = /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+300ms\s+cubic-bezier\(0\.32,\s*0\.72,\s*0\.35,\s*1\)\s+both;/.test(block);
+  const sheetOut = /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block);
+  const bdOut = /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
+  const kfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
+  const kfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
+  const kfBdIn = /@keyframes\s+sheet-backdrop-in\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
+  const kfBdOut = /@keyframes\s+sheet-backdrop-out\s*\{\s*from\s*\{\s*opacity:\s*1;\s*\}\s*to\s*\{\s*opacity:\s*0;\s*\}\s*\}/.test(block);
+  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up,[\s\S]*?\.sheet\.slide-up\.is-closing,[\s\S]*?\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop,[\s\S]*?\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{\s*animation:\s*none;\s*\}/.test(block);
+  // Both shared slide-up sheets (DriftSheet + LeverSheet) mount with .slide-up and close via retained .is-closing
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  await seed(nowstripL4Seed());
+  const checkCycle = async (label, triggerBtn) => {
+    if (!triggerBtn) return `${label}: missing trigger`;
+    fire(triggerBtn, 'click'); await sleep(40);
+    const ow = all((n) => has(n, 'sheet-wrap'))[0];
+    const os = all((n) => has(n, 'sheet'))[0];
+    if (!ow || !os || !has(ow, 'slide-up') || !has(os, 'slide-up') || has(os, 'is-closing')) return `${label}: bad open`;
+    openSheet(null); await sleep(30);
+    const mw = all((n) => has(n, 'sheet-wrap'))[0];
+    const ms = all((n) => has(n, 'sheet'))[0];
+    if (A.currentSheet() !== null || !mw || !ms || !has(mw, 'slide-up') || !has(mw, 'is-closing') || !off(mw) || !hid(mw) || !has(ms, 'slide-up') || !has(ms, 'is-closing')) {
+      return `${label}: bad closing`;
+    }
+    await sleep(250);
+    if (all((n) => has(n, 'sheet')).length !== 0) return `${label}: did not unmount`;
+    return null;
+  };
+  const leverErr = await checkCycle('lever', await waitForLeverBtn());
+  const driftErr = await checkCycle('drift', eldCheckBtn());
+  const ok = sheetIn && bdIn && sheetOut && bdOut && kfUp && kfDown && kfBdIn && kfBdOut && reduced && !leverErr && !driftErr;
+  return ok || JSON.stringify({ sheetIn, bdIn, sheetOut, bdOut, kfUp, kfDown, kfBdIn, kfBdOut, reduced, leverErr, driftErr });
 });
 
 let fails = 0;
