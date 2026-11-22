@@ -2132,7 +2132,8 @@ await pin('RT1. retime: slide-up entrance declares 300ms cubic-bezier(0.32, 0.72
   const kfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
   const kfBdIn = /@keyframes\s+sheet-backdrop-in\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
   const kfBdOut = /@keyframes\s+sheet-backdrop-out\s*\{\s*from\s*\{\s*opacity:\s*1;\s*\}\s*to\s*\{\s*opacity:\s*0;\s*\}\s*\}/.test(block);
-  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up,[\s\S]*?\.sheet\.slide-up\.is-closing,[\s\S]*?\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop,[\s\S]*?\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{\s*animation:\s*none;\s*\}/.test(block);
+  // Re-aimed (2026-11-22 slidepark): reduced-motion rule now also carries transform: none alongside animation: none.
+  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up,[\s\S]*?\.sheet\.slide-up\.is-closing,[\s\S]*?\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop,[\s\S]*?\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*none;[^}]*\}/.test(block);
   // Both shared slide-up sheets (DriftSheet + LeverSheet) mount with .slide-up and close via retained .is-closing
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;

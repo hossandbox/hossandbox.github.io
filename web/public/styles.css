@@ -1655,7 +1655,12 @@ button.back.settings-back {
 .sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
   animation: sheet-backdrop-out 200ms ease-out both;
 }
+/* Parked below the viewport in the base state so a pre-animation paint can never
+   show the sheet at its resting position (the "instant twin" artifact); the
+   animation's fill holds it at translateY(0) while open, and the closing
+   animation ends at the same parked position. */
 .sheet.slide-up {
+  transform: translateY(100%);
   animation: sheet-slide-up 300ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
   will-change: transform;
 }
@@ -1690,6 +1695,7 @@ button.back.settings-back {
   .sheet-wrap.slide-up > button.sheet-backdrop,
   .sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
     animation: none;
+    transform: none;
   }
 }
 

@@ -1765,6 +1765,33 @@ for (const [W, H] of SIZES) {
   await ctx.close();
 }
 
+/* ---------- (l) slidepark (2026-11-22, Lorico): Parked off-screen base transform on .sheet.slide-up + reduced-motion reset ---------- */
+{
+  const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+  const startIdx = css.indexOf('NOW "COMES BACK" STRIP');
+  const endIdx = css.indexOf('NOW HERO CARD DISSOLVE', startIdx);
+  const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
+
+  // SP1a: .sheet.slide-up (carrying the sheet-slide-up animation) declares transform: translateY(100%) as its base transform
+  const slideUpRules = [...block.matchAll(/(?:^|[}\s])\.sheet\.slide-up\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  const animRule = slideUpRules.find((body) => /\banimation\s*:\s*sheet-slide-up\b/.test(body)) || '';
+  const hasParkedBase = /\btransform\s*:\s*translateY\(\s*100%\s*\)\s*;/.test(animRule);
+  ok('[css] (l) SP1a: built dist/styles.css .sheet.slide-up rule declares parked base transform: translateY(100%) alongside sheet-slide-up animation',
+    Boolean(animRule) && hasParkedBase,
+    `matched=${Boolean(animRule)} body=${JSON.stringify(animRule.trim())}`);
+
+  // SP1b: inside @media (prefers-reduced-motion: reduce), the slide-up rule sets transform: none so reduced-motion users never get a hidden sheet
+  const rmMatch = block.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{((?:[^{}]|\{[^}]*\})*)\}/);
+  const rmBlock = rmMatch ? rmMatch[1] : '';
+  const rmRuleMatch = rmBlock.match(/\.sheet\.slide-up\b[^{]*\{([^}]*)\}/);
+  const rmRuleBody = rmRuleMatch ? rmRuleMatch[1] : '';
+  const hasRmAnimNone = /\banimation\s*:\s*none\s*;/.test(rmRuleBody);
+  const hasRmTransformNone = /\btransform\s*:\s*none\s*;/.test(rmRuleBody);
+  ok('[css] (l) SP1b: built dist/styles.css @media (prefers-reduced-motion: reduce) slide-up rule resets transform: none alongside animation: none',
+    Boolean(rmRuleBody) && hasRmAnimNone && hasRmTransformNone,
+    `rmRuleBody=${JSON.stringify(rmRuleBody.trim())}`);
+}
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;
