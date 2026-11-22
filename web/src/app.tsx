@@ -463,23 +463,27 @@ function useSheet(): SheetKind | null {
   return sheetNow;
 }
 
-function Sheet({ title, children, onBack, focusKey }: { title: string; children: ComponentChildren; onBack?: () => void; focusKey?: string }) {
+function Sheet({ title, children, onBack, focusKey, slideUp, closing }: { title: string; children: ComponentChildren; onBack?: () => void; focusKey?: string; slideUp?: boolean; closing?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (closing) return;
     // Focus the panel's own first action (marked data-first), else its first control. Again on each new
     // step of a panel that has steps (the Log's editor), so the new question is what is read out.
     const el = box.current?.querySelector<HTMLElement>('[data-first]') ?? box.current?.querySelector<HTMLElement>('button, input, select');
     el?.focus();
-  }, [focusKey]);
+  }, [focusKey, closing]);
   useEffect(() => {
+    if (closing) return;
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') openSheet(null); };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, []);
+  }, [closing]);
+  const wrapCls = `sheet-wrap${slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
+  const sheetCls = `sheet${slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
   return (
-    <div class="sheet-wrap">
+    <div class={wrapCls} inert={closing || undefined} aria-hidden={closing || undefined}>
       <button class="sheet-backdrop" tabIndex={-1} aria-label="Close" onClick={() => openSheet(null)} />
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={box}>
+      <div class={sheetCls} role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={box}>
         <div class="sheet-handle" aria-hidden="true" />
         <div class="sheet-head">
           {onBack && <button class="icon-btn" aria-label="Back" onClick={onBack}><Icon d={I.back} /></button>}
@@ -1829,7 +1833,7 @@ function LeverChips({ chips }: { chips: Lever[] }) {
  * writes the DRAFT only, behind the Lab's one-level draft undo. Nothing here writes
  * to the log.
  */
-function LeverSheet({ s, now, ev, lever }: { s: State; now: number; ev: FullEvaluation; lever: Lever }) {
+function LeverSheet({ s, now, ev, lever, closing = false }: { s: State; now: number; ev: FullEvaluation; lever: Lever; closing?: boolean }) {
   const { rule, cite, caveat } = leverRule(lever, ev);
   const after = leverAfter(s, now, lever);
   const prefill = leverSplitPrefill(s, now, lever);
@@ -1844,7 +1848,7 @@ function LeverSheet({ s, now, ev, lever }: { s: State; now: number; ev: FullEval
     ghost = <TimeAxis from={now} lanes={[{ key: 'CYCLE', label: `${ev.cycle.limit / 60}-hr cycle`, short: `${ev.cycle.limit / 60}-hr`, end: lever.at, ghostEnd: lever.at + lever.available, value: laneValue(lever.at, now) }]} twin={`At ${laneValue(lever.at, now)}, ${twinDur(lever.dropsOff)} of cycle time comes back.`} />;
   }
   return (
-    <Sheet title={leverTitle(lever)}>
+    <Sheet title={leverTitle(lever)} slideUp closing={closing}>
       {ghost}
       <p class="small">{rule}</p>
       <div class="why-cite">{cite}</div>
@@ -7691,6 +7695,27 @@ export function App() {
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
+  // Keep the closing comeback/lever sheet mounted (inert + aria-hidden) across its 200ms
+  // slide-down exit, then unmount cleanly. Under prefers-reduced-motion: reduce, unmount immediately.
+  const leverOpen = s.disclaimerAcked && !driveUp && sheet?.kind === 'lever';
+  const [retainedLever, setRetainedLever] = useState<Lever | null>(
+    () => (leverOpen && sheet?.kind === 'lever' ? sheet.lever : null),
+  );
+  const leverClosing = !leverOpen && retainedLever !== null && s.disclaimerAcked && !driveUp && sheet === null && !prefersReducedMotion();
+  const displayedLever = leverOpen && sheet?.kind === 'lever' ? sheet.lever : (leverClosing ? retainedLever : null);
+  useEffect(() => {
+    if (leverOpen && sheet?.kind === 'lever') {
+      if (retainedLever !== sheet.lever) setRetainedLever(sheet.lever);
+      return;
+    }
+    if (!retainedLever) return;
+    if (!s.disclaimerAcked || driveUp || sheet !== null || prefersReducedMotion()) {
+      setRetainedLever(null);
+      return;
+    }
+    const id = setTimeout(() => setRetainedLever(null), 220);
+    return () => clearTimeout(id);
+  }, [leverOpen, sheet, s.disclaimerAcked, driveUp]);
   useEffect(() => {
     if (s.tab !== 'plan' && s.tab !== 'settings' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
@@ -8000,7 +8025,7 @@ export function App() {
       {!showDisclaimer && sheet?.kind === 'drift' && <DriftSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
       {!showDisclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
-      {!showDisclaimer && sheet?.kind === 'lever' && <LeverSheet s={s} now={now} ev={ev} lever={sheet.lever} />}
+      {!showDisclaimer && displayedLever && <LeverSheet s={s} now={now} ev={ev} lever={displayedLever} closing={leverClosing} />}
       {!showDisclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
       {!showDisclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
       {!showDisclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}

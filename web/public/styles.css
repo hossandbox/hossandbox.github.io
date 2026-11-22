@@ -1604,6 +1604,93 @@ button.back.settings-back {
   }
 }
 
+/* ===================================================================================
+   NOW "COMES BACK" STRIP + SCOPED SLIDE-UP SHEET (Lorico, 2026-11-22)
+   1. Now screen lever/comeback strip (.lever): size and reflow the full sentence cleanly
+      inside the strip at phone width (~360–400px) without truncating or dropping time,
+      +duration, or available figures. Keeps the 64px row floor and existing palette tokens.
+   2. Scoped slide-up pop-up (.sheet.slide-up): ONLY the comeback/lever detail sheet
+      slides up quickly from the bottom (200ms ease-out) and slides back down on close.
+      All other sheets keep their current behavior. Respects prefers-reduced-motion.
+   =================================================================================== */
+.lever {
+  gap: var(--s-8);
+  padding: var(--s-8) var(--s-10) var(--s-8) var(--s-12);
+}
+.lever > svg {
+  flex-shrink: 0;
+}
+.lever-text {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.lever-text b {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.lever-sub {
+  font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+@media (max-width: 380px) {
+  .lever-text b {
+    font-size: 13.5px;
+  }
+}
+
+.sheet-wrap.slide-up {
+  overflow: hidden;
+}
+.sheet-wrap.slide-up.is-closing {
+  pointer-events: none;
+}
+.sheet-wrap.slide-up > button.sheet-backdrop {
+  animation: sheet-backdrop-in 200ms ease-out both;
+}
+.sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
+  animation: sheet-backdrop-out 200ms ease-out both;
+}
+.sheet.slide-up {
+  animation: sheet-slide-up 200ms ease-out both;
+  will-change: transform;
+}
+.sheet.slide-up.is-closing {
+  animation: sheet-slide-down 200ms ease-out both;
+}
+.sheet.slide-up .sheet-head h2 {
+  min-width: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+}
+@keyframes sheet-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes sheet-slide-down {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+@keyframes sheet-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheet-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet.slide-up,
+  .sheet.slide-up.is-closing,
+  .sheet-wrap.slide-up > button.sheet-backdrop,
+  .sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
+    animation: none;
+  }
+}
+
 @page {
   size: letter portrait;
   margin: 0.45in 0.5in;

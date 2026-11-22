@@ -1751,6 +1751,135 @@ await pin('P5. plan-dissolve: opening a Plan tool resets planRoom.scrollTop to 0
     || JSON.stringify({ afterSplit, hubAfterSplit, afterRecap, afterLoad, hubEnd: pages()[0].scrollTop });
 });
 
+/* ---------------- (n) nowstrip (2026-11-22, Lorico): Now "comes back" strip text fit + scoped slide-up sheet ---------------- */
+const nowstripL4Seed = () => {
+  // 7 heavy 10-hr duty days (dayStartHour: 18, America/Chicago) so 70/8 cycle binds and L4 "comes back" lever fires.
+  const CD = (day, hh, m = 0) => Math.floor(new Date(2026, 10, day, hh, m).getTime() / 60000);
+  const l4Segs = [];
+  for (let d = 2; d <= 8; d++) {
+    l4Segs.push(
+      { status: 'ON', start: CD(d, 5), end: CD(d, 6) },
+      { status: 'D', start: CD(d, 6), end: CD(d, 14) },
+      { status: 'ON', start: CD(d, 14), end: CD(d, 15) },
+      { status: 'OFF', start: CD(d, 15), end: CD(d + 1, 5) },
+    );
+  }
+  return {
+    tab: 'now',
+    nowCard: 'timeline',
+    nowCardAsked: true,
+    drivingView: false,
+    segments: l4Segs,
+    current: { status: 'ON', since: CD(9, 5) },
+    nowOverride: CD(9, 6, 0),
+    config: { ...getState().config, cycle: '70/8', dayStartHour: 18, timeZone: 'America/Chicago' },
+  };
+};
+const waitForLeverBtn = async () => {
+  for (let i = 0; i < 40; i++) {
+    const b = all((n) => n.localName === 'button' && has(n, 'lever'), pages()[1])[0];
+    if (b) return b;
+    await sleep(25);
+  }
+  return null;
+};
+
+await pin('N1. nowstrip (a): L4 "comes back" strip renders full text (time, +duration, available) inside button.lever with phone-fit reflow CSS and 64px row floor', async () => {
+  await seed(nowstripL4Seed());
+  const btn = await waitForLeverBtn();
+  if (!btn) return 'L4 lever strip button.lever did not appear on Now';
+  const txt = btn.textContent;
+  const hasFull = /At\s+\w+\s+\d{2}:\d{2}\s+\(18:00\s+Central\),\s+\+\d+h\s+\d+m\s+comes back\s+→\s+\d+h\s+\d+m\s+available/.test(txt);
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
+  const hasReflow = /\.lever-text\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*break-word;/.test(block);
+  const hasSize = /\.lever-text\s+b\s*\{[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.3;/.test(block);
+  const hasNarrow = /@media\s*\(max-width:\s*380px\)\s*\{[\s\S]*?\.lever-text\s+b\s*\{[^}]*font-size:\s*13\.5px;/.test(block);
+  const hasSvgShrink = /\.lever\s*>\s*svg\s*\{[^}]*flex-shrink:\s*0;/.test(block);
+  const noTruncate = !/text-overflow:\s*ellipsis/.test(block);
+  const ok = hasFull && hasReflow && hasSize && hasNarrow && hasSvgShrink && noTruncate;
+  return ok || JSON.stringify({ txt, hasFull, hasReflow, hasSize, hasNarrow, hasSvgShrink, noTruncate });
+});
+
+await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.slide-up; all other sheet kinds (why, status, exceptions, drift, add) do NOT', async () => {
+  await seed(nowstripL4Seed());
+  const btn = await waitForLeverBtn();
+  if (!btn) return 'missing L4 lever strip';
+  fire(btn, 'click'); await sleep(40);
+  const leverWrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const leverSheet = all((n) => has(n, 'sheet'))[0];
+  const leverOk = !!leverWrap && !!leverSheet && has(leverWrap, 'slide-up') && has(leverSheet, 'slide-up') && !has(leverSheet, 'is-closing');
+  const others = [
+    ['why', { kind: 'why' }],
+    ['status', { kind: 'status' }],
+    ['exceptions', { kind: 'exceptions' }],
+    ['drift', { kind: 'drift' }],
+    ['add', { kind: 'add' }],
+  ];
+  const otherBad = [];
+  for (const [name, desc] of others) {
+    openSheet(desc); await sleep(40);
+    const wraps = all((n) => has(n, 'sheet-wrap'));
+    const sheets = all((n) => has(n, 'sheet'));
+    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'slide-up') || has(wraps[0], 'slide-up')) {
+      otherBad.push(`${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
+    }
+  }
+  openSheet(null); await sleep(40);
+  return (leverOk && otherBad.length === 0) || JSON.stringify({ leverOk, leverWrap: leverWrap && cls(leverWrap), leverSheet: leverSheet && cls(leverSheet), otherBad });
+});
+
+await pin('N3. nowstrip (b): closing LeverSheet retains .sheet.slide-up.is-closing (inert + aria-hidden) across the 200ms slide-down exit then unmounts; other sheets unmount immediately', async () => {
+  await seed(nowstripL4Seed());
+  const btn = await waitForLeverBtn();
+  if (!btn) return 'missing L4 lever strip';
+  fire(btn, 'click'); await sleep(40);
+  const closeBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Close', all((n) => has(n, 'sheet'))[0])[0];
+  if (!closeBtn) return 'missing Close button in LeverSheet';
+  fire(closeBtn, 'click'); await sleep(30);
+  const midWrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const midSheet = all((n) => has(n, 'sheet'))[0];
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  const midOk = A.currentSheet() === null && !!midWrap && !!midSheet
+    && has(midWrap, 'slide-up') && has(midWrap, 'is-closing') && off(midWrap) && hid(midWrap)
+    && has(midSheet, 'slide-up') && has(midSheet, 'is-closing');
+  await sleep(250);
+  const afterClose = all((n) => has(n, 'sheet')).length === 0;
+  // Non-lever sheet unmounts immediately on close
+  openSheet({ kind: 'why' }); await sleep(40);
+  if (all((n) => has(n, 'sheet')).length !== 1) return 'why sheet did not open';
+  openSheet(null); await sleep(30);
+  const whyImmediate = all((n) => has(n, 'sheet')).length === 0;
+  return (midOk && afterClose && whyImmediate) || JSON.stringify({ midOk, afterClose, whyImmediate });
+});
+
+await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS animation and unmounts LeverSheet immediately on close', async () => {
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
+  const hasKfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
+  const hasKfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
+  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+200ms\s+ease-out/.test(block)
+    && /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out/.test(block);
+  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
+  const origMM = globalThis.window.matchMedia;
+  let immediateUnmount = false;
+  try {
+    globalThis.window.matchMedia = (q) => ({ matches: /prefers-reduced-motion:\s*reduce/.test(q), addEventListener() {}, removeEventListener() {} });
+    await seed(nowstripL4Seed());
+    const btn = await waitForLeverBtn();
+    if (!btn) return 'missing L4 lever strip under reduced motion';
+    fire(btn, 'click'); await sleep(40);
+    if (all((n) => has(n, 'sheet') && has(n, 'slide-up')).length !== 1) return 'LeverSheet did not open under reduced motion';
+    openSheet(null); await sleep(30);
+    immediateUnmount = all((n) => has(n, 'sheet')).length === 0;
+  } finally {
+    globalThis.window.matchMedia = origMM;
+  }
+  const ok = hasKfUp && hasKfDown && hasSlideRules && hasReducedCss && immediateUnmount;
+  return ok || JSON.stringify({ hasKfUp, hasKfDown, hasSlideRules, hasReducedCss, immediateUnmount });
+});
+
 let fails = 0;
 for (const [st, name, why] of res) { console.log(`${st} ${name}${why ? ` — ${why}` : ''}`); if (st === 'FAIL') fails++; }
 console.log(`revisions: ${res.length - fails}/${res.length} pins pass`);

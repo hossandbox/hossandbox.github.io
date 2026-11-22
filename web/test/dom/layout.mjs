@@ -1263,6 +1263,181 @@ for (const [W, H] of SIZES) {
   await ctx.close();
 }
 
+// (h) Now "comes back" strip text fit + scoped slide-up pop-up (Lorico, 2026-11-22):
+//   (a) At 360x640 and 412x915, the L4 "comes back" strip (button.lever under the Now timeline)
+//       renders the FULL line (time, +duration, available figure — no truncation) cleanly inside
+//       its strip with zero horizontal overflow, keeping the 64px row floor.
+//   (b) Tapping the strip opens LeverSheet with .sheet.slide-up (200ms slide-up entrance and
+//       matching 200ms slide-down exit via .is-closing before unmount), while other sheet kinds
+//       (e.g. Why?) keep their current behavior (no .slide-up, no slide animation).
+//   (c) Under prefers-reduced-motion: reduce, the slide animation is disabled (animationName: none)
+//       and closing unmounts immediately.
+const nowstripSeed = () => {
+  const CD = (day, hh, m = 0) => Math.floor(new Date(2026, 10, day, hh, m).getTime() / 60000);
+  const segs = [];
+  for (let d = 2; d <= 8; d++) {
+    segs.push(
+      { status: 'ON', start: CD(d, 5), end: CD(d, 6), createdAt: d * 10 + 1 },
+      { status: 'D', start: CD(d, 6), end: CD(d, 14), createdAt: d * 10 + 2 },
+      { status: 'ON', start: CD(d, 14), end: CD(d, 15), createdAt: d * 10 + 3 },
+      { status: 'OFF', start: CD(d, 15), end: CD(d + 1, 5), createdAt: d * 10 + 4 },
+    );
+  }
+  return {
+    segments: segs,
+    current: { status: 'ON', since: CD(9, 5), createdAt: 99 },
+    nowOverride: CD(9, 6, 0),
+    historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, themeChosen: true,
+    theme: 'day', nowCard: 'timeline', nowCardAsked: true, drivingView: false,
+    config: { cycle: '70/8', dayStartHour: 18, timeZone: 'America/Chicago', shortHaul: false },
+  };
+};
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(nowstripSeed()));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('section.page-now button.lever', { timeout: 5000 });
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(100);
+  const tag = `[${W}x${H} nowstrip]`;
+
+  // (a) Full L4 strip fits cleanly inside button.lever with zero horizontal overflow
+  const fit = await page.evaluate(() => {
+    const btn = document.querySelector('section.page-now button.lever');
+    const txt = btn?.querySelector('.lever-text');
+    const bold = btn?.querySelector('.lever-text b');
+    const svg = btn?.querySelector('svg');
+    const br = btn.getBoundingClientRect();
+    const tr = txt.getBoundingClientRect();
+    const bor = bold.getBoundingClientRect();
+    const sr = svg.getBoundingClientRect();
+    const bcs = getComputedStyle(bold);
+    const tcs = getComputedStyle(txt);
+    const lh = parseFloat(bcs.lineHeight) || (parseFloat(bcs.fontSize) * 1.3);
+    const lines = Math.round(bor.height / lh);
+    return {
+      text: bold.textContent.trim(),
+      vw: document.documentElement.clientWidth,
+      docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      btnW: Math.round(br.width * 10) / 10,
+      btnH: Math.round(br.height * 10) / 10,
+      btnLeft: Math.round(br.left * 10) / 10,
+      btnRight: Math.round(br.right * 10) / 10,
+      btnOverX: btn.scrollWidth > btn.clientWidth + 0.5,
+      txtOverX: txt.scrollWidth > txt.clientWidth + 0.5,
+      boldOverX: bold.scrollWidth > bold.clientWidth + 0.5,
+      txtInsideBtn: tr.left >= br.left - 0.5 && tr.right <= br.right + 0.5,
+      boldInsideTxt: bor.left >= tr.left - 0.5 && bor.right <= tr.right + 0.5,
+      svgInsideBtn: sr.left >= br.left - 0.5 && sr.right <= br.right + 0.5 && sr.width >= 16,
+      noEllipsis: bcs.textOverflow !== 'ellipsis' && tcs.textOverflow !== 'ellipsis',
+      fontSize: bcs.fontSize,
+      lines,
+    };
+  });
+  const fullRe = /At\s+\w+\s+\d{2}:\d{2}\s+\(18:00\s+Central\),\s+\+\d+h\s+\d+m\s+comes back\s+→\s+\d+h\s+\d+m\s+available/;
+  ok(`${tag} (h) full L4 "comes back" strip text fits cleanly with zero horizontal overflow and >=64px floor`,
+    fullRe.test(fit.text) && !fit.docOver && !fit.btnOverX && !fit.txtOverX && !fit.boldOverX
+    && fit.btnLeft >= -0.5 && fit.btnRight <= fit.vw + 0.5 && fit.btnH >= 64
+    && fit.txtInsideBtn && fit.boldInsideTxt && fit.svgInsideBtn && fit.noEllipsis && fit.lines <= 2,
+    JSON.stringify(fit));
+
+  // (b) Tapping button.lever opens scoped .sheet.slide-up with 200ms slide-up entrance & 200ms slide-down exit
+  await page.click('section.page-now button.lever');
+  await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
+  const openInfo = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    const h2 = sh.querySelector('#sheet-title');
+    const cs = getComputedStyle(sh);
+    const hr = h2.getBoundingClientRect();
+    const sr = sh.getBoundingClientRect();
+    return {
+      wrapSlide: wrap.classList.contains('slide-up'),
+      sheetSlide: sh.classList.contains('slide-up'),
+      closing: sh.classList.contains('is-closing'),
+      animName: cs.animationName,
+      animDur: cs.animationDuration,
+      h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
+    };
+  });
+  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 200ms slide-up entrance and fitted header`,
+    openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.2s' && openInfo.h2Fits,
+    JSON.stringify(openInfo));
+
+  await page.waitForTimeout(240);
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('.sheet button')].find((b) => b.textContent.trim() === 'Close');
+    btn.click();
+  });
+  await page.waitForTimeout(40);
+  const closingInfo = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    const cs = sh ? getComputedStyle(sh) : null;
+    return {
+      present: !!sh,
+      closing: !!sh?.classList.contains('is-closing'),
+      wrapInert: !!(wrap && (wrap.inert || wrap.hasAttribute('inert'))),
+      animName: cs?.animationName ?? null,
+      animDur: cs?.animationDuration ?? null,
+    };
+  });
+  await page.waitForTimeout(260);
+  const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (h) closing LeverSheet plays 200ms slide-down exit (.is-closing, inert) then unmounts`,
+    closingInfo.present && closingInfo.closing && closingInfo.wrapInert && closingInfo.animName === 'sheet-slide-down' && closingInfo.animDur === '0.2s' && unmounted,
+    JSON.stringify({ closingInfo, unmounted }));
+
+  // Other sheet kinds (e.g. Why?) do NOT carry .slide-up
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('section.page-now button')].find((x) => x.textContent.includes('Why?'));
+    if (!b) throw new Error('no Why? button on Now');
+    b.click();
+  });
+  await page.waitForSelector('.sheet', { timeout: 2000 });
+  const whyInfo = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    return {
+      wrapSlide: wrap.classList.contains('slide-up'),
+      sheetSlide: sh.classList.contains('slide-up'),
+      animName: getComputedStyle(sh).animationName,
+    };
+  });
+  ok(`${tag} (h) other sheet kinds (Why?) do NOT carry .slide-up or slide animation`,
+    !whyInfo.wrapSlide && !whyInfo.sheetSlide && whyInfo.animName === 'none',
+    JSON.stringify(whyInfo));
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(80);
+
+  // (c) prefers-reduced-motion: reduce disables slide animation and unmounts immediately on close
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.click('section.page-now button.lever');
+  await page.waitForSelector('.sheet.slide-up', { timeout: 2000 });
+  const rmOpen = await page.evaluate(() => {
+    const sh = document.querySelector('.sheet.slide-up');
+    const bd = document.querySelector('.sheet-wrap.slide-up > button.sheet-backdrop');
+    return {
+      sheetAnim: getComputedStyle(sh).animationName,
+      backdropAnim: getComputedStyle(bd).animationName,
+    };
+  });
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('.sheet button')].find((b) => b.textContent.trim() === 'Close');
+    btn.click();
+  });
+  await page.waitForTimeout(40);
+  const rmImmediate = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (h) prefers-reduced-motion disables slide animation and unmounts LeverSheet immediately`,
+    rmOpen.sheetAnim === 'none' && rmOpen.backdropAnim === 'none' && rmImmediate,
+    JSON.stringify({ rmOpen, rmImmediate }));
+
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
 await browser.close(); server.close();
 for (const r of res) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.pass ? '' : '  — ' + r.info}`);
 const fails = res.filter((r) => !r.pass).length;
