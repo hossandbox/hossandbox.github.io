@@ -495,20 +495,25 @@ for (const [W, H] of SIZES) {
       const eHub = await banner();
       await tap('.page.is-active button', 'Can I take this load?'); await settle();
       const eLoad = await banner();
-      // ---- C: the load check's step 2 Next, scrolled into view, clears the tab bar
+      // ---- C: load check step 2 runs in the full-viewport Plan tool room (tab bar hidden/inert);
+      // Next scrolled into view & at end of scroll clears the room's bottom edge cleanly.
       await tap('.page.is-active button', 'Next: when you leave'); await page.waitForTimeout(250);
       const step2 = await page.evaluate(async () => {
         const two = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const pg = document.querySelector('.page.is-active'); const nav = document.querySelector('nav.tabs'); const next = pg.querySelector('button.flow-next');
+        const navCs = getComputedStyle(nav);
         next.scrollIntoView({ block: 'end' }); await two();
-        const a = { bottom: next.getBoundingClientRect().bottom, navTop: nav.getBoundingClientRect().top };
+        const a = { bottom: next.getBoundingClientRect().bottom, vh: window.innerHeight };
         pg.scrollTop = 1e6; await two();
-        const b = { bottom: next.getBoundingClientRect().bottom, navTop: nav.getBoundingClientRect().top };
+        const b = { bottom: next.getBoundingClientRect().bottom, vh: window.innerHeight };
         pg.scrollTop = 0; await two();
-        return { a, b, head: pg.querySelector('.flow-head').textContent };
+        return { a, b, head: pg.querySelector('.flow-head').textContent, inPlanTool: document.querySelector('.app')?.classList.contains('in-plan-tool'), navHidden: navCs.visibility === 'hidden' && parseFloat(navCs.opacity) === 0 && nav.inert };
       });
-      ok(`${tag} (d) C: load step 2's Next scrolled into view lands clear of the tab bar`, step2.a.bottom <= step2.a.navTop + 0.5, `next bottom ${step2.a.bottom.toFixed(1)}, bar top ${step2.a.navTop.toFixed(1)}`);
-      ok(`${tag} (d) C: …and at the end of the scroll it clears the bar`, step2.b.bottom <= step2.b.navTop, `next bottom ${step2.b.bottom.toFixed(1)}, bar top ${step2.b.navTop.toFixed(1)}`);
+      ok(`${tag} (d) C: load step 2's Next scrolled into view lands clear inside the full-viewport tool room`, step2.inPlanTool && step2.navHidden && step2.a.bottom <= step2.a.vh + 0.5, `next bottom ${step2.a.bottom.toFixed(1)}, vh ${step2.a.vh}, navHidden ${step2.navHidden}`);
+      ok(`${tag} (d) C: …and at the end of the scroll it clears the bottom padding cleanly`, step2.b.bottom <= step2.b.vh - 20, `next bottom ${step2.b.bottom.toFixed(1)}, vh ${step2.b.vh}`);
+      // Exit Load tool room back to Plan hub (step 2 -> step 1 -> Plan) so header gear is visible
+      await page.evaluate(() => { document.querySelector('.page.is-active .flow-head button')?.click(); }); await page.waitForTimeout(150);
+      await page.evaluate(() => { document.querySelector('.page.is-active .flow-head button')?.click(); }); await page.waitForTimeout(300);
       await page.evaluate(() => { const b = document.querySelector('header.top button[aria-label="Settings"]'); if (!b) throw new Error('no Settings gear button'); b.click(); }); await page.waitForTimeout(300);
       const eMore = await banner();
       ok(`${tag} (d) E: the "History incomplete" button sits inside its banner on Plan, the load check and More`, [eHub, eLoad, eMore].every((x) => x !== null && x <= 0), `plan ${eHub}, load ${eLoad}, more ${eMore} (px past the inner bottom edge)`);
@@ -582,15 +587,16 @@ for (const [W, H] of SIZES) {
     const settle = async () => { await page.waitForTimeout(300); await page.waitForFunction(() => { const m = document.querySelector('main.pages'), p = document.querySelector('.page.is-active'); return !m || !p || !m.contains(p) || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2500 }).catch(() => {}); };
 
     // 1 + 2. Order & Open-on-Now at the first animation frame after load (R2)
-    // Re-aimed (2026-11-21 transitions, Lorico): bar & strip are both 3 panels (Plan/Now/Log); Settings lives outside main.pages as section.page-settings.settings-room; TopBar .top-right is clock → gear → theme.
+    // Re-aimed (2026-11-21 transitions + plan-dissolve, Lorico): bar & strip are both 3 panels (Plan/Now/Log); Settings & Plan tool rooms live outside main.pages; TopBar .top-right is clock → gear → theme.
     const open = await page.evaluate(() => {
       const bar = [...document.querySelectorAll('nav.tabs button')].map((b) => b.textContent.trim());
       const strip = [...document.querySelectorAll('main.pages > section.page')].map((s) => [...s.classList].find((c) => c.startsWith('page-')));
-      const sr = document.querySelector('.app > section.page-settings.settings-room');
+      const sr = document.querySelector('.app > section.page-settings.room.settings-room');
+      const pr = document.querySelector('.app > section.page-tool.room.plan-room');
       const topRight = [...document.querySelectorAll('header.top .top-right > *')].map((el) => (el.classList.contains('clock') ? 'clock' : el.getAttribute('aria-label') === 'Settings' ? 'gear' : el.classList.contains('theme-btn') ? 'theme' : el.tagName));
-      return { ff: window.__firstFrame, bar, strip, hasSettingsRoom: !!sr, topRight };
+      return { ff: window.__firstFrame, bar, strip, hasSettingsRoom: !!sr, hasPlanRoom: !!pr, topRight };
     });
-    ok(`${tag} (e) order: bar is Plan/Now/Log, strip is 3 pages (page-plan/page-now/page-log), Settings room sits outside strip, header .top-right is clock/gear/theme`, JSON.stringify(open.bar) === '["Plan","Now","Log"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log"]' && open.hasSettingsRoom && JSON.stringify(open.topRight) === '["clock","gear","theme"]', JSON.stringify(open));
+    ok(`${tag} (e) order: bar is Plan/Now/Log, strip is 3 pages (page-plan/page-now/page-log), Settings & Plan tool rooms sit outside strip, header .top-right is clock/gear/theme`, JSON.stringify(open.bar) === '["Plan","Now","Log"]' && JSON.stringify(open.strip) === '["page-plan","page-now","page-log"]' && open.hasSettingsRoom && open.hasPlanRoom && JSON.stringify(open.topRight) === '["clock","gear","theme"]', JSON.stringify(open));
     ok(`${tag} (e) open on Now at first animation frame (R2): scrollLeft === innerWidth and page-now visible`, open.ff && open.ff.sl === W && open.ff.iw === W && /\bpage-now\b/.test(open.ff.active || '') && Math.abs(open.ff.nowLeft) <= 1, JSON.stringify(open.ff));
 
     // 6. Equal-width tabs & plain Now treatment (active)
@@ -762,12 +768,46 @@ for (const [W, H] of SIZES) {
       offChecks.every((s) => !s.docOverflow && !s.pageOverflow && s.tabClips.length === 0),
       JSON.stringify(offChecks.map((s) => ({ l: s.lbl, doc: s.docOverflow, pg: s.pageOverflow, clips: s.tabClips }))));
 
-    // Check TimeHead absence on a Plan sub-screen (Split Lab)
+    // Check Plan sub-screen (Split Lab) room dissolve + TimeHead absence
     await tapNav('Plan'); await settle();
+    const slBeforeTool = await page.evaluate(() => document.querySelector('main.pages').scrollLeft);
     await page.evaluate(() => { const b = [...document.querySelectorAll('.page-plan button.plan-item')].find((x) => x.textContent.includes('Plan a sleeper split')); if (b) b.click(); });
-    await page.waitForTimeout(150);
-    const subTh = await page.evaluate(() => document.querySelectorAll('.page-plan p.timehead').length);
-    ok(`${tag} (e) TimeHead absent on Plan sub-screen (Split Lab)`, subTh === 0, `count=${subTh}`);
+    await page.waitForTimeout(300);
+    const toolSnap = await page.evaluate(() => {
+      const app = document.querySelector('.app');
+      const m = document.querySelector('main.pages'), h = document.querySelector('header.top'), nav = document.querySelector('nav.tabs');
+      const pr = document.querySelector('section.page-tool.room.plan-room');
+      const r = pr ? pr.getBoundingClientRect() : null;
+      const prCs = pr ? getComputedStyle(pr) : null;
+      const hCs = getComputedStyle(h), navCs = getComputedStyle(nav);
+      return {
+        inRoom: app.classList.contains('in-room') && app.classList.contains('in-plan-tool'),
+        sl: m.scrollLeft,
+        active: pr?.classList.contains('is-active'),
+        top: r ? Math.round(r.top) : -1,
+        height: r ? Math.round(r.height) : -1,
+        vh: window.innerHeight,
+        prOp: prCs ? parseFloat(prCs.opacity) : -1,
+        chromeHidden: h.inert && nav.inert && m.inert && hCs.visibility === 'hidden' && navCs.visibility === 'hidden',
+        subTh: pr ? pr.querySelectorAll('p.timehead').length : -1,
+        hasSplit: !!(pr && pr.textContent.includes('Break 1')),
+      };
+    });
+    ok(`${tag} (e) Plan tool dissolve (Split Lab): full-viewport room, chrome hidden/inert, zero strip scroll, TimeHead absent`,
+      toolSnap.inRoom && toolSnap.active && toolSnap.sl === slBeforeTool && toolSnap.top === 0 && Math.abs(toolSnap.height - toolSnap.vh) <= 1 && toolSnap.prOp === 1 && toolSnap.chromeHidden && toolSnap.subTh === 0 && toolSnap.hasSplit,
+      JSON.stringify(toolSnap));
+    // Exit Split Lab via Back button so Plan hub & main header are restored for the theme toggle check
+    await page.evaluate(() => { document.querySelector('section.page-tool button.back')?.click(); });
+    await page.waitForTimeout(300);
+    const afterToolBack = await page.evaluate(() => ({
+      inRoom: document.querySelector('.app').classList.contains('in-room'),
+      sl: document.querySelector('main.pages').scrollLeft,
+      hdrInert: document.querySelector('header.top').inert,
+      activePlan: document.querySelector('section.page-plan').classList.contains('is-active'),
+    }));
+    ok(`${tag} (e) Plan tool Back dissolves cleanly to Plan hub with chrome restored and zero strip scroll`,
+      !afterToolBack.inRoom && afterToolBack.sl === slBeforeTool && !afterToolBack.hdrInert && afterToolBack.activePlan,
+      JSON.stringify(afterToolBack));
     // Transitions (d): verify theme CSS transition rule on color/background (no geometry) and theme flip + persistence
     const themeCheck = await page.evaluate(() => {
       const appCs = getComputedStyle(document.querySelector('.app'));

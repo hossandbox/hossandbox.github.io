@@ -109,6 +109,7 @@ const seed = async (rec) => {
 render(h(App, {}), root);
 await sleep(100);
 const planPage = () => all((n) => n.localName === 'section' && has(n, 'page-plan'))[0];
+const planRoom = () => all((n) => n.localName === 'section' && has(n, 'page-tool'))[0];
 
 /* ---------------- R1: Straight 10 misses, 8/2 rescues ---------------- */
 // Math (from BASE_SEGS at Wed 13:00, dockWait = 2h = 120m, remainingDrive = 6h = 360m, deadline = Wed 21:30):
@@ -299,7 +300,7 @@ await pin('R4. next-shift trap 11h/14h remaining numbers match hand calculation 
   await seed({ tab: 'plan', nowOverride: NOW_13, segments: BASE_SEGS, current: null });
   A.openRescuePlanner(true);
   await sleep(60);
-  const pg = planPage();
+  const pg = planRoom();
   const next82Drive = all((n) => n.attributes?.['data-rescue-next-drive'] === 'split82', pg)[0]?.textContent ?? '';
   const next82Win = all((n) => n.attributes?.['data-rescue-next-window'] === 'split82', pg)[0]?.textContent ?? '';
 
@@ -358,7 +359,7 @@ await pin('R4b. completes-pending Next-Shift Trap reads after delivery (matches 
   await seed({ tab: 'plan', nowOverride: now18, segments: pendingShortSegs, current: null });
   A.openRescuePlanner(true);
   await sleep(60);
-  const pg = planPage();
+  const pg = planRoom();
   const trap73El = all((n) => n.attributes?.['data-rescue-next-shift'] === 'split73', pg)[0];
   const trap73Head = trap73El ? (all((n) => has(n, 'rescue-trap-head'), trap73El)[0]?.textContent ?? '') : '';
 
@@ -391,7 +392,7 @@ await pin('R5. exact callout "Long leg = Sleeper Berth ONLY; verify on your ELD.
   await seed({ tab: 'plan', nowOverride: NOW_13, segments: BASE_SEGS, current: null });
   A.openRescuePlanner(true);
   await sleep(60);
-  const pg = planPage();
+  const pg = planRoom();
   const c82 = all((n) => n.attributes?.['data-rescue-sb-callout'] === 'split82', pg)[0]?.textContent ?? '';
   const c73 = all((n) => n.attributes?.['data-rescue-sb-callout'] === 'split73', pg)[0]?.textContent ?? '';
   const expected = 'Long leg = Sleeper Berth ONLY; verify on your ELD.';
@@ -430,7 +431,7 @@ await pin('R6. no-rescue scenario shows plain "No rescue — the split doesn\'t 
   await seed({ tab: 'plan', nowOverride: now1430, segments: exhaustedSegs, current: null });
   A.openRescuePlanner(true);
   await sleep(60);
-  const pg = planPage();
+  const pg = planRoom();
   const vEl = all((n) => n.attributes?.['data-rescue-verdict'] === '1', pg)[0];
   const vTxt = vEl?.textContent ?? '';
   const recBadges = all((n) => n.attributes?.['data-rescue-rec-badge'] === '1', pg);
@@ -562,22 +563,24 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator
   await sleep(60);
   if (!A.isRescuePlannerOpen()) return 'simulator did not open';
 
-  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), pg)[0]?.textContent?.trim();
-  const verdictEl = all((n) => n.attributes?.['data-rescue-verdict'] === '1', pg)[0];
-  const stratEl = all((n) => n.attributes?.['data-rescue-strategies'] === '1', pg)[0];
-  const timeInputs = all((n) => n.localName === 'input' && n.attributes?.type === 'time', pg);
-  const txt = pg.textContent;
+  // Re-aimed (2026-11-21 plan-dissolve): RescueTab renders in planRoom() while planPage() keeps the 7-item hub mounted.
+  const rm = planRoom();
+  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
+  const verdictEl = all((n) => n.attributes?.['data-rescue-verdict'] === '1', rm)[0];
+  const stratEl = all((n) => n.attributes?.['data-rescue-strategies'] === '1', rm)[0];
+  const timeInputs = all((n) => n.localName === 'input' && n.attributes?.type === 'time', rm);
+  const txt = rm.textContent;
   const vIdx = verdictEl ? txt.indexOf(verdictEl.textContent) : -1;
   const sIdx = stratEl ? txt.indexOf(stratEl.textContent) : -1;
   const verdictBeforeStrat = vIdx >= 0 && sIdx > vIdx;
 
   // Toggle "Set deadline" and verify shared ClockPick sheet opens and applies cleanly
-  const setDlBtn = all((n) => n.localName === 'button' && /Set deadline/.test(n.textContent), pg)[0];
+  const setDlBtn = all((n) => n.localName === 'button' && /Set deadline/.test(n.textContent), rm)[0];
   if (!setDlBtn) return 'missing Set deadline toggle';
   fire(setDlBtn, 'click');
   await sleep(40);
-  const timeInputsAfterToggle = all((n) => n.localName === 'input' && n.attributes?.type === 'time', pg);
-  const dlBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rescue-deadline-btn'] === '1', pg)[0];
+  const timeInputsAfterToggle = all((n) => n.localName === 'input' && n.attributes?.type === 'time', rm);
+  const dlBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rescue-deadline-btn'] === '1', rm)[0];
   if (!dlBtn) return 'missing deadline ClockPick trigger button';
   fire(dlBtn, 'click');
   await sleep(50);
@@ -591,10 +594,10 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator
   clkIn.value = '21:50'; fire(clkIn, 'input'); await sleep(20);
   fire(goBtn, 'click'); await sleep(60);
 
-  const afterDl = all((n) => n.localName === 'button' && n.attributes?.['data-rescue-deadline-btn'] === '1', pg)[0]?.textContent ?? '';
+  const afterDl = all((n) => n.localName === 'button' && n.attributes?.['data-rescue-deadline-btn'] === '1', rm)[0]?.textContent ?? '';
 
   // Back button returns to the 7-item Plan hub
-  const backBtn = all((n) => n.localName === 'button' && has(n, 'back'), pg)[0];
+  const backBtn = all((n) => n.localName === 'button' && has(n, 'back'), rm)[0];
   fire(backBtn, 'click');
   await sleep(60);
   const itemsAfterBack = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);

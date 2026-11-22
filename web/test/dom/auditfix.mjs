@@ -94,15 +94,28 @@ const tap = async (p, sel, text, ms = 300) => {
   }, [sel, text ? text.source ?? text : null]);
   await wait(p, ms);
 };
-// Re-aimed (2026-11-21 nav-gear + transitions, Lorico): Settings opens via header gear as its own room
-// (bottom bar hidden while in Settings); leaving Settings uses button.settings-back first.
+// Re-aimed (2026-11-21 nav-gear + transitions + plan-dissolve, Lorico): Settings and Plan tools open
+// as full-screen rooms (main chrome hidden/inert while in a room); exit the active room first.
+const exitRoom = async (p) => {
+  for (let i = 0; i < 6; i++) {
+    const mode = await p.evaluate(() => {
+      const app = document.querySelector('.app');
+      if (!app) return null;
+      if (app.classList.contains('in-settings')) return 'settings';
+      if (app.classList.contains('in-plan-tool')) return 'plan-tool';
+      return null;
+    });
+    if (!mode) return;
+    if (mode === 'settings') await tap(p, 'section.page-settings button.settings-back', null, 350);
+    else await tap(p, 'section.page-tool button.back, section.page-tool .flow-head button', null, 350);
+  }
+};
 const go = async (p, tab) => {
+  await exitRoom(p);
   if (tab === 'More' || tab === 'Settings') {
     await tap(p, 'header.top button[aria-label="Settings"]', null, 400);
     return;
   }
-  const inSettings = await p.evaluate(() => !!document.querySelector('.app.in-settings'));
-  if (inSettings) await tap(p, 'section.page-settings button.settings-back', null, 400);
   await tap(p, 'nav.tabs button', new RegExp(tab), 900);
 };
 const sheetText = (p) => p.evaluate(() => document.querySelector('.sheet')?.innerText ?? '');

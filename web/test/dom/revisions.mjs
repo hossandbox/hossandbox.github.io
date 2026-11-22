@@ -28,6 +28,37 @@ globalThis.cancelAnimationFrame = () => {};
 // driving-view remount placement (R1) are observable in the DOM shim.
 const scrollCalls = [];
 const applyingScrollTo = (el) => (opts) => { scrollCalls.push(opts); if (opts && typeof opts.left === 'number') el.scrollLeft = opts.left; };
+// LoadTab scrolls each step to top; domshim has no window.scrollTo layout method.
+globalThis.scrollTo = () => {};
+const popListeners = new Set();
+{
+  const rawAdd = globalThis.addEventListener;
+  const rawRem = globalThis.removeEventListener;
+  globalThis.addEventListener = (t, f) => { if (t === 'popstate') popListeners.add(f); return rawAdd(t, f); };
+  globalThis.removeEventListener = (t, f) => { if (t === 'popstate') popListeners.delete(f); return rawRem(t, f); };
+}
+const firePopState = () => { for (const f of [...popListeners]) f({ type: 'popstate' }); };
+// Minimal browser-like history stack so backnav.ts's h.go(-n) settles its `ours` counter via popstate.
+{
+  const stack = [{ state: null }];
+  let idx = 0;
+  globalThis.history = {
+    get state() { return stack[idx]?.state ?? null; },
+    get length() { return stack.length; },
+    pushState(d) { stack.length = idx + 1; stack.push({ state: d }); idx++; },
+    replaceState(d) { stack[idx] = { state: d }; },
+    go(delta) {
+      idx = Math.max(0, Math.min(stack.length - 1, idx + delta));
+      queueMicrotask(() => firePopState());
+    },
+    back() { this.go(-1); },
+    forward() { this.go(1); },
+  };
+}
+const pressHardwareBack = () => {
+  // Simulate the phone's hardware Back button (not our own h.go): pop one entry and emit popstate.
+  firePopState();
+};
 {
   const initMain = (n, t) => {
     if (String(t).toLowerCase() === 'main') {
@@ -66,6 +97,7 @@ const segs = { segments: [{ status: 'OFF', start: T - 900, end: T - 300 }, { sta
 const strip = () => all((n) => n.localName === 'main' && has(n, 'pages'))[0];
 const pages = () => { const m = strip(); return m ? m.childNodes.filter((n) => n.localName === 'section') : []; };
 const settingsRoom = () => all((n) => n.localName === 'section' && has(n, 'page-settings'))[0];
+const planRoom = () => all((n) => n.localName === 'section' && has(n, 'page-tool'))[0];
 const settingsBackBtn = () => all((n) => n.localName === 'button' && has(n, 'settings-back'))[0];
 const gearBtn = () => all((n) => n.localName === 'button' && n.attributes?.['aria-label'] === 'Settings')[0];
 const litTab = () => { const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0]; const on = nav && nav.childNodes.filter((n) => n.localName === 'button').find((b) => has(b, 'on')); return on ? on.textContent.trim() : null; };
@@ -109,9 +141,9 @@ await pin('A3. the app still lands on Now by default, seated at 1 × width on fr
 });
 
 /* ---------------- (s) the snap strip ---------------- */
-// Re-aimed (2026-11-21 transitions, Lorico): strip has 3 panels matching PANEL_ORDER (page-plan, page-now, page-log);
-// Settings sits outside <main class="pages"> as section.page-settings.settings-room.
-await pin('S1. <main> is the 3-page strip matching PANEL_ORDER/BAR_ORDER; Settings room lives outside the strip', async () => {
+// Re-aimed (2026-11-21 transitions + plan-dissolve, Lorico): strip has 3 panels matching PANEL_ORDER (page-plan, page-now, page-log);
+// Settings and Plan tool rooms sit outside <main class="pages"> sharing the .room mechanism.
+await pin('S1. <main> is the 3-page strip matching PANEL_ORDER/BAR_ORDER; Settings and Plan tool rooms live outside the strip', async () => {
   const ps = pages();
   if (ps.length !== 3) return `pages=${ps.length}`;
   const want = ['page-plan', 'page-now', 'page-log'];
@@ -120,9 +152,11 @@ await pin('S1. <main> is the 3-page strip matching PANEL_ORDER/BAR_ORDER; Settin
   const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
   const barIds = nav.childNodes.filter((n) => n.localName === 'button').map((b) => ({ Plan: 'plan', Now: 'now', Log: 'log' }[b.textContent.trim()]));
   const sr = settingsRoom();
-  const roomOutsideStrip = !!sr && has(sr, 'settings-room') && sr.parentNode !== strip();
-  return (JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(got) === JSON.stringify(expectedFromOrder) && JSON.stringify(barIds) === JSON.stringify(BAR_ORDER) && roomOutsideStrip)
-    || `strip=${JSON.stringify(got)} bar=${JSON.stringify(barIds)} roomOutsideStrip=${roomOutsideStrip}`;
+  const pr = planRoom();
+  const roomsOutsideStrip = !!sr && has(sr, 'room') && has(sr, 'settings-room') && sr.parentNode !== strip()
+    && !!pr && has(pr, 'room') && has(pr, 'plan-room') && pr.parentNode !== strip();
+  return (JSON.stringify(got) === JSON.stringify(want) && JSON.stringify(got) === JSON.stringify(expectedFromOrder) && JSON.stringify(barIds) === JSON.stringify(BAR_ORDER) && roomsOutsideStrip)
+    || `strip=${JSON.stringify(got)} bar=${JSON.stringify(barIds)} roomsOutsideStrip=${roomsOutsideStrip}`;
 });
 await pin('S2. all three strip panels and the Settings room stay mounted at once (never unmounts a page)', async () => {
   await seed({ tab: 'now', ...segs });
@@ -159,9 +193,10 @@ await pin('S4. REPEATED walks keep working — the full 3-panel ring, forth and 
 await pin('S5. the page nodes are the same objects after the walks (scroll state lives on them)', async () => {
   const before = pages();
   const srBefore = settingsRoom();
+  const prBefore = planRoom();
   await scrollStripTo(0); await scrollStripTo(800); await scrollStripTo(400);
   const after = pages();
-  return (before.length === 3 && after.length === 3 && before.every((p, i) => p === after[i]) && srBefore === settingsRoom()) || 'a page node was replaced';
+  return (before.length === 3 && after.length === 3 && before.every((p, i) => p === after[i]) && srBefore === settingsRoom() && prBefore === planRoom()) || 'a page node was replaced';
 });
 // Re-aimed (2026-11-21 transitions, Lorico): Plan/Log/Now bar taps scroll the 3-panel strip to 0/800/400;
 // header Settings gear dissolves into Settings room WITHOUT scrolling the strip, and Settings Back returns.
@@ -205,21 +240,23 @@ await pin('S7. a programmatic tab change (restore / deep link / back) scrolls th
   const lastLog = scrollCalls[scrollCalls.length - 1];
   return (lastLog && lastLog.left === 800) || `log scrollTo=${JSON.stringify(lastLog)}`;
 });
-// Re-aimed (2026-11-20 nowplain): Plan is now index 0 (0px); swiping left from Plan goes to Now (400px).
-await pin('S8. a planning sub-screen sits on the Plan page; a settle there never walks it back to the menu', async () => {
-  scrollCalls.length = 0;
+// Re-aimed (2026-11-21 plan-dissolve, Lorico): planning sub-screens open in section.page-tool.room.plan-room
+// without scrolling the strip, leaving the Plan hub mounted behind them and ignoring strip scrolls while open.
+await pin('S8. a planning sub-screen opens in the Plan tool room without scrolling the strip; strip scrolls never clobber it', async () => {
+  await seed({ tab: 'plan', ...segs });
+  strip().scrollLeft = 0; scrollCalls.length = 0;
   await seed({ tab: 'split', ...segs });
-  const last = scrollCalls[scrollCalls.length - 1];
-  if (!last || last.left !== 0) return `strip went to ${JSON.stringify(last)}, want plan (0)`;
-  const planPage = pages()[0];
-  if (!planPage.textContent.includes('Break 1')) return 'Split Lab content not in the Plan page';
+  if (scrollCalls.length !== 0 || strip().scrollLeft !== 0) return `unexpected strip scroll: calls=${JSON.stringify(scrollCalls)} sl=${strip().scrollLeft}`;
+  const pr = planRoom();
+  if (!has(pr, 'is-active') || !pr.textContent.includes('Break 1')) return 'Split Lab content not active in Plan tool room';
+  if (!pages()[0].textContent.includes('Plan a sleeper split')) return 'Plan hub not kept mounted behind the room';
   await scrollStripTo(0);
-  if (getState().tab !== 'split') return `settle clobbered the sub-screen: tab=${getState().tab}`;
+  if (getState().tab !== 'split') return `settle at 0 clobbered the sub-screen: tab=${getState().tab}`;
   await scrollStripTo(400);
-  return getState().tab === 'now' || `swiping away from a sub-screen: tab=${getState().tab}, want now`;
+  return getState().tab === 'split' || `strip scroll behind room clobbered sub-screen: tab=${getState().tab}, want split`;
 });
-// Re-aimed (2026-11-21 transitions, Lorico): Log is panel index 2 of 3; off-strip Settings room is also inert + aria-hidden.
-await pin('S9. the pages off the settled panel (and closed Settings room) are inert and aria-hidden; the settled page is neither', async () => {
+// Re-aimed (2026-11-21 transitions + plan-dissolve, Lorico): Log is panel index 2 of 3; both closed off-strip rooms are inert + aria-hidden.
+await pin('S9. the pages off the settled panel (and closed Settings/Plan rooms) are inert and aria-hidden; the settled page is neither', async () => {
   await seed({ tab: 'log', ...segs });
   const ps = pages();
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
@@ -232,6 +269,8 @@ await pin('S9. the pages off the settled panel (and closed Settings room) are in
   });
   const sr = settingsRoom();
   if (!off(sr) || !hid(sr)) bad.push(`settings room inert=${off(sr)} hidden=${hid(sr)}`);
+  const pr = planRoom();
+  if (!off(pr) || !hid(pr)) bad.push(`plan room inert=${off(pr)} hidden=${hid(pr)}`);
   return bad.length === 0 || bad.join('; ');
 });
 await pin('S10. while a sheet is open, a strip settle does not change the tab', async () => {
@@ -882,16 +921,17 @@ await pin('W1. Plan hub lists 7 .plan-item tools with "Weekly recap vs. 34" 5th,
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
   if (items.length !== 7 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue') return `items=${JSON.stringify(titles)}`;
   fire(items[4], 'click'); await sleep(60);
-  const txt = planPg.textContent;
-  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
-  const verdict = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', planPg)[0];
+  const rm = planRoom();
+  const txt = rm.textContent;
+  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
+  const verdict = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', rm)[0];
   if (h1 !== 'Weekly recap vs. 34' || !verdict) return `h1=${h1} verdict=${!!verdict}`;
   if (txt.indexOf(verdict.textContent) > txt.indexOf('Day-by-day forecast')) return 'verdict banner is not before Day-by-day forecast';
-  const back = all((n) => n.localName === 'button' && has(n, 'back'), planPg)[0];
+  const back = all((n) => n.localName === 'button' && has(n, 'back'), rm)[0];
   if (!back || !/Plan/.test(back.textContent)) return `back=${back?.textContent}`;
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return afterItems.length === 7 || `after back items=${afterItems.length}`;
+  return (!has(rm, 'is-active') && afterItems.length === 7) || `after back active=${cls(rm)} items=${afterItems.length}`;
 });
 
 await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset net gain; changing budget preset & target home time updates live', async () => {
@@ -908,17 +948,18 @@ await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset 
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
   fire(lastBtn, 'click'); await sleep(60);
-  const v1 = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', planPg)[0]?.textContent ?? '';
+  const rm = planRoom();
+  const v1 = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', rm)[0]?.textContent ?? '';
   if (!/Recaps pinch to 5h 00m/.test(v1) || !/nets \+/.test(v1)) return `unexpected verdict: ${v1}`;
   // Select Target Home Time = 4 shifts -> Home Time summary card + cruise cap appears
-  const sel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Target home time or day off', planPg)[0];
+  const sel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Target home time or day off', rm)[0];
   if (!sel) return 'missing home-time select';
   sel.value = '4';
   fire(sel, 'change'); await sleep(60);
-  const txt = planPg.textContent;
+  const txt = rm.textContent;
   const okHome = /Recap cruise cap/.test(txt) && /cap shifts at/.test(txt);
   // Tap 8h 30m preset button -> updates projection
-  const btn85 = all((n) => n.localName === 'button' && n.textContent.trim() === '8h 30m', planPg)[0];
+  const btn85 = all((n) => n.localName === 'button' && n.textContent.trim() === '8h 30m', rm)[0];
   if (!btn85) return 'missing 8h 30m preset button';
   fire(btn85, 'click'); await sleep(60);
   const okPreset = has(btn85, 'on');
@@ -934,7 +975,7 @@ await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cy
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
   fire(lastBtn, 'click'); await sleep(60);
-  const txt = planPg.textContent;
+  const txt = planRoom().textContent;
   const ok = /60-hour \/ 7-day cycle/.test(txt)
     && /7 of your last 7 carrier days have no logged entries and are counted as 0h/.test(txt)
     && /Recap wall/.test(txt);
@@ -984,17 +1025,18 @@ await pin('R1. Plan hub lists 7 .plan-item tools with "When to roll & PTA" 6th a
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
   if (items.length !== 7 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue') return `items=${JSON.stringify(titles)}`;
   fire(items[5], 'click'); await sleep(60);
-  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), planPg)[0]?.textContent?.trim();
-  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planPg)[0];
-  const checklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg)[0];
-  const pta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0];
-  const txt = planPg.textContent;
+  const rm = planRoom();
+  const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
+  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', rm)[0];
+  const checklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', rm)[0];
+  const pta = all((n) => n.attributes?.['data-rollout-pta'] === '1', rm)[0];
+  const txt = rm.textContent;
   if (h1 !== 'When to roll & PTA' || !verdict || !checklist || !pta) return `h1=${h1} v=${!!verdict} c=${!!checklist} p=${!!pta}`;
   if (txt.indexOf(verdict.textContent) > txt.indexOf(checklist.textContent)) return 'verdict not before checklist';
-  const back = all((n) => n.localName === 'button' && has(n, 'back'), planPg)[0];
+  const back = all((n) => n.localName === 'button' && has(n, 'back'), rm)[0];
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return afterItems.length === 7 || `after back items=${afterItems.length}`;
+  return (!has(rm, 'is-active') && afterItems.length === 7) || `after back active=${cls(rm)} items=${afterItems.length}`;
 });
 
 await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Central (home terminal) yields identical dual-displayed roll-out, 08:00-10:00 sweet spot & PTA', async () => {
@@ -1013,28 +1055,29 @@ await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Centra
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: sOk, current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
   // Choose America/New_York, date 2026-11-12, time 08:00 in local mode via ClockPick sheet, 550 mi @ 55 mph
-  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
-  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', planPg)[0];
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', rm)[0];
+  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', rm)[0];
   if (!tzSel || !btn550) return 'missing rollout controls';
   tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
-  const errLocal = await setRolloutAppt(planPg, '2026-11-12', '08:00');
+  const errLocal = await setRolloutAppt(rm, '2026-11-12', '08:00');
   if (errLocal) return errLocal;
   fire(btn550, 'click'); await sleep(60);
 
-  const rollLocal = all((n) => n.attributes?.['data-rollout-rollout'] === '1', planPg)[0]?.textContent ?? '';
-  const sweetLocal = all((n) => n.attributes?.['data-rollout-sweetspot'] === '1', planPg)[0]?.textContent ?? '';
-  const ptaLocal = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0]?.textContent ?? '';
+  const rollLocal = all((n) => n.attributes?.['data-rollout-rollout'] === '1', rm)[0]?.textContent ?? '';
+  const sweetLocal = all((n) => n.attributes?.['data-rollout-sweetspot'] === '1', rm)[0]?.textContent ?? '';
+  const ptaLocal = all((n) => n.attributes?.['data-rollout-pta'] === '1', rm)[0]?.textContent ?? '';
 
   // Toggle to Home terminal and enter 07:00 Central via ClockPick sheet — must produce the EXACT same roll-out and PTA!
-  const termBtn = all((n) => n.localName === 'button' && /Home terminal/.test(n.textContent), planPg)[0];
+  const termBtn = all((n) => n.localName === 'button' && /Home terminal/.test(n.textContent), rm)[0];
   fire(termBtn, 'click'); await sleep(40);
-  const errTerm = await setRolloutAppt(planPg, '2026-11-12', '07:00');
+  const errTerm = await setRolloutAppt(rm, '2026-11-12', '07:00');
   if (errTerm) return errTerm;
 
-  const rollTerm = all((n) => n.attributes?.['data-rollout-rollout'] === '1', planPg)[0]?.textContent ?? '';
-  const ptaTerm = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg)[0]?.textContent ?? '';
+  const rollTerm = all((n) => n.attributes?.['data-rollout-rollout'] === '1', rm)[0]?.textContent ?? '';
+  const ptaTerm = all((n) => n.attributes?.['data-rollout-pta'] === '1', rm)[0]?.textContent ?? '';
 
   A.openRolloutPlanner(false);
   const okDual = /19:30 Central/.test(rollLocal) && /20:30 Eastern/.test(rollLocal);
@@ -1053,18 +1096,19 @@ await pin('R3. miles + speed vs direct drive hours mode equivalence in live DOM 
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
-  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', planPg)[0];
+  const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', rm)[0];
   fire(btn550, 'click'); await sleep(60);
-  const brkMiles = all((n) => n.attributes?.['data-rollout-break'] === '1', planPg)[0]?.textContent ?? '';
-  const shutMiles = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', planPg)[0]?.textContent ?? '';
+  const brkMiles = all((n) => n.attributes?.['data-rollout-break'] === '1', rm)[0]?.textContent ?? '';
+  const shutMiles = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', rm)[0]?.textContent ?? '';
 
-  const hrsModeBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Direct drive hours', planPg)[0];
+  const hrsModeBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Direct drive hours', rm)[0];
   fire(hrsModeBtn, 'click'); await sleep(40);
-  const btn10h = all((n) => n.localName === 'button' && n.textContent.trim() === '10h', planPg)[0];
+  const btn10h = all((n) => n.localName === 'button' && n.textContent.trim() === '10h', rm)[0];
   fire(btn10h, 'click'); await sleep(60);
-  const brkHours = all((n) => n.attributes?.['data-rollout-break'] === '1', planPg)[0]?.textContent ?? '';
-  const shutHours = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', planPg)[0]?.textContent ?? '';
+  const brkHours = all((n) => n.attributes?.['data-rollout-break'] === '1', rm)[0]?.textContent ?? '';
+  const shutHours = all((n) => n.attributes?.['data-rollout-shutdown'] === '1', rm)[0]?.textContent ?? '';
 
   A.openRolloutPlanner(false);
   return (brkMiles === brkHours && shutMiles === shutHours && brkMiles.length > 0)
@@ -1086,23 +1130,24 @@ await pin('R4. infeasible run (10h break cannot complete before roll-out): shows
   await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
-  const errSet = await setRolloutAppt(planPg, '2026-11-12', '10:00');
+  const errSet = await setRolloutAppt(rm, '2026-11-12', '10:00');
   if (errSet) return errSet;
 
-  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planPg)[0]?.textContent ?? '';
-  const infCard = all((n) => n.attributes?.['data-rollout-infeasible'] === '1', planPg)[0];
-  const badChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg);
-  const badPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg);
+  const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', rm)[0]?.textContent ?? '';
+  const infCard = all((n) => n.attributes?.['data-rollout-infeasible'] === '1', rm)[0];
+  const badChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', rm);
+  const badPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', rm);
   if (!/Does not fit/.test(verdict) || !/10-hour break cannot finish/.test(verdict)) return `bad verdict: ${verdict}`;
   if (!infCard || badChecklist.length !== 0 || badPta.length !== 0) return `inf=${!!infCard} chk=${badChecklist.length} pta=${badPta.length}`;
 
   // One-tap shift to earliest workable appointment flips to legal timetable
-  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), planPg)[0];
+  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), rm)[0];
   if (!shiftBtn) return 'missing recovery shift button';
   fire(shiftBtn, 'click'); await sleep(60);
-  const okChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', planPg).length === 1;
-  const okPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', planPg).length === 1;
+  const okChecklist = all((n) => n.attributes?.['data-rollout-checklist'] === '1', rm).length === 1;
+  const okPta = all((n) => n.attributes?.['data-rollout-pta'] === '1', rm).length === 1;
   A.openRolloutPlanner(false);
   return (okChecklist && okPta) || `after shift chk=${okChecklist} pta=${okPta}`;
 });
@@ -1128,16 +1173,17 @@ await pin('R6. rollout screen has no raw <input type="time"> or <input type="dat
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
-  const rawClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), planPg);
+  const rawClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), rm);
   const rootClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'));
   if (rawClosed.length !== 0 || rootClosed.length !== 0) return `closed raw=${rawClosed.length} root=${rootClosed.length}`;
 
-  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   if (!apptBtn) return 'missing appointment button';
   fire(apptBtn, 'click'); await sleep(40);
   const sh = all((n) => has(n, 'sheet'))[0];
-  const rawOnPage = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), planPg);
+  const rawOnPage = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), rm);
   const inSheetTime = all((n) => n.localName === 'input' && n.attributes?.type === 'time', sh);
   const inSheetDate = all((n) => n.localName === 'input' && n.attributes?.type === 'date', sh);
   openSheet(null); await sleep(40);
@@ -1156,11 +1202,12 @@ await pin('R7. tapping rollout appointment opens ClockPick sheet naming entry zo
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
-  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', rm)[0];
   tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
 
-  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   fire(apptBtn, 'click'); await sleep(40);
   const sh = all((n) => has(n, 'sheet'))[0];
   if (!sh) return 'sheet did not open';
@@ -1199,18 +1246,19 @@ await pin('R8. cross-zone (Chicago home / New York entry) sets 08:00 -> stores d
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
   // Cross-zone: home America/Chicago, entry America/New_York (local mode)
-  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', planPg)[0];
+  const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', rm)[0];
   tzSel.value = 'America/New_York'; fire(tzSel, 'change'); await sleep(40);
-  const errX = await setRolloutAppt(planPg, '2026-11-12', '08:00');
+  const errX = await setRolloutAppt(rm, '2026-11-12', '08:00');
   if (errX) return errX;
 
-  const btnX = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const btnX = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   const storedDateX = btnX?.attributes?.['data-rollout-appt-date'];
   const storedTimeX = btnX?.attributes?.['data-rollout-appt-time'];
   const btnTextX = btnX?.textContent ?? '';
-  const arrTextX = all((n) => n.attributes?.['data-rollout-arrival'] === '1', planPg)[0]?.textContent ?? '';
+  const arrTextX = all((n) => n.attributes?.['data-rollout-arrival'] === '1', rm)[0]?.textContent ?? '';
 
   // Reopen sheet to confirm ClockPick displays the exact stored wall date/time (2026-11-12, 08:00)
   fire(btnX, 'click'); await sleep(40);
@@ -1224,9 +1272,9 @@ await pin('R8. cross-zone (Chicago home / New York entry) sets 08:00 -> stores d
 
   // Same-zone: home America/Chicago, entry America/Chicago
   tzSel.value = 'America/Chicago'; fire(tzSel, 'change'); await sleep(40);
-  const errS = await setRolloutAppt(planPg, '2026-11-12', '09:30');
+  const errS = await setRolloutAppt(rm, '2026-11-12', '09:30');
   if (errS) return errS;
-  const btnS = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const btnS = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   const storedDateS = btnS?.attributes?.['data-rollout-appt-date'];
   const storedTimeS = btnS?.attributes?.['data-rollout-appt-time'];
   const btnTextS = btnS?.textContent ?? '';
@@ -1266,17 +1314,18 @@ await pin('R9. recovery "Use earliest workable appointment" updates stored appoi
   await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
   const planPg = pages()[0];
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  const rm = planRoom();
 
-  const errSet = await setRolloutAppt(planPg, '2026-11-12', '10:00');
+  const errSet = await setRolloutAppt(rm, '2026-11-12', '10:00');
   if (errSet) return errSet;
-  const beforeBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const beforeBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   const beforePair = `${beforeBtn?.attributes?.['data-rollout-appt-date']} ${beforeBtn?.attributes?.['data-rollout-appt-time']}`;
 
-  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), planPg)[0];
+  const shiftBtn = all((n) => n.localName === 'button' && /Use earliest workable appointment/.test(n.textContent), rm)[0];
   if (!shiftBtn) return 'missing recovery button';
   fire(shiftBtn, 'click'); await sleep(60);
 
-  const afterBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planPg)[0];
+  const afterBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', rm)[0];
   const afterDate = afterBtn?.attributes?.['data-rollout-appt-date'];
   const afterTime = afterBtn?.attributes?.['data-rollout-appt-time'];
   const afterPair = `${afterDate} ${afterTime}`;
@@ -1419,7 +1468,8 @@ await pin('T1. transitions (a): tapping gear from Plan/Now/Log does NOT scroll t
   return true;
 });
 
-await pin('T2. transitions (b): while in Settings, header chrome, strip, and bottom bar are hidden/inert and CSS dissolves only Settings into the viewport', async () => {
+// Re-aimed (2026-11-21 plan-dissolve, Lorico): shared .app.in-room + .page.room dissolve rules govern both Settings and Plan tool rooms.
+await pin('T2. transitions (b): while in Settings, header chrome, strip, and bottom bar are hidden/inert and shared room CSS dissolves Settings into the viewport', async () => {
   await seed({ tab: 'now', ...segs });
   fire(gearBtn(), 'click'); await sleep(60);
   const appEl = all((n) => has(n, 'app'))[0];
@@ -1430,22 +1480,42 @@ await pin('T2. transitions (b): while in Settings, header chrome, strip, and bot
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const hidesChromeCss = /\.app\.in-settings\s*>\s*header\.top[\s\S]*?\.app\.in-settings\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;/.test(css);
-  const roomFixedCss = /\.page\.settings-room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+\d+ms/.test(css);
-  const roomActiveCss = /\.page\.settings-room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;/.test(css);
-  const ok = has(appEl, 'in-settings')
+  const hidesChromeCss = /\.app\.in-room\s*>\s*header\.top[\s\S]*?\.app\.in-room\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;/.test(css);
+  const roomFixedCss = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+220ms\s+ease-out/.test(css);
+  const roomActiveCss = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;/.test(css);
+  const ok = has(appEl, 'in-room') && has(appEl, 'in-settings')
     && off(hdr) && hid(hdr)
     && off(st) && hid(st)
     && off(nav) && hid(nav)
-    && !off(sr) && !hid(sr) && has(sr, 'is-active')
+    && !off(sr) && !hid(sr) && has(sr, 'room') && has(sr, 'is-active')
     && hidesChromeCss && roomFixedCss && roomActiveCss;
   return ok || JSON.stringify({ appCls: cls(appEl), offH: off(hdr), hidH: hid(hdr), offS: off(st), offN: off(nav), offR: off(sr), hidesChromeCss, roomFixedCss, roomActiveCss });
 });
 
+// Re-aimed (2026-11-21 plan-dissolve, Lorico): Split Lab and Rescue Simulator now render in section.page-tool.room.plan-room;
+// leaving Settings to a main panel restores chrome immediately, while returning to an active Plan sub-screen preserves it in planRoom() until Back exits to Plan hub.
 await pin('T3. transitions (c): return affordance (48px target) leaves Settings, restores header + bottom bar, and preserves origin panel & Plan sub-screen', async () => {
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
-  // Origin: Split Lab inside Plan
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const back48Css = /button\.back\.settings-back\s*\{[^}]*min-height:\s*var\(--ctl-floor\)/.test(css);
+  // Origin: Plan hub -> Settings -> Back restores chrome directly
+  await seed({ tab: 'plan', ...segs });
+  strip().scrollLeft = 0; scrollCalls.length = 0;
+  fire(gearBtn(), 'click'); await sleep(60);
+  fire(settingsBackBtn(), 'click'); await sleep(60);
+  const appEl = all((n) => has(n, 'app'))[0];
+  const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
+  const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
+  const sr = settingsRoom();
+  const okHub = getState().tab === 'plan'
+    && !has(appEl, 'in-room') && !has(appEl, 'in-settings')
+    && !off(hdr) && !hid(hdr) && !off(nav) && !hid(nav) && !off(strip()) && !hid(strip())
+    && off(sr) && hid(sr) && !has(sr, 'is-active')
+    && scrollCalls.length === 0 && strip().scrollLeft === 0
+    && back48Css;
+  if (!okHub) return `plan hub return failed: tab=${getState().tab} appCls=${cls(appEl)} scrollCalls=${scrollCalls.length} back48Css=${back48Css}`;
+  // Origin: Split Lab inside Plan tool room
   await seed({ tab: 'split', ...segs });
   strip().scrollLeft = 0; scrollCalls.length = 0;
   fire(gearBtn(), 'click'); await sleep(60);
@@ -1454,26 +1524,21 @@ await pin('T3. transitions (c): return affordance (48px target) leaves Settings,
     return `split back btn wrong: label=${back?.attributes?.['aria-label']} text=${back?.textContent}`;
   }
   fire(back, 'click'); await sleep(60);
-  const appEl = all((n) => has(n, 'app'))[0];
-  const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
-  const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
-  const sr = settingsRoom();
-  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const back48Css = /button\.back\.settings-back\s*\{[^}]*min-height:\s*var\(--ctl-floor\)/.test(css);
+  const pr = planRoom();
   const okSplit = getState().tab === 'split'
-    && !has(appEl, 'in-settings')
-    && !off(hdr) && !hid(hdr) && !off(nav) && !hid(nav) && !off(strip()) && !hid(strip())
+    && has(appEl, 'in-room') && has(appEl, 'in-plan-tool') && !has(appEl, 'in-settings')
     && off(sr) && hid(sr) && !has(sr, 'is-active')
+    && !off(pr) && !hid(pr) && has(pr, 'is-active')
     && scrollCalls.length === 0 && strip().scrollLeft === 0
-    && pages()[0].textContent.includes('Break 1')
-    && back48Css;
-  if (!okSplit) return `split return failed: tab=${getState().tab} appCls=${cls(appEl)} scrollCalls=${scrollCalls.length} back48Css=${back48Css}`;
+    && pr.textContent.includes('Break 1')
+    && pages()[0].textContent.includes('Plan a sleeper split');
+  if (!okSplit) return `split return failed: tab=${getState().tab} appCls=${cls(appEl)} scrollCalls=${scrollCalls.length}`;
   // Origin: Rescue Simulator (Plan tool flag stays open across Settings visit)
   await seed({ tab: 'plan', ...segs });
   A.openRescuePlanner(true); await sleep(60);
   fire(gearBtn(), 'click'); await sleep(60);
   fire(settingsBackBtn(), 'click'); await sleep(60);
-  const okRescue = getState().tab === 'plan' && A.isRescuePlannerOpen();
+  const okRescue = getState().tab === 'plan' && A.isRescuePlannerOpen() && has(planRoom(), 'is-active');
   A.openRescuePlanner(false); await sleep(30);
   return okRescue || `rescue return failed: tab=${getState().tab} rescueOpen=${A.isRescuePlannerOpen()}`;
 });
@@ -1485,7 +1550,7 @@ await pin('T4. transitions (d): Day/Night toggle applies CSS color/background tr
   const dur = durMatch ? Number(durMatch[1]) : 0;
   const hasColorAndBg = /background-color\s+\d+ms\s+ease/.test(themeRule) && /color\s+\d+ms\s+ease/.test(themeRule) && /border-color\s+\d+ms\s+ease/.test(themeRule);
   const noGeometry = !/\b(width|height|padding|margin|top|left|right|bottom|font-size|gap|grid)\b/.test(themeRule);
-  const hasReducedMotion = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.page\.settings-room[\s\S]*?transition:\s*none;/.test(css);
+  const hasReducedMotion = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.page\.room[\s\S]*?transition:\s*none;/.test(css);
   if (!(dur >= 200 && dur <= 350 && hasColorAndBg && noGeometry && hasReducedMotion)) {
     return `css check failed: dur=${dur} hasColorAndBg=${hasColorAndBg} noGeometry=${noGeometry} hasReducedMotion=${hasReducedMotion} rule=${themeRule}`;
   }
@@ -1509,6 +1574,181 @@ await pin('T4. transitions (d): Day/Night toggle applies CSS color/background tr
   const ok = afterNight.theme === 'night' && afterNight.chosen === true && afterNight.attr === null && afterNight.saved === 'night'
     && afterDay.theme === 'day' && afterDay.chosen === true && afterDay.attr === 'day' && afterDay.saved === 'day';
   return ok || JSON.stringify({ afterNight, afterDay });
+});
+
+/* ---------------- (p) plan-dissolve (2026-11-21, Lorico): all Plan tools get the Settings-room dissolve ---------------- */
+await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap, history, week, rollout, rescue) dissolves into plan-room with chrome inert/hidden and ZERO strip scroll', async () => {
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  const tools = [
+    ['load', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[0]; fire(b, 'click'); }, 'How far is the load?'],
+    ['split', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1]; fire(b, 'click'); }, 'Break 1'],
+    ['trip', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[2]; fire(b, 'click'); }, 'Clock-to-parking'],
+    ['recap', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3]; fire(b, 'click'); }, 'Hours coming back'],
+    ['week', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[4]; fire(b, 'click'); }, 'Weekly recap vs. 34'],
+    ['rollout', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5]; fire(b, 'click'); }, 'When to roll & PTA'],
+    ['rescue', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6]; fire(b, 'click'); }, 'Split-sleeper rescue'],
+  ];
+  for (const [id, openFn, marker] of tools) {
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false);
+    await seed({ tab: 'plan', ...segs });
+    strip().scrollLeft = 0; scrollCalls.length = 0;
+    openFn(); await sleep(60);
+    const appEl = all((n) => has(n, 'app'))[0];
+    const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
+    const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
+    const pr = planRoom();
+    const sr = settingsRoom();
+    const hubItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0]);
+    const ok = scrollCalls.length === 0 && strip().scrollLeft === 0
+      && has(appEl, 'in-room') && has(appEl, 'in-plan-tool') && !has(appEl, 'in-settings')
+      && off(hdr) && hid(hdr) && off(strip()) && hid(strip()) && off(nav) && hid(nav)
+      && off(sr) && hid(sr) && !has(sr, 'is-active')
+      && !off(pr) && !hid(pr) && has(pr, 'room') && has(pr, 'plan-room') && has(pr, 'is-active')
+      && pr.attributes?.['data-plan-tool'] === id
+      && pr.textContent.includes(marker)
+      && litTab() === null
+      && hubItems.length === 7;
+    if (!ok) return `${id} failed: scrollCalls=${scrollCalls.length} appCls=${cls(appEl)} prCls=${cls(pr)} tool=${pr.attributes?.['data-plan-tool']} lit=${litTab()} hubItems=${hubItems.length}`;
+  }
+  // History reached from Recap ("Your last 8 days")
+  await seed({ tab: 'plan', ...segs });
+  strip().scrollLeft = 0; scrollCalls.length = 0;
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  const histBtn = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Your last 8 days/.test(n.textContent), planRoom())[0];
+  if (!histBtn) return 'missing Your last 8 days door in Recap';
+  fire(histBtn, 'click'); await sleep(60);
+  const prH = planRoom();
+  const appH = all((n) => has(n, 'app'))[0];
+  const okHist = scrollCalls.length === 0 && strip().scrollLeft === 0
+    && has(appH, 'in-room') && has(appH, 'in-plan-tool')
+    && has(prH, 'is-active') && prH.attributes?.['data-plan-tool'] === 'history'
+    && prH.textContent.includes('Your last 8 days');
+  A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false);
+  return okHist || `history failed: scrollCalls=${scrollCalls.length} tool=${prH.attributes?.['data-plan-tool']}`;
+});
+
+await pin('P2. plan-dissolve: shared room CSS (220ms ease-out, fixed inset:0 z-index:20), reduced-motion disable, sheet/modal z-index layering, and print hiding', async () => {
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const sharedChrome = /\.app\.in-room\s*>\s*header\.top,\s*\.app\.in-room\s*>\s*main\.pages,\s*\.app\.in-room\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;[^}]*opacity\s+220ms\s+ease-out/.test(css);
+  const sharedRoom = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+220ms\s+ease-out/.test(css);
+  const sharedActive = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*opacity\s+220ms\s+ease-out/.test(css);
+  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.app\.in-room\s*>\s*header\.top[\s\S]*?\.page\.room,\s*\.page\.room\.is-active[\s\S]*?transition:\s*none;/.test(css);
+  const sheetAbove = /\.sheet-wrap\s*\{[^}]*z-index:\s*40;/.test(css);
+  const modalAbove = /\.backdrop\s*\{[^}]*z-index:\s*50;/.test(css);
+  const printHide = /@media\s+print\s*\{[\s\S]*?\.app\.has-print-report\s*>\s*:not\(\.print-report\)\s*\{\s*display:\s*none\s*!important;/.test(css);
+  const ok = sharedChrome && sharedRoom && sharedActive && reduced && sheetAbove && modalAbove && printHide;
+  return ok || JSON.stringify({ sharedChrome, sharedRoom, sharedActive, reduced, sheetAbove, modalAbove, printHide });
+});
+
+await pin('P3. plan-dissolve: closing every Plan tool via its Back affordance dissolves back to origin (Plan hub / Recap / Now), restores chrome & hub scrollTop with zero strip scroll', async () => {
+  const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
+  const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
+  for (let idx = 0; idx < 7; idx++) {
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false);
+    await seed({ tab: 'plan', ...segs });
+    strip().scrollLeft = 0;
+    pages()[0].scrollTop = 185;
+    scrollCalls.length = 0;
+    const item = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[idx];
+    fire(item, 'click'); await sleep(60);
+    const pr = planRoom();
+    const backBtn = all((n) => n.localName === 'button' && (has(n, 'back') || /Back to Plan/.test(n.attributes?.['aria-label'] || '')), pr)[0];
+    if (!backBtn) return `tool[${idx}] missing back button`;
+    fire(backBtn, 'click'); await sleep(60);
+    const appEl = all((n) => has(n, 'app'))[0];
+    const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
+    const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
+    const ok = getState().tab === 'plan'
+      && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen()
+      && !has(appEl, 'in-room') && !has(appEl, 'in-plan-tool')
+      && !off(hdr) && !hid(hdr) && !off(strip()) && !hid(strip()) && !off(nav) && !hid(nav)
+      && off(pr) && hid(pr) && !has(pr, 'is-active')
+      && has(pages()[0], 'is-active') && litTab() === 'Plan'
+      && pages()[0].scrollTop === 185
+      && scrollCalls.length === 0 && strip().scrollLeft === 0;
+    if (!ok) return `tool[${idx}] return failed: tab=${getState().tab} appCls=${cls(appEl)} hubScroll=${pages()[0].scrollTop} scrollCalls=${scrollCalls.length} lit=${litTab()}`;
+  }
+  // Recap -> History -> Back to Recap -> Back to Plan (nested origin return)
+  await seed({ tab: 'plan', ...segs });
+  strip().scrollLeft = 0; scrollCalls.length = 0;
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item') && /Your last 8 days/.test(n.textContent), planRoom())[0], 'click'); await sleep(60);
+  const backRecap = all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0];
+  if (!backRecap || !backRecap.textContent.includes('Recap')) return `history back wrong: ${backRecap?.textContent}`;
+  fire(backRecap, 'click'); await sleep(60);
+  if (getState().tab !== 'recap' || !has(planRoom(), 'is-active')) return `history->recap failed: tab=${getState().tab}`;
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0], 'click'); await sleep(60);
+  if (getState().tab !== 'plan' || has(planRoom(), 'is-active') || scrollCalls.length !== 0) return `recap->plan failed: tab=${getState().tab}`;
+  // Now -> Split Lab (planReturn: 'now') -> Back to Now with zero strip scroll
+  await seed({ tab: 'now', ...segs });
+  strip().scrollLeft = 400; scrollCalls.length = 0;
+  setState({ tab: 'split', planReturn: 'now' }); await sleep(60);
+  const backNow = all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0];
+  if (!backNow || !backNow.textContent.includes('Now') || scrollCalls.length !== 0 || strip().scrollLeft !== 400) {
+    return `now->split failed: back=${backNow?.textContent} scrollCalls=${scrollCalls.length} sl=${strip().scrollLeft}`;
+  }
+  fire(backNow, 'click'); await sleep(60);
+  return (getState().tab === 'now' && !has(planRoom(), 'is-active') && scrollCalls.length === 0 && strip().scrollLeft === 400 && litTab() === 'Now')
+    || `split->now failed: tab=${getState().tab} scrollCalls=${scrollCalls.length} sl=${strip().scrollLeft}`;
+});
+
+await pin('P4. plan-dissolve: hardware Back (popstate via backnav) closes sheet first if open, then dissolves Plan tool back to Plan hub with zero strip scroll', async () => {
+  for (const [id, openFn] of [
+    ['load', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[0], 'click')],
+    ['split', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1], 'click')],
+    ['trip', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[2], 'click')],
+    ['recap', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click')],
+    ['week', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[4], 'click')],
+    ['rollout', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5], 'click')],
+    ['rescue', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6], 'click')],
+  ]) {
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false);
+    await seed({ tab: 'plan', ...segs });
+    strip().scrollLeft = 0; scrollCalls.length = 0;
+    openFn(); await sleep(60);
+    if (!has(planRoom(), 'is-active')) return `${id} did not open`;
+    pressHardwareBack(); await sleep(60);
+    const appEl = all((n) => has(n, 'app'))[0];
+    const ok = getState().tab === 'plan' && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen()
+      && !has(appEl, 'in-room') && !has(planRoom(), 'is-active') && has(pages()[0], 'is-active')
+      && scrollCalls.length === 0 && strip().scrollLeft === 0;
+    if (!ok) return `hw-back ${id} failed: tab=${getState().tab} appCls=${cls(appEl)} scrollCalls=${scrollCalls.length}`;
+  }
+  // Open a sheet inside Rollout -> first hardware Back closes sheet while keeping Rollout room open; second closes Rollout
+  await seed({ tab: 'plan', ...segs });
+  strip().scrollLeft = 0; scrollCalls.length = 0;
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5], 'click'); await sleep(60);
+  const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planRoom())[0];
+  fire(apptBtn, 'click'); await sleep(60);
+  if (!all((n) => has(n, 'sheet')).length) return 'rollout sheet did not open';
+  pressHardwareBack(); await sleep(60);
+  const sheetClosedRoomOpen = all((n) => has(n, 'sheet')).length === 0 && A.isRolloutPlannerOpen() && has(planRoom(), 'is-active');
+  pressHardwareBack(); await sleep(60);
+  const roomClosed = !A.isRolloutPlannerOpen() && !has(planRoom(), 'is-active') && getState().tab === 'plan' && scrollCalls.length === 0;
+  return (sheetClosedRoomOpen && roomClosed) || `sheetClosedRoomOpen=${sheetClosedRoomOpen} roomClosed=${roomClosed}`;
+});
+
+await pin('P5. plan-dissolve: opening a Plan tool resets planRoom.scrollTop to 0 (and preserves Plan hub scrollTop across tool entry/exit)', async () => {
+  await seed({ tab: 'plan', ...segs });
+  pages()[0].scrollTop = 240;
+  planRoom().scrollTop = 310;
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1], 'click'); await sleep(60);
+  const afterSplit = planRoom().scrollTop;
+  // Scroll inside Split Lab, return to Plan, open Recap -> resets to 0 again; hub scrollTop stays 240
+  planRoom().scrollTop = 420;
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0], 'click'); await sleep(60);
+  const hubAfterSplit = pages()[0].scrollTop;
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  const afterRecap = planRoom().scrollTop;
+  // Switch directly from Recap to Load -> resets planRoom.scrollTop to 0
+  planRoom().scrollTop = 190;
+  const loadDoor = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Can I take this load\?/.test(n.textContent), planRoom())[0];
+  fire(loadDoor, 'click'); await sleep(60);
+  const afterLoad = planRoom().scrollTop;
+  setState({ tab: 'plan' }); await sleep(60);
+  return (afterSplit === 0 && hubAfterSplit === 240 && afterRecap === 0 && afterLoad === 0 && pages()[0].scrollTop === 240)
+    || JSON.stringify({ afterSplit, hubAfterSplit, afterRecap, afterLoad, hubEnd: pages()[0].scrollTop });
 });
 
 let fails = 0;

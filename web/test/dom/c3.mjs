@@ -81,6 +81,7 @@ const byClass = (c, from) => all((n) => n.nodeType === 1 && cls(n).includes(c), 
 // on the Now and Recap screens — pins about the Plan hub or a Plan sub-screen scope
 // their searches to the Plan page subtree, as a driver's eye would.
 const planPage = () => byClass('page-plan')[0];
+const planRoom = () => byClass('page-tool')[0];
 const fire = (node, type, extra = {}) => { for (const t of [type, type[0].toUpperCase() + type.slice(1)]) { const ev = { type: t, target: node, currentTarget: node, preventDefault() {}, stopPropagation() {}, ...extra }; for (const f of node.listeners[t] ?? []) f.call(node, ev); } };
 const disabled = (n) => n.attributes.disabled !== undefined && n.attributes.disabled !== 'false';
 const buttons = (re) => all((n) => n.localName === 'button' && re.test(n.textContent));
@@ -338,15 +339,18 @@ await pin('D10a. the Plan hub lists 7 items; 4th is "Hours coming back" (opens r
   return (getState().tab === 'recap' && getState().planReturn === 'plan') || `${getState().tab}/${getState().planReturn}`;
 });
 
-await pin('D10b. Hours coming back sits under Plan in the tab bar (navOf), title + back to Plan; History too', async () => {
+// Re-aimed (2026-11-21 plan-dissolve, Lorico): Hours coming back & History open in the full-screen Plan tool room
+// (section.page-tool.room.plan-room) with main chrome hidden/inert, while navPanelOf keeps both under 'plan'.
+await pin('D10b. Hours coming back sits under Plan (navPanelOf), opens in Plan tool room with title + back to Plan; History too', async () => {
   const cur = () => all((n) => n.localName === 'button' && n.attributes['aria-current'] === 'page')[0]?.textContent.trim();
-  const onRecap = cur();
-  const title = all((n) => n.localName === 'h1', planPage())[0]?.textContent;
-  const back = all((n) => n.localName === 'button' && cls(n).includes('back'), planPage())[0]?.textContent.trim();
+  const pr = planRoom();
+  const onRecap = A.navPanelOf('recap') === 'plan' && !cur() && cls(pr).includes('is-active');
+  const title = all((n) => n.localName === 'h1', pr)[0]?.textContent;
+  const back = all((n) => n.localName === 'button' && cls(n).includes('back'), pr)[0]?.textContent.trim();
   setState({ tab: 'history', planReturn: 'recap' }); await sleep(60);
-  const onHist = cur();
+  const onHist = A.navPanelOf('history') === 'plan' && !cur() && cls(planRoom()).includes('is-active');
   setState({ tab: 'recap', planReturn: 'plan' }); await sleep(40);
-  return (onRecap === 'Plan' && onHist === 'Plan' && title === 'Hours coming back' && back === 'Plan') || JSON.stringify({ onRecap, onHist, title, back });
+  return (onRecap && onHist && title === 'Hours coming back' && back === 'Plan') || JSON.stringify({ onRecap, onHist, title, back });
 });
 
 await pin('D10c. the phone\'s Back from Hours coming back lands on Plan (History\'s still lands on Now)', async () => {
@@ -408,12 +412,13 @@ await pin('D10g. tapping a bar opens that day in History (back returns to Hours 
 });
 
 // A5 (audit-fix): forecast rows read "+<dur> back" (was "+<dur> drops") and day-editor buttons are capitalised ("Set"/"Edit").
+// Re-aimed (2026-11-21 plan-dissolve): RecapTab renders inside planRoom() (section.page-tool).
 await pin('D10h. the screen keeps the forecast list, "Fix a day" (the day editor) and the Load + History doors, in that order', async () => {
   setState({ tab: 'recap', planReturn: 'plan' }); await sleep(60);
-  const t = planPage()?.textContent ?? '';
+  const t = planRoom()?.textContent ?? '';
   const at = (s) => t.indexOf(s);
   const order = [at('Hours coming back'), at('On duty, day by day'), at('+10h 00m back'), at('Fix a day'), at('Can I take this load?'), at('Your last 8 days')];
-  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && all((n) => n.localName === 'button' && /^(Set|Edit)$/.test(n.textContent), planPage()).length > 0) || JSON.stringify(order);
+  return (order.every((x) => x >= 0) && order.every((x, i) => i === 0 || x > order[i - 1]) && all((n) => n.localName === 'button' && /^(Set|Edit)$/.test(n.textContent), planRoom()).length > 0) || JSON.stringify(order);
 });
 
 // D18 (audit-fix): both the old Recap row and the one-release "Hours coming back has moved to Plan ›" migration banner are retired from More.

@@ -29,7 +29,7 @@ const out = (label) => {
 // page-* marker to the next page's (nested cards are <section class="card">, never
 // "page page-*"). Presence checks keep reading the whole tree, as before.
 const pageOut = (html, page) => {
-  const marks = ['page-now', 'page-plan', 'page-log', 'page-settings'];
+  const marks = ['page-now', 'page-plan', 'page-log', 'page-settings', 'page-tool'];
   const i = html.indexOf(page);
   if (i < 0) return '';
   const next = marks.map((m) => html.indexOf(m, i + 1)).filter((j) => j > i);
@@ -1275,15 +1275,17 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (!/Adverse driving conditions/.test(h) || !/16-hour short-haul day/.test(h) || !/type="checkbox"/.test(h)) throw new Error('the exceptions panel must hold both switches');
   openSheet(null);
 
-  // 8. Plan: three questions; the planning screens lead back to it and keep Plan lit in the tab bar
+  // 8. Plan: three questions; the planning screens lead back to it and open in their own full-screen room
+  // (re-aimed 2026-11-21 plan-dissolve, Lorico: Plan tools dissolve in as a full-screen room with main chrome hidden/inert, matching Settings).
   setState({ ...base, tab: 'plan' });
   h = out('plan/hub');
   for (const q of ['Can I take this load?', 'Plan a sleeper split', 'Plan a run']) if (!h.includes(q)) throw new Error(`Plan must offer "${q}"`);
   for (const tab of ['split', 'trip']) {
     setState({ tab });
     h = out(`${tab}/under plan`);
-    if (!/class="back"/.test(h)) throw new Error(`${tab} must lead back to Plan`);
-    if (!/aria-current="page"[^>]*>[\s\S]{0,400}Plan<\/button>/.test(h)) throw new Error(`${tab} must keep Plan lit in the tab bar`);
+    if (!/class="back"/.test(pageOut(h, 'page-tool'))) throw new Error(`${tab} must lead back to Plan`);
+    if (!/in-room in-plan-tool/.test(h) || !/page-tool room plan-room is-active/.test(h)) throw new Error(`${tab} must open in the active Plan tool room`);
+    if (/aria-current="page"/.test(h)) throw new Error(`${tab} must not light a bottom-bar tab while main chrome is hidden in a room`);
   }
   // 9. tap targets: nothing on Now smaller than 48px by its own CSS (floor raised by patch #6;
   //    the per-class pins live in the patch 6 section at the end of this file)
@@ -2901,10 +2903,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // (a)+(d)+(f) the render: 8 day sections, the totals in the driver's words, "Not logged" on
   //     screen, and the ELD named as the official record
   let h = out('patch 7.2/history seeded');
-  // scoped to the Plan page, where the history view lives: every page rides along in
-  // the render now that the panels stay mounted, and the other pages have their own
-  // headings, totals and buttons
-  const hist = pageOut(h, 'page-plan');
+  // Re-aimed (2026-11-21 plan-dissolve): Plan tools render in section.page-tool.room.plan-room outside <main.pages>.
+  const hist = pageOut(h, 'page-tool');
   if ((hist.match(/<h2>/g) || []).length !== 8) throw new Error('patch 7.2: the view must render 8 day sections');
   if (!/Today — 2026-10-12/.test(hist) || !/2026-10-05/.test(hist)) throw new Error('patch 7.2: the day sections must run from the oldest day to Today');
   if (!/Driving <b>5h 00m<\/b>/.test(hist) || !/Sleeper <b>7h 00m<\/b>/.test(hist) || !/Not logged <b>15h 30m<\/b>/.test(hist))
@@ -2916,7 +2916,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   //     the only button on the screen is the shared back bar, which lives outside the component
   const body = app.slice(app.indexOf('function HistoryTab'), app.indexOf('/* ============================================================ Can I take this load?'));
   if (/onClick|openSheet|setState|undoable/.test(body)) throw new Error('patch 7.2: the reflection view must not wire any editing or state-changing control');
-  if (/Edit|Delete|Add a break/.test(pageOut(h, 'page-plan'))) throw new Error('patch 7.2: the rendered view must carry no edit, delete or add controls');
+  if (/Edit|Delete|Add a break/.test(pageOut(h, 'page-tool'))) throw new Error('patch 7.2: the rendered view must carry no edit, delete or add controls');
 
   // the door and the way back: Recap offers the view, entering records Recap as the origin
   // (the patch 7.1 pattern), and the back bar names Recap and lands there
@@ -2933,7 +2933,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // (e) the DEMO/fresh state shows the empty state, not a week of invented history
   ss({ segments: [], tentative: [], current: null, historyAcknowledged: false, nowOverride: null, tab: 'history' });
   h = out('patch 7.2/history fresh');
-  const histFresh = pageOut(h, 'page-plan');
+  const histFresh = pageOut(h, 'page-tool');
   if (!/Nothing logged yet — this fills in as you enter your real day\./.test(histFresh)) throw new Error('patch 7.2: a fresh install must show the empty state');
   if ((histFresh.match(/<h2>/g) || []).length !== 0 || />Not logged</.test(histFresh)) throw new Error('patch 7.2: the fresh state must render no day sections and no not-logged rows');
   if (!/For your own review — your ELD holds the official record\./.test(histFresh)) throw new Error('patch 7.2: the ELD note must ride the empty state too');
@@ -6088,9 +6088,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(rules('.top-row > .pill').some((r) => /min-width: 0;/.test(r) && /white-space: normal;/.test(r)) && rules('.top-row > .top-right').some((r) => /flex: none;/.test(r)), 'patch 19 B4: in the header row the status capsule must give way (min-width: 0; white-space: normal) and the clock + theme switch must not (flex: none)');
   need(/@supports \(grid-template-columns: subgrid\) \{\s*\.taxis \{ display: grid; grid-template-columns: 96px minmax\(0, 1fr\) minmax\(64px, max-content\);[^}]*\}\s*\.taxis > \.taxis-row \{ grid-column: 1 \/ -1; grid-template-columns: subgrid; \}/.test(css19), 'patch 19 B4: the timeline rows must share one set of columns, the value column sized to its widest value');
   need(!/100vw/.test(css19), 'patch 19 B4: no 100vw anywhere in the stylesheet (it includes the scrollbar and overflows)');
-  // B5. the one scroll-to-top in the app follows the scroller (panel strip: the scroller
-  // is the strip page the load check sits in; the shell call rides along, a no-op there).
-  need(/useEffect\(\(\) => \{ window\.scrollTo\(0, 0\); document\.querySelector\('\.app'\)\?\.scrollTo\?\.\(0, 0\); document\.querySelector\('\.pages \.page\.is-active'\)\?\.scrollTo\?\.\(0, 0\); \}, \[step\]\)/.test(app19), 'patch 19 B5: a new load-check step must start at the top of its strip page, which is the scroller now');
+  // B5. the one scroll-to-top in the app follows the scroller (re-aimed 2026-11-21 plan-dissolve:
+  // LoadTab now scrolls inside its full-viewport .page.plan-room.is-active room, falling back to strip page).
+  need(/useEffect\(\(\) => \{ window\.scrollTo\(0, 0\); document\.querySelector\('\.app'\)\?\.scrollTo\?\.\(0, 0\); document\.querySelector\('\.page\.plan-room\.is-active, \.pages \.page\.is-active'\)\?\.scrollTo\?\.\(0, 0\); \}, \[step\]\)/.test(app19), 'patch 19 B5: a new load-check step must start at the top of its Plan room scroller');
   // A (structural): one store operation, one guard for both tap-time entries, no new storage key.
   need(/export function adjustCurrentStart\(cur: State, newSince: number, now: number\): AdjustStartResult/.test(store19), 'patch 19 A: the store must export adjustCurrentStart(state, newSince, now)');
   need((app19.match(/adjustCurrentStart\(/g) || []).length >= 2 && !/current: \{ \.\.\.[a-z.!]*current!?, since:/.test(app19), 'patch 19 A: the app must move the current start only through the store operation');
@@ -6334,8 +6334,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(A.LOAD_DEFAULT_MILES === 550 && A.FRESH_LOADCHECK.miles === 550, 'A6: fresh load check defaults to middle preset 550 mi');
 
   // A7: Plan a run uses presets + steppers + numeric entry, zero range sliders.
+  // Re-aimed (2026-11-21 plan-dissolve): Plan tools render in section.page-tool.
   setState({ ...S.INITIAL_STATE, tab: 'trip', nowOverride: nowT, historyAcknowledged: true, disclaimerAcked: true, tzChosen: true, trip: { ...DEFAULT_TRIP } });
-  const tripHtml = pageOut(render(h(App, {})), 'page-plan');
+  const tripHtml = pageOut(render(h(App, {})), 'page-tool');
   need(!/<input[^>]*type="range"/.test(tripHtml), 'A7: Plan a run must have no range sliders');
   need(/aria-label="Depart"/.test(tripHtml) && /aria-label="Distance presets"/.test(tripHtml) && /aria-label="Pre-trip or loading length"/.test(tripHtml) && /aria-label="Stop length"/.test(tripHtml), 'A7: Plan a run must render Depart, Distance, Pre-trip, and Stop preset groups');
 
@@ -6379,7 +6380,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   need(/<button class="plan-item"[\s\S]*?Can I take this load\?[\s\S]*?Four quick questions, get a yes or no\./.test(planHtml), 'Plan must still render the "Can I take this load?" plan-item entry');
   setState({ ...activeRecord, tab: 'load', planReturn: 'plan', loadCheck: { ...S.DEFAULT_LOADCHECK } });
-  const loadHtml = pageOut(render(h(App, {})), 'page-plan');
+  const loadHtml = pageOut(render(h(App, {})), 'page-tool');
   need(/How far is the load\?/.test(loadHtml), 'Load check wizard must remain intact when opened from Plan');
   if (bad.length) throw new Error(`declutter: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
@@ -6400,13 +6401,13 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   };
   const NEW_LABEL = 'Could be unloaded by (if they take you on arrival)';
   setState({ ...baseRec, loadCheck: { ...S.DEFAULT_LOADCHECK, miles: 550, leaveIn: 60, dwell: 120, dwellOff: false, appt: nowT + 60 * 17, answered: true } });
-  const ansHtml = pageOut(render(h(App, {})), 'page-plan');
+  const ansHtml = pageOut(render(h(App, {})), 'page-tool');
   need(new RegExp(`<div class="verdict-sub">${NEW_LABEL.replace(/[()]/g, '\\$&')} `).test(ansHtml), 'D17: verdict-sub must lead with "Could be unloaded by (if they take you on arrival) <time>"');
   need(new RegExp(`<div class="stat-label">${NEW_LABEL.replace(/[()]/g, '\\$&')}<\\/div>`).test(ansHtml), 'D17: Stat label must read "Could be unloaded by (if they take you on arrival)"');
   need(!/Unloaded by/.test(ansHtml), 'D17: load-check answer must no longer show a bare "Unloaded by" label');
   // dwell === 0 keeps the "There by" branch and omits the unload Stat unchanged.
   setState({ ...baseRec, loadCheck: { ...S.DEFAULT_LOADCHECK, miles: 300, leaveIn: 0, dwell: 0, dwellOff: false, answered: true } });
-  const noDwellHtml = pageOut(render(h(App, {})), 'page-plan');
+  const noDwellHtml = pageOut(render(h(App, {})), 'page-tool');
   need(/<div class="verdict-sub">There by /.test(noDwellHtml) && !noDwellHtml.includes(NEW_LABEL) && !/Unloaded by/.test(noDwellHtml), 'D17: zero-dwell load answer must keep "There by" and omit unload label');
   if (bad.length) throw new Error(`D17 label patch: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true });
@@ -6624,7 +6625,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
-  const weekHtml = pageOut(render(h(App, {})), 'page-plan');
+  const weekHtml = pageOut(render(h(App, {})), 'page-tool');
   const verdictAt = weekHtml.indexOf('data-wrecap-verdict');
   const forecastAt = weekHtml.indexOf('Day-by-day forecast');
   need(verdictAt > 0 && forecastAt > verdictAt, `Verdict banner must appear before Day-by-day forecast (${verdictAt} vs ${forecastAt})`);
@@ -6883,7 +6884,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(titles2.length === 7 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
-  const rollHtml = pageOut(render(h(App, {})), 'page-plan');
+  const rollHtml = pageOut(render(h(App, {})), 'page-tool');
   const vPos = rollHtml.indexOf('data-rollout-verdict');
   const cPos = rollHtml.indexOf('data-rollout-checklist');
   const pPos = rollHtml.indexOf('data-rollout-pta="1"');
@@ -6933,7 +6934,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   A.openRolloutPlanner(false);
   A.openRescuePlanner(true);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now13, config: cfgChi, segments: segsMid, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
-  const rescueHtml = pageOut(render(h(App, {})), 'page-plan');
+  const rescueHtml = pageOut(render(h(App, {})), 'page-tool');
   const vAt = rescueHtml.indexOf('data-rescue-verdict="1"');
   const sAt = rescueHtml.indexOf('data-rescue-strategies="1"');
   need(vAt > 0 && sAt > vAt, `rescue SSR order wrong: verdict=${vAt} strategies=${sAt}`);

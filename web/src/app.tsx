@@ -4042,8 +4042,11 @@ function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
  * (Lorico, on his Pixel, live patch 7). The label names the real destination.
  */
 function BackToPlan({ s }: { s: State }) {
-  const label = s.planReturn === 'now' ? 'Now' : s.planReturn === 'recap' ? 'Recap' : 'Plan';
-  return <button class="back" onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /> {label}</button>;
+  // Never target the screen we are already on (e.g. returning History/Load → Recap where
+  // planReturn stayed 'recap'): fall back to 'plan' so the driver is never stranded in a room.
+  const dest: State['planReturn'] = s.planReturn === s.tab ? 'plan' : s.planReturn;
+  const label = dest === 'now' ? 'Now' : dest === 'recap' ? 'Recap' : 'Plan';
+  return <button class="back" onClick={() => (dest === s.planReturn ? setState({ tab: s.planReturn }) : setState({ tab: dest, planReturn: 'plan' }))}><Icon d={I.back} /> {label}</button>;
 }
 
 /**
@@ -6519,7 +6522,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const [milesText, setMilesText] = useState<string | null>(null);
   const milesProblem = milesText === null ? null : loadMilesProblem(milesText);
   // each question is its own screen: start it at the top, not wherever the last Next button was
-  useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); document.querySelector('.pages .page.is-active')?.scrollTo?.(0, 0); }, [step]);
+  useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); document.querySelector('.page.plan-room.is-active, .pages .page.is-active')?.scrollTo?.(0, 0); }, [step]);
   const hist = cycleBasis(s, now, ev.cycle.windowDays);
   const departure = now + lc.leaveIn;
   const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
@@ -7503,6 +7506,29 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue';
+
+const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
+  load: 'Can I take this load?',
+  split: 'Plan a sleeper split',
+  trip: 'Plan a run',
+  recap: 'Hours coming back',
+  history: 'Your last 8 days',
+  week: 'Weekly recap vs. 34',
+  rollout: 'When to roll & PTA',
+  rescue: 'Split-sleeper rescue',
+};
+
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean): PlanToolId | null {
+  if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
+  if (tab === 'plan') {
+    if (weekOpen) return 'week';
+    if (rolloutOpen) return 'rollout';
+    if (rescueOpen) return 'rescue';
+  }
+  return null;
+}
+
 /* The panels live side by side in a horizontal scroll-snap strip — The Daily Number's
  * mechanism, copied at Lorico's word (2026-11-18): the browser's own scrolling decides
  * what a drag means, each page is its own vertical scroller, and the bottom bar follows
@@ -7521,17 +7547,61 @@ export function App() {
   const now = useNow();
   // Startup disclaimer — dismissed for this launch only; a fresh launch shows it again.
   const [, redraw] = useState(0);
+  const weekOpen = useWeekPlanner();
+  const rolloutOpen = useRolloutPlanner();
+  const rescueOpen = useRescuePlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
-  // Settings is its own room outside the strip (Lorico, 2026-11-21 transitions): remember
-  // the last non-settings tab so leaving Settings dissolves back to the exact origin room.
+  // Settings and every Plan tool sub-screen open as full-screen rooms outside the 3-panel
+  // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
+  // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen);
+  const inPlanTool = activePlanTool !== null;
+  const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
   if (s.tab !== 'settings') settingsReturnTab.current = s.tab;
-  const stripPanel = navPanelOf(settingsReturnTab.current);
+  const lastStripPanel = useRef<State['tab']>(
+    inSettings ? 'now' : inPlanTool ? (s.planReturn === 'now' ? 'now' : 'plan') : s.tab,
+  );
+  if (!inRoom) lastStripPanel.current = s.tab;
+  const stripPanel = lastStripPanel.current;
+  const wasInRoom = useRef(inRoom);
   const wasInSettings = useRef(inSettings);
+  const prevPlanTool = useRef<PlanToolId | null>(activePlanTool);
   const settingsRef = useRef<HTMLElement>(null);
+  const planRoomRef = useRef<HTMLElement>(null);
+  // Keep the closing Plan tool mounted (inert + aria-hidden) across the 220ms dissolve-out
+  // so exit cross-fades cleanly like Settings, then unmount to preserve each tool's lifecycle.
+  const [retainedTool, setRetainedTool] = useState<{ tool: PlanToolId; epoch: number } | null>(
+    () => (activePlanTool ? { tool: activePlanTool, epoch: 1 } : null),
+  );
+  const toolEpochRef = useRef(activePlanTool ? 1 : 0);
+  const wasToolOpenRef = useRef(inPlanTool);
+  const activeEntry = activePlanTool
+    ? (retainedTool && retainedTool.tool === activePlanTool && (wasToolOpenRef.current || wasInSettings.current)
+        ? retainedTool
+        : { tool: activePlanTool, epoch: ++toolEpochRef.current })
+    : null;
+  wasToolOpenRef.current = inPlanTool;
+  const preserveBehindSettings = inSettings && retainedTool !== null
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen) === retainedTool.tool;
+  const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
+  const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
+  useEffect(() => {
+    if (activeEntry) {
+      if (retainedTool !== activeEntry) setRetainedTool(activeEntry);
+      return;
+    }
+    if (!retainedTool || preserveBehindSettings) return;
+    if (inSettings || prefersReducedMotion()) {
+      setRetainedTool(null);
+      return;
+    }
+    const id = setTimeout(() => setRetainedTool(null), 240);
+    return () => clearTimeout(id);
+  }, [activePlanTool, inSettings, preserveBehindSettings]);
   const pagesRef = useRef<HTMLElement>(null);
   const [barPanel, setBarPanel] = useState<State['tab']>(() => stripPanel);
   const barPanelRef = useRef(barPanel);
@@ -7621,9 +7691,6 @@ export function App() {
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
-  const weekOpen = useWeekPlanner();
-  const rolloutOpen = useRolloutPlanner();
-  const rescueOpen = useRescuePlanner();
   useEffect(() => {
     if (s.tab !== 'plan' && s.tab !== 'settings' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
@@ -7684,14 +7751,8 @@ export function App() {
     );
   }
   const TAB_META: Record<string, [string, string]> = { log: ['Log', I.log], now: ['Now', I.now], plan: ['Plan', I.plan] };
-  // The planning screens sit under Plan: the tab bar shows where you are, not a fifth or sixth
-  // tab (declutter patch, 2026-11-05). Capstone C3 (D10-A): Hours coming back (tab id 'recap')
-  // and the last-8-days view it opens moved from More to Plan. While Settings is open as its own
-  // room, keep the Plan page mounted in whatever sub-screen the driver left it on so dissolving
-  // back preserves Plan state cleanly.
-  const mainTab = inSettings ? settingsReturnTab.current : s.tab;
-  const planFamily = navPanelOf(mainTab) === 'plan';
-  const returnLabel = stripPanel === 'plan' ? 'Plan' : stripPanel === 'log' ? 'Log' : 'Now';
+  const settingsOriginPanel = navPanelOf(settingsReturnTab.current);
+  const returnLabel = settingsOriginPanel === 'plan' ? 'Plan' : settingsOriginPanel === 'log' ? 'Log' : 'Now';
   // The two global notices, defined once and ridden at the top of every strip page.
   const warnbox = s.nowOverride !== null ? (
     <p class="warnbox"><b>Simulated clock.</b> Every time on screen is worked out for {clock(now)} — a made-up time set under More → Testing, not the real time. Anything you change while it is up is thrown away when you go back to the real clock. <button class="mini" onClick={() => useRealClock()}>Use real clock</button></p>
@@ -7717,9 +7778,13 @@ export function App() {
   // sheet/disclaimer owns the screen. The store is the strip's master the other way:
   // whenever the tab's panel changes any other way — a bar tap, the back button, a
   // shortcut, a restored state — the strip scrolls to meet it.
-  const activePanel = navPanelOf(s.tab);
+  const activeStripPanel = inRoom ? null : stripPanel;
+  const isInRoomNow = () => {
+    const t = getState().tab;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen()) !== null;
+  };
   const onPagesScroll = () => {
-    if (getState().tab === 'settings') return;
+    if (isInRoomNow()) return;
     const el = pagesRef.current; if (!el) return;
     // Finish a programmatic smooth glide's sub-pixel tail once within 1px of its target snap
     // offset so an adjacent panel's flush edge (e.g. Now's dock) never lingers 1px inside view.
@@ -7729,7 +7794,7 @@ export function App() {
     }
     cancelRafOf(stripRaf.current);
     stripRaf.current = rafOf(() => {
-      if (getState().tab === 'settings') return;
+      if (isInRoomNow()) return;
       const w = el.clientWidth || 0; if (!w) return;
       const idx = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w)));
       const panel = PANEL_ORDER[idx];
@@ -7747,7 +7812,7 @@ export function App() {
       if (stripSettle.current) clearTimeout(stripSettle.current);
       stripSettle.current = setTimeout(() => {
         stripSettle.current = null;
-        if (!getState().disclaimerAcked || currentSheet() !== null || getState().tab === 'settings') return;
+        if (!getState().disclaimerAcked || currentSheet() !== null || isInRoomNow()) return;
         const w2 = el.clientWidth || 0; if (!w2) return;
         const i2 = Math.max(0, Math.min(PANEL_ORDER.length - 1, Math.round(el.scrollLeft / w2)));
         if (Math.abs(el.scrollLeft - i2 * w2) > 2) return; // not resting on a page yet
@@ -7779,21 +7844,25 @@ export function App() {
   // stripPanel changes OR <main class="pages"> mounts (including returning from the driving
   // view, which unmounts the shell while stripPanel stays 'now'). A freshly mounted strip
   // jumps silently (behavior: 'auto') so first paint never flashes Plan and driving-view return
-  // lands on Now. Entering Settings leaves the strip untouched (zero scroll); returning to the
-  // same panel also needs zero scroll, while leaving Settings for a different panel seats
+  // lands on Now. Entering any full-screen room (Settings or a Plan tool) leaves the strip
+  // untouched (zero scroll) and resets the entering room's scrollTop to 0; returning to the
+  // same panel also needs zero scroll, while leaving a room for a different panel seats
   // instantly (behavior: 'auto') so no sideways slide competes with the dissolve.
   useLayoutEffect(() => {
-    if (inSettings) {
-      if (!wasInSettings.current && settingsRef.current) settingsRef.current.scrollTop = 0;
-      wasInSettings.current = true;
+    if (inSettings && !wasInSettings.current && settingsRef.current) settingsRef.current.scrollTop = 0;
+    wasInSettings.current = inSettings;
+    if (inPlanTool && activePlanTool !== prevPlanTool.current && planRoomRef.current) planRoomRef.current.scrollTop = 0;
+    prevPlanTool.current = activePlanTool;
+    if (inRoom) {
+      wasInRoom.current = true;
       stripGoal.current = null;
       tapGoal.current = null;
       tapPass.current = null;
       if (driveUp || !pagesRef.current) stripPlacedEl.current = null;
       return;
     }
-    const returningFromSettings = wasInSettings.current;
-    wasInSettings.current = false;
+    const returningFromRoom = wasInRoom.current;
+    wasInRoom.current = false;
     if (barPanelRef.current !== stripPanel) { barPanelRef.current = stripPanel; setBarPanel(stripPanel); }
     const el = pagesRef.current;
     if (!el || driveUp) { stripPlacedEl.current = null; return; }
@@ -7808,13 +7877,13 @@ export function App() {
     // commit, or a fresh mount) takes its panel as the lock reference right away, silently — so a settle swallowed under a sheet can never
     // leave a stale reference behind. A tap that needs no glide (already resting there,
     // no settle on its way) locks now, silently: nothing moved.
-    if (mountedNew || returningFromSettings || tapGoal.current !== idx || (!moving && stripSettle.current === null)) { lockedPanel.current = stripPanel; tapGoal.current = null; }
+    if (mountedNew || returningFromRoom || tapGoal.current !== idx || (!moving && stripSettle.current === null)) { lockedPanel.current = stripPanel; tapGoal.current = null; }
     tapPass.current = null;
     if (moving) {
-      const smooth = !mountedNew && !returningFromSettings && !prefersReducedMotion();
+      const smooth = !mountedNew && !returningFromRoom && !prefersReducedMotion();
       stripGoal.current = smooth ? idx : null;
       // Amendment A: only a tab tap's SMOOTH glide passes panels on screen; an instant jump
-      // (reduced motion, first placement / remount, or exiting Settings) shows nothing passing,
+      // (reduced motion, first placement / remount, or exiting a room) shows nothing passing,
       // so it keeps the lock tick only (or silent for non-tap jumps).
       if (smooth && tapGoal.current === idx) {
         const dir = idx * w > el.scrollLeft ? 1 : -1;
@@ -7824,15 +7893,15 @@ export function App() {
       el.scrollTo({ left: idx * w, behavior: smooth ? 'smooth' : 'auto' });
     }
     stripPlacedEl.current = el;
-  }, [stripPanel, driveUp, inSettings]);
+  }, [stripPanel, driveUp, inRoom, inSettings, inPlanTool, activePlanTool]);
   // A rotated or resized phone changes the page width under the strip: re-seat it on the
   // current panel, instantly, so the snap points line up again.
   useEffect(() => {
     const f = () => {
       const el = pagesRef.current; if (!el || typeof el.scrollTo !== 'function') return;
       const w = el.clientWidth || 0; if (!w) return;
-      const t = getState().tab;
-      const idx = PANEL_ORDER.indexOf(navPanelOf(t === 'settings' ? settingsReturnTab.current : t));
+      const panel = isInRoomNow() ? lastStripPanel.current : navPanelOf(getState().tab);
+      const idx = PANEL_ORDER.indexOf(panel);
       if (idx >= 0) el.scrollTo({ left: idx * w, behavior: 'auto' });
     };
     window.addEventListener('resize', f);
@@ -7851,57 +7920,43 @@ export function App() {
     );
   }
   return (
-    <div class={`${fresh ? 'app is-demo' : 'app'}${printReport ? ' has-print-report' : ''}${inSettings ? ' in-settings' : ''}`}>
-      <TopBar ev={ev} now={now} s={s} inert={blocked || inSettings} ariaHidden={inSettings} onNow={s.tab === 'now'} onSettings={() => { if (getState().tab !== 'settings') setState({ tab: 'settings' }); }} settingsActive={inSettings} />
+    <div class={`${fresh ? 'app is-demo' : 'app'}${printReport ? ' has-print-report' : ''}${inRoom ? ' in-room' : ''}${inSettings ? ' in-settings' : ''}${inPlanTool ? ' in-plan-tool' : ''}`}>
+      <TopBar ev={ev} now={now} s={s} inert={blocked || inRoom} ariaHidden={inRoom} onNow={s.tab === 'now'} onSettings={() => { if (getState().tab !== 'settings') setState({ tab: 'settings' }); }} settingsActive={inSettings} />
       {/* The three main panels side by side in the snap strip (Plan — Now — Log). Every page
           stays mounted and keeps its own scroll position; pages off the settled panel (and all
-          three while Settings room is open) are inert and aria-hidden. Settings lives outside
-          the strip as its own full-screen room with a quick dissolve (Lorico, 2026-11-21). */}
-      <main ref={pagesRef} class="pages" inert={blocked || inSettings} aria-hidden={inSettings || undefined} onScroll={onPagesScroll} onPointerDown={onStripGrab} onTouchStart={onStripGrab} onWheel={onStripGrab}>
-        <section class={`page page-plan${activePanel === 'plan' ? ' is-active' : ''}`} inert={activePanel !== 'plan'} aria-hidden={activePanel !== 'plan'}>
+          three while Settings or a Plan tool room is open) are inert and aria-hidden. Settings
+          and every Plan tool live outside the strip as full-screen rooms with a 220ms dissolve. */}
+      <main ref={pagesRef} class="pages" inert={blocked || inRoom} aria-hidden={inRoom || undefined} onScroll={onPagesScroll} onPointerDown={onStripGrab} onTouchStart={onStripGrab} onWheel={onStripGrab}>
+        <section class={`page page-plan${activeStripPanel === 'plan' ? ' is-active' : ''}`} inert={activeStripPanel !== 'plan'} aria-hidden={activeStripPanel !== 'plan'}>
           {warnbox}
           {themeNoticeCard}
           <Notices ev={ev} now={now} s={s} />
-          <TabBoundary key={planFamily ? (mainTab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : rescueOpen ? 'rescue' : 'plan') : mainTab) : 'plan'} tab={planFamily ? (mainTab === 'plan' ? (weekOpen ? 'week' : rolloutOpen ? 'rollout' : rescueOpen ? 'rescue' : 'plan') : mainTab) : 'plan'}>
-            {planFamily ? (
-              <>
-                {mainTab === 'plan' && !weekOpen && !rolloutOpen && !rescueOpen && <PlanTab ev={ev} />}
-                {mainTab === 'plan' && weekOpen && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
-                {mainTab === 'plan' && rolloutOpen && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
-                {mainTab === 'plan' && rescueOpen && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
-                {mainTab === 'split' && <SplitTab s={s} now={now} ev={ev} />}
-                {mainTab === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
-                {mainTab === 'history' && <HistoryTab s={s} now={now} />}
-                {mainTab === 'trip' && <TripTab s={s} now={now} ev={ev} />}
-                {mainTab === 'load' && <LoadTab s={s} now={now} ev={ev} />}
-              </>
-            ) : (
-              <PlanTab ev={ev} />
-            )}
+          <TabBoundary key="plan" tab="plan">
+            <PlanTab ev={ev} />
           </TabBoundary>
         </section>
-        <section class={`page page-now has-dock${activePanel === 'now' ? ' is-active' : ''}`} inert={activePanel !== 'now'} aria-hidden={activePanel !== 'now'}>
+        <section class={`page page-now has-dock${activeStripPanel === 'now' ? ' is-active' : ''}`} inert={activeStripPanel !== 'now'} aria-hidden={activeStripPanel !== 'now'}>
           {warnbox}
           {themeNoticeCard}
           <TabBoundary key="now" tab="now">
             <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
           </TabBoundary>
         </section>
-        <section class={`page page-log${activePanel === 'log' ? ' is-active' : ''}`} inert={activePanel !== 'log'} aria-hidden={activePanel !== 'log'}>
+        <section class={`page page-log${activeStripPanel === 'log' ? ' is-active' : ''}`} inert={activeStripPanel !== 'log'} aria-hidden={activeStripPanel !== 'log'}>
           <TabBoundary key="log" tab="log">
             <LogTab s={s} now={now} ev={ev} notices={<>{warnbox}{themeNoticeCard}<Notices ev={ev} now={now} s={s} /></>} />
           </TabBoundary>
         </section>
       </main>
-      <nav class="tabs" inert={blocked || inSettings} aria-hidden={inSettings || undefined}>{BAR_ORDER.map((k) => {
+      <nav class="tabs" inert={blocked || inRoom} aria-hidden={inRoom || undefined}>{BAR_ORDER.map((k) => {
         const [l, icon] = TAB_META[k];
-        const on = !inSettings && barPanel === k;
+        const on = !inRoom && barPanel === k;
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
         return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
-      <section ref={settingsRef} class={`page page-settings settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
+      <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
           <button type="button" class="back settings-back" data-settings-back aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: settingsReturnTab.current })}><Icon d={I.back} /> {returnLabel}</button>
           <h1 class="settings-title">Settings</h1>
@@ -7912,6 +7967,32 @@ export function App() {
         <TabBoundary key="settings" tab="settings">
           <SettingsTab s={s} now={now} ev={ev} />
         </TabBoundary>
+      </section>
+      <section
+        ref={planRoomRef}
+        class={`page page-tool room plan-room${inPlanTool ? ' is-active' : ''}`}
+        data-plan-tool={displayedTool?.tool ?? undefined}
+        aria-label={displayedTool ? PLAN_TOOL_LABEL[displayedTool.tool] : undefined}
+        inert={blocked || !inPlanTool}
+        aria-hidden={!inPlanTool}
+      >
+        {displayedTool && (
+          <>
+            {warnbox}
+            {themeNoticeCard}
+            <Notices ev={ev} now={now} s={s} />
+            <TabBoundary key={`${displayedTool.tool}-${displayedTool.epoch}`} tab={displayedTool.tool}>
+              {displayedTool.tool === 'week' && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
+              {displayedTool.tool === 'rollout' && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
+              {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
+              {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
+              {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
+              {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}
+              {displayedTool.tool === 'trip' && <TripTab s={s} now={now} ev={ev} />}
+              {displayedTool.tool === 'load' && <LoadTab s={s} now={now} ev={ev} />}
+            </TabBoundary>
+          </>
+        )}
       </section>
       {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
       {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}

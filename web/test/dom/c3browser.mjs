@@ -134,7 +134,7 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     const { ctx, page, errors } = await open(W, H, save({ tab: 'now' }), '/?go=recap');
     const r = await page.evaluate(() => ({
       search: location.search, path: location.pathname, marker: history.state && history.state.app,
-      title: document.querySelector('h1.screen-title')?.textContent,
+      title: document.querySelector('.page.is-active h1.screen-title')?.textContent,
       bars: [...document.querySelectorAll('button.wk-day')].map((b) => { const q = b.getBoundingClientRect(); return [Math.round(q.width), Math.round(q.height)]; }),
       hatch: (() => { const e = document.querySelector('.wk-hatch'); return e ? getComputedStyle(e).backgroundImage : 'none'; })(),
       sentence: document.querySelector('.hours-back')?.textContent,
@@ -150,7 +150,7 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     const bar = page.locator('button.wk-day').nth(6);
     if (await bar.count()) await bar.tap();
     await page.waitForTimeout(250);
-    const hist = await page.evaluate(() => ({ title: document.querySelector('h1.screen-title')?.textContent, focus: !!document.querySelector('.hist-focus') }));
+    const hist = await page.evaluate(() => ({ title: document.querySelector('.page.is-active h1.screen-title')?.textContent, focus: !!document.querySelector('.hist-focus') }));
     ok(`${tag} a real tap on a bar opens that day in History`, hist.title === 'Your last 8 days' && hist.focus, JSON.stringify(hist));
     ok(`${tag} no page errors (Hours coming back)`, errors.length === 0, errors.join(' | '));
     await ctx.close();
@@ -183,7 +183,7 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     await shot(page, `plan-hub-${W}x${H}`);
     await tapText(page, 'button.plan-item', /Hours coming back/); await page.waitForTimeout(200);
     await page.goBack(); await page.waitForTimeout(300);
-    const after = await page.evaluate(() => document.querySelector('h1.screen-title')?.textContent);
+    const after = await page.evaluate(() => document.querySelector('.page.is-active h1.screen-title')?.textContent);
     ok(`${tag} the phone's Back from Hours coming back lands on Plan`, after === 'Plan', after);
     // Re-aimed (2026-11-21 nav-gear, Lorico): Settings moved from bottom bar to header gear button.
     await page.locator('header.top button[aria-label="Settings"]').click(); await page.waitForTimeout(150);

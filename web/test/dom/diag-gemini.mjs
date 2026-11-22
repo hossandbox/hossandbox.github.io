@@ -46,11 +46,14 @@ if (process.argv.includes('--sweep')) {
     await page.evaluate(() => document.querySelector('.page.is-active .flow-head button, .page.is-active button.back, .page.is-active .icon-btn')?.click()); await settle();
     await tap('nav.tabs button', 'Plan'); await settle();
     try { await tap('.page.is-active button', 'Plan a run'); await settle(); r.trip = await banner(); } catch (e) { r.trip = 'n/a ' + e.message; }
+    await page.evaluate(() => document.querySelector('.page.is-active button.back')?.click()); await settle();
     await tap('nav.tabs button', 'Plan'); await settle();
     await page.evaluate(() => { const b = [...document.querySelectorAll('.page.is-active button')].find((x) => x.textContent.includes('Can I take this load?')); b.click(); }); await settle(); r.load = await banner();
     await tap('.page.is-active button', 'Next: when you leave'); await settle();
     r.step2 = await page.evaluate(async () => { const pg = document.querySelector('.page.is-active'); const nav = document.querySelector('nav.tabs'); const nb = () => pg.querySelector('button.flow-next').getBoundingClientRect().bottom; const top = nav.getBoundingClientRect().top; const at0 = nb() - top; pg.scrollTop = 1e6; await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))); const atMax = nb() - top; pg.scrollTop = 0; return { overNavAt0: +at0.toFixed(1), overNavAtMax: +atMax.toFixed(1), scrollable: pg.scrollHeight - pg.clientHeight, navH: +nav.getBoundingClientRect().height.toFixed(1) }; });
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/sweep-step2-${W}x${H}.png` });
+    await page.evaluate(() => document.querySelector('.page.is-active .flow-head button')?.click()); await settle();
+    await page.evaluate(() => document.querySelector('.page.is-active .flow-head button')?.click()); await settle();
     await page.evaluate(() => document.querySelector('header.top button[aria-label="Settings"]')?.click()); await settle(); r.more = await banner();
     await page.evaluate(() => document.querySelector('section.page-settings button.settings-back')?.click()); await settle();
     await tap('nav.tabs button', 'Now'); await settle();
@@ -113,7 +116,9 @@ for (const [W, H] of [[412, 915], [360, 640]]) for (const nowCard of ['dial', 't
     return { head: pg.querySelector('.flow-head')?.textContent, nextTop: +nb.top.toFixed(1), nextBottom: +nb.bottom.toFixed(1), navTop: +tb.top.toFixed(1), hiddenByNav: nb.bottom > tb.top, pagePadBottom: cs.paddingBottom, scrollable: pg.scrollHeight - pg.clientHeight };
   });
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/plan-step2-${W}-${nowCard}.png` });
-  // ---- MORE banner
+  // ---- MORE banner (exit Load room back to Plan hub first)
+  await page.evaluate(() => document.querySelector('.page.is-active .flow-head button')?.click()); await settle();
+  await page.evaluate(() => document.querySelector('.page.is-active .flow-head button')?.click()); await settle();
   await page.evaluate(() => document.querySelector('header.top button[aria-label="Settings"]')?.click()); await settle();
   const bannerMore = await banner('more');
   if (SHOTS && nowCard === 'dial') await page.screenshot({ path: `${SHOTS}/more-${W}.png` });
