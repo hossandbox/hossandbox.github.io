@@ -48,7 +48,12 @@ export interface FullEvaluation extends Availability {
  * the FMCSA-preferred split interpretation, all violations, and the cycle picture.
  */
 export function evaluate(raw: Segment[], opts: EvaluateOptions = {}): FullEvaluation {
-  const config: RulesConfig = { ...DEFAULT_CONFIG, ...(opts.config ?? {}) };
+  const rawConfig: RulesConfig = { ...DEFAULT_CONFIG, ...(opts.config ?? {}) };
+  const dsm = rawConfig.dayStartMinute;
+  const config: RulesConfig = {
+    ...rawConfig,
+    dayStartMinute: typeof dsm === 'number' && Number.isInteger(dsm) && dsm >= 0 && dsm <= 59 ? dsm : 0,
+  };
   const readable = (s: Segment) => Number.isFinite(s?.start) && Number.isFinite(s?.end) && s.end > s.start;
   const invalid = raw.filter((s) => !readable(s));
   const normalized = normalize(invalid.length ? raw.filter(readable) : raw);

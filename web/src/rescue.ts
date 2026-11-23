@@ -28,6 +28,7 @@ import {
   restPeriods,
 } from '../../engine/src/index.ts';
 import { cycleParamsOf, dur, isValidTimeZone, zoneShort } from './store.ts';
+import { safeRulesConfig } from './carrierday.ts';
 
 export type RescueDistanceMode = 'miles' | 'hours';
 export type RescueStrategyId = 'straight10' | 'split82' | 'split73' | 'roll_now';
@@ -288,7 +289,7 @@ export function resolveRescueDeadline(dateStr: string, timeStr: string, timeZone
   const check = new Date(Date.UTC(y, mo - 1, d));
   if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
   const tz = isValidTimeZone(timeZone) ? timeZone : 'UTC';
-  return localToMinute(y, mo, d, h, tz) + min;
+  return localToMinute(y, mo, d, h, tz, min);
 }
 
 /** Clamp speed 45–65 mph and compute conservative drive minutes (same ceiling formula as rollout.ts / engine trip.ts). */
@@ -496,13 +497,14 @@ function trailingSbAtNow(segments: Segment[], now: number): number {
 export function evaluateSplitPairing(
   logged: Segment[],
   now: number,
-  config: RulesConfig,
+  rawConfig: RulesConfig,
   dockWaitMinutes: number,
   driveMinutes: number,
   longSbMinutes: number,
   shortLegMinutes: number,
   order: 'short-first' | 'long-first',
 ): SplitPairingCheck {
+  const config = safeRulesConfig(rawConfig);
   const tz = isValidTimeZone(config.timeZone) ? config.timeZone : 'UTC';
   const evNow = evaluate(logged, { asOf: now, config });
   const loggedRests = restPeriods(evNow.segments);
@@ -1112,7 +1114,8 @@ function buildSplitStrategy(
  * follow-on next-shift balance is derived directly from `engine/src/index.ts`.
  */
 export function simulateRescue(input: RescueInput): RescueSimulation {
-  const { now, config } = input;
+  const { now } = input;
+  const config = safeRulesConfig(input.config);
   const logged = input.segments.filter((s) => !s.tentative);
   const tz = isValidTimeZone(config.timeZone) ? config.timeZone : 'UTC';
   const homeZoneName = zoneShort(tz);

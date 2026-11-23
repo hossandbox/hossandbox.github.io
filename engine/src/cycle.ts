@@ -3,7 +3,12 @@ import { LIMITS } from './types.ts';
 import { minutesOf, WORK } from './timeline.ts';
 import { severityOf, fmt } from './shift.ts';
 
-/* ---------- carrier-day arithmetic (24h periods starting at dayStartHour in home-terminal zone) ---------- */
+/* ---------- carrier-day arithmetic (24h periods starting at dayStartHour:dayStartMinute in home-terminal zone) ---------- */
+
+function dayStartMin(cfg: RulesConfig): number {
+  const m = cfg.dayStartMinute;
+  return typeof m === 'number' && Number.isInteger(m) && m >= 0 && m <= 59 ? m : 0;
+}
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
 function dtf(tz: string) {
@@ -24,9 +29,9 @@ function localParts(minute: number, tz: string) {
   return { y: get('year'), m: get('month'), d: get('day'), h: get('hour'), min: get('minute') };
 }
 
-/** Minutes since epoch for local wall time (y,m,d,h) in tz. Handles DST via two-pass correction. */
-export function localToMinute(y: number, m: number, d: number, h: number, tz: string): number {
-  const target = Math.floor(Date.UTC(y, m - 1, d, h) / 60000);
+/** Minutes since epoch for local wall time (y,m,d,h,min) in tz. Handles DST via two-pass correction. */
+export function localToMinute(y: number, m: number, d: number, h: number, tz: string, min = 0): number {
+  const target = Math.floor(Date.UTC(y, m - 1, d, h, min) / 60000);
   const at = (minute: number) => {
     const p = localParts(minute, tz);
     return { asUtc: Math.floor(Date.UTC(p.y, p.m - 1, p.d, p.h, p.min) / 60000) };
@@ -41,23 +46,23 @@ export function localToMinute(y: number, m: number, d: number, h: number, tz: st
     if (seen.has(next)) break; // oscillating: this wall time never appears on the clock
     guess = next;
   }
-  // Spring-forward gap. The requested wall time does not exist on this date (02:00 on the transition
-  // day, when the clock jumps 02:00 → 03:00), so the fixed-point iteration cannot settle. Resolve it
-  // FORWARD to the first real instant after the gap: that is when the driver's clock actually reads.
-  // The old code landed an hour early, which made the carrier day before the change 23 hours long and
-  // shifted every day's boundaries around it (stress-test 2.8).
+  // Spring-forward gap. The requested wall time does not exist on this date (02:00..02:59 on the
+  // transition day, when the clock jumps 02:00 → 03:00), so the fixed-point iteration cannot settle.
+  // Resolve it FORWARD to the real instant shifted past the gap: that keeps the preceding carrier
+  // day a full 24h and the spring-forward carrier day 23h (stress-test 2.8).
   const ascending = [...seen].sort((a, b) => a - b);
   return ascending.find((x) => at(x).asUtc >= target) ?? ascending[ascending.length - 1];
 }
 
 /** Start minute of the carrier day containing `minute`. */
 export function carrierDayStart(minute: number, cfg: RulesConfig): number {
+  const min = dayStartMin(cfg);
   const p = localParts(minute, cfg.timeZone);
-  let start = localToMinute(p.y, p.m, p.d, cfg.dayStartHour, cfg.timeZone);
+  let start = localToMinute(p.y, p.m, p.d, cfg.dayStartHour, cfg.timeZone, min);
   if (start > minute) {
-    // before today's dayStartHour → belongs to previous carrier day
+    // before today's carrier-day start → belongs to previous carrier day
     const prev = new Date(Date.UTC(p.y, p.m - 1, p.d - 1));
-    start = localToMinute(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), cfg.dayStartHour, cfg.timeZone);
+    start = localToMinute(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), cfg.dayStartHour, cfg.timeZone, min);
   }
   return start;
 }
@@ -68,7 +73,7 @@ export function nextCarrierDayStart(dayStart: number, cfg: RulesConfig): number 
 }
 
 export function dayLabel(dayStart: number, cfg: RulesConfig): string {
-  const p = localParts(dayStart + 1, cfg.timeZone);
+  const p = localParts(dayStart, cfg.timeZone);
   return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
 }
 

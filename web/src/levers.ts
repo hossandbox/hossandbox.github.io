@@ -1,6 +1,7 @@
 import type { FullEvaluation, RestPeriod } from '../../engine/src/index.ts';
 import { evaluate, driveAgainAt, pruneHistory } from '../../engine/src/index.ts';
 import { allSegments, clock, dur, zoneShort, type SplitDraft, type State } from './store.ts';
+import { dayStartWord, safeRulesConfig } from './carrierday.ts';
 
 /**
  * Lever chips (capstone C1, audit §2.4): "If you … → …" — the one change that moves the
@@ -35,7 +36,7 @@ export type Lever =
 
 /** The logged record the levers stand on: what-if rows out, pruned the way the Trip planner prunes. */
 function loggedRecord(s: State, now: number) {
-  return pruneHistory(allSegments(s, now).filter((x) => !x.tentative), now, s.config);
+  return pruneHistory(allSegments(s, now).filter((x) => !x.tentative), now, safeRulesConfig(s.config));
 }
 
 /**
@@ -57,11 +58,12 @@ function pairPartner(after: FullEvaluation, now: number, ev: FullEvaluation): Pe
  */
 export function computeLevers(s: State, now: number, ev: FullEvaluation, basis: 'log' | 'estimate' | 'demo', again?: { off: number | null; sb: number | null } | null): Lever[] {
   if (basis !== 'log' || s.tentative.length > 0) return [];
+  const cfg = safeRulesConfig(s.config);
   const out: Lever[] = [];
   const status = s.current?.status ?? 'OFF';
   const logged = loggedRecord(s, now);
   const evalRest = (r: number, st: 'OFF' | 'SB') =>
-    evaluate([...logged, { status: st, start: now, end: now + r }], { asOf: now + r, config: s.config });
+    evaluate([...logged, { status: st, start: now, end: now + r }], { asOf: now + r, config: cfg });
 
   // L1 — the break is what binds, and taking it now hands back driving.
   if (ev.driveNow > 0 && ev.binding === 'BREAK_30') {
@@ -109,9 +111,9 @@ export function computeLevers(s: State, now: number, ev: FullEvaluation, basis: 
   // null by its own design, so that one call stays here.
   if (ev.driveNow <= 0 && status !== 'SB') {
     const t = (status === 'ON' || status === 'D') && s.current ? Math.max(now, s.current.since + 1) : now;
-    const segs = pruneHistory(allSegments(s, t), t, s.config);
-    const offAt = again ? again.off : driveAgainAt(segs, { asOf: t, config: s.config }, 'OFF');
-    const sbAt = again?.sb ?? driveAgainAt(segs, { asOf: t, config: s.config }, 'SB');
+    const segs = pruneHistory(allSegments(s, t), t, cfg);
+    const offAt = again ? again.off : driveAgainAt(segs, { asOf: t, config: cfg }, 'OFF');
+    const sbAt = again?.sb ?? driveAgainAt(segs, { asOf: t, config: cfg }, 'SB');
     if (offAt !== null && sbAt !== null && sbAt < offAt) {
       out.push({ id: 'L3', sbAt, offAt, pending: ev.shift.pendingSplitLeg ? legOf(ev.shift.pendingSplitLeg) : null });
     }
@@ -125,17 +127,16 @@ export function computeLevers(s: State, now: number, ev: FullEvaluation, basis: 
     if (!cycleBinds && ev.driveNow <= 0) {
       // Resting off duty, the hero's `again.off` is this same search on this same record
       // (t = now in both constructions); every other status keeps its own call.
-      const againAt = status === 'OFF' && again ? again.off : driveAgainAt(logged, { asOf: now, config: s.config }, 'OFF');
+      const againAt = status === 'OFF' && again ? again.off : driveAgainAt(logged, { asOf: now, config: cfg }, 'OFF');
       if (againAt !== null && againAt - now <= 600) {
-        const resumed = evaluate([...logged, { status: 'OFF' as const, start: now, end: againAt }], { asOf: againAt, config: s.config });
+        const resumed = evaluate([...logged, { status: 'OFF' as const, start: now, end: againAt }], { asOf: againAt, config: cfg });
         cycleBinds = resumed.binding === 'CYCLE';
       }
     }
     if (cycleBinds) {
       const f = ev.cycle.forecast.find((x) => x.dayStart > now && x.dropsOff > 0);
       if (f) {
-        const h = s.config.dayStartHour;
-        const dayStartLabel = h === 0 ? `midnight ${zoneShort(s.config.timeZone)}` : `${String(h).padStart(2, '0')}:00 ${zoneShort(s.config.timeZone)}`;
+        const dayStartLabel = `${dayStartWord(cfg)} ${zoneShort(cfg.timeZone)}`;
         out.push({ id: 'L4', at: f.dayStart, dropsOff: f.dropsOff, available: f.availableAtStart, dayStartLabel });
       }
     }
@@ -224,7 +225,7 @@ export function leverAfter(s: State, now: number, l: Lever): FullEvaluation | nu
   if (l.id !== 'L1' && l.id !== 'L2') return null;
   const st = l.id === 'L1' ? 'OFF' as const : l.status === 'SB' ? 'SB' as const : 'OFF' as const;
   const logged = loggedRecord(s, now);
-  return evaluate([...logged, { status: st, start: now, end: now + l.restMin }], { asOf: now + l.restMin, config: s.config });
+  return evaluate([...logged, { status: st, start: now, end: now + l.restMin }], { asOf: now + l.restMin, config: safeRulesConfig(s.config) });
 }
 
 /**
@@ -244,7 +245,7 @@ export function leverSplitPrefill(s: State, now: number, l: Lever): Partial<Spli
     const b1 = l.sbAt - now;
     if (b1 <= 0 || b1 > 600) return null;
     const logged = loggedRecord(s, now);
-    const at = evaluate([...logged, { status: 'SB' as const, start: now, end: l.sbAt }], { asOf: l.sbAt, config: s.config });
+    const at = evaluate([...logged, { status: 'SB' as const, start: now, end: l.sbAt }], { asOf: l.sbAt, config: safeRulesConfig(s.config) });
     return { b1, b1s: 'SB', drive: Math.min(at.driveNow, 660) };
   }
   return null;

@@ -37,6 +37,7 @@ import {
   restPeriods,
 } from '../../engine/src/index.ts';
 import { ZONE_LABELS, cycleParamsOf, dur, isValidTimeZone, zoneShort } from './store.ts';
+import { dayStartWord, safeRulesConfig } from './carrierday.ts';
 
 export const STACK_MIN_STOPS = 2;
 export const STACK_MAX_STOPS = 5;
@@ -340,7 +341,7 @@ export function resolveStackWallMinute(dateStr: string, timeStr: string, timeZon
   const check = new Date(Date.UTC(y, mo - 1, d));
   if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
   const tz = isValidTimeZone(timeZone) ? timeZone : 'UTC';
-  return localToMinute(y, mo, d, h, tz) + min;
+  return localToMinute(y, mo, d, h, tz, min);
 }
 
 /* ---------- helpers & defaults ---------- */
@@ -1396,7 +1397,7 @@ export function buildStackDispatchText(res: Omit<StackResult, 'dispatchText'>): 
 
   if (res.altCycleRescue) {
     const alt = res.altCycleRescue;
-    const tag = alt.kind === 'restart34' ? '34h restart (49 CFR 395.3(c))' : 'midnight recap wait';
+    const tag = alt.kind === 'restart34' ? '34h restart (49 CFR 395.3(c))' : `${dayStartWord(res.displayChain.endEval.config)} recap wait`;
     lines.push(
       `Cycle option (${tag}): ${breakName} earliest legal ETA ${alt.breakingStopArrival.homeShort}, finishes ${alt.chainFinish.homeShort}.`,
     );
@@ -1496,7 +1497,7 @@ function buildPushRescue(
   const title = kind === 'restart34'
     ? 'Take a 34-hour restart (§395.3(c))'
     : kind === 'recap'
-      ? 'Wait for midnight recap hours'
+      ? `Wait for ${dayStartWord(pass.endEval.config)} recap hours`
       : `Push ${brkStop.label} past a 10-hour break`;
 
   const restSummary = chosenRest
@@ -1529,19 +1530,20 @@ function pickRemainingHeadline(ev: FullEvaluation, config: RulesConfig): string 
 }
 
 export function evaluateStackChain(input: StackInput): StackResult {
-  const homeTz = isValidTimeZone(input.config.timeZone) ? input.config.timeZone : 'UTC';
+  const config = safeRulesConfig(input.config);
+  const homeTz = isValidTimeZone(config.timeZone) ? config.timeZone : 'UTC';
   const homeZoneName = zoneShort(homeTz);
-  const { limit: cycleLimit, windowDays: cycleWindowDays } = cycleParamsOf(input.config);
+  const { limit: cycleLimit, windowDays: cycleWindowDays } = cycleParamsOf(config);
   const logged = input.segments.filter((s) => !s.tentative);
   const departure = Math.max(input.now, Math.round(input.departure ?? input.now));
   const untilStatus: DutyStatus = input.untilDepartureStatus ?? 'ON';
   const leadSegs: Segment[] = departure > input.now
     ? [{ status: untilStatus, start: input.now, end: departure, tentative: true, note: 'Until departure' }]
     : [];
-  const baseHistory = pruneHistory(logged, input.now, input.config);
-  const evNow = evaluate(baseHistory, { asOf: input.now, config: input.config });
+  const baseHistory = pruneHistory(logged, input.now, config);
+  const evNow = evaluate(baseHistory, { asOf: input.now, config });
   const evStart = departure > input.now
-    ? evaluate([...baseHistory, ...leadSegs], { asOf: departure, config: input.config })
+    ? evaluate([...baseHistory, ...leadSegs], { asOf: departure, config })
     : evNow;
 
   const stops = input.stops.slice(0, STACK_MAX_STOPS).map((st, idx) => ({
@@ -1608,9 +1610,9 @@ export function evaluateStackChain(input: StackInput): StackResult {
   }
 
   // Run all three engine-backed passes.
-  const continuousPass = runContinuousPass(baseHistory, leadSegs, input.now, departure, stops, input.config, homeTz);
-  const reset10Pass = runPlanTripChain(baseHistory, leadSegs, input.now, departure, stops, input.config, homeTz, 'reset10');
-  const restart34Pass = runPlanTripChain(baseHistory, leadSegs, input.now, departure, stops, input.config, homeTz, 'restart34');
+  const continuousPass = runContinuousPass(baseHistory, leadSegs, input.now, departure, stops, config, homeTz);
+  const reset10Pass = runPlanTripChain(baseHistory, leadSegs, input.now, departure, stops, config, homeTz, 'reset10');
+  const restart34Pass = runPlanTripChain(baseHistory, leadSegs, input.now, departure, stops, config, homeTz, 'restart34');
 
   // Choose the best legal planTrip pass (reset10 vs restart34).
   const bestLegalPass: StackChainPass = (() => {
@@ -1637,7 +1639,7 @@ export function evaluateStackChain(input: StackInput): StackResult {
     const winningPass = (multiShiftLegal || (bestLegalPass.hosLegal && bestLegalPass.allApptsMet && bestLegalPass.longRestCount === 0))
       ? bestLegalPass
       : continuousPass;
-    const remText = pickRemainingHeadline(winningPass.endEval, input.config);
+    const remText = pickRemainingHeadline(winningPass.endEval, config);
     const subParts: string[] = [];
     let restNote = '';
     if (winningPass.longRestCount > 0 && winningPass.lastLongRestStopIndex >= 0) {
@@ -1775,14 +1777,14 @@ export function evaluateStackChain(input: StackInput): StackResult {
     limitingClock = brk.minutes > 0 && o.apptSlack !== null && o.apptSlack + brk.minutes >= 0 ? 'BREAK_30' : 'TIME_ONLY';
   }
 
-  const limitingClockLabel = limitLabelFor(limitingClock, input.config, evStart);
-  const limitingCite = limitCiteFor(limitingClock, input.config, evStart);
+  const limitingClockLabel = limitLabelFor(limitingClock, config, evStart);
+  const limitingCite = limitCiteFor(limitingClock, config, evStart);
 
   // --- Search for inter-stop 7/3 and 8/2 split rescues ---
   const allowSplit = input.allowSplitBetweenStops !== false;
   const allSplitRescues = allowSplit
     ? findSplitRescues(
-      baseHistory, leadSegs, input.now, departure, stops, input.config, homeTz, firstBreakIndex, evStart.shift.pendingSplitLeg,
+      baseHistory, leadSegs, input.now, departure, stops, config, homeTz, firstBreakIndex, evStart.shift.pendingSplitLeg,
     )
     : [];
   const splitRescue = allSplitRescues[0] ?? null;

@@ -30,6 +30,7 @@ import {
   restPeriods,
 } from '../../engine/src/index.ts';
 import { ZONE_LABELS, cycleParamsOf, dur, isValidTimeZone, zoneShort } from './store.ts';
+import { safeRulesConfig } from './carrierday.ts';
 
 export type ZoneEntryMode = 'local' | 'terminal';
 export type DistanceMode = 'miles' | 'hours';
@@ -280,7 +281,7 @@ export function resolveWallDateTime(dateStr: string, timeStr: string, timeZone: 
   const check = new Date(Date.UTC(y, mo - 1, d));
   if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
   const tz = isValidTimeZone(timeZone) ? timeZone : 'UTC';
-  return localToMinute(y, mo, d, h, tz) + min;
+  return localToMinute(y, mo, d, h, tz, min);
 }
 
 /** Format an epoch minute explicitly in both home-terminal and appointment-local zones. */
@@ -329,7 +330,8 @@ export function computeDriveMinutes(
  * Default hard appointment for first open: next morning at 08:00 in home-terminal time that is at
  * least 22 hours ahead of `now`, so an overnight run with a 10h break fits cleanly out of the box.
  */
-export function defaultAppointmentFor(now: number, config: RulesConfig): { apptDate: string; apptTime: string } {
+export function defaultAppointmentFor(now: number, rawConfig: RulesConfig): { apptDate: string; apptTime: string } {
+  const config = safeRulesConfig(rawConfig);
   let ds = carrierDayStart(now, config);
   for (let i = 0; i < 4; i++) {
     ds = nextCarrierDayStart(ds, config);
@@ -728,7 +730,8 @@ function findEarliestLegalRollOut(
  * and verify feasibility directly against the driver's logged record via `evaluate()`.
  */
 export function planRollout(input: RolloutInput): RolloutPlan {
-  const { now, config } = input;
+  const { now } = input;
+  const config = safeRulesConfig(input.config);
   const logged = input.segments.filter((s) => !s.tentative);
   const homeTz = isValidTimeZone(config.timeZone) ? config.timeZone : 'UTC';
   const apptTz = isValidTimeZone(input.apptTimeZone) ? input.apptTimeZone : homeTz;

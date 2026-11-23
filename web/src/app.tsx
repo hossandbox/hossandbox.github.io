@@ -25,8 +25,9 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, dayLabel, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, terminalMidnightOnDevice, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
+import { clampDayStartMinute, safeRulesConfig, formatDayStartHM, dayStartWord } from './carrierday.ts';
 import {
   projectRecapVs34, defaultResetStart, wallMinuteInCarrierDay, fmtWallHM, parseIsoDay,
   PROJECTION_SHIFTS, SHIFT_BUDGET_PRESETS, SHIFT_START_PRESETS, RESET_TIME_PRESETS,
@@ -457,6 +458,8 @@ export type SheetKind =
   | { kind: 'stacktime'; mode: 'appt' | 'departure'; title: string; initialMinute: number; entryZoneName: string; entryTimeZone: string; onApply: (minute: number) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
+  // Carrier-day exact start time (HH:MM) picker in Settings, on the shared ClockPick.
+  | { kind: 'daystart' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
   // `live` (patch L1 item 1): `seg` is the OPEN status, materialised up to the minute it was tapped.
   // `via: 'what'` (A2): the check was reached straight from "It wasn't …" (no counted steps).
@@ -739,7 +742,7 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0): boolea
     if (st === 'D') {
       try {
         const post = getState();
-        const ev2 = evaluate(allSegments(post, now), { asOf: now, config: post.config });
+        const ev2 = evaluate(allSegments(post, now), { asOf: now, config: safeRulesConfig(post.config) });
         speakAloud(statusSpeech('D', at, ev2.driveNow, ev2.mustStopBy));
       } catch { speakAloud(statusSpeech('D', at)); }
     } else {
@@ -990,8 +993,8 @@ export function consequenceLines(before: State, after: State, now: number): Cons
   }
   let evB: FullEvaluation, evA: FullEvaluation;
   try {
-    evB = evaluate(allSegments(before, now), { asOf: now, config: before.config });
-    evA = evaluate(allSegments(after, now), { asOf: now, config: after.config });
+    evB = evaluate(allSegments(before, now), { asOf: now, config: safeRulesConfig(before.config) });
+    evA = evaluate(allSegments(after, now), { asOf: now, config: safeRulesConfig(after.config) });
   } catch { return out; }
   const same = (v: Violation, w: Violation) => v.kind === w.kind && v.start < w.end + 1 && w.start < v.end + 1;
   for (const v of evA.violations) {
@@ -1076,7 +1079,8 @@ function useDriveAgain(s: State, now: number, ev: FullEvaluation | null): DriveA
     const t = !resting && s.current ? Math.max(now, s.current.since + 1) : now;
     // History older than the cycle window cannot change the answer (the same cut the Trip planner uses,
     // checked against the unpruned answer on 60 long records); it more than halves the cost.
-    const segs = pruneHistory(allSegments(s, t), t, s.config), opts = { asOf: t, config: s.config };
+    const cfg = safeRulesConfig(s.config);
+    const segs = pruneHistory(allSegments(s, t), t, cfg), opts = { asOf: t, config: cfg };
     return {
       off: driveAgainAt(segs, opts, status === 'SB' ? 'SB' : 'OFF'),
       sb: resting ? null : driveAgainAt(segs, opts, 'SB'),
@@ -1366,7 +1370,7 @@ function Notices({ ev, now, s, strip }: { ev: FullEvaluation; now: number; s: St
         {s.config.timeZone !== deviceTz && (
           <NoticeLine summary={`Clock times: ${zoneShort(deviceTz)} (phone) · carrier day: ${zoneShort(s.config.timeZone)}`} open={s.zoneAck !== zonePair(s)}>
             <div class="warnbox">
-              <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
+              <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {formatDayStartHM(s.config)} <b>{s.config.timeZone}</b>. A {dayStartWord(s.config)} recap is not {dayStartWord(s.config)} on the clock above.
             </div>
             <button class="mini" onClick={() => setState({ zoneAck: zonePair(s) })}>Got it</button>
           </NoticeLine>
@@ -1428,7 +1432,7 @@ function Notices({ ev, now, s, strip }: { ev: FullEvaluation; now: number; s: St
       )}
       {s.config.timeZone !== deviceTz && (
         <div class="warnbox">
-          <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {String(s.config.dayStartHour).padStart(2, '0')}:00 <b>{s.config.timeZone}</b>. A midnight recap is not midnight on the clock above.
+          <b>Two time zones in play.</b> Every clock time on this screen is in <b>your device zone ({deviceTz})</b>, but your carrier day — and the recap hours that come back with it — rolls at {formatDayStartHM(s.config)} <b>{s.config.timeZone}</b>. A {dayStartWord(s.config)} recap is not {dayStartWord(s.config)} on the clock above.
         </div>
       )}
     </>
@@ -1932,13 +1936,14 @@ export interface PreviewResult {
  */
 export function previewEval(s: State, now: number, t: number, cont: PreviewCont): PreviewResult {
   const cur = s.current;
+  const cfg = safeRulesConfig(s.config);
   const status: DutyStatus = cont === 'drive' ? 'D' : cur?.status ?? 'OFF';
   const note = cont === 'stay' && cur?.note ? { note: cur.note } : {};
   const record = allSegments(s, now);
-  const ev = evaluate([...record, { status, start: now, end: t, tentative: true, ...note }], { asOf: t, config: s.config });
+  const ev = evaluate([...record, { status, start: now, end: t, tentative: true, ...note }], { asOf: t, config: cfg });
   let again: PreviewResult['again'] = null;
   if (ev.driveNow <= 0) {
-    const segs = pruneHistory([...record, { status, start: now, end: t, ...note }], t, s.config), opts = { asOf: t, config: s.config };
+    const segs = pruneHistory([...record, { status, start: now, end: t, ...note }], t, cfg), opts = { asOf: t, config: cfg };
     again = { off: driveAgainAt(segs, opts, 'OFF'), sb: driveAgainAt(segs, opts, 'SB') };
   }
   return { at: t, cont, status, ev, violations: ev.violations.filter((v) => v.start >= now).sort((a, b) => a.start - b.start), again };
@@ -2751,7 +2756,7 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
     // "6h 20m → 6h 00m", and hold off on forcing Off Duty — the result screen asks for the
     // driver's real status with the four status buttons.
     const seeded: State = { ...cur, ...patch, current: null };
-    const evAfter = evaluate(allSegments(seeded, now), { asOf: now, config: cur.config });
+    const evAfter = evaluate(allSegments(seeded, now), { asOf: now, config: safeRulesConfig(cur.config) });
     const actual = eldActualClocks(clocks, evAfter, cur.config.shortHaul);
     setState({ ...patch, current: null });
     setDone({ notes, clocks, actual, at: now });
@@ -2770,7 +2775,7 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
         if (st === 'D') {
           try {
             const post = getState();
-            const ev2 = evaluate(allSegments(post, at), { asOf: at, config: post.config });
+            const ev2 = evaluate(allSegments(post, at), { asOf: at, config: safeRulesConfig(post.config) });
             speakAloud(statusSpeech('D', at, ev2.driveNow, ev2.mustStopBy));
           } catch { speakAloud(statusSpeech('D', at)); }
         } else {
@@ -3488,9 +3493,10 @@ export function reopenDay(now: number) {
 
 /** The carrier day `back` days before the one holding `now`: [start, end) in epoch minutes. */
 function carrierDay(now: number, back: number, s: State): { start: number; end: number } {
-  let start = carrierDayStart(now, s.config);
-  for (let i = 0; i < back; i++) start = carrierDayStart(start - 1, s.config);
-  return { start, end: nextCarrierDayStart(start, s.config) };
+  const cfg = safeRulesConfig(s.config);
+  let start = carrierDayStart(now, cfg);
+  for (let i = 0; i < back; i++) start = carrierDayStart(start - 1, cfg);
+  return { start, end: nextCarrierDayStart(start, cfg) };
 }
 
 /**
@@ -3586,7 +3592,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
       <div class="log-pin">
         <div class="daynav">
           <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
-          <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {String(s.config.dayStartHour).padStart(2, '0')}:00{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
+          <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {formatDayStartHM(s.config)}{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
           <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
         </div>
         <section class="card log-graph-card">
@@ -3802,11 +3808,11 @@ const KEYS_MINUTES: ClockKeys = [[[-5, '−5', '5 minutes earlier'], [-1, '−1'
  * sheet. "Another day" shows the app's own date words ("Fri Nov 20") over a transparent date
  * input, the same way the big clock sits over the time input.
  */
-function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true }: {
-  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean;
+function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true, timeOnly = false, sub }: {
+  at: number; set: (v: number) => void; now: number; future: boolean; say: string; name: string; keys: ClockKeys; extra?: ComponentChildren; anyDay?: boolean; timeOnly?: boolean; sub?: string;
 }) {
-  const chips = dayChips(now, future);
-  const onChip = chips.some((c) => sameDay(c.at, at));
+  const chips = timeOnly ? [] : dayChips(now, future);
+  const onChip = timeOnly ? true : chips.some((c) => sameDay(c.at, at));
   const pickDate = (v: string) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
     if (!m) return;
@@ -3815,21 +3821,23 @@ function ClockPick({ at, set, now, future, say, name, keys, extra, anyDay = true
   };
   return (
     <>
-      <div class="chips ed-days" role="group" aria-label="Day">
-        {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
-      </div>
+      {!timeOnly && (
+        <div class="chips ed-days" role="group" aria-label="Day">
+          {chips.map((c) => <button key={c.label} class={sameDay(c.at, at) ? 'on' : undefined} aria-pressed={sameDay(c.at, at)} onClick={() => set(onDay(at, c.at))}>{c.label}</button>)}
+        </div>
+      )}
       <div class="ed-clock">
         {/* The picker input covers the whole clock face (transparent): a tap anywhere on the
             big time lands on the input itself, which is what opens a phone's time picker. */}
         <label class="ed-clock-pick">
-          <output class="mono" aria-live="polite" aria-label={`${say} ${clock(at)}`}>{clock(at, false)}</output>
+          <output class="mono" aria-live="polite" aria-label={`${say} ${timeOnly ? clock(at, false) : clock(at)}`}>{clock(at, false)}</output>
           <TimePicker at={at} set={set} name={name} cls="ed-clock-input" />
         </label>
-        <span>{new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · tap the time to pick it</span>
+        <span>{timeOnly ? (sub ?? 'Tap the time to pick it') : `${new Date(at * 60000).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · tap the time to pick it`}</span>
       </div>
       {extra}
       {keys.map((row, i) => <div key={i} class={`ed-keys ${row.length === 2 ? 'two' : 'four'}`}>{row.map(([d, t, a]) => <button key={d} aria-label={a} onClick={() => set(at + d)}>{t}</button>)}</div>)}
-      {anyDay && (
+      {!timeOnly && anyDay && (
         <label class="ed-day">Another day
           <span class={onChip ? 'ed-day-pick' : 'ed-day-pick on'}>
             <span class="ed-day-val" aria-hidden="true">{dayWords(at)}</span>
@@ -4605,8 +4613,8 @@ export function splitScenario(s: State, now: number, ev: FullEvaluation) {
 
   // Evaluate at the instant Break 2 ends — every result card on this screen describes that
   // moment. Using endB2 + 1 put "stop by" a minute past the stated evaluation time (consumer-review-1).
-  const after = evaluate([...base, ...plan], { asOf: endB2, config: s.config });
-  const atDriveEnd = evaluate([...base, ...plan.filter((r) => r.note !== 'Break 2')], { asOf: endDrive, config: s.config });
+  const after = evaluate([...base, ...plan], { asOf: endB2, config: safeRulesConfig(s.config) });
+  const atDriveEnd = evaluate([...base, ...plan.filter((r) => r.note !== 'Break 2')], { asOf: endDrive, config: safeRulesConfig(s.config) });
   const paired = after.shift.chain.length >= 2 && after.shift.chain[after.shift.chain.length - 1].end === endB2;
   // The pinned now-vs-after line (patch #14): the END of the 14-hour window itself, from the
   // same two evaluations this screen already makes. Paired rests after the anchor are
@@ -4645,7 +4653,7 @@ export function splitFixes(s: State, sc: SplitScenario): SplitFix[] {
   if (sc.planViol.length > 0) {
     // The engine's own driving time at the end of Break 1 + the on-duty stretch (one extra evaluate).
     const lead = sc.plan.filter((r) => r.note === 'Break 1' || r.note === 'On duty');
-    const room = Math.max(0, Math.min(SPLIT_BLOCK_MAX.drive, evaluate([...sc.base, ...lead], { asOf: sc.endDwell, config: s.config }).driveNow));
+    const room = Math.max(0, Math.min(SPLIT_BLOCK_MAX.drive, evaluate([...sc.base, ...lead], { asOf: sc.endDwell, config: safeRulesConfig(s.config) }).driveNow));
     if (room < drive) out.push({ id: 'shortenDrive', block: 'drive', label: `Shorten the drive to ${dur(room)}`, patch: { drive: room } });
   }
   return out;
@@ -5087,8 +5095,6 @@ function PlanCompare({ both, from, view, onView }: { both: ReturnType<typeof pla
 
 /* ---------- Hours coming back (capstone C3, audit §3 D10-A + M8) ---------- */
 
-/** "midnight" for a 00:00 carrier day, else the hour ("06:00"). */
-const dayStartWord = (h: number): string => (h === 0 ? 'midnight' : `${String(h).padStart(2, '0')}:00`);
 /**
  * The screen's one sentence: "{cycle}: {left} left · +{drops} back at {roll} ({day start} {zone})".
  * Every number is the evaluation's own (cycle.remaining, forecast[0]) — the same source the
@@ -5098,7 +5104,7 @@ export function hoursBackSentence(ev: FullEvaluation, now: number, cfg: State['c
   const head = `${ev.cycle.limit / 60} hours: ${dur(ev.cycle.remaining)} left`;
   const f = ev.cycle.forecast[0];
   if (!f) return head;
-  return `${head} · +${dur(f.dropsOff)} back at ${laneValue(f.dayStart, now)} (${dayStartWord(cfg.dayStartHour)} ${zoneShort(cfg.timeZone)})`;
+  return `${head} · +${dur(f.dropsOff)} back at ${laneValue(f.dayStart, now)} (${dayStartWord(cfg)} ${zoneShort(cfg.timeZone)})`;
 }
 /**
  * A week-strip bar's label (A5, audit): the weekday and date for EVERY bar ("Fri 13") — one
@@ -5122,14 +5128,14 @@ export function isoDayWords(isoDay: string): string {
  */
 export function hoursBackDays(s: State, now: number, ev: FullEvaluation): FullEvaluation['cycle']['forecast'] {
   let long: FullEvaluation;
-  try { long = evaluate(allSegments(s, now), { asOf: now, config: s.config, forecastDays: ev.cycle.windowDays }); } catch { return ev.cycle.forecast.filter((f) => f.dropsOff > 0); }
+  try { long = evaluate(allSegments(s, now), { asOf: now, config: safeRulesConfig(s.config), forecastDays: ev.cycle.windowDays }); } catch { return ev.cycle.forecast.filter((f) => f.dropsOff > 0); }
   return long.cycle.forecast.filter((f) => f.dropsOff > 0);
 }
 export function nextBackSentence(ev: FullEvaluation, back: FullEvaluation['cycle']['forecast'], now: number, cfg: State['config']): string {
   const head = `${ev.cycle.limit / 60} hours: ${dur(ev.cycle.remaining)} left`;
   const f = back[0];
   if (!f) return `${head} · nothing comes back in the next ${ev.cycle.windowDays} days`;
-  return `${head} · next back: +${dur(f.dropsOff)} at ${isoDayWords(f.label)} ${clock(f.dayStart, false)} (${dayStartWord(cfg.dayStartHour)} ${zoneShort(cfg.timeZone)})`;
+  return `${head} · next back: +${dur(f.dropsOff)} at ${isoDayWords(f.label)} ${clock(f.dayStart, false)} (${dayStartWord(cfg)} ${zoneShort(cfg.timeZone)})`;
 }
 /** The strip's bars: one per carrier day, oldest first; the oldest carries the hatch that rolls off next. */
 export function weekBars(ev: FullEvaluation): { start: number; label: string; onDuty: number; hatch: number; today: boolean }[] {
@@ -5223,7 +5229,7 @@ function RecapTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           {ev.cycle.restartEnd !== null && <Stat label="Last 34h restart" value={clock(ev.cycle.restartEnd)} />}
         </div>
         {hist !== 'known' && <p class="warnbox small">This recap rests on an incomplete basis: your record does not cover the whole {ev.cycle.windowDays}-day period, so the days before it count as zero. Use <b>Set</b> on those days, or confirm that your record really starts here.</p>}
-        <p class="muted small">“Set” a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so every clock counts it. Days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)}</b> — the times in this table use your device zone.</>}</p>
+        <p class="muted small">“Set” a past day with drive + on-duty hours and a start time; it's written as real segments (with a 30-min break after 8h driving) so every clock counts it. Days roll at {formatDayStartHM(s.config)} {s.config.timeZone}.{deviceTz !== s.config.timeZone && <> On your device clock ({deviceTz}) that is <b>{clock(carrierDayStart(now, safeRulesConfig(s.config)), false)}</b> — the times in this table use your device zone.</>}</p>
       </Card>
       <button class="plan-item" onClick={() => setState({ tab: 'load', planReturn: 'recap' })}>
         <span class="plan-icon"><Icon d={I.truck} size={26} /></span>
@@ -5320,7 +5326,7 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
   const signKind: SignKind = plan.verdict.tone === 'bad' ? 'stop' : plan.verdict.tone === 'warn' ? 'warn' : 'go';
   const signWord = plan.verdict.tone === 'bad' ? 'Recap wall' : plan.verdict.tone === 'warn' ? 'Tight cycle' : 'Clear on recaps';
   const tzWord = zoneShort(s.config.timeZone);
-  const rollWord = s.config.dayStartHour === 0 ? 'midnight' : `${String(s.config.dayStartHour).padStart(2, '0')}:00`;
+  const rollWord = dayStartWord(s.config);
   const hasCustom = customShifts.some((x) => x !== null);
   const sampleShift = plan.recaps.shifts[0];
   const delta = plan.netDeltaMinutes;
@@ -5344,7 +5350,7 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
           )}
           <p class="muted small" style="margin:0">
             {plan.limit / 60}-hour / {plan.windowDays}-day cycle · rolls at {rollWord} {tzWord}
-            {deviceTz !== s.config.timeZone && <> ({terminalMidnightOnDevice(s.config.timeZone, deviceTz, now)} device time)</>}.
+            {deviceTz !== s.config.timeZone && <> ({clock(carrierDayStart(now, safeRulesConfig(s.config)), false)} device time)</>}.
           </p>
         </div>
       </Card>
@@ -7519,7 +7525,7 @@ function HistoryTab({ s, now }: { s: State; now: number }) {
     <>
       <BackToPlan s={s} />
       <h1 class="screen-title">Your last 8 days</h1>
-      <p class="muted small">What you logged, day by day, on your carrier's clock — days roll at {String(s.config.dayStartHour).padStart(2, '0')}:00 {s.config.timeZone}, and the times below read in your device zone ({deviceTz}), like everywhere else in the app.</p>
+      <p class="muted small">What you logged, day by day, on your carrier's clock — days roll at {formatDayStartHM(s.config)} {s.config.timeZone}, and the times below read in your device zone ({deviceTz}), like everywhere else in the app.</p>
       {days.map((d) => {
         const card = (
         <Card key={d.start} title={d.isToday ? `Today — ${d.label}` : d.label}>
@@ -7629,7 +7635,7 @@ export function defaultApptTime(s: State, now: number): number {
   const departure = now + lc.leaveIn;
   const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
   const input: TripInput = {
-    departure, distanceMiles: lc.miles, mph: s.mph, stops: [], config: s.config,
+    departure, distanceMiles: lc.miles, mph: s.mph, stops: [], config: safeRulesConfig(s.config),
     ...(lc.leaveIn > 0 ? { untilDeparture: { from: now, status: lc.waitOff ? 'OFF' as DutyStatus : 'ON' as DutyStatus, label: `${lc.waitOff ? 'Off duty' : 'On duty'} until departure` } } : {}),
   };
   const both = planTripAll(loadSegs, input);
@@ -8206,11 +8212,12 @@ export function buildLogSummaryDays(s: State, now: number, days: number): LogSum
   const fullFmt = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: s.config.timeZone });
   const shortFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: s.config.timeZone });
 
+  const cfg = safeRulesConfig(s.config);
   const out: LogSummaryDay[] = [];
-  let curStart = carrierDayStart(now, s.config);
+  let curStart = carrierDayStart(now, cfg);
   for (let back = 0; back < count; back++) {
     const start = curStart;
-    const end = nextCarrierDayStart(start, s.config);
+    const end = nextCarrierDayStart(start, cfg);
     const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
     for (const x of loggedResolved) {
       totals[x.status] += Math.max(0, Math.min(x.end, end, now) - Math.max(x.start, start));
@@ -8240,7 +8247,7 @@ export function buildLogSummaryDays(s: State, now: number, days: number): LogSum
       live,
       noDuty: rows.length === 0 && !live,
     });
-    if (back + 1 < count) curStart = carrierDayStart(curStart - 1, s.config);
+    if (back + 1 < count) curStart = carrierDayStart(curStart - 1, cfg);
   }
   return out;
 }
@@ -8265,7 +8272,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
     weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   }).format(new Date(req.generatedAtMs));
   const twoZones = s.config.timeZone !== deviceTz;
-  const dayStartLabel = `${String(s.config.dayStartHour).padStart(2, '0')}:00`;
+  const dayStartLabel = formatDayStartHM(s.config);
 
   return (
     <article class="print-report" data-print-report data-days={days.length} aria-label="Log summary report">
@@ -8478,7 +8485,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
     if (pressRef.current !== null) { clearTimeout(pressRef.current); pressRef.current = null; }
   };
   useEffect(() => cancelPress, []);
-  const setC = (p: Partial<typeof c>) => setState({ config: { ...c, ...p } });
+  const setC = (p: Partial<typeof c>) => setState({ config: safeRulesConfig({ ...c, ...p }) });
   const exportJson = () => {
     const name = downloadExport(s);
     // Say only what is knowable: the app asked the browser for a download. Whether the file landed is
@@ -8505,7 +8512,16 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       // Say what was replaced, exactly as the bad-zone case does: an imported draft that the app could
       // not use must not be silently swapped for a default.
       const resets = draftResets(d, cur);
-      setState((cur) => applyImportedState(cur, d));
+      setState((cur) => {
+        const out = applyImportedState(cur, d);
+        if (out.config) {
+          // A legacy backup exported before dayStartMinute existed has a config object without that key;
+          // store.ts sanitizeConfig spreads cur.config first, which would silently inherit the current minute.
+          const legacyCfg = d.config && typeof d.config === 'object' && !Array.isArray(d.config) && !('dayStartMinute' in d.config);
+          out.config = safeRulesConfig(legacyCfg ? { ...out.config, dayStartMinute: 0 } : out.config);
+        }
+        return out;
+      });
       setIoNote(`Imported ${(d.segments ?? []).length} segment(s) and ${(d.tentative ?? []).length} what-if row(s) from ${f.name}. Settings and the trip scenario came back with them; a simulated clock does not.${badZone ? ` The file's time zone "${badZone}" is not valid, so your home terminal zone stayed ${getState().config.timeZone}.` : ''}${resets.length ? ` Values the app could not use were replaced in ${resets.join(' and ')}.` : ''}`);
     }).catch((err) => setIoNote(`Could not read that file: ${err instanceof Error ? err.message : String(err)}`));
   };
@@ -8514,7 +8530,19 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
       {/* D18 (audit): the one-release "Hours coming back has moved to Plan ›" row is retired. */}
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
-        <label>Carrier day starts at<select value={c.dayStartHour} onChange={(e) => setC({ dayStartHour: Number((e.target as HTMLSelectElement).value) })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
+        <button
+          type="button"
+          class="rowbtn"
+          data-carrier-day-btn="1"
+          aria-label={`Carrier day starts at ${formatDayStartHM(c)} (${zoneShort(c.timeZone)}). Change`}
+          onClick={() => openSheet({ kind: 'daystart' })}
+        >
+          <span>
+            <b>Carrier day starts at <span class="mono">{formatDayStartHM(c)}</span></b><br />
+            <span class="muted small">{c.dayStartHour === 0 && clampDayStartMinute(c.dayStartMinute) === 0 ? `Midnight · ${zoneShort(c.timeZone)}` : `Home terminal time · ${zoneShort(c.timeZone)}`}</span>
+          </span>
+          <Icon d={I.next} />
+        </button>
         <TimeZoneField value={c.timeZone} onChange={(v) => setC({ timeZone: v })} />
         <label class="check"><input type="checkbox" checked={c.shortHaul} onChange={(e) => setC({ shortHaul: (e.target as HTMLInputElement).checked })} /> Short-haul (§395.1(e)) — no 30-min break rule</label>
         {/* Gemini round, item H: the control is a row, not a section — the last row of the Now
@@ -8566,6 +8594,54 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         </Card>
       )}
     </>
+  );
+}
+
+const KEYS_DAYSTART: ClockKeys = [
+  [[-60, '− 1 hour', '1 hour earlier'], [60, '+ 1 hour', '1 hour later']],
+  [[-15, '−15', '15 minutes earlier'], [-5, '−5', '5 minutes earlier'], [5, '+5', '5 minutes later'], [15, '+15', '15 minutes later']],
+  [[-1, '−1', '1 minute earlier'], [1, '+1', '1 minute later']],
+];
+/** Anchor time-of-day edits on a fixed non-DST local calendar date so every HH:MM (00:00..23:59) exists cleanly. */
+const dayStartAnchor = (h: number, m: number) => Math.floor(new Date(2026, 5, 15, h, m, 0, 0).getTime() / 60000);
+
+function DayStartSheet({ s, closing = false }: { s: State; closing?: boolean }) {
+  const c = safeRulesConfig(s.config);
+  const [at, setAt] = useState<number>(() => dayStartAnchor(c.dayStartHour, c.dayStartMinute));
+  const setPick = (v: number) => {
+    const d = new Date(v * 60000);
+    setAt(dayStartAnchor(d.getHours(), d.getMinutes()));
+  };
+  const d = new Date(at * 60000);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const hm = formatDayStartHM({ dayStartHour: h, dayStartMinute: m });
+  const tzName = zoneShort(c.timeZone);
+  const apply = () => {
+    setState((cur) => ({ config: { ...safeRulesConfig(cur.config), dayStartHour: h, dayStartMinute: m } }));
+    openSheet(null);
+  };
+  return (
+    <Sheet title="Carrier day starts at" closing={closing}>
+      <p class="muted small" style="margin:0">Exact daily 24-hour boundary in <b>{tzName}</b> ({c.timeZone}).</p>
+      <ClockPick
+        timeOnly
+        at={at}
+        set={setPick}
+        now={at}
+        future={false}
+        say="Carrier day starts at"
+        name="Carrier day start time"
+        keys={KEYS_DAYSTART}
+        sub={`Home terminal time (${tzName}) · tap the time to pick it`}
+        extra={(h !== 0 || m !== 0) ? (
+          <div class="chips" style="margin-bottom:8px">
+            <button type="button" onClick={() => setAt(dayStartAnchor(0, 0))}>Reset to 00:00 (midnight)</button>
+          </div>
+        ) : undefined}
+      />
+      <button class="primary wide ed-go" data-carrier-day-apply="1" onClick={apply}>Apply · {hm} ({tzName})</button>
+    </Sheet>
   );
 }
 
@@ -8641,7 +8717,8 @@ function DisclaimerDialog({ closing = false }: { closing?: boolean }) {
 function SpeakAskDialog({ closing = false }: { closing?: boolean }) {
   const yes = () => {
     setState({ speakAlerts: true, speechAsked: true, speakAskOpen: false });
-    const cur = getState();
+    const rawCur = getState();
+    const cur = { ...rawCur, config: safeRulesConfig(rawCur.config) };
     if (cur.current && cur.nowOverride === null) {
       if (cur.current.status === 'D') {
         try {
@@ -8765,6 +8842,7 @@ function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, roll
   if (k.kind === 'rollouttime') return s.tab === 'plan' && rolloutOpen;
   if (k.kind === 'rescuetime') return s.tab === 'plan' && rescueOpen;
   if (k.kind === 'stacktime') return s.tab === 'plan' && stackOpen;
+  if (k.kind === 'daystart') return s.tab === 'settings';
   return true;
 }
 
@@ -8782,7 +8860,9 @@ const cancelRafOf = (id: number): void => { if (typeof cancelAnimationFrame === 
 const prefersReducedMotion = (): boolean => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function App() {
-  const s = useStore();
+  const rawState = useStore();
+  const safeCfg = useMemo(() => safeRulesConfig(rawState.config), [rawState.config]);
+  const s = useMemo(() => (safeCfg === rawState.config ? rawState : { ...rawState, config: safeCfg }), [rawState, safeCfg]);
   const now = useNow();
   // Startup disclaimer — dismissed for this launch only; a fresh launch shows it again.
   const [, redraw] = useState(0);
@@ -9066,7 +9146,7 @@ export function App() {
       if (st.nowOverride !== null) { welcomeCheck(st, 0, null); return; }
       const t = nowMin();
       let e: FullEvaluation | null = null;
-      try { e = evaluate(allSegments(st, t), { asOf: t, config: st.config }); } catch { e = null; }
+      try { e = evaluate(allSegments(st, t), { asOf: t, config: safeRulesConfig(st.config) }); } catch { e = null; }
       welcomeCheck(st, t, e);
     };
     check();
@@ -9282,6 +9362,7 @@ export function App() {
       case 'edit':
       case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
       case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
+      case 'daystart': inner = <DayStartSheet key={mk} s={s} closing={sheetClosing} />; break;
     }
     return <SheetMotionCtx.Provider value={{ closing: sheetClosing, morphOrigin: displayedSheet.morph }}>{inner}</SheetMotionCtx.Provider>;
   };

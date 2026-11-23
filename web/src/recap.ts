@@ -31,6 +31,7 @@ import {
   nextCarrierDayStart,
 } from '../../engine/src/index.ts';
 import { cycleParamsOf, dur } from './store.ts';
+import { safeRulesConfig } from './carrierday.ts';
 
 export const PROJECTION_SHIFTS = 7;
 export const SHIFT_BUDGET_PRESETS = [
@@ -214,6 +215,7 @@ export interface RecapComparison {
   limit: number;
   windowDays: number;
   dayStartHour: number;
+  dayStartMinute: number;
   timeZone: string;
   /** Historical rolling window days derived from the store's logged segments. */
   pastDays: PastDaySummary[];
@@ -279,21 +281,24 @@ export function fmtWallHM(wallMinutes: number): string {
  * Exact epoch minute for a home-terminal wall-clock time (`wallMinutes` in 0..1439)
  * that falls inside carrier day `[dayStart, dayEnd)`.
  *
- * When `dayStartHour > 0` (e.g., 06:00), wall times `< dayStartHour` (e.g., 02:00)
- * occur on the next calendar date while still belonging to this carrier day.
+ * When the carrier day starts after 00:00 (e.g., 18:40), wall times earlier than the
+ * boundary (e.g., 18:15 or 02:00) occur on the next calendar date while still belonging
+ * to this carrier day.
  */
 export function wallMinuteInCarrierDay(
   dayStart: number,
   dayEnd: number,
   wallMinutes: number,
-  config: RulesConfig,
+  rawConfig: RulesConfig,
 ): number {
+  const config = safeRulesConfig(rawConfig);
   const lbl = dayLabel(dayStart, config);
   const [y, mo, d] = lbl.split('-').map(Number);
   const norm = ((Math.round(wallMinutes) % 1440) + 1440) % 1440;
   const h = Math.floor(norm / 60);
   const min = norm % 60;
-  const base = h < config.dayStartHour
+  const startWall = config.dayStartHour * 60 + config.dayStartMinute;
+  const base = norm < startWall
     ? new Date(Date.UTC(y, mo - 1, d + 1))
     : new Date(Date.UTC(y, mo - 1, d));
   const minute = localToMinute(
@@ -302,12 +307,14 @@ export function wallMinuteInCarrierDay(
     base.getUTCDate(),
     h,
     config.timeZone,
-  ) + min;
+    min,
+  );
   return Math.max(dayStart, Math.min(dayEnd - 1, minute));
 }
 
 /** Default 34-hour reset start: tomorrow at 08:00 home-terminal time (clamped >= now). */
-export function defaultResetStart(now: number, config: RulesConfig, dayOffset = 1, wallMinutes = 8 * 60): number {
+export function defaultResetStart(now: number, rawConfig: RulesConfig, dayOffset = 1, wallMinutes = 8 * 60): number {
+  const config = safeRulesConfig(rawConfig);
   let ds = carrierDayStart(now, config);
   for (let i = 0; i < dayOffset; i++) ds = nextCarrierDayStart(ds, config);
   const de = nextCarrierDayStart(ds, config);
@@ -697,7 +704,8 @@ export function buildVerdict(
  *   Strategy B: Take a 34-Hour Reset starting at `input.resetStart`
  */
 export function projectRecapVs34(input: RecapPlanInput): RecapComparison {
-  const { segments, now, config } = input;
+  const { segments, now } = input;
+  const config = safeRulesConfig(input.config);
   const logged = segments.filter((x) => !x.tentative);
   const { limit, windowDays } = cycleParamsOf(config);
   const ev = evaluate(logged, { asOf: now, config });
@@ -886,6 +894,7 @@ export function projectRecapVs34(input: RecapPlanInput): RecapComparison {
     limit,
     windowDays,
     dayStartHour: config.dayStartHour,
+    dayStartMinute: config.dayStartMinute,
     timeZone: config.timeZone,
     pastDays,
     unloggedPastDays,

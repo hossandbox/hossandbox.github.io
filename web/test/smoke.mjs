@@ -6992,4 +6992,51 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('stack my stops & loads (legal 3-stop, SSR verdict-first, dispatch text, zero input[type=time]): OK');
 }
+// --- Carrier-day exact start time (HH:MM): persistence, clamping, SSR formatting
+{
+  const S = await import('../src/store.ts');
+  const CD = await import('../src/carrierday.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  // 1. Persistence round-trip preserves dayStartMinute = 40 unchanged
+  const raw40 = JSON.stringify({
+    segments: [],
+    config: { cycle: '70/8', dayStartHour: 18, dayStartMinute: 40, timeZone: 'America/Chicago', shortHaul: false },
+  });
+  const parsed40 = S.parseSaved(raw40);
+  need(parsed40.config.dayStartHour === 18 && parsed40.config.dayStartMinute === 40, `parseSaved 18:40 failed: ${JSON.stringify(parsed40.config)}`);
+
+  // 2. Garbage dayStartMinute values clamp to 0 before evaluation
+  for (const g of [75, -1, 40.5, 'x', NaN, null]) {
+    const p = S.parseSaved(JSON.stringify({ segments: [], config: { cycle: '70/8', dayStartHour: 18, dayStartMinute: g, timeZone: 'America/Chicago', shortHaul: false } }));
+    const safe = CD.safeRulesConfig(p.config);
+    need(safe.dayStartMinute === 0, `garbage ${JSON.stringify(g)} not clamped to 0`);
+  }
+
+  // 3. SSR Settings + Now/Plan two-zones notices show 18:40
+  const otherZone = S.deviceTz === 'America/New_York' ? 'America/Los_Angeles' : 'America/New_York';
+  const T = E.localToMinute(2026, 11, 11, 14, 'America/Chicago', 0);
+  setState({
+    ...S.INITIAL_STATE,
+    tab: 'settings',
+    nowOverride: T,
+    disclaimerAcked: true,
+    tzChosen: true,
+    historyAcknowledged: true,
+    drivingView: false,
+    zoneAck: null,
+    config: { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 18, dayStartMinute: 40, timeZone: otherZone },
+  });
+  const fullHtml = render(h(App, {}));
+  need(fullHtml.includes('Carrier day starts at') && fullHtml.includes('18:40'), 'Settings SSR missing Carrier day starts at 18:40');
+  need(fullHtml.includes(`rolls at 18:40 <b>${otherZone}</b>`), 'Now/Plan two-zones SSR notice missing 18:40');
+  need(fullHtml.includes('Carrier day from 18:40'), 'Log daynav SSR missing 18:40');
+  need(!/<input[^>]+type="time"/.test(pageOut(fullHtml, 'page-settings')), 'Settings SSR must not render bare <input type="time">');
+
+  if (bad.length) throw new Error(`carrier-day exact start: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('carrier-day exact start (18:40 persistence, garbage clamping, SSR Settings/Notices/Log): OK');
+}
 console.log('OK');

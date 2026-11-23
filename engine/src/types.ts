@@ -31,6 +31,8 @@ export interface RulesConfig {
   cycle: '60/7' | '70/8';
   /** Hour (0-23) at which the carrier's 24-hour period starts at the home terminal. Usually 0. */
   dayStartHour: number;
+  /** Minute (0-59) within dayStartHour at which the carrier's 24-hour period starts. Usually 0. */
+  dayStartMinute: number;
   /** IANA time zone of the home terminal, used to compute carrier days. */
   timeZone: string;
   /** Driver qualifies for §395.1(e)(1)/(2) short-haul: exempt from the 30-min break rule. */
@@ -44,6 +46,7 @@ export interface RulesConfig {
 export const DEFAULT_CONFIG: RulesConfig = {
   cycle: '70/8',
   dayStartHour: 0,
+  dayStartMinute: 0,
   timeZone: 'America/Chicago',
   shortHaul: false,
 };

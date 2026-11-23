@@ -226,7 +226,12 @@ function waitForCycle(ev: FullEvaluation, t: number): { minutes: number; reason:
  */
 export function pruneHistory(history: Segment[], from: number, config?: Partial<RulesConfig>): Segment[] {
   if (history.length < 50) return history;
-  const cfg = { ...DEFAULT_CONFIG, ...(config ?? {}) };
+  const rawCfg = { ...DEFAULT_CONFIG, ...(config ?? {}) };
+  const dsm = rawCfg.dayStartMinute;
+  const cfg: RulesConfig = {
+    ...rawCfg,
+    dayStartMinute: typeof dsm === 'number' && Number.isInteger(dsm) && dsm >= 0 && dsm <= 59 ? dsm : 0,
+  };
   const { windowDays } = cycleParams(cfg);
   let winStart = carrierDayStart(from, cfg);
   for (let i = 0; i < windowDays + 1; i++) winStart = carrierDayStart(winStart - 1, cfg);
