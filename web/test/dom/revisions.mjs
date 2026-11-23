@@ -1186,7 +1186,8 @@ await pin('R6. rollout screen has no raw <input type="time"> or <input type="dat
   const rawOnPage = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), rm);
   const inSheetTime = all((n) => n.localName === 'input' && n.attributes?.type === 'time', sh);
   const inSheetDate = all((n) => n.localName === 'input' && n.attributes?.type === 'date', sh);
-  openSheet(null); await sleep(40);
+  // Re-aimed (2026-11-22 polish): all bottom sheets retain .is-closing across the 200ms slide-down exit then unmount.
+  openSheet(null); await sleep(260);
   const rootAfter = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'));
   A.openRolloutPlanner(false);
   return (rawOnPage.length === 0 && inSheetTime.length === 1 && inSheetDate.length === 1 && rootAfter.length === 0)
@@ -1481,8 +1482,9 @@ await pin('T2. transitions (b): while in Settings, header chrome, strip, and bot
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
   const hidesChromeCss = /\.app\.in-room\s*>\s*header\.top[\s\S]*?\.app\.in-room\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;/.test(css);
-  const roomFixedCss = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+220ms\s+ease-out/.test(css);
-  const roomActiveCss = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;/.test(css);
+  // Re-aimed (2026-11-22 polish): shared room dissolve uses unified motion tokens (--dur-room/--ease-enter on enter, --dur-exit/--ease-exit on exit).
+  const roomFixedCss = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+var\(--dur-exit\)\s+var\(--ease-exit\)/.test(css);
+  const roomActiveCss = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*transition:[^;]*opacity\s+var\(--dur-room\)\s+var\(--ease-enter\)/.test(css);
   const ok = has(appEl, 'in-room') && has(appEl, 'in-settings')
     && off(hdr) && hid(hdr)
     && off(st) && hid(st)
@@ -1628,11 +1630,12 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
   return okHist || `history failed: scrollCalls=${scrollCalls.length} tool=${prH.attributes?.['data-plan-tool']}`;
 });
 
-await pin('P2. plan-dissolve: shared room CSS (220ms ease-out, fixed inset:0 z-index:20), reduced-motion disable, sheet/modal z-index layering, and print hiding', async () => {
+// Re-aimed (2026-11-22 polish): shared room dissolve uses unified motion tokens (--dur-room 240ms --ease-enter / --dur-exit 200ms --ease-exit).
+await pin('P2. plan-dissolve: shared room CSS (motion tokens, fixed inset:0 z-index:20), reduced-motion disable, sheet/modal z-index layering, and print hiding', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const sharedChrome = /\.app\.in-room\s*>\s*header\.top,\s*\.app\.in-room\s*>\s*main\.pages,\s*\.app\.in-room\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;[^}]*opacity\s+220ms\s+ease-out/.test(css);
-  const sharedRoom = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+220ms\s+ease-out/.test(css);
-  const sharedActive = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*opacity\s+220ms\s+ease-out/.test(css);
+  const sharedChrome = /\.app\.in-room\s*>\s*header\.top,\s*\.app\.in-room\s*>\s*main\.pages,\s*\.app\.in-room\s*>\s*nav\.tabs\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;[^}]*opacity\s+var\(--dur-exit\)\s+var\(--ease-exit\)/.test(css);
+  const sharedRoom = /\.page\.room\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*20;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*transition:[^;]*opacity\s+var\(--dur-exit\)\s+var\(--ease-exit\)/.test(css);
+  const sharedActive = /\.page\.room\.is-active\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*opacity\s+var\(--dur-room\)\s+var\(--ease-enter\)/.test(css);
   const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.app\.in-room\s*>\s*header\.top[\s\S]*?\.page\.room,\s*\.page\.room\.is-active[\s\S]*?transition:\s*none;/.test(css);
   const sheetAbove = /\.sheet-wrap\s*\{[^}]*z-index:\s*40;/.test(css);
   const modalAbove = /\.backdrop\s*\{[^}]*z-index:\s*50;/.test(css);
@@ -1722,11 +1725,14 @@ await pin('P4. plan-dissolve: hardware Back (popstate via backnav) closes sheet 
   const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planRoom())[0];
   fire(apptBtn, 'click'); await sleep(60);
   if (!all((n) => has(n, 'sheet')).length) return 'rollout sheet did not open';
-  pressHardwareBack(); await sleep(60);
-  const sheetClosedRoomOpen = all((n) => has(n, 'sheet')).length === 0 && A.isRolloutPlannerOpen() && has(planRoom(), 'is-active');
+  // Re-aimed (2026-11-22 polish): first hardware Back immediately clears currentSheet() and marks RolloutTimeSheet .is-closing, then unmounts after the 200ms slide-down exit.
+  pressHardwareBack(); await sleep(40);
+  const sheetClosedRoomOpen = A.currentSheet() === null && all((n) => has(n, 'sheet') && !has(n, 'is-closing')).length === 0 && A.isRolloutPlannerOpen() && has(planRoom(), 'is-active');
+  await sleep(240);
+  const sheetUnmounted = all((n) => has(n, 'sheet')).length === 0;
   pressHardwareBack(); await sleep(60);
   const roomClosed = !A.isRolloutPlannerOpen() && !has(planRoom(), 'is-active') && getState().tab === 'plan' && scrollCalls.length === 0;
-  return (sheetClosedRoomOpen && roomClosed) || `sheetClosedRoomOpen=${sheetClosedRoomOpen} roomClosed=${roomClosed}`;
+  return (sheetClosedRoomOpen && sheetUnmounted && roomClosed) || `sheetClosedRoomOpen=${sheetClosedRoomOpen} sheetUnmounted=${sheetUnmounted} roomClosed=${roomClosed}`;
 });
 
 await pin('P5. plan-dissolve: opening a Plan tool resets planRoom.scrollTop to 0 (and preserves Plan hub scrollTop across tool entry/exit)', async () => {
@@ -1801,9 +1807,8 @@ await pin('N1. nowstrip (a): L4 "comes back" strip renders full text (time, +dur
   return ok || JSON.stringify({ txt, hasFull, hasReflow, hasSize, hasNarrow, hasSvgShrink, noTruncate });
 });
 
-// Re-aimed (2026-11-22 eldslide, Lorico): DriftSheet now also uses .sheet.slide-up alongside LeverSheet;
-// all other sheet kinds (why, status, exceptions, add, quickstart) do NOT.
-await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.slide-up; non-slide-up sheet kinds (why, status, exceptions, add, quickstart) do NOT', async () => {
+// Re-aimed (2026-11-22 polish): unified motion system — ALL bottom sheets share base .sheet / .sheet-wrap slide-up/down CSS (LeverSheet keeps .slide-up; all other sheet kinds also render cleanly with zero .is-closing while open).
+await pin('N2. nowstrip (b) / unified sheets: LeverSheet and all other bottom sheet kinds (why, status, exceptions, add, quickstart) open cleanly under the unified bottom-sheet motion system', async () => {
   await seed(nowstripL4Seed());
   const btn = await waitForLeverBtn();
   if (!btn) return 'missing L4 lever strip';
@@ -1823,15 +1828,16 @@ await pin('N2. nowstrip (b): LeverSheet carries .sheet.slide-up & .sheet-wrap.sl
     openSheet(desc); await sleep(40);
     const wraps = all((n) => has(n, 'sheet-wrap'));
     const sheets = all((n) => has(n, 'sheet'));
-    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'slide-up') || has(wraps[0], 'slide-up')) {
+    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'is-closing') || has(wraps[0], 'is-closing')) {
       otherBad.push(`${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
     }
   }
-  openSheet(null); await sleep(40);
+  openSheet(null); await sleep(260);
   return (leverOk && otherBad.length === 0) || JSON.stringify({ leverOk, leverWrap: leverWrap && cls(leverWrap), leverSheet: leverSheet && cls(leverSheet), otherBad });
 });
 
-await pin('N3. nowstrip (b): closing LeverSheet retains .sheet.slide-up.is-closing (inert + aria-hidden) across the 200ms slide-down exit then unmounts; other sheets unmount immediately', async () => {
+// Re-aimed (2026-11-22 polish): ALL bottom sheets (both LeverSheet and WhySheet) now share the unified 200ms slide-down retained-exit lifecycle (.is-closing, inert + aria-hidden) before unmounting.
+await pin('N3. nowstrip (b) / unified sheets: closing LeverSheet and other bottom sheets (Why?) retains .is-closing (inert + aria-hidden) across the 200ms slide-down exit then unmounts', async () => {
   await seed(nowstripL4Seed());
   const btn = await waitForLeverBtn();
   if (!btn) return 'missing L4 lever strip';
@@ -1848,24 +1854,34 @@ await pin('N3. nowstrip (b): closing LeverSheet retains .sheet.slide-up.is-closi
     && has(midSheet, 'slide-up') && has(midSheet, 'is-closing');
   await sleep(250);
   const afterClose = all((n) => has(n, 'sheet')).length === 0;
-  // Non-lever sheet unmounts immediately on close
+  // Other sheet kinds (why) now also share the unified retained slide-down exit
   openSheet({ kind: 'why' }); await sleep(40);
   if (all((n) => has(n, 'sheet')).length !== 1) return 'why sheet did not open';
   openSheet(null); await sleep(30);
-  const whyImmediate = all((n) => has(n, 'sheet')).length === 0;
-  return (midOk && afterClose && whyImmediate) || JSON.stringify({ midOk, afterClose, whyImmediate });
+  const whyMidWrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const whyMidSheet = all((n) => has(n, 'sheet'))[0];
+  const whyClosingOk = A.currentSheet() === null && !!whyMidWrap && !!whyMidSheet
+    && has(whyMidWrap, 'is-closing') && off(whyMidWrap) && hid(whyMidWrap) && has(whyMidSheet, 'is-closing');
+  await sleep(250);
+  const whyUnmounted = all((n) => has(n, 'sheet')).length === 0;
+  return (midOk && afterClose && whyClosingOk && whyUnmounted) || JSON.stringify({ midOk, afterClose, whyClosingOk, whyUnmounted });
 });
 
-await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS animation and unmounts LeverSheet immediately on close', async () => {
+// Re-aimed (2026-11-22 polish): unified motion tokens (--dur-sheet: 320ms, --ease-enter: cubic-bezier(0.22, 0.14, 0.45, 1), --dur-exit: 200ms, --ease-exit: ease-out) on base .sheet rules + reduced-motion neutralization.
+await pin('N4. nowstrip (c) / unified sheets: prefers-reduced-motion disables bottom-sheet CSS animation & parked transform and unmounts LeverSheet immediately on close', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
+  const block = css.slice(css.indexOf('SPLIT DECISION MOTION SYSTEM'));
+  const hasTokens = /--dur-sheet:\s*320ms;/.test(block)
+    && /--dur-exit:\s*200ms;/.test(block)
+    && /--ease-enter:\s*cubic-bezier\(0\.22,\s*0\.14,\s*0\.45,\s*1\);/.test(block)
+    && /--ease-exit:\s*ease-out;/.test(block);
   const hasKfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
   const hasKfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
-  const hasSlideRules = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block)
-    && /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block)
-    && /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block)
-    && /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
-  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
+  const hasSlideRules = /\.sheet\s*\{[^}]*transform:\s*translateY\(100%\);[^}]*animation:\s*sheet-slide-up\s+var\(--dur-sheet\)\s+var\(--ease-enter\)\s+both;/.test(block)
+    && /\.sheet-wrap\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+var\(--dur-sheet\)\s+var\(--ease-enter\)\s+both;/.test(block)
+    && /\.sheet\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block)
+    && /\.sheet-wrap\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block);
+  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet,[\s\S]*?\.sheet\.is-closing,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
   const origMM = globalThis.window.matchMedia;
   let immediateUnmount = false;
   try {
@@ -1880,8 +1896,8 @@ await pin('N4. nowstrip (c): prefers-reduced-motion disables .sheet.slide-up CSS
   } finally {
     globalThis.window.matchMedia = origMM;
   }
-  const ok = hasKfUp && hasKfDown && hasSlideRules && hasReducedCss && immediateUnmount;
-  return ok || JSON.stringify({ hasKfUp, hasKfDown, hasSlideRules, hasReducedCss, immediateUnmount });
+  const ok = hasTokens && hasKfUp && hasKfDown && hasSlideRules && hasReducedCss && immediateUnmount;
+  return ok || JSON.stringify({ hasTokens, hasKfUp, hasKfDown, hasSlideRules, hasReducedCss, immediateUnmount });
 });
 
 /* ---------------- (o) dialfade (2026-11-22, Lorico): Now hero card soft dissolve (Timeline <-> Dial) ---------------- */
@@ -1915,15 +1931,16 @@ await pin('DF1. dialfade: Timeline <-> Dial applies .now-card-dissolve (~200ms p
   const settledTl = !!nowHero() && !has(nowHero(), 'now-card-dissolve')
     && all((n) => has(n, 'taxis'), pages()[1]).length > 0
     && nowCardKey('Timeline')?.attributes['aria-pressed'] === 'true';
-  // CSS rules: pure opacity dissolve ~200ms ease-out on hero body (:not(.card-switch)), no slide/scale, reduced-motion override
+  // CSS rules: pure opacity dissolve using unified tokens (--dur-exit 200ms --ease-state) on hero body (:not(.card-switch)), no slide/scale in now-card-dissolve, reduced-motion override
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
   const startIdx = css.indexOf('\n.hero.now-card-dissolve');
   const endIdx = css.indexOf('@page', startIdx);
   const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
-  const hasRule = /\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)\s*\{[^}]*animation:\s*now-card-dissolve\s+200ms\s+ease-out/.test(block);
+  const kfMatch = block.match(/@keyframes\s+now-card-dissolve\s*\{[\s\S]*?\}\s*\}/);
+  const hasRule = /\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)\s*\{[^}]*animation:\s*now-card-dissolve\s+var\(--dur-exit\)\s+var\(--ease-state\)/.test(block);
   const hasKf = /@keyframes\s+now-card-dissolve\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
-  const noTransform = !/transform|translate|scale/i.test(block);
-  const hasReduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)\s*\{[^}]*animation:\s*none;/.test(block);
+  const noTransform = !!kfMatch && !/transform|translate|scale/i.test(kfMatch[0]);
+  const hasReduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.hero\.now-card-dissolve\s*>\s*:not\(\.card-switch\)[\s\S]*?animation:\s*none;/.test(block);
   const ok = steadyNoFade && midDial && settledDial && midTl && settledTl && hasRule && hasKf && noTransform && hasReduced;
   return ok || JSON.stringify({ steadyNoFade, midDial, settledDial, midTl, settledTl, hasRule, hasKf, noTransform, hasReduced });
 });
@@ -1989,7 +2006,8 @@ await pin('DF3. dialfade: prefers-reduced-motion: reduce swaps Timeline <-> Dial
 /* ---------------- (p) eldslide (2026-11-22, Lorico): "Check against my ELD" DriftSheet scoped slide-up/slide-down ---------------- */
 const eldCheckBtn = () => all((n) => n.localName === 'button' && has(n, 'plan-item') && /Check against my ELD/.test(n.textContent), pages()[1])[0];
 
-await pin('ES1. eldslide: DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up when open; sample of other sheet kinds (why, status, exceptions, add) do NOT', async () => {
+// Re-aimed (2026-11-22 polish): DriftSheet AND all other bottom sheets (why, status, exceptions, add) now share the unified bottom-sheet motion system.
+await pin('ES1. eldslide / unified sheets: DriftSheet and all other bottom sheet kinds (why, status, exceptions, add) open cleanly under the unified bottom-sheet motion system', async () => {
   await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
   const btn = eldCheckBtn();
   if (!btn) return 'missing "Check against my ELD" button on Now';
@@ -2009,15 +2027,16 @@ await pin('ES1. eldslide: DriftSheet carries .sheet.slide-up & .sheet-wrap.slide
     openSheet(desc); await sleep(40);
     const wraps = all((n) => has(n, 'sheet-wrap'));
     const sheets = all((n) => has(n, 'sheet'));
-    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'slide-up') || has(wraps[0], 'slide-up')) {
+    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'is-closing') || has(wraps[0], 'is-closing')) {
       otherBad.push(`${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
     }
   }
-  openSheet(null); await sleep(40);
+  openSheet(null); await sleep(260);
   return (driftOk && otherBad.length === 0) || JSON.stringify({ driftOk, driftWrap: driftWrap && cls(driftWrap), driftSheet: driftSheet && cls(driftSheet), otherBad });
 });
 
-await pin('ES2. eldslide: closing DriftSheet (Close button, backdrop, Escape, hardware Back) retains .is-closing (inert) then unmounts while releasing blocked immediately; direct switch/disclaimer/driving/other sheets unmount immediately', async () => {
+// Re-aimed (2026-11-22 polish): ALL bottom sheets share retained .is-closing exit; direct switch / disclaimer / driving view still bypass exit retention immediately.
+await pin('ES2. eldslide / unified sheets: closing DriftSheet (Close, backdrop, Escape, hw Back) and other sheets retains .is-closing (inert) then unmounts while releasing blocked immediately; direct switch/disclaimer/driving bypass retention immediately', async () => {
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
@@ -2055,15 +2074,18 @@ await pin('ES2. eldslide: closing DriftSheet (Close button, backdrop, Escape, ha
   fire(eldCheckBtn(), 'click'); await sleep(40);
   openSheet({ kind: 'why' }); await sleep(30);
   const swSheets = all((n) => has(n, 'sheet'));
-  const swOk = swSheets.length === 1 && !has(swSheets[0], 'slide-up') && !has(swSheets[0], 'is-closing');
+  const swOk = swSheets.length === 1 && !has(swSheets[0], 'is-closing') && /Why/.test(swSheets[0].textContent);
+  // Closing WhySheet now also plays unified retained slide-down exit then unmounts cleanly
   openSheet(null); await sleep(30);
-  const whyImmediate = all((n) => has(n, 'sheet')).length === 0;
+  const whyClosing = all((n) => has(n, 'sheet') && has(n, 'is-closing')).length === 1 && A.currentSheet() === null;
+  await sleep(250);
+  const whyUnmounted = all((n) => has(n, 'sheet')).length === 0;
 
   // Showing disclaimer skips exit retention immediately
   fire(eldCheckBtn(), 'click'); await sleep(40);
   setState({ disclaimerAcked: false }); openSheet(null); await sleep(30);
   const discImmediate = all((n) => has(n, 'sheet')).length === 0;
-  setState({ disclaimerAcked: true }); await sleep(40);
+  setState({ disclaimerAcked: true }); await sleep(260);
 
   // Entering driving view skips exit retention immediately
   fire(eldCheckBtn(), 'click'); await sleep(40);
@@ -2072,14 +2094,14 @@ await pin('ES2. eldslide: closing DriftSheet (Close button, backdrop, Escape, ha
   const driveImmediate = all((n) => has(n, 'sheet')).length === 0;
   await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
 
-  return (swOk && whyImmediate && discImmediate && driveImmediate)
-    || JSON.stringify({ swOk, whyImmediate, discImmediate, driveImmediate });
+  return (swOk && whyClosing && whyUnmounted && discImmediate && driveImmediate)
+    || JSON.stringify({ swOk, whyClosing, whyUnmounted, discImmediate, driveImmediate });
 });
 
 await pin('ES3. eldslide: under prefers-reduced-motion: reduce, DriftSheet has no slide animation CSS and unmounts immediately on close', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const block = css.slice(css.indexOf('NOW "COMES BACK" STRIP'));
-  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up[\s\S]*?\.sheet\.slide-up\.is-closing[\s\S]*?animation:\s*none;/.test(block);
+  const block = css.slice(css.indexOf('SPLIT DECISION MOTION SYSTEM'));
+  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet,[\s\S]*?\.sheet\.is-closing,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
   const origMM = globalThis.window.matchMedia;
   let immediateUnmount = false;
   try {
@@ -2118,22 +2140,26 @@ await pin('ES4. eldslide regression: LeverSheet still slides up with .sheet.slid
   return (openOk && midOk && unmounted) || JSON.stringify({ openOk, midOk, unmounted });
 });
 
-/* ---------------- (q) retime (2026-11-22, Lorico): Slide-up entrance retimed (300ms cubic-bezier), exit untouched (200ms ease-out) ---------------- */
-await pin('RT1. retime: slide-up entrance declares 450ms cubic-bezier(0.33, 0.35, 0.25, 1) (sheet + backdrop) while close exit stays 200ms ease-out with unchanged 220ms retained-exit lifecycle', async () => {
+/* ---------------- (q) retime / motion system (2026-11-22 polish): Unified motion tokens + Log-entry origin morph + modals + day swaps ---------------- */
+// Re-aimed (2026-11-22 polish): bottom-sheet entrance uses unified 320ms cubic-bezier(0.22, 0.14, 0.45, 1) (low peak velocity for 60Hz/120Hz parity) while exit stays 200ms ease-out with 220ms retained-exit lifecycle.
+await pin('RT1. motion system: bottom-sheet entrance declares 320ms cubic-bezier(0.22, 0.14, 0.45, 1) via tokens (sheet + backdrop) while close exit stays 200ms ease-out with unchanged 220ms retained-exit lifecycle', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
-  const startIdx = css.indexOf('NOW "COMES BACK" STRIP');
-  const endIdx = css.indexOf('NOW HERO CARD DISSOLVE', startIdx);
+  const startIdx = css.indexOf('SPLIT DECISION MOTION SYSTEM');
+  const endIdx = css.indexOf('@page', startIdx);
   const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
-  const sheetIn = /\.sheet\.slide-up\s*\{[^}]*animation:\s*sheet-slide-up\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block);
-  const bdIn = /\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+450ms\s+cubic-bezier\(0\.33,\s*0\.35,\s*0\.25,\s*1\)\s+both;/.test(block);
-  const sheetOut = /\.sheet\.slide-up\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+200ms\s+ease-out\s+both;/.test(block);
-  const bdOut = /\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+200ms\s+ease-out\s+both;/.test(block);
+  const tokens = /--dur-sheet:\s*320ms;/.test(block)
+    && /--dur-exit:\s*200ms;/.test(block)
+    && /--ease-enter:\s*cubic-bezier\(0\.22,\s*0\.14,\s*0\.45,\s*1\);/.test(block)
+    && /--ease-exit:\s*ease-out;/.test(block);
+  const sheetIn = /\.sheet\s*\{[^}]*transform:\s*translateY\(100%\);[^}]*animation:\s*sheet-slide-up\s+var\(--dur-sheet\)\s+var\(--ease-enter\)\s+both;/.test(block);
+  const bdIn = /\.sheet-wrap\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-in\s+var\(--dur-sheet\)\s+var\(--ease-enter\)\s+both;/.test(block);
+  const sheetOut = /\.sheet\.is-closing\s*\{[^}]*animation:\s*sheet-slide-down\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block);
+  const bdOut = /\.sheet-wrap\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*sheet-backdrop-out\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block);
   const kfUp = /@keyframes\s+sheet-slide-up\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*\}/.test(block);
   const kfDown = /@keyframes\s+sheet-slide-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(0\);\s*\}\s*to\s*\{\s*transform:\s*translateY\(100%\);\s*\}\s*\}/.test(block);
   const kfBdIn = /@keyframes\s+sheet-backdrop-in\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
   const kfBdOut = /@keyframes\s+sheet-backdrop-out\s*\{\s*from\s*\{\s*opacity:\s*1;\s*\}\s*to\s*\{\s*opacity:\s*0;\s*\}\s*\}/.test(block);
-  // Re-aimed (2026-11-22 slidepark): reduced-motion rule now also carries transform: none alongside animation: none.
-  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.slide-up,[\s\S]*?\.sheet\.slide-up\.is-closing,[\s\S]*?\.sheet-wrap\.slide-up\s*>\s*button\.sheet-backdrop,[\s\S]*?\.sheet-wrap\.slide-up\.is-closing\s*>\s*button\.sheet-backdrop\s*\{[^}]*animation:\s*none;[^}]*\}/.test(block);
+  const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet,[\s\S]*?\.sheet\.is-closing,[\s\S]*?\.sheet\.morph-origin,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
   // Both shared slide-up sheets (DriftSheet + LeverSheet) mount with .slide-up and close via retained .is-closing
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
@@ -2156,8 +2182,68 @@ await pin('RT1. retime: slide-up entrance declares 450ms cubic-bezier(0.33, 0.35
   };
   const leverErr = await checkCycle('lever', await waitForLeverBtn());
   const driftErr = await checkCycle('drift', eldCheckBtn());
-  const ok = sheetIn && bdIn && sheetOut && bdOut && kfUp && kfDown && kfBdIn && kfBdOut && reduced && !leverErr && !driftErr;
-  return ok || JSON.stringify({ sheetIn, bdIn, sheetOut, bdOut, kfUp, kfDown, kfBdIn, kfBdOut, reduced, leverErr, driftErr });
+  const ok = tokens && sheetIn && bdIn && sheetOut && bdOut && kfUp && kfDown && kfBdIn && kfBdOut && reduced && !leverErr && !driftErr;
+  return ok || JSON.stringify({ tokens, sheetIn, bdIn, sheetOut, bdOut, kfUp, kfDown, kfBdIn, kfBdOut, reduced, leverErr, driftErr });
+});
+
+await pin('MS1. motion system: Log-entry morph CSS, centered modal CSS, End-of-Day swap CSS, and Plan inner step dissolve CSS are all defined on unified tokens with reduced-motion resets', async () => {
+  const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
+  const block = css.slice(css.indexOf('SPLIT DECISION MOTION SYSTEM'), css.indexOf('@page'));
+  const hasMorph = /\.sheet\.morph-origin\s*\{[^}]*animation:\s*sheet-morph-in\s+var\(--dur-sheet\)\s+var\(--ease-enter\)\s+both;/.test(block)
+    && /\.sheet\.morph-origin\.is-closing\s*\{[^}]*animation:\s*sheet-morph-out\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block)
+    && /\.sheet\.morph-origin\.is-closing\.morph-fallback\s*\{[^}]*animation:\s*sheet-slide-down\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block)
+    && /@keyframes\s+sheet-morph-in\s*\{/.test(block)
+    && /@keyframes\s+sheet-morph-out\s*\{/.test(block);
+  const hasModal = /\.backdrop\s*\{[^}]*animation:\s*modal-backdrop-in\s+var\(--dur-room\)\s+var\(--ease-enter\)\s+both;/.test(block)
+    && /\.backdrop\s*>\s*\.modal\s*\{[^}]*animation:\s*modal-enter\s+var\(--dur-room\)\s+var\(--ease-enter\)\s+both;/.test(block)
+    && /\.backdrop\.is-closing\s*>\s*\.modal\s*\{[^}]*animation:\s*modal-exit\s+var\(--dur-exit\)\s+var\(--ease-exit\)\s+both;/.test(block);
+  const hasSwaps = /\.day-swap-in\s*\{[^}]*animation:\s*state-reveal\s+var\(--dur-exit\)\s+var\(--ease-state\)\s+both;/.test(block)
+    && /\.page\.plan-room\.room-swap\s*>\s*\*\s*\{[^}]*animation:\s*state-dissolve\s+var\(--dur-exit\)\s+var\(--ease-state\)\s+both;/.test(block)
+    && /\.flow-body\.step-dissolve\s*\{[^}]*animation:\s*state-dissolve\s+var\(--dur-exit\)\s+var\(--ease-state\)\s+both;/.test(block)
+    && /\.sheet\[data-step-swap="1"\]\s*>\s*:not\(\.sheet-handle\):not\(\.sheet-head\)\s*\{[^}]*animation:\s*state-dissolve\s+var\(--dur-micro\)\s+var\(--ease-state\)\s+both;/.test(block);
+  const hasReduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.morph-origin[\s\S]*?\.backdrop\s*>\s*\.modal[\s\S]*?\.day-swap-in[\s\S]*?animation:\s*none;[^}]*transform:\s*none;[^}]*opacity:\s*1;/.test(block);
+  return (hasMorph && hasModal && hasSwaps && hasReduced) || JSON.stringify({ hasMorph, hasModal, hasSwaps, hasReduced });
+});
+
+await pin('MS2. motion system: Now open-day <-> End of Day chooser <-> closed-day swaps apply .day-swap-in and keep Reopen/Undo immediately clickable', async () => {
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+  await sleep(250);
+  const endBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'End my day', pages()[1])[0];
+  if (!endBtn) return 'missing End my day button';
+  fire(endBtn, 'click'); await sleep(30);
+  const askEl = all((n) => has(n, 'endday-ask'), pages()[1])[0];
+  const askSwapOk = !!askEl && has(askEl, 'day-swap-in');
+  const offBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Off Duty', askEl)[0];
+  if (!offBtn) return 'missing Off Duty in endday-ask';
+  fire(offBtn, 'click'); await sleep(30);
+  const closedBar = all((n) => has(n, 'undo') && /Day closed/.test(n.textContent), pages()[1])[0];
+  const closedSwapOk = !!closedBar && has(closedBar, 'day-swap-in');
+  const reopenBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'Reopen', closedBar)[0];
+  if (!reopenBtn) return 'missing Reopen button';
+  fire(reopenBtn, 'click'); await sleep(30);
+  const reopenedBtn = all((n) => n.localName === 'button' && n.textContent.trim() === 'End my day', pages()[1])[0];
+  const reopenSwapOk = !!reopenedBtn && has(reopenedBtn, 'day-swap-in');
+  await sleep(250);
+  const cleanedUp = !has(all((n) => n.localName === 'button' && n.textContent.trim() === 'End my day', pages()[1])[0], 'day-swap-in');
+  return (askSwapOk && closedSwapOk && reopenSwapOk && cleanedUp) || JSON.stringify({ askSwapOk, closedSwapOk, reopenSwapOk, cleanedUp });
+});
+
+await pin('MS3. motion system: Log entry rows carry deterministic data-entry-key and tapping a row with a valid rect opens EditorSheet in .morph-origin mode', async () => {
+  await seed({ tab: 'log', ...segs });
+  const row = all((n) => n.localName === 'button' && has(n, 'entry') && !has(n, 'live'), pages()[2])[0];
+  if (!row) return 'missing logged entry row';
+  const key = row.attributes?.['data-entry-key'];
+  if (!key) return 'missing data-entry-key on Log entry row';
+  row.getBoundingClientRect = () => ({ left: 20, top: 380, width: 372, height: 60, right: 392, bottom: 440 });
+  fire(row, 'click'); await sleep(40);
+  const wrap = all((n) => has(n, 'sheet-wrap'))[0];
+  const sh = all((n) => has(n, 'sheet'))[0];
+  const openedMorph = !!wrap && !!sh && has(wrap, 'morph-origin') && has(sh, 'morph-origin') && has(row, 'is-morph-source');
+  openSheet(null); await sleep(30);
+  const closingMorph = all((n) => has(n, 'sheet') && has(n, 'morph-origin') && has(n, 'is-closing')).length === 1 && !has(row, 'is-morph-source');
+  await sleep(250);
+  const unmounted = all((n) => has(n, 'sheet')).length === 0;
+  return (openedMorph && closingMorph && unmounted) || JSON.stringify({ key, openedMorph, closingMorph, unmounted });
 });
 
 let fails = 0;

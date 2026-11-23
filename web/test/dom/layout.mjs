@@ -1368,10 +1368,11 @@ for (const [W, H] of SIZES) {
       h2Fits: hr.left >= sr.left - 0.5 && hr.right <= sr.right + 0.5 && h2.scrollWidth <= h2.clientWidth + 0.5,
     };
   });
-  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 450ms cubic-bezier slide-up entrance (sheet + backdrop) and fitted header`,
+  // Re-aimed (2026-11-22 polish): unified bottom-sheet entrance 320ms cubic-bezier(0.22, 0.14, 0.45, 1); exit stays 200ms ease-out.
+  ok(`${tag} (h) LeverSheet carries .sheet.slide-up with 320ms cubic-bezier(0.22, 0.14, 0.45, 1) slide-up entrance (sheet + backdrop) and fitted header`,
     openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
-    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.45s' && openInfo.animTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
-    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.45s' && openInfo.bdAnimTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.32s' && openInfo.animTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.32s' && openInfo.bdAnimTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
     && openInfo.h2Fits,
     JSON.stringify(openInfo));
 
@@ -1408,7 +1409,7 @@ for (const [W, H] of SIZES) {
     && unmounted,
     JSON.stringify({ closingInfo, unmounted }));
 
-  // Other sheet kinds (e.g. Why?) do NOT carry .slide-up
+  // Re-aimed (2026-11-22 polish): all bottom sheets (including Why?) now share the unified 320ms slide-up / 200ms slide-down motion system
   await page.evaluate(() => {
     const b = [...document.querySelectorAll('section.page-now button')].find((x) => x.textContent.includes('Why?'));
     if (!b) throw new Error('no Why? button on Now');
@@ -1416,19 +1417,19 @@ for (const [W, H] of SIZES) {
   });
   await page.waitForSelector('.sheet', { timeout: 2000 });
   const whyInfo = await page.evaluate(() => {
-    const wrap = document.querySelector('.sheet-wrap');
     const sh = document.querySelector('.sheet');
+    const cs = getComputedStyle(sh);
     return {
-      wrapSlide: wrap.classList.contains('slide-up'),
-      sheetSlide: sh.classList.contains('slide-up'),
-      animName: getComputedStyle(sh).animationName,
+      animName: cs.animationName,
+      animDur: cs.animationDuration,
+      animTiming: cs.animationTimingFunction,
     };
   });
-  ok(`${tag} (h) other sheet kinds (Why?) do NOT carry .slide-up or slide animation`,
-    !whyInfo.wrapSlide && !whyInfo.sheetSlide && whyInfo.animName === 'none',
+  ok(`${tag} (h) other sheet kinds (Why?) share unified 320ms cubic-bezier(0.22, 0.14, 0.45, 1) slide-up animation`,
+    whyInfo.animName === 'sheet-slide-up' && whyInfo.animDur === '0.32s' && whyInfo.animTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)',
     JSON.stringify(whyInfo));
   await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
-  await page.waitForTimeout(80);
+  await page.waitForTimeout(280);
 
   // (c) prefers-reduced-motion: reduce disables slide animation and unmounts immediately on close
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1606,10 +1607,11 @@ for (const [W, H] of SIZES) {
       docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 450ms cubic-bezier slide-up entrance (sheet + backdrop) and zero overflow`,
+  // Re-aimed (2026-11-22 polish): DriftSheet entrance uses unified 320ms cubic-bezier(0.22, 0.14, 0.45, 1); exit stays 200ms ease-out.
+  ok(`${tag} (j) DriftSheet carries .sheet.slide-up & .sheet-wrap.slide-up with 320ms cubic-bezier(0.22, 0.14, 0.45, 1) slide-up entrance (sheet + backdrop) and zero overflow`,
     openInfo.title === 'Check against my ELD' && openInfo.wrapSlide && openInfo.sheetSlide && !openInfo.closing
-    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.45s' && openInfo.animTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
-    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.45s' && openInfo.bdAnimTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+    && openInfo.animName === 'sheet-slide-up' && openInfo.animDur === '0.32s' && openInfo.animTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && openInfo.bdAnimName === 'sheet-backdrop-in' && openInfo.bdAnimDur === '0.32s' && openInfo.bdAnimTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
     && openInfo.h2Fits && !openInfo.docOver,
     JSON.stringify(openInfo));
 
@@ -1657,7 +1659,7 @@ for (const [W, H] of SIZES) {
     closeBtnRes.ok && backdropRes.ok && escapeRes.ok,
     JSON.stringify({ closeBtnRes, backdropRes, escapeRes }));
 
-  // Sample non-slide-up sheet (Why?) keeps existing behavior: no .slide-up, animationName none, immediate unmount
+  // Re-aimed (2026-11-22 polish): WhySheet shares unified 320ms slide-up / 200ms ease-out slide-down (.is-closing, inert) then unmounts
   await page.evaluate(() => {
     const b = [...document.querySelectorAll('section.page-now button')].find((x) => x.textContent.includes('Why?'));
     if (!b) throw new Error('no Why? button on Now');
@@ -1665,16 +1667,25 @@ for (const [W, H] of SIZES) {
   });
   await page.waitForSelector('.sheet', { timeout: 2000 });
   const whyInfo = await page.evaluate(() => {
-    const wrap = document.querySelector('.sheet-wrap');
     const sh = document.querySelector('.sheet');
-    return { wrapSlide: wrap.classList.contains('slide-up'), sheetSlide: sh.classList.contains('slide-up'), animName: getComputedStyle(sh).animationName };
+    const cs = getComputedStyle(sh);
+    return { animName: cs.animationName, animDur: cs.animationDuration, animTiming: cs.animationTimingFunction };
   });
   await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
   await page.waitForTimeout(40);
-  const whyImmediate = await page.evaluate(() => !document.querySelector('.sheet'));
-  ok(`${tag} (j) non-slide-up sheet (Why?) carries no .slide-up, no slide animation, and unmounts immediately`,
-    !whyInfo.wrapSlide && !whyInfo.sheetSlide && whyInfo.animName === 'none' && whyImmediate,
-    JSON.stringify({ whyInfo, whyImmediate }));
+  const whyMid = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap');
+    const sh = document.querySelector('.sheet');
+    const cs = sh ? getComputedStyle(sh) : null;
+    return { closing: !!sh?.classList.contains('is-closing'), inert: !!(wrap && (wrap.inert || wrap.hasAttribute('inert'))), animName: cs?.animationName ?? null, animDur: cs?.animationDuration ?? null, animTiming: cs?.animationTimingFunction ?? null };
+  });
+  await page.waitForTimeout(260);
+  const whyUnmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (j) other sheet (Why?) shares unified 320ms slide-up entrance and 200ms ease-out slide-down exit then unmounts`,
+    whyInfo.animName === 'sheet-slide-up' && whyInfo.animDur === '0.32s' && whyInfo.animTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && whyMid.closing && whyMid.inert && whyMid.animName === 'sheet-slide-down' && whyMid.animDur === '0.2s' && whyMid.animTiming === 'ease-out'
+    && whyUnmounted,
+    JSON.stringify({ whyInfo, whyMid, whyUnmounted }));
 
   // Pin 3: Under prefers-reduced-motion: reduce, DriftSheet has no slide animation and unmounts immediately on close
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1744,8 +1755,8 @@ for (const [W, H] of SIZES) {
     });
     await page.waitForTimeout(260);
     const unmounted = await page.evaluate(() => !document.querySelector('.sheet'));
-    const pass = enter.sheetName === 'sheet-slide-up' && enter.sheetDur === '0.45s' && enter.sheetTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
-      && enter.bdName === 'sheet-backdrop-in' && enter.bdDur === '0.45s' && enter.bdTiming === 'cubic-bezier(0.33, 0.35, 0.25, 1)'
+    const pass = enter.sheetName === 'sheet-slide-up' && enter.sheetDur === '0.32s' && enter.sheetTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+      && enter.bdName === 'sheet-backdrop-in' && enter.bdDur === '0.32s' && enter.bdTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
       && !enter.docOver
       && exit.sheetName === 'sheet-slide-down' && exit.sheetDur === '0.2s' && exit.sheetTiming === 'ease-out'
       && exit.bdName === 'sheet-backdrop-out' && exit.bdDur === '0.2s' && exit.bdTiming === 'ease-out'
@@ -1759,37 +1770,224 @@ for (const [W, H] of SIZES) {
     if (!b) throw new Error('no Check against my ELD button on Now');
     b.click();
   }));
-  ok(`${tag} (k) slide-up sheets (LeverSheet + DriftSheet) enter at 0.45s cubic-bezier(0.33, 0.35, 0.25, 1) while close stays 0.2s ease-out with zero overflow`,
+  ok(`${tag} (k) slide-up sheets (LeverSheet + DriftSheet) enter at 0.32s cubic-bezier(0.22, 0.14, 0.45, 1) while close stays 0.2s ease-out with zero overflow`,
     leverProbe.pass && driftProbe.pass && errors.length === 0,
     JSON.stringify({ leverProbe, driftProbe, errors }));
   await ctx.close();
 }
 
-/* ---------- (l) slidepark (2026-11-22, Lorico): Parked off-screen base transform on .sheet.slide-up + reduced-motion reset ---------- */
+/* ---------- (l) slidepark (2026-11-22, Lorico; re-aimed for unified motion system): Parked off-screen base transform on .sheet + reduced-motion reset ---------- */
 {
   const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
-  const startIdx = css.indexOf('NOW "COMES BACK" STRIP');
-  const endIdx = css.indexOf('NOW HERO CARD DISSOLVE', startIdx);
+  const startIdx = css.indexOf('SPLIT DECISION MOTION SYSTEM');
+  const endIdx = css.indexOf('@page', startIdx);
   const block = startIdx >= 0 && endIdx > startIdx ? css.slice(startIdx, endIdx) : '';
 
-  // SP1a: .sheet.slide-up (carrying the sheet-slide-up animation) declares transform: translateY(100%) as its base transform
-  const slideUpRules = [...block.matchAll(/(?:^|[}\s])\.sheet\.slide-up\s*\{([^}]*)\}/g)].map((m) => m[1]);
-  const animRule = slideUpRules.find((body) => /\banimation\s*:\s*sheet-slide-up\b/.test(body)) || '';
+  // SP1a: .sheet (carrying the sheet-slide-up animation) declares transform: translateY(100%) as its base transform
+  const sheetRules = [...block.matchAll(/(?:^|[}\s])\.sheet\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  const animRule = sheetRules.find((body) => /\banimation\s*:\s*sheet-slide-up\b/.test(body)) || '';
   const hasParkedBase = /\btransform\s*:\s*translateY\(\s*100%\s*\)\s*;/.test(animRule);
-  ok('[css] (l) SP1a: built dist/styles.css .sheet.slide-up rule declares parked base transform: translateY(100%) alongside sheet-slide-up animation',
+  ok('[css] (l) SP1a: built dist/styles.css .sheet rule declares parked base transform: translateY(100%) alongside sheet-slide-up animation',
     Boolean(animRule) && hasParkedBase,
     `matched=${Boolean(animRule)} body=${JSON.stringify(animRule.trim())}`);
 
-  // SP1b: inside @media (prefers-reduced-motion: reduce), the slide-up rule sets transform: none so reduced-motion users never get a hidden sheet
+  // SP1b: inside @media (prefers-reduced-motion: reduce), the sheet rule sets transform: none alongside animation: none
   const rmMatch = block.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{((?:[^{}]|\{[^}]*\})*)\}/);
   const rmBlock = rmMatch ? rmMatch[1] : '';
-  const rmRuleMatch = rmBlock.match(/\.sheet\.slide-up\b[^{]*\{([^}]*)\}/);
+  const rmRuleMatch = rmBlock.match(/\.sheet,\s*\n\s*\.sheet\.is-closing[\s\S]*?\{([^}]*)\}/);
   const rmRuleBody = rmRuleMatch ? rmRuleMatch[1] : '';
   const hasRmAnimNone = /\banimation\s*:\s*none\s*;/.test(rmRuleBody);
   const hasRmTransformNone = /\btransform\s*:\s*none\s*;/.test(rmRuleBody);
-  ok('[css] (l) SP1b: built dist/styles.css @media (prefers-reduced-motion: reduce) slide-up rule resets transform: none alongside animation: none',
+  ok('[css] (l) SP1b: built dist/styles.css @media (prefers-reduced-motion: reduce) sheet rule resets transform: none alongside animation: none',
     Boolean(rmRuleBody) && hasRmAnimNone && hasRmTransformNone,
     `rmRuleBody=${JSON.stringify(rmRuleBody.trim())}`);
+}
+
+/* ---------- (m) motion-system (2026-11-22 polish): Log-entry origin morph (open/return/off-screen fallback/reduced-motion), centered modals, and Now day swap ---------- */
+const motionSeed = () => {
+  const base = seedRecord('timeline');
+  // Ensure enough logged rows on today so .log-scroll scrolls well past the top row even on 412x915
+  const extra = [];
+  let cursor = nowMinute - 60 * 10;
+  for (let i = 0; i < 12; i++) {
+    extra.push({ status: i % 2 === 0 ? 'D' : 'ON', start: cursor, end: cursor + 35, createdAt: 100 + i });
+    cursor += 35;
+  }
+  return {
+    ...base,
+    segments: [...base.segments.filter((x) => x.end <= nowMinute - 60 * 10), ...extra],
+    current: { status: 'ON', since: cursor, createdAt: 200 },
+  };
+};
+for (const [W, H] of SIZES) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(motionSeed()));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('section.page-now.is-active', { timeout: 5000 });
+  await page.evaluate(() => document.fonts && document.fonts.ready);
+  await page.waitForTimeout(100);
+  const tag = `[${W}x${H} motion-system]`;
+
+  // M0: Now open-day <-> End of Day chooser <-> closed-day swap applies .day-swap-in (state-reveal, 0.2s) and stays immediately clickable
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('section.page-now button')].find((x) => x.textContent.trim() === 'End my day');
+    if (!b) throw new Error('missing End my day button');
+    b.click();
+  });
+  await page.waitForTimeout(30);
+  const askSwap = await page.evaluate(() => {
+    const el = document.querySelector('section.page-now .endday-ask');
+    const cs = el ? getComputedStyle(el) : null;
+    return { present: !!el, hasCls: !!el?.classList.contains('day-swap-in'), animName: cs?.animationName ?? null, animDur: cs?.animationDuration ?? null, animTiming: cs?.animationTimingFunction ?? null };
+  });
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('section.page-now .endday-ask button')].find((x) => x.textContent.trim() === 'Not yet');
+    b?.click();
+  });
+  await page.waitForTimeout(260);
+  ok(`${tag} (m) M0: Now End-of-Day swap applies state-reveal (0.2s cubic-bezier(0.25, 0.1, 0.45, 1)) cleanly`,
+    askSwap.present && askSwap.hasCls && askSwap.animName === 'state-reveal' && askSwap.animDur === '0.2s' && askSwap.animTiming === 'cubic-bezier(0.25, 0.1, 0.45, 1)',
+    JSON.stringify(askSwap));
+
+  // Navigate to Log via bottom bar
+  await page.click('nav.tabs button:has-text("Log")');
+  await page.waitForSelector('section.page-log.is-active button.entry:not(.live)', { timeout: 5000 });
+  await page.waitForTimeout(180);
+
+  // M1: Tapping a visible Log entry opens EditorSheet with .morph-origin and computed FLIP vars matching the row
+  await page.click('section.page-log.is-active button.entry:not(.live)');
+  await page.waitForSelector('.sheet.morph-origin', { timeout: 2000 });
+  const morphOpen = await page.evaluate(() => {
+    const wrap = document.querySelector('.sheet-wrap.morph-origin');
+    const sh = document.querySelector('.sheet.morph-origin');
+    const src = document.querySelector('section.page-log button.entry.is-morph-source');
+    const cs = getComputedStyle(sh);
+    return {
+      hasWrap: !!wrap,
+      hasSrc: !!src,
+      animName: cs.animationName,
+      animDur: cs.animationDuration,
+      animTiming: cs.animationTimingFunction,
+      dx: sh.style.getPropertyValue('--morph-dx'),
+      dy: sh.style.getPropertyValue('--morph-dy'),
+      sx: sh.style.getPropertyValue('--morph-sx'),
+      sy: sh.style.getPropertyValue('--morph-sy'),
+      docOver: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok(`${tag} (m) M1: tapping a Log entry opens EditorSheet via sheet-morph-in (0.32s cubic-bezier(0.22, 0.14, 0.45, 1)) with live FLIP origin vars and zero overflow`,
+    morphOpen.hasWrap && morphOpen.hasSrc
+    && morphOpen.animName === 'sheet-morph-in' && morphOpen.animDur === '0.32s' && morphOpen.animTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && /^-?\d+(\.\d+)?px$/.test(morphOpen.dx) && /^-?\d+(\.\d+)?px$/.test(morphOpen.dy)
+    && parseFloat(morphOpen.sx) >= 0.84 && parseFloat(morphOpen.sy) >= 0.32
+    && !morphOpen.docOver,
+    JSON.stringify(morphOpen));
+
+  // M2: Closing while the tapped row is visible returns INTO that row via sheet-morph-out (0.2s ease-out)
+  await page.waitForTimeout(340);
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(40);
+  const morphClose = await page.evaluate(() => {
+    const sh = document.querySelector('.sheet.morph-origin.is-closing');
+    const cs = sh ? getComputedStyle(sh) : null;
+    return {
+      present: !!sh,
+      fallback: !!sh?.classList.contains('morph-fallback'),
+      animName: cs?.animationName ?? null,
+      animDur: cs?.animationDuration ?? null,
+      animTiming: cs?.animationTimingFunction ?? null,
+    };
+  });
+  await page.waitForTimeout(260);
+  const morphUnmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (m) M2: closing EditorSheet while row is visible returns via sheet-morph-out (0.2s ease-out) then unmounts`,
+    morphClose.present && !morphClose.fallback && morphClose.animName === 'sheet-morph-out' && morphClose.animDur === '0.2s' && morphClose.animTiming === 'ease-out' && morphUnmounted,
+    JSON.stringify({ morphClose, morphUnmounted }));
+
+  // M3: If the tapped row scrolls off-screen before close, closing falls back gracefully to plain sheet-slide-down
+  await page.click('section.page-log.is-active button.entry:not(.live)');
+  await page.waitForSelector('.sheet.morph-origin', { timeout: 2000 });
+  await page.waitForTimeout(340);
+  await page.evaluate(() => {
+    const sc = document.querySelector('section.page-log.is-active .log-scroll');
+    if (sc) sc.scrollTop = sc.scrollHeight;
+  });
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(40);
+  const offscreenClose = await page.evaluate(() => {
+    const sh = document.querySelector('.sheet.morph-origin.is-closing');
+    const cs = sh ? getComputedStyle(sh) : null;
+    return {
+      present: !!sh,
+      fallback: !!sh?.classList.contains('morph-fallback'),
+      opacity: cs?.opacity ?? null,
+      animName: cs?.animationName ?? null,
+      animDur: cs?.animationDuration ?? null,
+      animTiming: cs?.animationTimingFunction ?? null,
+    };
+  });
+  await page.waitForTimeout(260);
+  const fallbackUnmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (m) M3: when tapped Log row scrolls off-screen before close, EditorSheet falls back gracefully to sheet-slide-down (0.2s ease-out, opacity 1) then unmounts`,
+    offscreenClose.present && offscreenClose.fallback && offscreenClose.opacity === '1' && offscreenClose.animName === 'sheet-slide-down' && offscreenClose.animDur === '0.2s' && offscreenClose.animTiming === 'ease-out' && fallbackUnmounted,
+    JSON.stringify({ offscreenClose, fallbackUnmounted }));
+
+  // M4: Reduced motion disables Log-entry morph animation and unmounts immediately on close
+  await page.evaluate(() => { const sc = document.querySelector('section.page-log.is-active .log-scroll'); if (sc) sc.scrollTop = 0; });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.click('section.page-log.is-active button.entry:not(.live)');
+  await page.waitForSelector('.sheet.morph-origin', { timeout: 2000 });
+  const rmMorph = await page.evaluate(() => {
+    const sh = document.querySelector('.sheet.morph-origin');
+    const cs = getComputedStyle(sh);
+    return { animName: cs.animationName, opacity: cs.opacity, transform: cs.transform };
+  });
+  await page.evaluate(() => document.querySelector('.sheet button[aria-label="Close"]')?.click());
+  await page.waitForTimeout(40);
+  const rmMorphUnmounted = await page.evaluate(() => !document.querySelector('.sheet'));
+  ok(`${tag} (m) M4: prefers-reduced-motion disables Log-entry morph animation (opacity 1, transform none) and unmounts immediately`,
+    rmMorph.animName === 'none' && rmMorph.opacity === '1' && rmMorph.transform === 'none' && rmMorphUnmounted,
+    JSON.stringify({ rmMorph, rmMorphUnmounted }));
+
+  ok(`${tag} no page errors`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+}
+
+// M5: Centered modal (DisclaimerDialog) enters at 0.24s cubic-bezier(0.22, 0.14, 0.45, 1) and exits at 0.2s ease-out (.is-closing, inert), neutralized under reduced motion
+{
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify({ ...seedRecord('timeline'), disclaimerAcked: false }));
+  const page = await ctx.newPage();
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await page.waitForSelector('.backdrop > .modal', { timeout: 5000 });
+  const modalOpen = await page.evaluate(() => {
+    const bd = document.querySelector('.backdrop');
+    const m = bd?.querySelector(':scope > .modal');
+    const bcs = getComputedStyle(bd);
+    const mcs = getComputedStyle(m);
+    return { bdAnim: bcs.animationName, bdDur: bcs.animationDuration, bdTiming: bcs.animationTimingFunction, mAnim: mcs.animationName, mDur: mcs.animationDuration, mTiming: mcs.animationTimingFunction };
+  });
+  await page.waitForTimeout(260);
+  await page.click('.modal button.primary');
+  await page.waitForTimeout(40);
+  const modalClose = await page.evaluate(() => {
+    const bd = document.querySelector('.backdrop.is-closing');
+    const m = bd?.querySelector(':scope > .modal');
+    const mcs = m ? getComputedStyle(m) : null;
+    return { present: !!bd, inert: !!(bd && (bd.inert || bd.hasAttribute('inert'))), roleRemoved: bd?.getAttribute('role') === null, mAnim: mcs?.animationName ?? null, mDur: mcs?.animationDuration ?? null, mTiming: mcs?.animationTimingFunction ?? null };
+  });
+  await page.waitForTimeout(260);
+  const modalGone = await page.evaluate(() => !document.querySelector('.backdrop'));
+  ok('[412x915 motion-system] (m) M5: centered modal (DisclaimerDialog) enters at 0.24s cubic-bezier(0.22, 0.14, 0.45, 1) and closes at 0.2s ease-out (.is-closing, inert) then unmounts',
+    modalOpen.bdAnim === 'modal-backdrop-in' && modalOpen.bdDur === '0.24s' && modalOpen.bdTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && modalOpen.mAnim === 'modal-enter' && modalOpen.mDur === '0.24s' && modalOpen.mTiming === 'cubic-bezier(0.22, 0.14, 0.45, 1)'
+    && modalClose.present && modalClose.inert && modalClose.roleRemoved && modalClose.mAnim === 'modal-exit' && modalClose.mDur === '0.2s' && modalClose.mTiming === 'ease-out'
+    && modalGone && errors.length === 0,
+    JSON.stringify({ modalOpen, modalClose, modalGone, errors }));
+  await ctx.close();
 }
 
 await browser.close(); server.close();

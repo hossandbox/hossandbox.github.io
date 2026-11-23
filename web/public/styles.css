@@ -674,7 +674,7 @@ button.pv-step { min-height: 56px; padding: var(--s-8); font-size: 15px; font-we
 .now-rest.pv-dim > .dock > * { opacity: .4; }
 /* The snap back to now: a 200ms slide, instant under reduced motion. */
 .pv-snapmark { display: none; }
-.pv-snapmark + .hero { animation: pv-slide 200ms ease-out; }
+.pv-snapmark + .hero { animation: pv-slide 200ms var(--ease-state, ease-out); }
 @keyframes pv-slide { from { transform: translateX(-12px); opacity: .6; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .pv-snapmark + .hero { animation: none; } }
 
@@ -910,7 +910,7 @@ button.drive-stop:active { box-shadow: var(--t-press), 0 1px 0 var(--key-base); 
 label.check { gap: var(--s-14); min-height: var(--ctl); }
 label.check input { -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 56px; height: 48px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: var(--r-12); background: none; box-shadow: none; cursor: pointer; }
 label.check input::before { content: ""; box-sizing: border-box; position: absolute; left: 0; right: 0; top: 8px; height: 32px; border-radius: var(--r-pill); border: 1px solid var(--line); background: radial-gradient(circle at 41px 50%, transparent 3px, var(--muted) 3.5px, var(--muted) 5px, transparent 5.5px), var(--t-well); box-shadow: var(--t-well-in), var(--t-lip); }
-label.check input::after { content: ""; box-sizing: border-box; position: absolute; top: 11px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--t-grip); border: 1px solid var(--t-grip-edge); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 3px var(--t-cast); transition: transform 120ms ease-out; }
+label.check input::after { content: ""; box-sizing: border-box; position: absolute; top: 11px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--t-grip); border: 1px solid var(--t-grip-edge); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 2px 3px var(--t-cast); transition: transform var(--dur-micro, 140ms) var(--ease-state, ease-out); }
 label.check input:checked::before { border-color: var(--t-accent-lo); background: linear-gradient(var(--on-accent), var(--on-accent)) 14px 50% / 2px 10px no-repeat, var(--accent-solid); }
 label.check input:checked::after { transform: translateX(24px); }
 label.check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -1458,13 +1458,29 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 }
 
 /* ===================================================================================
-   TRANSITION POLISH (Lorico, 2026-11-21)
-   1. Settings as "another room": tapping the header gear dissolves out all main-app
-      chrome (TopBar, 3-panel strip, bottom tab bar) and dissolves in the full-screen
-      Settings room (220ms ease-out). No horizontal strip scrolling on Settings leg.
-   2. Day/Night theme ease: calm 280ms color/background/border-color cross-fade only —
-      never geometry, no flash, no layout shift. Respects prefers-reduced-motion.
+   SPLIT DECISION MOTION SYSTEM
+   One coherent, refresh-rate-independent motion system across the entire app.
+   - Curves cap peak velocity <= 1.71x with gentle onset (v0 <= 0.64) and >= 6% travel
+     in the final quarter, eliminating the 120Hz "pop + second settle" split while
+     feeling identical at 60Hz, 90/120Hz, and battery saver.
+   - Every entering overlay starts parked (off-screen or transparent) in its base
+     state so pre-animation paints never leak a static twin.
+   - Compositor-friendly properties only (transform, opacity) on all spatial motion;
+     color-only transitions on Day/Night theme toggle.
+   - Complete prefers-reduced-motion: reduce neutralization across every surface.
    =================================================================================== */
+:root {
+  --dur-press: 90ms;
+  --dur-micro: 140ms;
+  --dur-exit: 200ms;
+  --dur-room: 240ms;
+  --dur-theme: 280ms;
+  --dur-sheet: 320ms;
+  --ease-enter: cubic-bezier(0.22, 0.14, 0.45, 1);
+  --ease-exit: ease-out;
+  --ease-state: cubic-bezier(0.25, 0.10, 0.45, 1);
+}
+
 @property --bg { syntax: '<color>'; inherits: true; initial-value: #090c10; }
 @property --ground-hi { syntax: '<color>'; inherits: true; initial-value: #131b23; }
 @property --ground-lo { syntax: '<color>'; inherits: true; initial-value: #090c10; }
@@ -1511,17 +1527,44 @@ body, .app, .card, .hero, .dock, .stat, .modal, .sheet, .pill, .toggle, .warnbox
   transition: background-color 280ms ease, color 280ms ease, border-color 280ms ease;
 }
 button {
-  transition: transform 90ms ease-out, box-shadow 90ms ease-out, filter 120ms ease-out, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+  transition: transform var(--dur-press) var(--ease-exit), box-shadow var(--dur-press) var(--ease-exit), filter var(--dur-micro) var(--ease-exit), background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+button.entry {
+  transition: transform var(--dur-press) var(--ease-exit), box-shadow var(--dur-press) var(--ease-exit), filter var(--dur-micro) var(--ease-exit), opacity var(--dur-exit) var(--ease-state), background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+}
+button.entry.is-morph-source {
+  opacity: 0.45;
+}
+.tabs button {
+  transition: color var(--dur-micro) var(--ease-state), transform var(--dur-press) var(--ease-exit);
+}
+.tabs button::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 26%;
+  right: 26%;
+  height: 3px;
+  border-radius: 0 0 var(--r-3) var(--r-3);
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--glow);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity var(--dur-micro) var(--ease-state), transform var(--dur-micro) var(--ease-state);
+}
+.tabs button.on::before {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
-/* Room dissolve (Settings + every Plan tool sub-screen): main-app chrome fades out while the
-   active full-viewport room cross-fades in as its own space (220ms ease-out). */
+/* ---------- 1. FULL-SCREEN ROOMS (Settings + all 8 Plan tools) ---------- */
+/* Pure opacity cross-fade (no transform on the scroll container so sticky headers stay valid). */
 .app > header.top,
 .app > main.pages,
 .app > nav.tabs {
   opacity: 1;
   visibility: visible;
-  transition: opacity 220ms ease-out, visibility 0s linear 0s, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+  transition: opacity var(--dur-room) var(--ease-enter), visibility 0s linear 0s, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
 }
 .app.in-room > header.top,
 .app.in-room > main.pages,
@@ -1529,7 +1572,7 @@ button {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 220ms ease-out, visibility 0s linear 220ms, background-color 280ms ease, color 280ms ease, border-color 280ms ease;
+  transition: opacity var(--dur-exit) var(--ease-exit), visibility 0s linear var(--dur-exit), background-color 280ms ease, color 280ms ease, border-color 280ms ease;
 }
 .page.room {
   position: fixed;
@@ -1550,13 +1593,24 @@ button {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 220ms ease-out, visibility 0s linear 220ms, background-color 280ms ease, color 280ms ease;
+  transition: opacity var(--dur-exit) var(--ease-exit), visibility 0s linear var(--dur-exit), background-color 280ms ease, color 280ms ease;
 }
 .page.room.is-active {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 220ms ease-out, visibility 0s linear 0s, background-color 280ms ease, color 280ms ease;
+  transition: opacity var(--dur-room) var(--ease-enter), visibility 0s linear 0s, background-color 280ms ease, color 280ms ease;
+}
+.page.plan-room.room-swap > * {
+  animation: state-dissolve var(--dur-exit) var(--ease-state) both;
+}
+.flow-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-12);
+}
+.flow-body.step-dissolve {
+  animation: state-dissolve var(--dur-exit) var(--ease-state) both;
 }
 .page.settings-room {
   padding: 0 12px calc(24px + env(safe-area-inset-bottom));
@@ -1593,28 +1647,7 @@ button.back.settings-back {
   color: var(--text);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  html,
-  body, .app, .card, .hero, .dock, .stat, .modal, .sheet, .pill, .toggle, .warnbox, .alertbox, .plan-icon, .bignum, .limit-plate, .ed-clock, .grid, .filebtn, input, select,
-  button,
-  .app > header.top, .app > main.pages, .app > nav.tabs,
-  .app.in-room > header.top, .app.in-room > main.pages, .app.in-room > nav.tabs,
-  .page.room, .page.room.is-active, .settings-head {
-    transition: none;
-  }
-}
-
-/* ===================================================================================
-   NOW "COMES BACK" STRIP + SCOPED SLIDE-UP SHEET (Lorico, 2026-11-22)
-   1. Now screen lever/comeback strip (.lever): size and reflow the full sentence cleanly
-      inside the strip at phone width (~360–400px) without truncating or dropping time,
-      +duration, or available figures. Keeps the 64px row floor and existing palette tokens.
-   2. Scoped slide-up pop-up (.sheet.slide-up): ONLY the comeback/lever detail sheet
-      (LeverSheet) and the "Check against my ELD" drift check sheet (DriftSheet) slide up
-      from the bottom (450ms cubic-bezier(0.33, 0.35, 0.25, 1) entrance to match perceived
-      speed of the 200ms ease-out slide-down exit).
-      All other sheets keep their current behavior. Respects prefers-reduced-motion.
-   =================================================================================== */
+/* ---------- NOW "COMES BACK" STRIP TEXT REFLOW (Lorico, 2026-11-22) ---------- */
 .lever {
   gap: var(--s-8);
   padding: var(--s-8) var(--s-10) var(--s-8) var(--s-12);
@@ -1643,35 +1676,40 @@ button.back.settings-back {
   }
 }
 
-.sheet-wrap.slide-up {
+/* ---------- 2. BOTTOM SHEETS (all 14 sheet kinds) ---------- */
+/* Parked below the viewport in the base state so pre-animation paints never leak a static twin.
+   Entrance: 320ms cubic-bezier(0.22, 0.14, 0.45, 1) — bounded velocity, no 120Hz double-motion.
+   Exit: 200ms ease-out — Lorico's approved slide-down exit feel, preserved verbatim. */
+.sheet-wrap {
   overflow: hidden;
 }
-.sheet-wrap.slide-up.is-closing {
+.sheet-wrap.is-closing {
   pointer-events: none;
 }
-.sheet-wrap.slide-up > button.sheet-backdrop {
-  animation: sheet-backdrop-in 450ms cubic-bezier(0.33, 0.35, 0.25, 1) both;
+.sheet-wrap > button.sheet-backdrop {
+  opacity: 0;
+  animation: sheet-backdrop-in var(--dur-sheet) var(--ease-enter) both;
 }
-.sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
-  animation: sheet-backdrop-out 200ms ease-out both;
+.sheet-wrap.is-closing > button.sheet-backdrop {
+  animation: sheet-backdrop-out var(--dur-exit) var(--ease-exit) both;
 }
-/* Parked below the viewport in the base state so a pre-animation paint can never
-   show the sheet at its resting position (the "instant twin" artifact); the
-   animation's fill holds it at translateY(0) while open, and the closing
-   animation ends at the same parked position. */
-.sheet.slide-up {
+.sheet {
   transform: translateY(100%);
-  animation: sheet-slide-up 450ms cubic-bezier(0.33, 0.35, 0.25, 1) both;
+  animation: sheet-slide-up var(--dur-sheet) var(--ease-enter) both;
   will-change: transform;
 }
-.sheet.slide-up.is-closing {
-  animation: sheet-slide-down 200ms ease-out both;
+.sheet.is-closing {
+  animation: sheet-slide-down var(--dur-exit) var(--ease-exit) both;
 }
-.sheet.slide-up .sheet-head h2 {
+.sheet.slide-up .sheet-head h2,
+.sheet.morph-origin .sheet-head h2 {
   min-width: 0;
   font-size: 18px;
   line-height: 1.25;
   overflow-wrap: break-word;
+}
+.sheet[data-step-swap="1"] > :not(.sheet-handle):not(.sheet-head) {
+  animation: state-dissolve var(--dur-micro) var(--ease-state) both;
 }
 @keyframes sheet-slide-up {
   from { transform: translateY(100%); }
@@ -1689,33 +1727,153 @@ button.back.settings-back {
   from { opacity: 1; }
   to { opacity: 0; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .sheet.slide-up,
-  .sheet.slide-up.is-closing,
-  .sheet-wrap.slide-up > button.sheet-backdrop,
-  .sheet-wrap.slide-up.is-closing > button.sheet-backdrop {
-    animation: none;
-    transform: none;
+
+/* ---------- 3. LOG-ENTRY ORIGIN MORPH (EditorSheet from/into tapped Log row) ---------- */
+/* FLIP geometry (--morph-dx, --morph-dy, --morph-sx, --morph-sy) is computed synchronously in
+   useLayoutEffect before frame 0. Parked at the row's origin rect in the base state (zero flash).
+   Falls back cleanly via .morph-fallback to sheet-slide-down when the row is off-screen or deleted. */
+.sheet.morph-origin {
+  opacity: 0;
+  transform-origin: 50% 50%;
+  transform: translate3d(var(--morph-dx, 0px), var(--morph-dy, 32px), 0) scale(var(--morph-sx, 0.92), var(--morph-sy, 0.42));
+  animation: sheet-morph-in var(--dur-sheet) var(--ease-enter) both;
+  will-change: transform, opacity;
+}
+.sheet.morph-origin.is-closing {
+  animation: sheet-morph-out var(--dur-exit) var(--ease-exit) both;
+}
+.sheet.morph-origin.is-closing.morph-fallback {
+  opacity: 1;
+  animation: sheet-slide-down var(--dur-exit) var(--ease-exit) both;
+}
+@keyframes sheet-morph-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(var(--morph-dx, 0px), var(--morph-dy, 32px), 0) scale(var(--morph-sx, 0.92), var(--morph-sy, 0.42));
+  }
+  28% { opacity: 1; }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1, 1);
+  }
+}
+@keyframes sheet-morph-out {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1, 1);
+  }
+  72% { opacity: 0.92; }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--morph-dx, 0px), var(--morph-dy, 32px), 0) scale(var(--morph-sx, 0.92), var(--morph-sy, 0.42));
   }
 }
 
-/* ===================================================================================
-   NOW HERO CARD DISSOLVE (Lorico, 2026-11-22)
-   Soft ~200ms opacity dissolve when toggling the Now hero card between Timeline and
-   Dial (s.nowCard). Scoped strictly to .hero.now-card-dissolve body content
-   (excluding the top-right .card-switch toggle so the switch stays solid under the
-   thumb). Pure opacity fade — no slide or scale. Respects prefers-reduced-motion.
-   =================================================================================== */
+/* ---------- 4. CENTERED MODAL DIALOGS (DisclaimerDialog, SpeakAskDialog) ---------- */
+.backdrop {
+  opacity: 0;
+  animation: modal-backdrop-in var(--dur-room) var(--ease-enter) both;
+}
+.backdrop.is-closing {
+  pointer-events: none;
+  animation: modal-backdrop-out var(--dur-exit) var(--ease-exit) both;
+}
+.backdrop > .modal {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.96);
+  animation: modal-enter var(--dur-room) var(--ease-enter) both;
+  will-change: transform, opacity;
+}
+.backdrop.is-closing > .modal {
+  animation: modal-exit var(--dur-exit) var(--ease-exit) both;
+}
+@keyframes modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes modal-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.96); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes modal-exit {
+  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  to { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.97); }
+}
+
+/* ---------- 5. IN-PLACE STATE SWAPS & MICRO-TRANSITIONS ---------- */
+/* Now hero Timeline <-> Dial dissolve (switch stays solid under the thumb). Pure opacity only. */
 .hero.now-card-dissolve > :not(.card-switch) {
-  animation: now-card-dissolve 200ms ease-out both;
+  animation: now-card-dissolve var(--dur-exit) var(--ease-state) both;
 }
 @keyframes now-card-dissolve {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes state-dissolve {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes state-reveal {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+/* Now open-day <-> End of Day chooser <-> closed-day swap */
+.day-swap-in {
+  animation: state-reveal var(--dur-exit) var(--ease-state) both;
+}
+/* Log day navigation & Entries <-> What the clocks count swap */
+.log-swap-in {
+  animation: state-dissolve var(--dur-exit) var(--ease-state) both;
+}
+/* DrivingView arrival */
+main.drive.drive-enter {
+  animation: state-dissolve var(--dur-exit) var(--ease-state) both;
+}
+
+/* ---------- UNIVERSAL REDUCED-MOTION OVERRIDE ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .hero.now-card-dissolve > :not(.card-switch) {
+  html,
+  body, .app, .card, .hero, .dock, .stat, .modal, .sheet, .pill, .toggle, .warnbox, .alertbox, .plan-icon, .bignum, .limit-plate, .ed-clock, .grid, .filebtn, input, select,
+  button, button.entry, .tabs button, .tabs button::before,
+  .app > header.top, .app > main.pages, .app > nav.tabs,
+  .app.in-room > header.top, .app.in-room > main.pages, .app.in-room > nav.tabs,
+  .page.room, .page.room.is-active, .settings-head {
+    transition: none;
+  }
+  .sheet,
+  .sheet.is-closing,
+  .sheet-wrap > button.sheet-backdrop,
+  .sheet-wrap.is-closing > button.sheet-backdrop,
+  .sheet.slide-up,
+  .sheet.slide-up.is-closing,
+  .sheet-wrap.slide-up > button.sheet-backdrop,
+  .sheet-wrap.slide-up.is-closing > button.sheet-backdrop,
+  .sheet.morph-origin,
+  .sheet.morph-origin.is-closing,
+  .sheet.morph-origin.is-closing.morph-fallback,
+  .sheet-wrap.morph-origin > button.sheet-backdrop,
+  .sheet-wrap.morph-origin.is-closing > button.sheet-backdrop,
+  .backdrop,
+  .backdrop.is-closing,
+  .backdrop > .modal,
+  .backdrop.is-closing > .modal,
+  .hero.now-card-dissolve > :not(.card-switch),
+  .page.plan-room.room-swap > *,
+  .flow-body.step-dissolve,
+  .sheet[data-step-swap="1"] > :not(.sheet-handle):not(.sheet-head),
+  .day-swap-in,
+  .log-swap-in,
+  main.drive.drive-enter {
     animation: none;
+    transform: none;
+    opacity: 1;
+  }
+  button.entry.is-morph-source {
+    opacity: 1;
   }
 }
 

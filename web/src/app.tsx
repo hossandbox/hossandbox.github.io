@@ -453,9 +453,78 @@ export type SheetKind =
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
   // `resume`: the step a "Change" came from, to return to once the new answer is in.
   | { kind: 'add'; step?: EdStep; draft?: Draft; inside?: Segment; day?: number; resume?: EdStep; via?: 'what' };
+interface MorphRect { left: number; top: number; width: number; height: number }
+interface SheetMorphOrigin { key: string; rect: MorphRect }
+let activeMorphOrigin: SheetMorphOrigin | null = null;
+let openingFromLogRow = false;
+function logEntryKey(seg: Pick<Segment, 'status' | 'start' | 'end' | 'tentative'>): string {
+  return `${seg.status}-${seg.start}-${seg.end}${seg.tentative ? '-t' : ''}`;
+}
+function openLogEntryEditor(k: Extract<SheetKind, { kind: 'edit' }>, entryKey: string, el: HTMLElement | null) {
+  const r = el?.getBoundingClientRect?.();
+  if (r && r.width > 0 && r.height > 0) {
+    activeMorphOrigin = { key: entryKey, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+  } else {
+    activeMorphOrigin = null;
+  }
+  openingFromLogRow = true;
+  try { openSheet(k); } finally { openingFromLogRow = false; }
+}
+function updateActiveMorphKey(key: string) {
+  if (activeMorphOrigin) activeMorphOrigin = { ...activeMorphOrigin, key };
+}
+function resolveLogEntryRect(key: string): MorphRect | null {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+  const logPage = document.querySelector('section.page-log.is-active');
+  if (!logPage) return null;
+  const scroller = logPage.querySelector('.log-scroll');
+  if (!scroller || typeof scroller.getBoundingClientRect !== 'function') return null;
+  const rows = scroller.querySelectorAll<HTMLElement>('[data-entry-key]');
+  let target: HTMLElement | null = null;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].getAttribute('data-entry-key') === key) { target = rows[i]; break; }
+  }
+  if (!target || typeof target.getBoundingClientRect !== 'function') return null;
+  const r = target.getBoundingClientRect();
+  const sr = scroller.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0 && sr.width > 0 && sr.height > 0)) return null;
+  const visTop = Math.max(sr.top, 0);
+  const visBot = Math.min(sr.bottom, window.innerHeight || sr.bottom);
+  if (r.bottom <= visTop + 8 || r.top >= visBot - 8) return null;
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+function applyMorphVars(el: HTMLElement, wrap: HTMLElement, rect: MorphRect): boolean {
+  if (typeof wrap.getBoundingClientRect !== 'function') return false;
+  const wrapRect = wrap.getBoundingClientRect();
+  if (!(wrapRect.width > 0 && wrapRect.height > 0)) return false;
+  const tw = el.offsetWidth || wrapRect.width;
+  const th = el.offsetHeight || Math.min(wrapRect.height * 0.6, 420);
+  if (!(tw > 0 && th > 0)) return false;
+  const tx = wrapRect.left + wrapRect.width / 2;
+  const ty = wrapRect.bottom - th / 2;
+  const ox = rect.left + rect.width / 2;
+  const oy = rect.top + rect.height / 2;
+  const dx = ox - tx;
+  const dy = oy - ty;
+  const sx = Math.max(0.84, Math.min(0.98, rect.width / tw));
+  const sy = Math.max(0.32, Math.min(0.75, rect.height / th));
+  el.style?.setProperty?.('--morph-dx', `${dx.toFixed(1)}px`);
+  el.style?.setProperty?.('--morph-dy', `${dy.toFixed(1)}px`);
+  el.style?.setProperty?.('--morph-sx', sx.toFixed(3));
+  el.style?.setProperty?.('--morph-sy', sy.toFixed(3));
+  return true;
+}
+
 let sheetNow: SheetKind | null = null;
 const sheetSubs = new Set<() => void>();
-export function openSheet(k: SheetKind | null) { sheetNow = k; sheetSubs.forEach((f) => f()); }
+export function openSheet(k: SheetKind | null) {
+  if (k !== null) {
+    if (k.kind !== 'edit') activeMorphOrigin = null;
+    else if (!openingFromLogRow && sheetNow?.kind !== 'edit') activeMorphOrigin = null;
+  }
+  sheetNow = k;
+  sheetSubs.forEach((f) => f());
+}
 export function currentSheet(): SheetKind | null { return sheetNow; }
 function useSheet(): SheetKind | null {
   const [, force] = useState(0);
@@ -463,8 +532,57 @@ function useSheet(): SheetKind | null {
   return sheetNow;
 }
 
-function Sheet({ title, children, onBack, focusKey, slideUp, closing }: { title: string; children: ComponentChildren; onBack?: () => void; focusKey?: string; slideUp?: boolean; closing?: boolean }) {
+const SheetMotionCtx = createContext<{ closing: boolean; morphOrigin: SheetMorphOrigin | null }>({ closing: false, morphOrigin: null });
+
+function Sheet({ title, children, onBack, focusKey, slideUp = false, closing: closingProp, morphOrigin: morphProp }: { title: string; children: ComponentChildren; onBack?: () => void; focusKey?: string; slideUp?: boolean; closing?: boolean; morphOrigin?: SheetMorphOrigin | null }) {
+  const ctx = useContext(SheetMotionCtx);
+  const closing = closingProp ?? ctx.closing;
+  const morphOrigin = morphProp !== undefined ? morphProp : ctx.morphOrigin;
+  const wrapRef = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const didMorphOpenRef = useRef(false);
+  const prevFocusRef = useRef<string | undefined>(focusKey);
+  const stepEpochRef = useRef(0);
+  const activeStepRef = useRef(0);
+  const [, setStepDone] = useState(0);
+  if (!closing && focusKey !== undefined && prevFocusRef.current !== focusKey) {
+    prevFocusRef.current = focusKey;
+    activeStepRef.current = prefersReducedMotion() ? 0 : ++stepEpochRef.current;
+  }
+  const stepSwap = !closing && !prefersReducedMotion() && activeStepRef.current > 0;
+  useEffect(() => {
+    const epoch = activeStepRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeStepRef.current = 0;
+      setStepDone((n) => n + 1);
+      return;
+    }
+    const id = setTimeout(() => {
+      if (activeStepRef.current === epoch) {
+        activeStepRef.current = 0;
+        setStepDone((n) => n + 1);
+      }
+    }, 160);
+    return () => clearTimeout(id);
+  }, [focusKey]);
+  useLayoutEffect(() => {
+    if (!morphOrigin || !box.current || !wrapRef.current || prefersReducedMotion()) return;
+    if (!closing) {
+      if (!didMorphOpenRef.current) {
+        didMorphOpenRef.current = true;
+        applyMorphVars(box.current, wrapRef.current, morphOrigin.rect);
+      }
+      return;
+    }
+    const closeKey = activeMorphOrigin?.key ?? morphOrigin.key;
+    const liveRect = resolveLogEntryRect(closeKey);
+    if (liveRect && applyMorphVars(box.current, wrapRef.current, liveRect)) {
+      box.current.classList?.remove('morph-fallback');
+    } else {
+      box.current.classList?.add('morph-fallback');
+    }
+  }, [closing, morphOrigin]);
   useEffect(() => {
     if (closing) return;
     // Focus the panel's own first action (marked data-first), else its first control. Again on each new
@@ -478,12 +596,13 @@ function Sheet({ title, children, onBack, focusKey, slideUp, closing }: { title:
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
   }, [closing]);
-  const wrapCls = `sheet-wrap${slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
-  const sheetCls = `sheet${slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
+  const useMorph = morphOrigin !== null;
+  const wrapCls = `sheet-wrap${useMorph ? ' morph-origin' : slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
+  const sheetCls = `sheet${useMorph ? ' morph-origin' : slideUp ? ' slide-up' : ''}${closing ? ' is-closing' : ''}`;
   return (
-    <div class={wrapCls} inert={closing || undefined} aria-hidden={closing || undefined}>
+    <div ref={wrapRef} class={wrapCls} inert={closing || undefined} aria-hidden={closing || undefined}>
       <button class="sheet-backdrop" tabIndex={-1} aria-label="Close" onClick={() => openSheet(null)} />
-      <div class={sheetCls} role="dialog" aria-modal="true" aria-labelledby="sheet-title" ref={box}>
+      <div class={sheetCls} role="dialog" aria-modal="true" aria-labelledby="sheet-title" data-step-swap={stepSwap ? '1' : undefined} ref={box}>
         <div class="sheet-handle" aria-hidden="true" />
         <div class="sheet-head">
           {onBack && <button class="icon-btn" aria-label="Back" onClick={onBack}><Icon d={I.back} /></button>}
@@ -2129,6 +2248,33 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
     }, 220);
     return () => clearTimeout(t);
   }, [s.nowCard]);
+  // Calm in-place reveal for Now open-day <-> End of Day chooser <-> closed-day swaps.
+  const dayPhase = closedToday ? 'closed' : endAsk ? 'ask' : 'open';
+  const prevDayPhaseRef = useRef(dayPhase);
+  const daySwapEpochRef = useRef(0);
+  const activeDaySwapRef = useRef(0);
+  const [, setDaySwapDone] = useState(0);
+  if (prevDayPhaseRef.current !== dayPhase) {
+    prevDayPhaseRef.current = dayPhase;
+    activeDaySwapRef.current = prefersReducedMotion() ? 0 : ++daySwapEpochRef.current;
+  }
+  const daySwapIn = !prefersReducedMotion() && activeDaySwapRef.current > 0;
+  useEffect(() => {
+    const epoch = activeDaySwapRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeDaySwapRef.current = 0;
+      setDaySwapDone((n) => n + 1);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (activeDaySwapRef.current === epoch) {
+        activeDaySwapRef.current = 0;
+        setDaySwapDone((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [dayPhase]);
   return (
     <>
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
@@ -2203,12 +2349,12 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           slot (the close's undo is still on the Log). And the close asks the one question it
           used to guess: Off Duty or Sleeper. */}
       {historyBasis(s, now) !== 'fresh' && (closedToday ? (
-        <div class="row undo">
+        <div class={`row undo${daySwapIn ? ' day-swap-in' : ''}`}>
           <span>Day closed · {clock(closedToday.at, false)} · {segLabel(s.current?.status ?? 'OFF', s.current?.note)}</span>
           <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
         </div>
       ) : endAsk ? (
-        <div class="endday-ask" role="group" aria-label="End the day in">
+        <div class={`endday-ask${daySwapIn ? ' day-swap-in' : ''}`} role="group" aria-label="End the day in">
           <p class="endday-q"><b>End the day in…</b></p>
           <div class="row">
             <button class="primary" onClick={() => { setEndAsk(false); endDay(now, 'OFF'); }}>{STATUS_LABEL.OFF}</button>
@@ -2217,7 +2363,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           <button class="link" onClick={() => setEndAsk(false)}>Not yet</button>
         </div>
       ) : (
-        <button class="wide" onClick={() => setEndAsk(true)}>End my day</button>
+        <button class={`wide${daySwapIn ? ' day-swap-in' : ''}`} onClick={() => setEndAsk(true)}>End my day</button>
       ))}
       {/* Patch 19: the status the driver is in, with the way to fix when it started — the
           after-the-fact door for a tap made late (or early). The Log's live row says
@@ -2286,12 +2432,12 @@ function bindingShare(ev: FullEvaluation): number {
   return Math.max(0, Math.min(1, left / of));
 }
 
-function DrivingView({ s, now, ev, again, onDetails }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onDetails: () => void }) {
+function DrivingView({ s, now, ev, again, onDetails, enter = false }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onDetails: () => void; enter?: boolean }) {
   // 'calm', not 'ok': .ok is the app-wide green-text class and turned the whole screen green.
   const level = ev.driveNow <= 0 ? 'bad' : ev.driveNow <= 60 ? 'warn' : 'calm';
   const left = dur(ev.driveNow);
   return (
-    <main class={`drive ${level}`} aria-live="polite">
+    <main class={`drive ${level}${enter ? ' drive-enter' : ''}`} aria-live="polite">
       <div class="top-row">
         <span class="pill" style={`--led: ${STATUS_COLOR.D}`}>{segLabel('D', s.current?.note)} · {dur(now - currentRunStart(s, now))}</span>
         <span class="top-right">
@@ -2358,7 +2504,7 @@ export function eldActualClocks(clocks: EldClocks, evAfter: FullEvaluation, shor
   };
 }
 
-function QuickStartSheet({ s, now }: { s: State; now: number }) {
+function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
   const cyc = cycleParamsOf(s.config);
   const fields: { key: keyof EldClocks; label: string; sub: string; max: number }[] = [
     { key: 'driveLeft', label: 'Drive time left', sub: '11-hour driving clock', max: LIMITS.DRIVE },
@@ -2551,7 +2697,7 @@ function QuickStartSheet({ s, now }: { s: State; now: number }) {
       }
     };
     return (
-      <Sheet title="Start from my ELD clocks" focusKey="qs-done">
+      <Sheet title="Start from my ELD clocks" focusKey="qs-done" closing={closing}>
         <p tabIndex={-1} data-first>Your clocks are set from those four numbers.</p>
         <p class="small">The four clocks:</p>
         <ul class="small">{fields.map((f) => {
@@ -2772,7 +2918,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
   );
 }
 
-function StatusSheet({ s, now }: { s: State; now: number }) {
+function StatusSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
   const [ago, setAgo] = useState(0);
   // Patch 19: an exact, typed "minutes ago" beside the presets (the field report's 7 minutes
   // sits between 5 and 15). While the box holds anything it is the answer — a preset tap
@@ -2793,7 +2939,7 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
   const cur = s.current;
   const isOn = (st: DutyStatus, note?: string) => cur?.status === st && (cur?.note ?? undefined) === note;
   return (
-    <Sheet title="What are you doing now?">
+    <Sheet title="What are you doing now?" closing={closing}>
       <h3 tabIndex={-1} data-first>When did it start?</h3>
       <div class="toggle" role="group" aria-label="When did it start?">
         {offsets.map((o) => <button key={o.minutes} class={!inUse && ago === o.minutes ? 'on' : ''} aria-pressed={!inUse && ago === o.minutes} disabled={!o.ok} onClick={() => { setAgo(o.minutes); setTyped(''); setBlocked(false); }}>{o.minutes ? `${o.minutes} min ago` : 'Now'}</button>)}
@@ -2840,7 +2986,7 @@ function StatusSheet({ s, now }: { s: State; now: number }) {
  * judges it on every render, so the reason a time cannot be used is on screen before the
  * button is. On apply the panel shows the resulting "since" time.
  */
-function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: number | null }) {
+function SinceSheet({ s, now, done = null, closing = false }: { s: State; now: number; done?: number | null; closing?: boolean }) {
   const cur = s.current;
   const [at, setAt] = useState<number>(cur ? cur.since : now);
   const [err, setErr] = useState<string | null>(null);
@@ -2867,7 +3013,7 @@ function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: num
   }, [confirm]);
   if (!cur) {
     return (
-      <Sheet title="Fix the start time">
+      <Sheet title="Fix the start time" closing={closing}>
         <p class="small">{adjustStartProblemText('none', s, now)}</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>Close</button></div>
       </Sheet>
@@ -2876,7 +3022,7 @@ function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: num
   const label = segLabel(cur.status, cur.note);
   if (done !== null) {
     return (
-      <Sheet title="Fix the start time" focusKey="done">
+      <Sheet title="Fix the start time" focusKey="done" closing={closing}>
         <p><b>Start time fixed — {label} since {clock(done)}</b></p>
         <p class="small">{statusBeingLeft(s) ? 'The entry before it ends at that time now, and every clock has been worked out again from it.' : 'Every clock has been worked out again from it.'}</p>
         <p class="muted small">Undo is on the Log until your next change.</p>
@@ -2891,7 +3037,7 @@ function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: num
     if (e) setErr(e); else openSheet({ kind: 'since', done: at });
   };
   return (
-    <Sheet title="Fix the start time" focusKey="pick">
+    <Sheet title="Fix the start time" focusKey="pick" closing={closing}>
       <div class="ed-ctx">
         <span class="dot" style={{ background: STATUS_COLOR[cur.status] }} />
         <span class="ed-ctx-t">{label} since {clock(cur.since)}</span>
@@ -2913,7 +3059,7 @@ function SinceSheet({ s, now, done = null }: { s: State; now: number; done?: num
 }
 
 /** Each rule's own stop time, if he drove from now without stopping; the earliest one is the answer. */
-function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+function WhySheet({ s, now, ev, closing = false }: { s: State; now: number; ev: FullEvaluation; closing?: boolean }) {
   const sh = ev.shift;
   const split = sh.chain.length >= 2;
   const pair = activePair(ev);
@@ -2945,7 +3091,7 @@ function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   // hypothetical, and a lever computed on the real record could mislead — the line is omitted.
   const lever = s.tentative.length === 0 ? whyLever(allSegments(s, now), s.config, now, ev) : null;
   return (
-    <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'}>
+    <Sheet title={ev.driveNow > 0 ? `Why stop by ${clockFull(ev.mustStopBy)}?` : 'Why can’t I drive?'} closing={closing}>
       <p class="sheet-lead">If you drove from now without stopping, each rule would end at its own time. The earliest one is the one that counts.</p>
       {/* The same lanes as the Timeline card, in both modes (audit §2.6): one detailed view.
           Out of time, every end is at or behind now and the wall is gone — the lanes then
@@ -2968,11 +3114,11 @@ function WhySheet({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   );
 }
 
-function ExceptionsSheet({ ev }: { ev: FullEvaluation }) {
+function ExceptionsSheet({ ev, closing = false }: { ev: FullEvaluation; closing?: boolean }) {
   const adverseOn = ev.shift.exceptionKeys.adverse !== null;
   const sixteenOn = ev.shift.exceptionKeys.sixteen !== null;
   return (
-    <Sheet title="Exceptions this shift">
+    <Sheet title="Exceptions this shift" closing={closing}>
       <label class="check"><input type="checkbox" data-first checked={adverseOn} onChange={() => toggleException(ev, 'adverseShifts')} /> Adverse driving conditions — +2h driving and window (§395.1(b)(1))</label>
       <label class="check"><input type="checkbox" checked={sixteenOn} onChange={() => toggleException(ev, 'sixteenHourShifts')} /> 16-hour short-haul day — window to 16h, driving stays 11 (§395.1(o))</label>
       {ev.shift.notes.map((n, i) => <p key={i} class={`small ${n.startsWith('⚠') ? 'warnbox' : 'muted'}`}>{n}</p>)}
@@ -3275,6 +3421,34 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   const [back, setBack] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [back]);
+  const openEditSheet = useSheet();
+  const morphSourceKey = openEditSheet?.kind === 'edit' && activeMorphOrigin ? activeMorphOrigin.key : null;
+  const logViewKey = `${back}:${s.logResolved ? 1 : 0}`;
+  const prevLogViewRef = useRef(logViewKey);
+  const logSwapEpochRef = useRef(0);
+  const activeLogSwapRef = useRef(0);
+  const [, setLogSwapDone] = useState(0);
+  if (prevLogViewRef.current !== logViewKey) {
+    prevLogViewRef.current = logViewKey;
+    activeLogSwapRef.current = prefersReducedMotion() ? 0 : ++logSwapEpochRef.current;
+  }
+  const logSwapIn = !prefersReducedMotion() && activeLogSwapRef.current > 0;
+  useEffect(() => {
+    const epoch = activeLogSwapRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeLogSwapRef.current = 0;
+      setLogSwapDone((n) => n + 1);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (activeLogSwapRef.current === epoch) {
+        activeLogSwapRef.current = 0;
+        setLogSwapDone((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [logViewKey]);
   const day = carrierDay(now, back, s);
   const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
   const canBack = day.start > earliest;
@@ -3357,7 +3531,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
             <button class={showResolved ? 'on-outline' : ''} onClick={() => setShowResolved(!showResolved)}>{showResolved ? '← Back to entries' : 'See what the clocks count'}</button>
           </div>
           {showResolved ? (
-            <>
+            <div key="resolved" class={logSwapIn ? 'log-swap-in' : undefined}>
               <p class="muted small">Oldest first — this is what the clocks actually count across your whole log, with any overlaps settled and your current status included. Read-only; go back to entries to change anything.</p>
               <ul class="seglist">{resolved.map((seg, i) => (
                 <li key={i}><span class="dot" style={{ background: STATUS_COLOR[seg.status] }} /><span>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</span><span class="muted">{clock(seg.start)} → {clock(seg.end)} · {dur(seg.end - seg.start)}</span></li>
@@ -3367,20 +3541,20 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
               )}</ul>
               <p class="small">Driving <b>{dur(totals.D)}</b> · On duty <b>{dur(totals.ON)}</b> · Off duty <b>{dur(totals.OFF)}</b> · Sleeper <b>{dur(totals.SB)}</b></p>
               <p class="muted small">Set your current status on the Now screen to keep this timeline moving.</p>
-            </>
+            </div>
           ) : (
-            <>
+            <div key={`day-${back}`} class={logSwapIn ? 'log-swap-in' : undefined}>
               {liveRow && s.current && (
                 /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
-                <button class="entry live" aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} onClick={() => openSheet({ kind: 'edit', seg: liveSeg(s, now)!, live: true })}>
+                <button class={`entry live${morphSourceKey === 'live' ? ' is-morph-source' : ''}`} aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} data-entry-key="live" onClick={(e) => openLogEntryEditor({ kind: 'edit', seg: liveSeg(s, now)!, live: true }, 'live', e.currentTarget)}>
                   <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
                   <span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
                   <span class="entry-len">{dur(Math.max(0, now - s.current.since))}</span>
                   <Icon d={I.next} size={18} />
                 </button>
               )}
-              {listed.map((it, i) => 'g' in it ? <HoleRow key={`h${it.g.start}`} g={it.g} /> : (() => { const seg = it.seg; return (
-                <button key={i} class="entry" aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} onClick={() => openSheet({ kind: 'edit', seg })}>
+              {listed.map((it, i) => 'g' in it ? <HoleRow key={`h${it.g.start}`} g={it.g} /> : (() => { const seg = it.seg; const ek = logEntryKey(seg); return (
+                <button key={i} class={`entry${morphSourceKey === ek ? ' is-morph-source' : ''}`} aria-label={`Edit ${seg.tentative ? 'what-if ' : ''}${describe(seg)}`} data-entry-key={ek} onClick={(e) => openLogEntryEditor({ kind: 'edit', seg }, ek, e.currentTarget)}>
                   <span class={seg.note === ELD_SEED_NOTE ? 'dot eld-dot' : 'dot'} style={{ background: STATUS_COLOR[seg.status], color: STATUS_COLOR[seg.status] }} />
                   <span><b>{segLabel(seg.status, seg.note)}{seg.tentative ? ' (what-if)' : ''}</b><span class="muted small">{clock(seg.start)} → {clock(seg.end)}</span>
                     {/* D11 (audit): the quick start's rows say where they came from — an estimate
@@ -3391,7 +3565,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
                 </button>
               ); })())}
               {!dayRows.length && !(s.current && back === 0) && <p class="muted">Nothing logged on this day.</p>}
-            </>
+            </div>
           )}
         </Card>
         <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
@@ -3844,7 +4018,10 @@ function WhatStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
       // A different status is one tap, kept as the times were; undo is on the Log.
       const e = saveEntry(edit, next, now);
       setErr(e);
-      if (!e) openSheet(null);
+      if (!e) {
+        updateActiveMorphKey(logEntryKey({ status: next.status, start: next.start, end: next.end, tentative: edit.tentative }));
+        openSheet(null);
+      }
       return;
     }
     const d = draftFor({ status, note, minutes }, k.draft, now, inside, k.kind === 'add' ? k.day : undefined, s);
@@ -3983,7 +4160,13 @@ function CheckStep({ k, s, now }: { k: EdKind; s: State; now: number }) {
   const save = () => {
     if (unchanged) { openSheet(null); return; }
     const e = live ? adjustStartNow(d.start, absorbed.length > 0) : commitDraft(k, d, now);
-    setErr(e); if (!e) openSheet(null);
+    setErr(e);
+    if (!e) {
+      if (k.kind === 'edit') {
+        updateActiveMorphKey(live ? 'live' : logEntryKey({ status: d.status, start: d.start, end, tentative: k.seg.tentative }));
+      }
+      openSheet(null);
+    }
   };
   const verb = edit ? 'Save the change' : 'Add to my log';
   return (
@@ -4050,7 +4233,7 @@ function MenuStep({ k, s }: { k: Extract<SheetKind, { kind: 'edit' }>; s: State 
   );
 }
 
-function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
+function EditorSheet({ k, s, now, closing = false, morphOrigin = null }: { k: EdKind; s: State; now: number; closing?: boolean; morphOrigin?: SheetMorphOrigin | null }) {
   const step: EdStep = k.step ?? (k.kind === 'edit' ? 'menu' : 'what');
   // A step that needs a draft without one (a stale descriptor) starts over at the first question.
   const ok = step === 'menu' || step === 'what' || !!k.draft;
@@ -4058,7 +4241,7 @@ function EditorSheet({ k, s, now }: { k: EdKind; s: State; now: number }) {
   const title = k.kind === 'add' ? 'Add to your log' : `${segLabel(k.seg.status, k.seg.note)}${k.seg.tentative ? ' (what-if)' : ''}`;
   const first = at === (k.kind === 'edit' ? 'menu' : 'what') && !(k.kind === 'add' && k.draft);
   return (
-    <Sheet title={title} onBack={first ? undefined : sheetBack} focusKey={at}>
+    <Sheet title={title} onBack={first ? undefined : sheetBack} focusKey={at} closing={closing} morphOrigin={morphOrigin}>
       {at === 'menu' && k.kind === 'edit' && <MenuStep k={k} s={s} />}
       {at === 'what' && <WhatStep k={k} s={s} now={now} />}
       {at === 'when' && <WhenStep k={k} now={now} />}
@@ -4481,7 +4664,7 @@ const BLOCK_TITLE: Record<SplitBlockKey, string> = { b1: 'Break 1', dwell: 'On d
  * this build. The fix buttons for the ✗ lines this block can mend sit here too (M4).
  * Everything here edits the DRAFT; nothing reaches the log.
  */
-function SplitBlockSheet({ s, now, ev, block }: { s: State; now: number; ev: FullEvaluation; block: SplitBlockKey }) {
+function SplitBlockSheet({ s, now, ev, block, closing = false }: { s: State; now: number; ev: FullEvaluation; block: SplitBlockKey; closing?: boolean }) {
   const sc = splitScenario(s, now, ev);
   const value = s.split[block], max = SPLIT_BLOCK_MAX[block];
   // A stepper, the box or the toggle is an ordinary draft edit: it retires a pending
@@ -4491,7 +4674,7 @@ function SplitBlockSheet({ s, now, ev, block }: { s: State; now: number; ev: Ful
   const statusKey = block === 'b1' ? 'b1s' : block === 'b2' ? 'b2s' : null;
   const fixes = splitFixes(s, sc).filter((f) => f.block === block);
   return (
-    <Sheet title={`${BLOCK_TITLE[block]} · ${dur(value)}`}>
+    <Sheet title={`${BLOCK_TITLE[block]} · ${dur(value)}`} closing={closing}>
       {statusKey && <Toggle options={[['OFF', STATUS_LABEL.OFF], ['SB', STATUS_LABEL.SB]]} value={s.split[statusKey]} onChange={(v) => edit({ [statusKey]: v })} />}
       <div class="pb-steps" role="group" aria-label={`${BLOCK_TITLE[block]} length`}>
         {[-60, -15, 15, 60].map((d) => (
@@ -5382,7 +5565,7 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
  * ClockPick renders and parses in — equal to `s.config.timeZone` in the home zone, and still exact
  * when `deviceTz !== s.config.timeZone` or under `TZ=UTC`).
  */
-function RolloutTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rollouttime' }>; now: number }) {
+function RolloutTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { kind: 'rollouttime' }>; now: number; closing?: boolean }) {
   const nowWall = formatWallDateTime(now, k.entryTimeZone);
   const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
   const [at, setAt] = useState<number>(() => {
@@ -5401,7 +5584,7 @@ function RolloutTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rolloutti
     openSheet(null);
   };
   return (
-    <Sheet title={`Appointment (${k.entryZoneName})`}>
+    <Sheet title={`Appointment (${k.entryZoneName})`} closing={closing}>
       <p class="muted small" style="margin:0">Wall-clock time in <b>{k.entryZoneName}</b> time.</p>
       <ClockPick at={at} set={setAt} now={pickerNow} future={true} say="Appointment" name="Appointment time" keys={KEYS_HOURS} />
       <button class="primary wide ed-go" onClick={apply}>Apply · {clockFull(at)} ({k.entryZoneName})</button>
@@ -5944,7 +6127,7 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
  * Split-Sleeper Rescue Simulator: optional target delivery deadline on the shared ClockPick.
  * Converts home-terminal wall-clock strings through `deviceTz` in the exact pattern of `RolloutTimeSheet`.
  */
-function RescueTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rescuetime' }>; now: number }) {
+function RescueTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { kind: 'rescuetime' }>; now: number; closing?: boolean }) {
   const nowWall = formatWallDateTime(now, k.homeTimeZone);
   const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
   const [at, setAt] = useState<number>(() => {
@@ -5959,7 +6142,7 @@ function RescueTimeSheet({ k, now }: { k: Extract<SheetKind, { kind: 'rescuetime
     openSheet(null);
   };
   return (
-    <Sheet title={`Target deadline (${k.homeZoneName})`}>
+    <Sheet title={`Target deadline (${k.homeZoneName})`} closing={closing}>
       <p class="muted small" style="margin:0">Wall-clock deadline in <b>{k.homeZoneName}</b> (home terminal) time.</p>
       <ClockPick at={at} set={setAt} now={pickerNow} future={true} say="Deadline" name="Target deadline" keys={KEYS_HOURS} />
       <button class="primary wide ed-go" onClick={apply}>Apply · {clockFull(at)} ({k.homeZoneName})</button>
@@ -6499,7 +6682,7 @@ export function defaultApptTime(s: State, now: number): number {
 }
 
 /** The load check's big clock: the Log editor's when-keys, for a departure or an appointment. */
-function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave' | 'appt' }) {
+function LoadTimeSheet({ s, now, field, closing = false }: { s: State; now: number; field: 'leave' | 'appt'; closing?: boolean }) {
   const lc = s.loadCheck;
   const start = field === 'leave'
     ? (lc.leaveIn > 0 ? now + lc.leaveIn : nextHour(now))
@@ -6512,7 +6695,7 @@ function LoadTimeSheet({ s, now, field }: { s: State; now: number; field: 'leave
     openSheet(null);
   };
   return (
-    <Sheet title={field === 'leave' ? 'When will you leave?' : 'Appointment at the receiver'}>
+    <Sheet title={field === 'leave' ? 'When will you leave?' : 'Appointment at the receiver'} closing={closing}>
       {/* Patch L1 item 3: the one shared clock picker (the day buttons stop at three days out, as before: no another-day). */}
       <ClockPick at={at} set={setAt} now={now} future={true} say={field === 'leave' ? 'Leave at' : 'Appointment at'} name={field === 'leave' ? 'Leave time' : 'Appointment time'} keys={KEYS_HOURS} anyDay={false} />
       {problem && <div class="warnbox small">{problem}</div>}
@@ -6550,6 +6733,32 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const draftUndo = loadDraftUndoPending();
   // A6 (taste): steps 1 Distance, 2 Leave, 3 Appointment (optional), 4 Receiver dwell, 5 Answer.
   const [step, setStep] = useState(lc.answered ? 5 : 1);
+  // Inner wizard step dissolve: fires only on step changes after mount (never on initial room open).
+  const prevStepRef = useRef(step);
+  const stepEpochRef = useRef(0);
+  const activeStepRef = useRef(0);
+  const [, setStepDone] = useState(0);
+  if (prevStepRef.current !== step) {
+    prevStepRef.current = step;
+    activeStepRef.current = prefersReducedMotion() ? 0 : ++stepEpochRef.current;
+  }
+  const stepSwap = !prefersReducedMotion() && activeStepRef.current > 0;
+  useEffect(() => {
+    const epoch = activeStepRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeStepRef.current = 0;
+      setStepDone((n) => n + 1);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (activeStepRef.current === epoch) {
+        activeStepRef.current = 0;
+        setStepDone((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [step]);
   // Gemini round, item I: the typed miles as typed. A value the check cannot use (empty, 0,
   // negative, not a number, past 3000) used to be dropped silently — the box kept showing
   // "-100" while the check ran on the old distance after Next. Now the box keeps what
@@ -6621,6 +6830,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     return (
       <>
         {head(1)}
+        <div key="s1" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
         <h1 class="flow-q">How far is the load?</h1>
         <p class="muted">Miles from here to the receiver.</p>
         <div class="bignum"><b>{lc.miles}</b> mi</div>
@@ -6629,6 +6839,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         {milesProblem && <p class="warnbox small" id="miles-problem" role="alert">{milesProblem}</p>}
         {chips([[250, '250'], [400, '400'], [550, '550'], [700, '700'], [900, '900']] as [number, string][], milesProblem ? NaN : lc.miles, (v) => { setMilesText(null); setLoad({ miles: v }); })}
         {next(1, 'Next: when you leave', !!milesProblem)}
+        </div>
       </>
     );
   }
@@ -6636,6 +6847,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     return (
       <>
         {head(2)}
+        <div key="s2" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
         <h1 class="flow-q">When will you leave?</h1>
         {chips([[0, 'Now'], [30, 'In 30 min'], [60, 'In 1 hour'], [120, 'In 2 hours']] as [number, string][], lc.leaveIn, (v) => setLoad({ leaveIn: v }))}
         {/* Capstone C3 (M7): a typed departure, past the chips' two hours, on the Log editor's big clock. */}
@@ -6649,6 +6861,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
           </>
         )}
         {next(2, 'Next: appointment time')}
+        </div>
       </>
     );
   }
@@ -6656,6 +6869,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     return (
       <>
         {head(3)}
+        <div key="s3" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
         <h1 class="flow-q">Appointment at the receiver?</h1>
         <p class="muted">With a time, the answer says whether you make it.</p>
         <div class="chips">
@@ -6664,6 +6878,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         </div>
         {appt !== null && <p class="small"><b>Appointment {clockFull(appt)}</b></p>}
         {next(3, 'Next: time at the receiver')}
+        </div>
       </>
     );
   }
@@ -6671,11 +6886,13 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     return (
       <>
         {head(4)}
+        <div key="s4" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
         <h1 class="flow-q">How long at the receiver?</h1>
         {chips([[0, 'None'], [30, '30 min'], [60, '1 hour'], [120, '2 hours'], [180, '3 hours'], [240, '4 hours']] as [number, string][], lc.dwell, (v) => setLoad({ dwell: v }))}
         <h3>While you are there, you are</h3>
         {chips([[false, 'On duty (unloading)'], [true, 'Off duty (relieved)']] as [boolean, string][], lc.dwellOff, (v) => setLoad({ dwellOff: v }))}
         {next(4, 'Show me the answer')}
+        </div>
       </>
     );
   }
@@ -6685,6 +6902,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
         <button class="icon-btn" aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /></button>
         <b>Can I take this load?</b><span />
       </div>
+      <div key="s5" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
       <section class={`verdict ${best.feasible ? 'yes' : 'no'}`}>
         <div class="verdict-label">{provisional ? 'Verdict (provisional)' : 'Verdict'}</div>
         {/* A sign, not a slab (patch 16, P1c): the word rides on the card surface with an icon and
@@ -6741,6 +6959,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <p class="trust">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
       <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
       <button class="wide" onClick={() => { clearLoadDraftUndo(); initStock.current = false; setState({ loadCheck: { ...FRESH_LOADCHECK } }); setStep(1); }}>Check another load</button>
+      </div>
     </>
   );
 }
@@ -6748,10 +6967,10 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 /* ============================================================ Trip tab */
 
 /** The trip planner's departure on the shared clock picker (item 3). A past time stays allowed (a reconstruction), as it always was. */
-function TripTimeSheet({ s, now }: { s: State; now: number }) {
+function TripTimeSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
   const [at, setAt] = useState<number>(fromInput(s.trip.dep ?? '') ?? now);
   return (
-    <Sheet title="When do you leave?">
+    <Sheet title="When do you leave?" closing={closing}>
       <ClockPick at={at} set={setAt} now={now} future={true} say="Depart" name="Departure time" keys={KEYS_HOURS} />
       <button class="primary wide ed-go" onClick={() => { setState({ trip: { ...getState().trip, dep: toInput(at) } }); openSheet(null); }}>Depart {clockFull(at)}</button>
       <button class="wide" onClick={() => { setState({ trip: { ...getState().trip, dep: null } }); openSheet(null); }}>Leave now</button>
@@ -7402,11 +7621,11 @@ export function eraseAll() {
  * A9 (audit): Start over and Erase confirm in the app's own sheet, in plain words — what goes,
  * whether it can come back, and (for Erase) a way to keep a copy first.
  */
-function ConfirmSheet({ s, now, what }: { s: State; now: number; what: 'startover' | 'erase' }) {
+function ConfirmSheet({ s, now, what, closing = false }: { s: State; now: number; what: 'startover' | 'erase'; closing?: boolean }) {
   const [note, setNote] = useState<string | null>(null);
   if (what === 'startover') {
     return (
-      <Sheet title="Start over?">
+      <Sheet title="Start over?" closing={closing}>
         <p>Your log is replaced with a fresh 10-hour rest ending now ({clock(now)}), and you go on duty from there.</p>
         <p class="muted small">Undo is on the Log until your next change.</p>
         <button class="primary wide" data-first onClick={() => openSheet(null)}>Keep my log</button>
@@ -7415,7 +7634,7 @@ function ConfirmSheet({ s, now, what }: { s: State; now: number; what: 'startove
     );
   }
   return (
-    <Sheet title="Erase everything on this phone?">
+    <Sheet title="Erase everything on this phone?" closing={closing}>
       <p><b>This can't be undone.</b> Your log ({s.segments.length} {s.segments.length === 1 ? 'entry' : 'entries'}), your what-if rows and your day closes are deleted. Your settings stay.</p>
       <button class="wide" onClick={() => setNote(`Download requested: ${downloadExport(s)}. Check your browser's downloads — the app cannot confirm the file reached your device.`)}>Export a copy first</button>
       {note && <p class="muted small">{note}</p>}
@@ -7444,9 +7663,9 @@ export function acknowledgeDisclaimer() {
  * One-time startup disclaimer pop-up: shown on launch whenever disclaimerAcked is false.
  * Body matches More → About verbatim; the single button calls acknowledgeDisclaimer() and dismisses.
  */
-function DisclaimerDialog() {
+function DisclaimerDialog({ closing = false }: { closing?: boolean }) {
   return (
-    <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
+    <div class={`backdrop${closing ? ' is-closing' : ''}`} role={closing ? undefined : 'dialog'} aria-modal={closing ? undefined : 'true'} aria-labelledby={closing ? undefined : 'disclaimer-title'} inert={closing || undefined} aria-hidden={closing || undefined}>
       <div class="modal">
         <h2 id="disclaimer-title">Before you start</h2>
         <p class="small">Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
@@ -7462,7 +7681,7 @@ function DisclaimerDialog() {
  * truck is about to roll), and never again — either answer is remembered, and More → Driving
  * alerts can change it later. A "Yes" speaks the confirmation for the status that raised it.
  */
-function SpeakAskDialog() {
+function SpeakAskDialog({ closing = false }: { closing?: boolean }) {
   const yes = () => {
     setState({ speakAlerts: true, speechAsked: true, speakAskOpen: false });
     const cur = getState();
@@ -7480,7 +7699,7 @@ function SpeakAskDialog() {
   };
   const no = () => setState({ speakAlerts: false, speechAsked: true, speakAskOpen: false });
   return (
-    <div class="backdrop" role="dialog" aria-modal="true" aria-labelledby="speakask-title">
+    <div class={`backdrop${closing ? ' is-closing' : ''}`} role={closing ? undefined : 'dialog'} aria-modal={closing ? undefined : 'true'} aria-labelledby={closing ? undefined : 'speakask-title'} inert={closing || undefined} aria-hidden={closing || undefined}>
       <div class="modal">
         <h2 id="speakask-title">Want the alerts read out loud?</h2>
         <p class="small">While you drive, Split Decision can say the numbers out loud — how much driving is left at 60, 30 and 15 minutes, when time runs out, and a spoken confirmation when you tap a status — so you never have to read the screen. It uses this browser's voice. Nothing is recorded, and nothing leaves your phone.</p>
@@ -7564,6 +7783,30 @@ function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boo
   return null;
 }
 
+function sheetSessionKey(k: SheetKind): string {
+  switch (k.kind) {
+    case 'lever': return `lever-${k.lever.id}`;
+    case 'splitblock': return `splitblock-${k.block}`;
+    case 'loadtime': return `loadtime-${k.field}`;
+    case 'rollouttime': return `rollouttime-${k.apptDate}-${k.apptTime}-${k.entryTimeZone}`;
+    case 'rescuetime': return `rescuetime-${k.deadlineMinute}`;
+    case 'confirm': return `confirm-${k.what}`;
+    case 'edit': return `e${k.live ? 'live' : ''}${k.seg.start}-${k.live ? '' : k.seg.end}`;
+    case 'add': return `a${k.inside?.start ?? ''}`;
+    default: return k.kind;
+  }
+}
+
+function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean): boolean {
+  if (driveUp) return k.kind === 'status' || k.kind === 'since';
+  if (k.kind === 'splitblock') return s.tab === 'split';
+  if (k.kind === 'loadtime') return s.tab === 'load';
+  if (k.kind === 'triptime') return s.tab === 'trip';
+  if (k.kind === 'rollouttime') return s.tab === 'plan' && rolloutOpen;
+  if (k.kind === 'rescuetime') return s.tab === 'plan' && rescueOpen;
+  return true;
+}
+
 /* The panels live side by side in a horizontal scroll-snap strip — The Daily Number's
  * mechanism, copied at Lorico's word (2026-11-18): the browser's own scrolling decides
  * what a drag means, each page is its own vertical scroller, and the bottom bar follows
@@ -7614,6 +7857,32 @@ export function App() {
   );
   const toolEpochRef = useRef(activePlanTool ? 1 : 0);
   const wasToolOpenRef = useRef(inPlanTool);
+  const prevSwapToolRef = useRef<PlanToolId | null>(activePlanTool);
+  const roomSwapEpochRef = useRef(0);
+  const activeRoomSwapRef = useRef(0);
+  const [, setRoomSwapDone] = useState(0);
+  if (activePlanTool !== prevSwapToolRef.current) {
+    const switchingInsideRoom = prevSwapToolRef.current !== null && activePlanTool !== null;
+    prevSwapToolRef.current = activePlanTool;
+    activeRoomSwapRef.current = switchingInsideRoom && !prefersReducedMotion() ? ++roomSwapEpochRef.current : 0;
+  }
+  const roomSwap = inPlanTool && !prefersReducedMotion() && activeRoomSwapRef.current > 0;
+  useEffect(() => {
+    const epoch = activeRoomSwapRef.current;
+    if (epoch === 0) return;
+    if (prefersReducedMotion()) {
+      activeRoomSwapRef.current = 0;
+      setRoomSwapDone((n) => n + 1);
+      return;
+    }
+    const id = setTimeout(() => {
+      if (activeRoomSwapRef.current === epoch) {
+        activeRoomSwapRef.current = 0;
+        setRoomSwapDone((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(id);
+  }, [activePlanTool]);
   const activeEntry = activePlanTool
     ? (retainedTool && retainedTool.tool === activePlanTool && (wasToolOpenRef.current || wasInSettings.current)
         ? retainedTool
@@ -7634,7 +7903,7 @@ export function App() {
       setRetainedTool(null);
       return;
     }
-    const id = setTimeout(() => setRetainedTool(null), 240);
+    const id = setTimeout(() => setRetainedTool(null), 220);
     return () => clearTimeout(id);
   }, [activePlanTool, inSettings, preserveBehindSettings]);
   const pagesRef = useRef<HTMLElement>(null);
@@ -7726,51 +7995,83 @@ export function App() {
   }, []);
   const again = useDriveAgain(s, now, ev);
   const sheet = useSheet();
-  // Keep the closing comeback/lever sheet mounted (inert + aria-hidden) across its 200ms
-  // slide-down exit, then unmount cleanly. Under prefers-reduced-motion: reduce, unmount immediately.
-  const leverOpen = s.disclaimerAcked && !driveUp && sheet?.kind === 'lever';
-  const [retainedLever, setRetainedLever] = useState<Lever | null>(
-    () => (leverOpen && sheet?.kind === 'lever' ? sheet.lever : null),
-  );
-  const leverClosing = !leverOpen && retainedLever !== null && s.disclaimerAcked && !driveUp && sheet === null && !prefersReducedMotion();
-  const displayedLever = leverOpen && sheet?.kind === 'lever' ? sheet.lever : (leverClosing ? retainedLever : null);
+  const prevDriveUpRef = useRef(driveUp);
+  const driveEnterRef = useRef(false);
+  if (driveUp !== prevDriveUpRef.current) {
+    driveEnterRef.current = driveUp && !prefersReducedMotion();
+    prevDriveUpRef.current = driveUp;
+  }
+  const driveEnter = driveUp && driveEnterRef.current && !prefersReducedMotion();
+  // Unified bottom-sheet & Log-entry morph lifecycle across ALL 14 sheet kinds.
+  // Closing a sheet immediately clears currentSheet() / blocked / backNav while retaining the
+  // exiting sheet (inert + aria-hidden) across the 200ms slide-down / morph-return exit, then
+  // unmounts cleanly. Direct sheet-to-sheet switches, disclaimer, driving-view flips, and
+  // prefers-reduced-motion: reduce bypass exit retention and unmount immediately.
+  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen) ? sheet : null;
+  const sheetEpochRef = useRef(visibleSheet ? 1 : 0);
+  const prevVisibleKeyRef = useRef<string | null>(visibleSheet ? sheetSessionKey(visibleSheet) : null);
+  const visibleKey = visibleSheet ? sheetSessionKey(visibleSheet) : null;
+  if (visibleKey !== null && visibleKey !== prevVisibleKeyRef.current) {
+    sheetEpochRef.current++;
+  }
+  prevVisibleKeyRef.current = visibleKey;
+  type RetainedSheetEntry = { sheet: SheetKind; key: string; epoch: number; driveUp: boolean; morph: SheetMorphOrigin | null };
+  const [retainedSheet, setRetainedSheet] = useState<RetainedSheetEntry | null>(() => (
+    visibleSheet ? { sheet: visibleSheet, key: sheetSessionKey(visibleSheet), epoch: sheetEpochRef.current, driveUp, morph: visibleSheet.kind === 'edit' ? activeMorphOrigin : null } : null
+  ));
+  const activeSheetEntry: RetainedSheetEntry | null = visibleSheet
+    ? {
+        sheet: visibleSheet,
+        key: visibleKey!,
+        epoch: sheetEpochRef.current,
+        driveUp,
+        morph: visibleSheet.kind === 'edit' ? (retainedSheet && retainedSheet.key === visibleKey && retainedSheet.epoch === sheetEpochRef.current ? retainedSheet.morph : activeMorphOrigin) : null,
+      }
+    : null;
+  const sheetClosing = !visibleSheet && retainedSheet !== null && s.disclaimerAcked && sheet === null && retainedSheet.driveUp === driveUp && !prefersReducedMotion();
+  const displayedSheet = activeSheetEntry ?? (sheetClosing ? retainedSheet : null);
   useEffect(() => {
-    if (leverOpen && sheet?.kind === 'lever') {
-      if (retainedLever !== sheet.lever) setRetainedLever(sheet.lever);
+    if (activeSheetEntry) {
+      if (!retainedSheet || retainedSheet.sheet !== activeSheetEntry.sheet || retainedSheet.epoch !== activeSheetEntry.epoch || retainedSheet.morph !== activeSheetEntry.morph) {
+        setRetainedSheet(activeSheetEntry);
+      }
       return;
     }
-    if (!retainedLever) return;
-    if (!s.disclaimerAcked || driveUp || sheet !== null || prefersReducedMotion()) {
-      setRetainedLever(null);
+    if (!retainedSheet) return;
+    if (!s.disclaimerAcked || sheet !== null || retainedSheet.driveUp !== driveUp || prefersReducedMotion()) {
+      setRetainedSheet(null);
+      if (sheet === null) activeMorphOrigin = null;
       return;
     }
-    const id = setTimeout(() => setRetainedLever(null), 220);
+    const id = setTimeout(() => {
+      setRetainedSheet(null);
+      if (currentSheet() === null) activeMorphOrigin = null;
+    }, 220);
     return () => clearTimeout(id);
-  }, [leverOpen, sheet, s.disclaimerAcked, driveUp]);
-  // Keep the closing "Check against my ELD" drift sheet mounted (inert + aria-hidden) across its
-  // 200ms slide-down exit, then unmount cleanly. Under prefers-reduced-motion: reduce (or direct
-  // sheet switch, disclaimer, or driving view), skip exit retention and unmount immediately.
-  const driftOpen = s.disclaimerAcked && !driveUp && sheet?.kind === 'drift';
-  const driftEpochRef = useRef(0);
-  const prevDriftOpenRef = useRef(driftOpen);
-  if (driftOpen && !prevDriftOpenRef.current) driftEpochRef.current++;
-  prevDriftOpenRef.current = driftOpen;
-  const [retainedDrift, setRetainedDrift] = useState<boolean>(() => driftOpen);
-  const driftClosing = !driftOpen && retainedDrift && s.disclaimerAcked && !driveUp && sheet === null && !prefersReducedMotion();
-  const showDrift = driftOpen || driftClosing;
+  }, [visibleSheet, sheet, s.disclaimerAcked, driveUp]);
+  // Unified centered modal exit retention (DisclaimerDialog + SpeakAskDialog): 200ms exit fade/scale.
+  const discOpenNow = !s.disclaimerAcked;
+  const [retainedDisc, setRetainedDisc] = useState<boolean>(() => discOpenNow);
+  const discClosing = !discOpenNow && retainedDisc && !prefersReducedMotion();
+  const showDiscModal = discOpenNow || discClosing;
   useEffect(() => {
-    if (driftOpen) {
-      if (!retainedDrift) setRetainedDrift(true);
-      return;
-    }
-    if (!retainedDrift) return;
-    if (!s.disclaimerAcked || driveUp || sheet !== null || prefersReducedMotion()) {
-      setRetainedDrift(false);
-      return;
-    }
-    const id = setTimeout(() => setRetainedDrift(false), 220);
+    if (discOpenNow) { if (!retainedDisc) setRetainedDisc(true); return; }
+    if (!retainedDisc) return;
+    if (prefersReducedMotion()) { setRetainedDisc(false); return; }
+    const id = setTimeout(() => setRetainedDisc(false), 220);
     return () => clearTimeout(id);
-  }, [driftOpen, sheet, s.disclaimerAcked, driveUp]);
+  }, [discOpenNow]);
+  const speakOpenNow = s.disclaimerAcked && !driveUp && s.speakAskOpen;
+  const [retainedSpeak, setRetainedSpeak] = useState<boolean>(() => speakOpenNow);
+  const speakClosing = !speakOpenNow && retainedSpeak && s.disclaimerAcked && !driveUp && !prefersReducedMotion();
+  const showSpeakModal = speakOpenNow || speakClosing;
+  useEffect(() => {
+    if (speakOpenNow) { if (!retainedSpeak) setRetainedSpeak(true); return; }
+    if (!retainedSpeak) return;
+    if (!s.disclaimerAcked || driveUp || prefersReducedMotion()) { setRetainedSpeak(false); return; }
+    const id = setTimeout(() => setRetainedSpeak(false), 220);
+    return () => clearTimeout(id);
+  }, [speakOpenNow, s.disclaimerAcked, driveUp]);
   useEffect(() => {
     if (s.tab !== 'plan' && s.tab !== 'settings' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
@@ -7987,15 +8288,38 @@ export function App() {
     window.addEventListener('resize', f);
     return () => window.removeEventListener('resize', f);
   }, []);
+  const renderDisplayedSheet = () => {
+    if (!displayedSheet || showDisclaimer) return null;
+    const sh = displayedSheet.sheet;
+    const mk = `${displayedSheet.key}-${displayedSheet.epoch}`;
+    let inner: ComponentChildren = null;
+    switch (sh.kind) {
+      case 'status': inner = <StatusSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
+      case 'since': inner = <SinceSheet key={mk} s={s} now={now} done={sh.done ?? null} closing={sheetClosing} />; break;
+      case 'quickstart': inner = <QuickStartSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
+      case 'drift': inner = <DriftSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
+      case 'why': inner = <WhySheet key={mk} s={s} now={now} ev={ev} closing={sheetClosing} />; break;
+      case 'exceptions': inner = <ExceptionsSheet key={mk} ev={ev} closing={sheetClosing} />; break;
+      case 'lever': inner = <LeverSheet key={mk} s={s} now={now} ev={ev} lever={sh.lever} closing={sheetClosing} />; break;
+      case 'splitblock': inner = <SplitBlockSheet key={mk} s={s} now={now} ev={ev} block={sh.block} closing={sheetClosing} />; break;
+      case 'loadtime': inner = <LoadTimeSheet key={mk} s={s} now={now} field={sh.field} closing={sheetClosing} />; break;
+      case 'triptime': inner = <TripTimeSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
+      case 'rollouttime': inner = <RolloutTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
+      case 'rescuetime': inner = <RescueTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
+      case 'edit':
+      case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
+      case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
+    }
+    return <SheetMotionCtx.Provider value={{ closing: sheetClosing, morphOrigin: displayedSheet.morph }}>{inner}</SheetMotionCtx.Provider>;
+  };
   if (showsDrivingView(s)) {
     return (
       <div class="app">
         <div inert={blocked}>
-          <DrivingView s={s} now={now} ev={ev} again={again} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
+          <DrivingView s={s} now={now} ev={ev} again={again} enter={driveEnter} onDetails={() => { setDrivingPeek(s.current?.since ?? null); redraw((x) => x + 1); }} />
         </div>
-        {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-        {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
-        {showDisclaimer && <DisclaimerDialog />}
+        {renderDisplayedSheet()}
+        {showDiscModal && <DisclaimerDialog closing={discClosing} />}
       </div>
     );
   }
@@ -8050,7 +8374,7 @@ export function App() {
       </section>
       <section
         ref={planRoomRef}
-        class={`page page-tool room plan-room${inPlanTool ? ' is-active' : ''}`}
+        class={`page page-tool room plan-room${inPlanTool ? ' is-active' : ''}${roomSwap ? ' room-swap' : ''}`}
         data-plan-tool={displayedTool?.tool ?? undefined}
         aria-label={displayedTool ? PLAN_TOOL_LABEL[displayedTool.tool] : undefined}
         inert={blocked || !inPlanTool}
@@ -8074,22 +8398,9 @@ export function App() {
           </>
         )}
       </section>
-      {!showDisclaimer && sheet?.kind === 'status' && <StatusSheet s={s} now={now} />}
-      {!showDisclaimer && sheet?.kind === 'since' && <SinceSheet s={s} now={now} done={sheet.done ?? null} />}
-      {!showDisclaimer && sheet?.kind === 'quickstart' && <QuickStartSheet s={s} now={now} />}
-      {!showDisclaimer && showDrift && <DriftSheet key={driftEpochRef.current} s={s} now={now} closing={driftClosing} />}
-      {!showDisclaimer && sheet?.kind === 'why' && <WhySheet s={s} now={now} ev={ev} />}
-      {!showDisclaimer && sheet?.kind === 'exceptions' && <ExceptionsSheet ev={ev} />}
-      {!showDisclaimer && displayedLever && <LeverSheet s={s} now={now} ev={ev} lever={displayedLever} closing={leverClosing} />}
-      {!showDisclaimer && sheet?.kind === 'splitblock' && s.tab === 'split' && <SplitBlockSheet s={s} now={now} ev={ev} block={sheet.block} />}
-      {!showDisclaimer && sheet?.kind === 'loadtime' && s.tab === 'load' && <LoadTimeSheet key={sheet.field} s={s} now={now} field={sheet.field} />}
-      {!showDisclaimer && sheet?.kind === 'triptime' && s.tab === 'trip' && <TripTimeSheet s={s} now={now} />}
-      {!showDisclaimer && sheet?.kind === 'rollouttime' && s.tab === 'plan' && rolloutOpen && <RolloutTimeSheet key={`${sheet.apptDate}-${sheet.apptTime}-${sheet.entryTimeZone}`} k={sheet} now={now} />}
-      {!showDisclaimer && sheet?.kind === 'rescuetime' && s.tab === 'plan' && rescueOpen && <RescueTimeSheet key={sheet.deadlineMinute} k={sheet} now={now} />}
-      {!showDisclaimer && (sheet?.kind === 'edit' || sheet?.kind === 'add') && <EditorSheet key={sheet.kind === 'edit' ? `e${sheet.live ? 'live' : ''}${sheet.seg.start}-${sheet.live ? '' : sheet.seg.end}` : `a${sheet.inside?.start ?? ''}`} k={sheet} s={s} now={now} />}
-      {!showDisclaimer && sheet?.kind === 'confirm' && <ConfirmSheet s={s} now={now} what={sheet.what} />}
-      {!showDisclaimer && s.speakAskOpen && <SpeakAskDialog />}
-      {showDisclaimer && <DisclaimerDialog />}
+      {renderDisplayedSheet()}
+      {showSpeakModal && <SpeakAskDialog closing={speakClosing} />}
+      {showDiscModal && <DisclaimerDialog closing={discClosing} />}
       {printReport && <LogSummaryReport s={s} req={printReport} />}
     </div>
   );
