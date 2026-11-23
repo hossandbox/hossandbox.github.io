@@ -45,6 +45,14 @@ import {
   type RescueDistanceMode, type RescueStrategyResult,
 } from './rescue.ts';
 import {
+  evaluateStackChain, createDefaultStops, loadStackDraft, saveStackDraft, clearStackDraft,
+  clampStackMph, stackLegDriveMinutes, deadheadMilesFor, resolveStackWallMinute, fmtStackFull,
+  STACK_MIN_STOPS, STACK_MAX_STOPS, STACK_MIN_MPH, STACK_MAX_MPH, STACK_DEFAULT_MPH,
+  STACK_MAX_MILES, STACK_MAX_DWELL_MIN, STACK_MAX_DEPARTURE_FUTURE_MIN, STACK_SPLIT_SB_CALLOUT,
+  STACK_MILES_PRESETS, STACK_MPH_PRESETS, STACK_DWELL_PRESETS, STACK_COMMON_ZONES,
+  type StackStopInput, type StackResult, type StackStopOutcome, type StackLimitKind,
+} from './stack.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -367,6 +375,7 @@ const I = {
   week: 'M4 19h16M6 16v-5M11 16V8M16 16v-8M20 16v-3M4 5h16',
   rollout: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   rescue: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
+  stack: 'M12 3 3 7.5 12 12 21 7.5 12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -444,6 +453,8 @@ export type SheetKind =
   | { kind: 'rollouttime'; apptDate: string; apptTime: string; entryZoneName: string; entryTimeZone: string; fallbackMinute: number | null; onApply: (date: string, time: string) => void }
   // Split-sleeper rescue simulator: optional target delivery deadline on the shared clock picker.
   | { kind: 'rescuetime'; deadlineMinute: number; homeZoneName: string; homeTimeZone: string; onApply: (minute: number) => void }
+  // Stack My Stops & Loads: per-stop optional appointment or start time on the shared clock picker.
+  | { kind: 'stacktime'; mode: 'appt' | 'departure'; title: string; initialMinute: number; entryZoneName: string; entryTimeZone: string; onApply: (minute: number) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // The Log's editor: which step is showing and the entry so far (see "the log editor" below).
@@ -4355,6 +4366,10 @@ export function openWeekPlanner(open = true) {
     rescuePlannerOpen = false;
     rescuePlannerSubs.forEach((f) => f());
   }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4381,6 +4396,10 @@ export function openRolloutPlanner(open = true) {
   if (open && rescuePlannerOpen) {
     rescuePlannerOpen = false;
     rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
@@ -4409,6 +4428,10 @@ export function openRescuePlanner(open = true) {
     rolloutPlannerOpen = false;
     rolloutPlannerSubs.forEach((f) => f());
   }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
 }
@@ -4417,6 +4440,37 @@ function useRescuePlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); rescuePlannerSubs.add(f); return () => { rescuePlannerSubs.delete(f); }; }, []);
   return rescuePlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for Stack My Stops & Loads (Multi-Stop & Pre-Plan Chain Checker).
+ * Held outside `store.ts` (store is frozen) in the exact style of the other Plan tools.
+ */
+let stackPlannerOpen = false;
+const stackPlannerSubs = new Set<() => void>();
+export function openStackPlanner(open = true) {
+  stackPlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'stacktime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  stackPlannerSubs.forEach((f) => f());
+}
+export function isStackPlannerOpen(): boolean { return stackPlannerOpen; }
+function useStackPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); stackPlannerSubs.add(f); return () => { stackPlannerSubs.delete(f); }; }, []);
+  return stackPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4449,6 +4503,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openRescuePlanner(true)}>
         <span class="plan-icon"><Icon d={I.rescue} size={26} /></span>
         <span class="plan-text"><b>Split-sleeper rescue</b><span class="muted small">Stuck at the dock? Compare a straight 10 against 7/3 and 8/2 splits before you commit.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openStackPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.stack} size={26} /></span>
+        <span class="plan-text"><b>Stack my stops &amp; loads</b><span class="muted small">Chain 2–5 stops or back-to-back pre-plans — see where clocks break and how to rescue.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -6596,6 +6655,833 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
   );
 }
 
+/* ============================================================ Stack My Stops & Loads (Plan tool #8) */
+
+/**
+ * Shared ClockPick sheet for Stack My Stops & Loads (per-stop hard appointment or start time).
+ * Converts wall-clock strings in `entryTimeZone` through `deviceTz` (exact pattern of RolloutTimeSheet).
+ */
+function StackTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { kind: 'stacktime' }>; now: number; closing?: boolean }) {
+  const nowWall = formatWallDateTime(now, k.entryTimeZone);
+  const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
+  const [at, setAt] = useState<number>(() => {
+    const wall = formatWallDateTime(k.initialMinute, k.entryTimeZone);
+    const parsed = resolveWallDateTime(wall.date, wall.time, deviceTz);
+    return parsed ?? nextHour(pickerNow);
+  });
+  const previewWall = formatWallDateTime(at, deviceTz);
+  const previewResolved = resolveStackWallMinute(previewWall.date, previewWall.time, k.entryTimeZone);
+  const maxDep = k.mode === 'departure' ? now + STACK_MAX_DEPARTURE_FUTURE_MIN : null;
+  const overMaxDep = maxDep !== null && previewResolved !== null && previewResolved > maxDep;
+  const apply = () => {
+    if (previewResolved !== null) k.onApply(previewResolved);
+    openSheet(null);
+  };
+  return (
+    <Sheet title={`${k.title} (${k.entryZoneName})`} closing={closing}>
+      <p class="muted small" style="margin:0">
+        Wall-clock time in <b>{k.entryZoneName}</b> time.{k.mode === 'departure' ? ' Up to 72 hours ahead.' : ''}
+      </p>
+      <ClockPick
+        at={at}
+        set={setAt}
+        now={pickerNow}
+        future={true}
+        say={k.mode === 'departure' ? 'Start at' : 'Appointment'}
+        name={k.title}
+        keys={KEYS_HOURS}
+      />
+      {overMaxDep && maxDep !== null && (
+        <p class="muted small" style="margin:0" data-stack-dep-cap-hint="1">
+          Capped at 72h ahead ({fmtStackFull(maxDep, k.entryTimeZone)}).
+        </p>
+      )}
+      <button class="primary wide ed-go" onClick={apply}>
+        {overMaxDep && maxDep !== null
+          ? `Apply · ${fmtStackFull(maxDep, k.entryTimeZone)} (72h max)`
+          : `Apply · ${clockFull(at)} (${k.entryZoneName})`}
+      </button>
+    </Sheet>
+  );
+}
+
+function StackStopEditor({
+  stop,
+  index,
+  total,
+  homeTz,
+  homeZoneName,
+  zoneChoices,
+  suggestedApptMinute,
+  onChange,
+  onRemove,
+}: {
+  stop: StackStopInput;
+  index: number;
+  total: number;
+  homeTz: string;
+  homeZoneName: string;
+  zoneChoices: string[];
+  suggestedApptMinute: number;
+  onChange: (patch: Partial<StackStopInput>) => void;
+  onRemove: () => void;
+}) {
+  const dbox = useDurationBoxes(
+    `${stop.label} dwell`,
+    stop.dwellMinutes,
+    0,
+    STACK_MAX_DWELL_MIN,
+    (m) => onChange({ dwellMinutes: m }),
+  );
+  const driveMin = stackLegDriveMinutes(stop.miles, stop.mph);
+  const localTz = isValidTimeZone(stop.apptTimeZone) ? stop.apptTimeZone : homeTz;
+  const sameZone = localTz === homeTz;
+  const localZoneName = zoneShort(localTz);
+  // N3 ("the time you see is the time that stays"): remember the active entry/display mode on the stop.
+  const effectiveEntryMode: 'local' | 'terminal' = !sameZone && stop.apptEntryMode === 'terminal' ? 'terminal' : 'local';
+  const entryTz = effectiveEntryMode === 'terminal' ? homeTz : localTz;
+  const entryZoneName = effectiveEntryMode === 'terminal' ? homeZoneName : localZoneName;
+
+  const openApptPicker = () => {
+    openSheet({
+      kind: 'stacktime',
+      mode: 'appt',
+      title: `${stop.label} appointment`,
+      initialMinute: stop.apptMinute ?? ceilHour(suggestedApptMinute),
+      entryZoneName,
+      entryTimeZone: entryTz,
+      onApply: (m) => onChange({ apptMinute: m, apptEntryMode: sameZone ? 'local' : effectiveEntryMode }),
+    });
+  };
+
+  return (
+    <div class="stack-stop-card" data-stack-stop-editor={String(index)}>
+      <div class="stack-stop-head">
+        <span class="rollout-step-num">{index + 1}</span>
+        <input
+          type="text"
+          class="stack-label-input"
+          aria-label={`Stop ${index + 1} name`}
+          maxLength={40}
+          value={stop.label}
+          onInput={(e) => onChange({ label: (e.target as HTMLInputElement).value })}
+        />
+        {total > STACK_MIN_STOPS && (
+          <button
+            type="button"
+            class="mini stack-remove-btn"
+            aria-label={`Remove ${stop.label}`}
+            onClick={onRemove}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {/* Miles + speed */}
+      <div class="stack-sub">
+        <div class="stack-sub-head">
+          <span class="stat-label">Leg distance &amp; speed</span>
+          <span class="muted small mono">{dur(driveMin)} @ {stop.mph} mph</span>
+        </div>
+        <div class="rollout-chips" role="group" aria-label={`Stop ${index + 1} miles presets`}>
+          {STACK_MILES_PRESETS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              class={stop.miles === m ? 'on' : ''}
+              onClick={() => onChange({ miles: m })}
+            >
+              {m} mi
+            </button>
+          ))}
+        </div>
+        <div class="rollout-fieldgrid">
+          <label>Miles
+            <input
+              type="number"
+              class="num"
+              inputMode="numeric"
+              min={0}
+              max={STACK_MAX_MILES}
+              data-stack-miles={String(index)}
+              aria-label={`Stop ${index + 1} miles`}
+              value={stop.miles}
+              onInput={(e) => {
+                const v = Number((e.target as HTMLInputElement).value);
+                if (Number.isFinite(v)) onChange({ miles: Math.max(0, Math.min(STACK_MAX_MILES, Math.round(v))) });
+              }}
+            />
+          </label>
+          <label>Realistic mph
+            <select
+              aria-label={`Stop ${index + 1} average speed mph`}
+              data-stack-mph={String(index)}
+              value={stop.mph}
+              onChange={(e) => onChange({ mph: clampStackMph(Number((e.target as HTMLSelectElement).value)) })}
+            >
+              {STACK_MPH_PRESETS.map((v) => (
+                <option key={v} value={v}>{v} mph</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {/* Dwell duration (presets + shared duration boxes + duty status) */}
+      <div class="stack-sub">
+        <div class="stack-sub-head">
+          <span class="stat-label">Expected dwell</span>
+          <span class="muted small mono">{stop.dwellMinutes > 0 ? `${dur(stop.dwellMinutes)} ${STATUS_LABEL[stop.dwellStatus].toLowerCase()}` : 'None'}</span>
+        </div>
+        <div class="rollout-chips" role="group" aria-label={`Stop ${index + 1} dwell presets`}>
+          {STACK_DWELL_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              class={stop.dwellMinutes === p.minutes ? 'on' : ''}
+              onClick={() => onChange({ dwellMinutes: p.minutes })}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div class="qs-row stack-dur-row">
+          <span class="qs-label">Exact dwell</span>
+          {dbox.boxes}
+        </div>
+        {dbox.note && <div class="warnbox small">{dbox.note}</div>}
+        {stop.dwellMinutes > 0 && (
+          <div class="stack-status-seg" role="group" aria-label={`Stop ${index + 1} dwell duty status`}>
+            {(['ON', 'OFF', 'SB'] as const).map((st) => (
+              <button
+                key={st}
+                type="button"
+                class={stop.dwellStatus === st ? 'on' : ''}
+                onClick={() => onChange({ dwellStatus: st })}
+              >
+                {st === 'ON' ? 'On duty' : st === 'OFF' ? 'Off duty' : 'Sleeper'}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Optional Hard Appointment (ClockPick + dual home/local timezone) */}
+      <div class="stack-sub">
+        <span class="stat-label">Hard appointment (optional)</span>
+        <div class="stack-appt-row">
+          <button
+            type="button"
+            class="rowbtn"
+            data-stack-appt-btn={String(index)}
+            data-stack-appt-min={stop.apptMinute !== null ? String(stop.apptMinute) : ''}
+            aria-label={stop.apptMinute !== null
+              ? `${stop.label} appointment: ${fmtStackFull(stop.apptMinute, effectiveEntryMode === 'terminal' ? homeTz : localTz)}. Change`
+              : `Set ${stop.label} appointment`}
+            onClick={openApptPicker}
+          >
+            <span>
+              {stop.apptMinute !== null ? (
+                effectiveEntryMode === 'terminal' ? (
+                  <>
+                    <b class="mono">{fmtStackFull(stop.apptMinute, homeTz)} (home)</b>
+                    <br /><span class="muted small mono">{fmtStackFull(stop.apptMinute, localTz)}</span>
+                  </>
+                ) : (
+                  <>
+                    <b class="mono">{fmtStackFull(stop.apptMinute, localTz)}</b>
+                    {!sameZone && (
+                      <><br /><span class="muted small mono">{fmtStackFull(stop.apptMinute, homeTz)} (home)</span></>
+                    )}
+                  </>
+                )
+              ) : (
+                <span class="muted">No hard appointment</span>
+              )}
+            </span>
+            <span class="muted small">{stop.apptMinute !== null ? 'Change' : 'Set time'}</span>
+          </button>
+          {stop.apptMinute !== null && (
+            <button
+              type="button"
+              class="mini stack-clear-btn"
+              aria-label={`Clear ${stop.label} appointment`}
+              onClick={() => onChange({ apptMinute: null })}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div class="stack-tz-wrap">
+          <label>Stop time zone
+            <select
+              aria-label={`Stop ${index + 1} time zone`}
+              data-stack-tz={String(index)}
+              value={localTz}
+              onChange={(e) => {
+                const newTz = (e.target as HTMLSelectElement).value;
+                if (stop.apptMinute !== null && newTz !== localTz) {
+                  // F2 + N3: Preserve the wall-clock reading displayed in the active entry mode
+                  // (Home reading if in Home mode, stop-local reading otherwise) and re-resolve in `newTz`.
+                  const sourceTz = effectiveEntryMode === 'terminal' ? homeTz : localTz;
+                  const prevWall = formatWallDateTime(stop.apptMinute, sourceTz);
+                  const reResolved = resolveStackWallMinute(prevWall.date, prevWall.time, newTz);
+                  onChange({
+                    apptTimeZone: newTz,
+                    apptEntryMode: 'local',
+                    ...(reResolved !== null ? { apptMinute: reResolved } : {}),
+                  });
+                } else {
+                  onChange({
+                    apptTimeZone: newTz,
+                    ...(newTz === homeTz ? { apptEntryMode: 'local' } : {}),
+                  });
+                }
+              }}
+            >
+              {zoneChoices.map((z) => (
+                <option key={z} value={z}>
+                  {zoneLabel(z) ?? z}{z === homeTz ? ' (Home terminal)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!sameZone && (
+            <div class="rollout-seg" role="group" aria-label={`Stop ${index + 1} time entry zone`}>
+              <button type="button" class={effectiveEntryMode === 'local' ? 'on' : ''} onClick={() => onChange({ apptEntryMode: 'local' })}>
+                Stop local ({localZoneName})
+              </button>
+              <button type="button" class={effectiveEntryMode === 'terminal' ? 'on' : ''} onClick={() => onChange({ apptEntryMode: 'terminal' })}>
+                Home ({homeZoneName})
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function StackTimelineList({
+  stops,
+  showingSplit,
+  firstBreakIndex,
+  limitingClock,
+  cycleLimit,
+  viewSwapping = false,
+}: {
+  stops: StackStopOutcome[];
+  showingSplit: boolean;
+  firstBreakIndex: number | null;
+  limitingClock: StackLimitKind;
+  cycleLimit: number;
+  viewSwapping?: boolean;
+}) {
+  return (
+    <ol
+      key={showingSplit ? 'tl-split' : 'tl-base'}
+      class={`rollout-steps${viewSwapping ? ' flow-body step-dissolve' : ''}`}
+      data-stack-timeline="1"
+    >
+      {stops.map((o) => {
+        const isBreakStop = !showingSplit && firstBreakIndex === o.index;
+        const badgeClass = !o.meetsAppt
+          ? 'bad'
+          : isBreakStop
+            ? 'warn'
+            : o.insertedRests.some((r) => r.kind !== 'break30')
+              ? 'accent'
+              : 'good';
+        const badgeText = !o.meetsAppt && o.apptSlack !== null
+          ? `Late ${dur(-o.apptSlack)}`
+          : isBreakStop
+            ? (limitingClock === 'CYCLE'
+              ? `Hits ${cycleLimit / 60}h cycle`
+              : limitingClock === 'DRIVE_11'
+                ? 'Hits 11h drive'
+                : limitingClock === 'WINDOW_14'
+                  ? 'Hits 14h window'
+                  : limitingClock === 'BREAK_30'
+                    ? '30-min break'
+                    : limitingClock === 'TIME_ONLY'
+                      ? 'Drive + dock time'
+                      : 'Breaks here')
+            : o.appt
+              ? (o.apptSlack === 0 ? 'On time' : `${dur(o.apptSlack ?? 0)} early`)
+              : o.insertedRests.some((r) => r.kind === 'reset10')
+                ? 'After 10h reset'
+                : o.insertedRests.some((r) => r.kind === 'restart34')
+                  ? 'After 34h restart'
+                  : o.insertedRests.some((r) => r.kind === 'recap')
+                    ? 'After recap'
+                    : 'Legal';
+        return (
+          <li
+            key={o.id}
+            class={`rollout-step${isBreakStop ? ' stack-step-break' : ''}`}
+            data-stack-stop-out={String(o.index)}
+          >
+            <div class="rollout-step-head">
+              <span class="rollout-step-num">{o.index + 1}</span>
+              <span class="rollout-step-title">{o.label}</span>
+              <span class={`rescue-badge ${badgeClass}`}>{badgeText}</span>
+            </div>
+            <p class="muted small" style="margin:0">
+              Drive {o.miles} mi @ {o.effectiveMph} mph (<b class="mono">{dur(o.driveMinutes)}</b>)
+              {o.dwellMinutes > 0 && <> · Dwell <b class="mono">{dur(o.dwellMinutes)}</b> ({STATUS_LABEL[o.dwellStatus].toLowerCase()})</>}
+            </p>
+            {o.insertedRests.length > 0 && (
+              <div class="stack-rests">
+                {o.insertedRests.map((r, ri) => (
+                  <div key={ri} class={`stack-rest-pill${r.kind === 'split' ? ' is-sb' : ''}`}>
+                    <b>{r.reason}</b>
+                    <span class="mono">{r.startDual.homeShort} → {r.endDual.homeShort} ({dur(r.minutes)})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div class="rollout-dual">
+              <div class="rollout-dual-box">
+                <span class="rollout-dual-lbl">ETA (wheels stop)</span>
+                <span class="rollout-dual-val mono">{o.arrival.localShort}{!o.sameZone ? ` ${o.apptZoneName}` : ''}</span>
+                {!o.sameZone && <span class="muted small mono">{o.arrival.homeShort} (home)</span>}
+                {o.appt && (
+                  <span class="muted small">
+                    Appt {o.appt.localShort}{!o.sameZone ? ` ${o.apptZoneName}` : ''}
+                  </span>
+                )}
+              </div>
+              <div class="rollout-dual-box">
+                <span class="rollout-dual-lbl">PTA (ready to roll)</span>
+                <span class="rollout-dual-val mono">{o.depart.localShort}{!o.sameZone ? ` ${o.apptZoneName}` : ''}</span>
+                {!o.sameZone && <span class="muted small mono">{o.depart.homeShort} (home)</span>}
+                <span class="muted small">
+                  14h left {dur(o.windowRemainingAfter)} · {cycleLimit / 60}h left {dur(o.cycleRemainingAfter)}
+                </span>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * Stack My Stops & Loads — Multi-Stop & Back-to-Back Pre-Plan Chain Checker (Plan tool #8).
+ * Evaluates 2–5 sequential stops or pre-plans through `engine/src/index.ts` (`planTrip` + `evaluate`),
+ * pinpoints the first breaking stop and limiting clock, searches for 7/3 and 8/2 split rescues
+ * between stops, and builds a one-tap CFR-cited Dispatch Pushback macro.
+ */
+function StackTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const defaultMph = clampStackMph(s.mph || STACK_DEFAULT_MPH);
+  const homeTz = isValidTimeZone(s.config.timeZone) ? s.config.timeZone : 'America/Chicago';
+  const initDraft = useMemo(() => loadStackDraft(defaultMph, homeTz, now), []);
+  const [stops, setStops] = useState<StackStopInput[]>(initDraft.stops);
+  const [departureMinute, setDepartureMinute] = useState<number | null>(initDraft.departureMinute);
+  const [depClamped, setDepClamped] = useState(false);
+  const [untilStatus, setUntilStatus] = useState<DutyStatus>(initDraft.untilDepartureStatus);
+  const [timelineView, setTimelineView] = useState<'baseline' | 'split'>('baseline');
+  const [copyNote, setCopyNote] = useState('');
+
+  // Persist draft cleanly outside store.ts (store.ts is frozen).
+  useEffect(() => {
+    saveStackDraft({ stops, departureMinute, untilDepartureStatus: untilStatus });
+  }, [stops, departureMinute, untilStatus]);
+
+  // Inner timeline-view swap dissolve (state-dissolve, never on initial mount).
+  const prevViewRef = useRef(timelineView);
+  const viewEpochRef = useRef(0);
+  const activeViewSwapRef = useRef(0);
+  const [, setViewSwapTick] = useState(0);
+  if (prevViewRef.current !== timelineView) {
+    prevViewRef.current = timelineView;
+    activeViewSwapRef.current = prefersReducedMotion() ? 0 : ++viewEpochRef.current;
+  }
+  const viewSwapping = !prefersReducedMotion() && activeViewSwapRef.current > 0;
+  useEffect(() => {
+    const epoch = activeViewSwapRef.current;
+    if (epoch === 0) return;
+    const t = setTimeout(() => {
+      if (activeViewSwapRef.current === epoch) {
+        activeViewSwapRef.current = 0;
+        setViewSwapTick((n) => n + 1);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [timelineView]);
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const hasPinnedDeparture = departureMinute !== null && departureMinute > now;
+  const departure = departureMinute !== null ? Math.max(now, departureMinute) : now;
+  const sim: StackResult = useMemo(
+    () => evaluateStackChain({
+      segments: logged,
+      now,
+      config: s.config,
+      departure,
+      untilDepartureStatus: untilStatus,
+      stops,
+      allowSplitBetweenStops: true,
+    }),
+    [logged, now, s.config, departure, untilStatus, stops],
+  );
+
+  // If split rescue disappears on edit, return timeline view to baseline.
+  const showingSplit = timelineView === 'split' && sim.splitRescue !== null;
+  const activeStops = showingSplit && sim.splitRescue ? sim.splitRescue.stops : sim.displayChain.stops;
+
+  const zoneChoices = useMemo(() => {
+    const list = [...STACK_COMMON_ZONES];
+    if (isValidTimeZone(homeTz) && !list.includes(homeTz)) list.unshift(homeTz);
+    return list;
+  }, [homeTz]);
+
+  const updateStop = (idx: number, patch: Partial<StackStopInput>) => {
+    setStops((prev) => prev.map((st, i) => (i === idx ? { ...st, ...patch } : st)));
+  };
+
+  const removeStop = (idx: number) => {
+    setStops((prev) => (prev.length <= STACK_MIN_STOPS ? prev : prev.filter((_, i) => i !== idx)));
+  };
+
+  const addStop = (preset: 'blank' | 'drop_hook' | 'live' | 'deadhead') => {
+    setStops((prev) => {
+      if (prev.length >= STACK_MAX_STOPS) return prev;
+      const n = prev.length + 1;
+      const mph = clampStackMph(prev[prev.length - 1]?.mph ?? defaultMph);
+      const next: StackStopInput = preset === 'drop_hook'
+        ? { id: `stop-${Date.now()}-${n}`, label: `Stop ${n}`, miles: 120, mph, dwellMinutes: 15, dwellStatus: 'ON', apptMinute: null, apptTimeZone: homeTz }
+        : preset === 'live'
+          ? { id: `stop-${Date.now()}-${n}`, label: `Stop ${n}`, miles: 120, mph, dwellMinutes: 120, dwellStatus: 'ON', apptMinute: null, apptTimeZone: homeTz }
+          : preset === 'deadhead'
+            ? { id: `stop-${Date.now()}-${n}`, label: `Pre-plan ${n}`, miles: deadheadMilesFor(mph), mph, dwellMinutes: 15, dwellStatus: 'ON', apptMinute: null, apptTimeZone: homeTz }
+            : { id: `stop-${Date.now()}-${n}`, label: `Stop ${n}`, miles: 120, mph, dwellMinutes: 60, dwellStatus: 'ON', apptMinute: null, apptTimeZone: homeTz };
+      return [...prev, next];
+    });
+  };
+
+  const resetStops = () => {
+    clearStackDraft();
+    setStops(createDefaultStops(defaultMph, homeTz));
+    setDepartureMinute(null);
+    setDepClamped(false);
+    setUntilStatus('ON');
+    setTimelineView('baseline');
+  };
+
+  const copyDispatch = async () => {
+    if (!sim.dispatchText) return;
+    const r = await shareVerdictText(sim.dispatchText);
+    if (r === 'shared') return;
+    setCopyNote(r === 'copied' ? 'Copied ✓' : 'Select & copy below');
+    window.setTimeout(() => setCopyNote(''), 2500);
+  };
+
+  const hist = cycleBasis(s, now, sim.cycleWindowDays);
+  const finishEval = sim.displayChain.endEval;
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Stack my stops &amp; loads</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Chain 2 to 5 stops or back-to-back pre-plans against your real 11, 14, 30-min, 10-hr, and {sim.cycleLimit / 60}-hr clocks.
+      </p>
+
+      {/* 1. VERDICT FIRST (5-second 03:00 clarity) */}
+      <Card tone={sim.tone}>
+        <div
+          class="stack-verdict"
+          data-stack-verdict="1"
+          data-stack-status={sim.status}
+          data-stack-limit={sim.limitingClock}
+          data-stack-break-idx={sim.firstBreakIndex !== null ? String(sim.firstBreakIndex) : ''}
+        >
+          <Sign kind={sim.verdictSign}>{sim.verdictLabel}</Sign>
+          <p class="stack-headline">{sim.headline}</p>
+          <p class="stack-subline">{sim.subline}</p>
+
+          <div class="rescue-clocks">
+            <div class="rescue-clock-pill">
+              <span>{sim.status === 'legal' ? '11h drive at end' : '11h drive now'}</span>
+              <b class="mono">{dur(sim.status === 'legal' ? finishEval.shift.driveRemaining : sim.driveRemainingNow)}</b>
+            </div>
+            <div class="rescue-clock-pill">
+              <span>{sim.status === 'legal' ? '14h window at end' : '14h window now'}</span>
+              <b class="mono">{dur(sim.status === 'legal' ? finishEval.shift.windowRemaining : sim.windowRemainingNow)}</b>
+            </div>
+            <div class="rescue-clock-pill">
+              <span>{sim.status === 'legal' ? `${sim.cycleLimit / 60}h cycle at end` : `${sim.cycleLimit / 60}h cycle now`}</span>
+              <b class="mono">{dur(sim.status === 'legal' ? finishEval.cycle.remaining : sim.cycleRemainingNow)}</b>
+            </div>
+          </div>
+
+          <p class="muted small" style="margin:0">
+            Seeded from your log at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
+            {hasPinnedDeparture && <> · Starting <b class="mono">{sim.departureDual.homeShort}</b> ({STATUS_LABEL[untilStatus].toLowerCase()} until then)</>}
+            {sim.pendingSplitLeg && <> · Pending split leg: <b>{dur(sim.pendingSplitLeg.duration)}</b></>}.
+          </p>
+
+          {sim.validInput && sim.dispatchText && (
+            <div class="stack-dispatch-box">
+              <div class="rollout-pta-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  data-stack-copy-btn="1"
+                  onClick={copyDispatch}
+                >
+                  {copyNote || (sim.status === 'legal' ? 'Copy dispatch summary' : 'Copy dispatch pushback')}
+                </button>
+              </div>
+              <pre class="rollout-pta-text" data-stack-dispatch="1">{sim.dispatchText}</pre>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* 2. RESCUES (when chain breaks: split at earlier stop OR push past 10h / recap / 34h) */}
+      {sim.validInput && sim.status !== 'legal' && (sim.splitRescue || sim.pushRescue) && (
+        <div class="stack-rescues" data-stack-rescues="1">
+          {sim.splitRescue && (
+            <section class="card rescue-card is-rec" data-stack-split-rescue="1">
+              <div class="rescue-card-head">
+                <div class="rescue-card-title-wrap">
+                  <h3 class="rescue-card-title">{sim.splitRescue.splitKind} split at {sim.splitRescue.atStopLabel}</h3>
+                  <span class="rescue-card-order">49 CFR 395.1(g) sleeper-berth split</span>
+                </div>
+                <div class="rescue-badges">
+                  <span class="rescue-badge good">Rescues chain</span>
+                </div>
+              </div>
+              <p class="rescue-verdict-line">{sim.splitRescue.summary}</p>
+              <div class="rescue-times">
+                <div class="rescue-time-box">
+                  <span class="rescue-time-lbl">Split leg at {sim.splitRescue.atStopLabel}</span>
+                  <span class="rescue-time-val mono">{sim.splitRescue.firstLegStart.homeShort} → {sim.splitRescue.firstLegEnd.homeShort}</span>
+                  <span class="rescue-time-sub">
+                    {dur(sim.splitRescue.firstLegMinutes)} {sim.splitRescue.firstLegStatus === 'SB' ? 'Sleeper Berth' : 'OFF/SB'}
+                    {sim.splitRescue.addedWaitMinutes > 0 ? ` (+${dur(sim.splitRescue.addedWaitMinutes)} wait)` : ' (uses dock dwell)'}
+                  </span>
+                </div>
+                <div class="rescue-time-box">
+                  <span class="rescue-time-lbl">All stops finish</span>
+                  <span class="rescue-time-val mono">{sim.splitRescue.chainFinish.homeShort}</span>
+                  <span class="rescue-time-sub">Split completes {sim.splitRescue.splitComplete.homeShort}</span>
+                </div>
+              </div>
+              <div class="rescue-sb-box" data-stack-sb-callout="1">
+                <span class="rescue-sb-title">
+                  {sim.splitRescue.longSbAlreadyLogged ? 'Prior Sleeper Berth long leg' : 'Required Sleeper Berth block'}
+                </span>
+                <span class="rescue-sb-block mono">
+                  {sim.splitRescue.longSbStart.homeShort} → {sim.splitRescue.longSbEnd.homeShort} ({dur(sim.splitRescue.longSbMinutes)} consecutive SB)
+                </span>
+                <span class="rescue-sb-callout">{sim.splitRescue.sbCallout || STACK_SPLIT_SB_CALLOUT}</span>
+              </div>
+              <div class="rescue-trap">
+                <span class="rescue-trap-head">Clocks after split completes ({sim.splitRescue.splitComplete.homeShort})</span>
+                <div class="rescue-trap-grid">
+                  <div class="rescue-trap-metric">
+                    <span>11h drive left</span>
+                    <b class="mono">{dur(sim.splitRescue.nextDriveRemaining)}</b>
+                  </div>
+                  <div class="rescue-trap-metric">
+                    <span>14h window left</span>
+                    <b class="mono">{dur(sim.splitRescue.nextWindowRemaining)}</b>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {sim.pushRescue && (
+            <section class="card rescue-card" data-stack-push-rescue="1">
+              <div class="rescue-card-head">
+                <div class="rescue-card-title-wrap">
+                  <h3 class="rescue-card-title">{sim.pushRescue.title}</h3>
+                  <span class="rescue-card-order">{sim.pushRescue.restSummary}</span>
+                </div>
+                <div class="rescue-badges">
+                  <span class="rescue-badge accent">
+                    {sim.pushRescue.kind === 'restart34'
+                      ? '34h restart'
+                      : sim.pushRescue.kind === 'recap'
+                        ? 'Recap wait'
+                        : sim.pushRescue.kind === 'reschedule'
+                          ? 'Schedule'
+                          : '10h reset'}
+                  </span>
+                </div>
+              </div>
+              <div class="rescue-times">
+                <div class="rescue-time-box">
+                  <span class="rescue-time-lbl">{sim.firstBreakLabel} legal ETA</span>
+                  <span class="rescue-time-val mono">{sim.pushRescue.breakingStopArrival.localShort}</span>
+                  {!sim.pushRescue.breakingStopArrival.sameZone && (
+                    <span class="rescue-time-sub mono">{sim.pushRescue.breakingStopArrival.homeShort} (home)</span>
+                  )}
+                  <span class="rescue-time-sub">PTA {sim.pushRescue.breakingStopDepart.localShort}</span>
+                </div>
+                <div class="rescue-time-box">
+                  <span class="rescue-time-lbl">Chain finishes</span>
+                  <span class="rescue-time-val mono">{sim.pushRescue.chainFinish.homeShort}</span>
+                  <span class="rescue-time-sub">100% HOS legal</span>
+                </div>
+              </div>
+              {sim.altCycleRescue && (
+                <p class="small muted" style="margin:8px 0 0">
+                  <b>Alternate cycle option:</b> {sim.altCycleRescue.title} — {sim.firstBreakLabel} ETA{' '}
+                  <b class="mono">{sim.altCycleRescue.breakingStopArrival.homeShort}</b>, finishes{' '}
+                  <b class="mono">{sim.altCycleRescue.chainFinish.homeShort}</b>.
+                </p>
+              )}
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* 3. STOP-BY-STOP TIMELINE */}
+      {sim.validInput && (
+        <Card title="Stop-by-stop timeline">
+          {sim.splitRescue && (
+            <div class="rollout-seg" role="group" aria-label="Timeline view" style="margin-bottom:10px">
+              <button
+                type="button"
+                class={!showingSplit ? 'on' : ''}
+                onClick={() => setTimelineView('baseline')}
+              >
+                {sim.pushRescue?.kind === 'restart34'
+                  ? '34h / recap path'
+                  : sim.pushRescue?.kind === 'reschedule'
+                    ? 'Standard path'
+                    : '10h-break path'}
+              </button>
+              <button
+                type="button"
+                class={showingSplit ? 'on' : ''}
+                onClick={() => setTimelineView('split')}
+              >
+                {sim.splitRescue.splitKind} split rescue
+              </button>
+            </div>
+          )}
+          <StackTimelineList
+            stops={activeStops}
+            showingSplit={showingSplit}
+            firstBreakIndex={sim.firstBreakIndex}
+            limitingClock={sim.limitingClock}
+            cycleLimit={sim.cycleLimit}
+            viewSwapping={viewSwapping}
+          />
+        </Card>
+      )}
+
+      {/* 4. LOG BASIS DISCLOSURE */}
+      {hist !== 'known' && (
+        <div class="warnbox small" style="margin-top:10px">
+          Your log does not cover a full {sim.cycleWindowDays}-day cycle yet, so unlogged past days count as 0h. Update past days in <b>Log</b> or{' '}
+          <button class="link" style="display:inline;padding:0;min-height:0" onClick={() => { openStackPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}>Hours coming back</button>.
+        </div>
+      )}
+
+      {/* 5. STOPS & PRE-PLANS EDITOR */}
+      <Card title={`Your stops (${stops.length} of ${STACK_MAX_STOPS})`}>
+        <div class="stack-editor" data-stack-editor="1">
+          {/* Optional departure start time (uses ClockPick; stored as absolute minute, F5) */}
+          <div class="stack-dep-row">
+            <button
+              type="button"
+              class="rowbtn"
+              data-stack-dep-btn="1"
+              data-stack-dep-min={String(departure)}
+              onClick={() => openSheet({
+                kind: 'stacktime',
+                mode: 'departure',
+                title: 'Start chain at',
+                initialMinute: hasPinnedDeparture ? departure : nextHour(now),
+                entryZoneName: sim.homeZoneName,
+                entryTimeZone: sim.homeTimeZone,
+                onApply: (m) => {
+                  const maxDep = now + STACK_MAX_DEPARTURE_FUTURE_MIN;
+                  if (m > maxDep) {
+                    setDepartureMinute(maxDep);
+                    setDepClamped(true);
+                  } else {
+                    setDepartureMinute(m > now ? m : null);
+                    setDepClamped(false);
+                  }
+                },
+              })}
+            >
+              <span>
+                <span class="stat-label">Chain starts</span>
+                <br />
+                <b class="mono">{hasPinnedDeparture ? fmtStackFull(departure, sim.homeTimeZone) : `Now (${sim.nowShort})`}</b>
+                {hasPinnedDeparture && depClamped && (
+                  <>
+                    <br />
+                    <span class="muted small" data-stack-dep-clamped="1">Capped at 72h ahead</span>
+                  </>
+                )}
+              </span>
+              <span class="muted small">Change</span>
+            </button>
+            {hasPinnedDeparture && (
+              <div class="stack-dep-extra">
+                <div class="stack-status-seg" role="group" aria-label="Status until start">
+                  {(['ON', 'OFF', 'SB'] as const).map((st) => (
+                    <button key={st} type="button" class={untilStatus === st ? 'on' : ''} onClick={() => setUntilStatus(st)}>
+                      {st === 'ON' ? 'On duty' : st === 'OFF' ? 'Off duty' : 'Sleeper'}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" class="mini" onClick={() => { setDepartureMinute(null); setDepClamped(false); }}>Start now</button>
+              </div>
+            )}
+          </div>
+
+          {/* Stop cards */}
+          {stops.map((st, idx) => (
+            <StackStopEditor
+              key={st.id}
+              stop={st}
+              index={idx}
+              total={stops.length}
+              homeTz={sim.homeTimeZone}
+              homeZoneName={sim.homeZoneName}
+              zoneChoices={zoneChoices}
+              suggestedApptMinute={sim.displayChain.stops[idx]?.arrival.minute ?? (now + (idx + 1) * 240)}
+              onChange={(patch) => updateStop(idx, patch)}
+              onRemove={() => removeStop(idx)}
+            />
+          ))}
+
+          {/* One-tap quick-add bar */}
+          {stops.length < STACK_MAX_STOPS && (
+            <div class="stack-add-bar" data-stack-add-bar="1">
+              <button type="button" class="primary wide" data-stack-add-btn="1" onClick={() => addStop('blank')}>
+                + Add stop ({stops.length + 1} of {STACK_MAX_STOPS})
+              </button>
+              <div class="rollout-chips" role="group" aria-label="Quick-add stop presets">
+                <button type="button" onClick={() => addStop('drop_hook')}>+15m drop/hook</button>
+                <button type="button" onClick={() => addStop('live')}>+2h live</button>
+                <button type="button" onClick={() => addStop('deadhead')}>+45m deadhead</button>
+              </div>
+            </div>
+          )}
+
+          <button type="button" class="ghost wide" style="margin-top:8px" onClick={resetStops}>
+            Reset to 2 stops
+          </button>
+        </div>
+      </Card>
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -7831,7 +8717,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -7842,14 +8728,16 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   week: 'Weekly recap vs. 34',
   rollout: 'When to roll & PTA',
   rescue: 'Split-sleeper rescue',
+  stack: 'Stack my stops & loads',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
     if (weekOpen) return 'week';
     if (rolloutOpen) return 'rollout';
     if (rescueOpen) return 'rescue';
+    if (stackOpen) return 'stack';
   }
   return null;
 }
@@ -7861,6 +8749,7 @@ function sheetSessionKey(k: SheetKind): string {
     case 'loadtime': return `loadtime-${k.field}`;
     case 'rollouttime': return `rollouttime-${k.apptDate}-${k.apptTime}-${k.entryTimeZone}`;
     case 'rescuetime': return `rescuetime-${k.deadlineMinute}`;
+    case 'stacktime': return `stacktime-${k.mode}-${k.title}-${k.initialMinute}-${k.entryTimeZone}`;
     case 'confirm': return `confirm-${k.what}`;
     case 'edit': return `e${k.live ? 'live' : ''}${k.seg.start}-${k.live ? '' : k.seg.end}`;
     case 'add': return `a${k.inside?.start ?? ''}`;
@@ -7868,13 +8757,14 @@ function sheetSessionKey(k: SheetKind): string {
   }
 }
 
-function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean): boolean {
+function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean): boolean {
   if (driveUp) return k.kind === 'status' || k.kind === 'since';
   if (k.kind === 'splitblock') return s.tab === 'split';
   if (k.kind === 'loadtime') return s.tab === 'load';
   if (k.kind === 'triptime') return s.tab === 'trip';
   if (k.kind === 'rollouttime') return s.tab === 'plan' && rolloutOpen;
   if (k.kind === 'rescuetime') return s.tab === 'plan' && rescueOpen;
+  if (k.kind === 'stacktime') return s.tab === 'plan' && stackOpen;
   return true;
 }
 
@@ -7899,6 +8789,7 @@ export function App() {
   const weekOpen = useWeekPlanner();
   const rolloutOpen = useRolloutPlanner();
   const rescueOpen = useRescuePlanner();
+  const stackOpen = useStackPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -7906,7 +8797,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -7961,7 +8852,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -8078,7 +8969,7 @@ export function App() {
   // exiting sheet (inert + aria-hidden) across the 200ms slide-down / morph-return exit, then
   // unmounts cleanly. Direct sheet-to-sheet switches, disclaimer, driving-view flips, and
   // prefers-reduced-motion: reduce bypass exit retention and unmount immediately.
-  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen) ? sheet : null;
+  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen) ? sheet : null;
   const sheetEpochRef = useRef(visibleSheet ? 1 : 0);
   const prevVisibleKeyRef = useRef<string | null>(visibleSheet ? sheetSessionKey(visibleSheet) : null);
   const visibleKey = visibleSheet ? sheetSessionKey(visibleSheet) : null;
@@ -8156,6 +9047,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && weekPlannerOpen) openWeekPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rescuePlannerOpen) openRescuePlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && stackPlannerOpen) openStackPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -8184,15 +9076,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -8242,7 +9134,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -8386,6 +9278,7 @@ export function App() {
       case 'triptime': inner = <TripTimeSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
       case 'rollouttime': inner = <RolloutTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'rescuetime': inner = <RescueTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
+      case 'stacktime': inner = <StackTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'edit':
       case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
       case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
@@ -8438,7 +9331,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -8469,6 +9362,7 @@ export function App() {
               {displayedTool.tool === 'week' && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
               {displayedTool.tool === 'rollout' && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
               {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
+              {displayedTool.tool === 'stack' && <StackTab s={s} now={now} onBack={() => openStackPlanner(false)} />}
               {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}

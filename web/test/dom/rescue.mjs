@@ -89,6 +89,7 @@ const seed = async (rec) => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
+  A.openStackPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -549,13 +550,13 @@ await pin('R7. 2h + 7h = 9h pairing fails FMCSA split qualification (no paused 1
   });
 });
 
-/* ---------------- R8: Plan hub bottom button, opens simulator, ClockPick compliance (no <input type="time">) ---------------- */
-await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
+/* ---------------- R8: Plan hub 7th button (above Stack), opens simulator, ClockPick compliance (no <input type="time">) ---------------- */
+await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above "Stack my stops & loads"), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
   await seed({ tab: 'plan', nowOverride: NOW_13, segments: BASE_SEGS, current: null });
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 7 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue') {
+  if (items.length !== 8 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
@@ -563,7 +564,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator
   await sleep(60);
   if (!A.isRescuePlannerOpen()) return 'simulator did not open';
 
-  // Re-aimed (2026-11-21 plan-dissolve): RescueTab renders in planRoom() while planPage() keeps the 7-item hub mounted.
+  // Re-aimed (2026-11-21 plan-dissolve): RescueTab renders in planRoom() while planPage() keeps the 8-item hub mounted.
   const rm = planRoom();
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
   const verdictEl = all((n) => n.attributes?.['data-rescue-verdict'] === '1', rm)[0];
@@ -596,13 +597,13 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator
 
   const afterDl = all((n) => n.localName === 'button' && n.attributes?.['data-rescue-deadline-btn'] === '1', rm)[0]?.textContent ?? '';
 
-  // Back button returns to the 7-item Plan hub
+  // Back button returns to the 8-item Plan hub
   const backBtn = all((n) => n.localName === 'button' && has(n, 'back'), rm)[0];
   fire(backBtn, 'click');
   await sleep(60);
   const itemsAfterBack = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
 
-  // Re-open, then leave Plan tab -> Rescue closes cleanly and returning to Plan shows the 7-item hub
+  // Re-open, then leave Plan tab -> Rescue closes cleanly and returning to Plan shows the 8-item hub
   fire(itemsAfterBack[6], 'click');
   await sleep(50);
   const openedAgain = A.isRescuePlannerOpen();
@@ -615,7 +616,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" last (7th), opens simulator
     && timeInputs.length === 0 && timeInputsAfterToggle.length === 0
     && /21:50/.test(afterDl)
     && openedAgain && !A.isRescuePlannerOpen()
-    && itemsAfterBack.length === 7 && itemsAfterTabLeave.length === 7;
+    && itemsAfterBack.length === 8 && itemsAfterTabLeave.length === 8;
 
   return ok || JSON.stringify({
     h1,

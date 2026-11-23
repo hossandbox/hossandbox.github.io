@@ -21,7 +21,7 @@ export interface HistoryLike {
 
 type Layer = 'tab' | 'sub' | 'sheet';
 /** Screens reached from Plan: Back returns to Plan. */
-export const PLAN_SCREENS = ['split', 'trip', 'load', 'week', 'rollout', 'rescue'];
+export const PLAN_SCREENS = ['split', 'trip', 'load', 'week', 'rollout', 'rescue', 'stack'];
 /**
  * Capstone C3 (audit §3 D10-A): "Hours coming back" (tab id 'recap') now lives under Plan, so the
  * phone's Back from it lands on Plan, not Now. It keeps the ONE history entry every tab has

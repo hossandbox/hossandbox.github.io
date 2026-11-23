@@ -6614,14 +6614,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
     `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
 
-  // 8. Plan tab placement (5th .plan-item, above tool #6 and #7) & WeekRecapTab SSR render order (verdict banner first)
+  // 8. Plan tab placement (5th .plan-item, above tools #6–#8) & WeekRecapTab SSR render order (verdict banner first)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
+  A.openStackPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 7 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue',
+  need(itemTitles.length === 8 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6874,14 +6875,15 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(!pCycleInf.feasible && /70-hour cycle/.test(pCycleInf.headline) && pCycleInf.recovery !== null,
     `f6 cycle infeasible: feasible=${pCycleInf.feasible} headline="${pCycleInf.headline}"`);
 
-  // Fixture 7: Plan hub placement (6th item, above tool #7) & RolloutTab SSR render order (verdict first, checklist, PTA)
+  // Fixture 7: Plan hub placement (6th item, above tools #7–#8) & RolloutTab SSR render order (verdict first, checklist, PTA)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
+  A.openStackPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 7 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 8 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -6945,5 +6947,49 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`split-sleeper rescue: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('split-sleeper rescue (8/2 rescue vs 10, 2h+7h=9h reject, SSR verdict-first & SB callout): OK');
+}
+// --- Stack My Stops & Loads ("Stack my stops & loads", Plan tab tool #8)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const ST = await import('../src/stack.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago') + m0;
+  const now06 = chi(11, 6, 0);
+  const freshSegs = [{ status: 'OFF', start: chi(10, 20, 0), end: now06, createdAt: 1 }];
+  const rLegal = ST.evaluateStackChain({
+    segments: freshSegs,
+    now: now06,
+    config: cfgChi,
+    stops: [
+      { id: 's1', label: 'Stop 1', miles: 165, mph: 55, dwellMinutes: 120, dwellStatus: 'ON', apptMinute: chi(11, 9, 30), apptTimeZone: 'America/Chicago' },
+      { id: 's2', label: 'Stop 2', miles: 110, mph: 55, dwellMinutes: 90, dwellStatus: 'ON', apptMinute: chi(11, 14, 0), apptTimeZone: 'America/Chicago' },
+      { id: 's3', label: 'Stop 3', miles: 110, mph: 55, dwellMinutes: 60, dwellStatus: 'ON', apptMinute: chi(11, 18, 0), apptTimeZone: 'America/Chicago' },
+    ],
+  });
+  need(rLegal.status === 'legal' && /ALL 3 STOPS LEGAL/.test(rLegal.headline), `stack smoke legal: ${rLegal.status} ${rLegal.headline}`);
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
+  ST.clearStackDraft();
+  A.openStackPlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now06, config: cfgChi, segments: freshSegs, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const stackHtml = pageOut(render(h(App, {})), 'page-tool');
+  const vAt = stackHtml.indexOf('data-stack-verdict="1"');
+  const tAt = stackHtml.indexOf('data-stack-timeline="1"');
+  const eAt = stackHtml.indexOf('data-stack-editor="1"');
+  need(vAt > 0 && tAt > vAt && eAt > tAt, `stack SSR order wrong: verdict=${vAt} timeline=${tAt} editor=${eAt}`);
+  need(stackHtml.includes('data-stack-dispatch="1"') && stackHtml.includes('my ELD governs'), 'stack SSR missing dispatch summary');
+  need(!/<input[^>]+type="time"/.test(stackHtml), 'stack SSR must not contain plain <input type="time">');
+  A.openStackPlanner(false);
+
+  if (bad.length) throw new Error(`stack my stops & loads: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('stack my stops & loads (legal 3-stop, SSR verdict-first, dispatch text, zero input[type=time]): OK');
 }
 console.log('OK');
