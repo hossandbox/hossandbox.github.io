@@ -2006,37 +2006,49 @@ await pin('DF3. dialfade: prefers-reduced-motion: reduce swaps Timeline <-> Dial
 /* ---------------- (p) eldslide (2026-11-22, Lorico): "Check against my ELD" DriftSheet scoped slide-up/slide-down ---------------- */
 const eldCheckBtn = () => all((n) => n.localName === 'button' && has(n, 'plan-item') && /Check against my ELD/.test(n.textContent), pages()[1])[0];
 
-// Re-aimed (2026-11-22 polish): DriftSheet AND all other bottom sheets (why, status, exceptions, add) now share the unified bottom-sheet motion system.
-await pin('ES1. eldslide / unified sheets: DriftSheet and all other bottom sheet kinds (why, status, exceptions, add) open cleanly under the unified bottom-sheet motion system', async () => {
+// Re-aimed (2026-11-22 morph4): DriftSheet, SinceSheet, ExceptionsSheet, and StatusSheet use .morph-origin; unconverted sheets (why, add, quickstart, lever) stay on base .sheet slide-up.
+await pin('ES1. morph4 / eld: DriftSheet (and converted since/exceptions/status) open in .morph-origin mode while unconverted sheets (why, add) stay on base slide-up', async () => {
   await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
   const btn = eldCheckBtn();
   if (!btn) return 'missing "Check against my ELD" button on Now';
   fire(btn, 'click'); await sleep(40);
   const driftWrap = all((n) => has(n, 'sheet-wrap'))[0];
   const driftSheet = all((n) => has(n, 'sheet'))[0];
-  const driftOk = !!driftWrap && !!driftSheet && has(driftWrap, 'slide-up') && has(driftSheet, 'slide-up') && !has(driftSheet, 'is-closing')
+  const driftOk = !!driftWrap && !!driftSheet && has(driftWrap, 'morph-origin') && has(driftSheet, 'morph-origin')
+    && !has(driftWrap, 'slide-up') && !has(driftSheet, 'slide-up') && !has(driftSheet, 'is-closing')
     && /Check against my ELD/.test(driftSheet.textContent);
-  const others = [
+  const unconverted = [
     ['why', { kind: 'why' }],
-    ['status', { kind: 'status' }],
-    ['exceptions', { kind: 'exceptions' }],
     ['add', { kind: 'add' }],
   ];
-  const otherBad = [];
-  for (const [name, desc] of others) {
+  const converted = [
+    ['status', { kind: 'status' }],
+    ['exceptions', { kind: 'exceptions' }],
+    ['since', { kind: 'since' }],
+  ];
+  const bad = [];
+  for (const [name, desc] of unconverted) {
     openSheet(desc); await sleep(40);
     const wraps = all((n) => has(n, 'sheet-wrap'));
     const sheets = all((n) => has(n, 'sheet'));
-    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'is-closing') || has(wraps[0], 'is-closing')) {
-      otherBad.push(`${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
+    if (sheets.length !== 1 || wraps.length !== 1 || has(sheets[0], 'morph-origin') || has(sheets[0], 'is-closing')) {
+      bad.push(`unconverted:${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
+    }
+  }
+  for (const [name, desc] of converted) {
+    openSheet(desc); await sleep(40);
+    const wraps = all((n) => has(n, 'sheet-wrap'));
+    const sheets = all((n) => has(n, 'sheet'));
+    if (sheets.length !== 1 || wraps.length !== 1 || !has(sheets[0], 'morph-origin') || !has(wraps[0], 'morph-origin') || has(sheets[0], 'slide-up') || has(sheets[0], 'is-closing')) {
+      bad.push(`converted:${name}: wraps=${wraps.map(cls)} sheets=${sheets.map(cls)}`);
     }
   }
   openSheet(null); await sleep(260);
-  return (driftOk && otherBad.length === 0) || JSON.stringify({ driftOk, driftWrap: driftWrap && cls(driftWrap), driftSheet: driftSheet && cls(driftSheet), otherBad });
+  return (driftOk && bad.length === 0) || JSON.stringify({ driftOk, driftWrap: driftWrap && cls(driftWrap), driftSheet: driftSheet && cls(driftSheet), bad });
 });
 
-// Re-aimed (2026-11-22 polish): ALL bottom sheets share retained .is-closing exit; direct switch / disclaimer / driving view still bypass exit retention immediately.
-await pin('ES2. eldslide / unified sheets: closing DriftSheet (Close, backdrop, Escape, hw Back) and other sheets retains .is-closing (inert) then unmounts while releasing blocked immediately; direct switch/disclaimer/driving bypass retention immediately', async () => {
+// Re-aimed (2026-11-22 morph4): DriftSheet closes via .morph-origin.is-closing (no .slide-up, no .morph-fallback) across every exit path; direct switch / disclaimer / driving view still bypass exit retention immediately.
+await pin('ES2. morph4 / eld: closing DriftSheet (Close, backdrop, Escape, hw Back) retains .morph-origin.is-closing (inert) then unmounts while releasing blocked immediately; direct switch/disclaimer/driving bypass retention immediately', async () => {
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
@@ -2045,15 +2057,15 @@ await pin('ES2. eldslide / unified sheets: closing DriftSheet (Close, backdrop, 
     const btn = eldCheckBtn();
     if (!btn) return `${label}: missing ELD button`;
     fire(btn, 'click'); await sleep(40);
-    if (all((n) => has(n, 'sheet') && has(n, 'slide-up')).length !== 1) return `${label}: DriftSheet did not open`;
+    if (all((n) => has(n, 'sheet') && has(n, 'morph-origin') && !has(n, 'slide-up')).length !== 1) return `${label}: DriftSheet did not open with .morph-origin`;
     closeFn(); await sleep(30);
     const midWrap = all((n) => has(n, 'sheet-wrap'))[0];
     const midSheet = all((n) => has(n, 'sheet'))[0];
     const mainEl = strip();
     const midOk = A.currentSheet() === null && !off(mainEl)
       && !!midWrap && !!midSheet
-      && has(midWrap, 'slide-up') && has(midWrap, 'is-closing') && off(midWrap) && hid(midWrap)
-      && has(midSheet, 'slide-up') && has(midSheet, 'is-closing');
+      && has(midWrap, 'morph-origin') && !has(midWrap, 'slide-up') && has(midWrap, 'is-closing') && off(midWrap) && hid(midWrap)
+      && has(midSheet, 'morph-origin') && !has(midSheet, 'slide-up') && !has(midSheet, 'morph-fallback') && has(midSheet, 'is-closing');
     if (!midOk) return `${label}: mid-close failed sheet=${JSON.stringify(A.currentSheet())} mainInert=${off(mainEl)} wrap=${midWrap && cls(midWrap)} sh=${midSheet && cls(midSheet)}`;
     await sleep(250);
     if (all((n) => has(n, 'sheet')).length !== 0) return `${label}: did not unmount after exit window`;
@@ -2074,10 +2086,10 @@ await pin('ES2. eldslide / unified sheets: closing DriftSheet (Close, backdrop, 
   fire(eldCheckBtn(), 'click'); await sleep(40);
   openSheet({ kind: 'why' }); await sleep(30);
   const swSheets = all((n) => has(n, 'sheet'));
-  const swOk = swSheets.length === 1 && !has(swSheets[0], 'is-closing') && /Why/.test(swSheets[0].textContent);
-  // Closing WhySheet now also plays unified retained slide-down exit then unmounts cleanly
+  const swOk = swSheets.length === 1 && !has(swSheets[0], 'is-closing') && !has(swSheets[0], 'morph-origin') && /Why/.test(swSheets[0].textContent);
+  // Closing WhySheet still plays unified retained slide-down exit then unmounts cleanly
   openSheet(null); await sleep(30);
-  const whyClosing = all((n) => has(n, 'sheet') && has(n, 'is-closing')).length === 1 && A.currentSheet() === null;
+  const whyClosing = all((n) => has(n, 'sheet') && has(n, 'is-closing') && !has(n, 'morph-origin')).length === 1 && A.currentSheet() === null;
   await sleep(250);
   const whyUnmounted = all((n) => has(n, 'sheet')).length === 0;
 
@@ -2098,10 +2110,10 @@ await pin('ES2. eldslide / unified sheets: closing DriftSheet (Close, backdrop, 
     || JSON.stringify({ swOk, whyClosing, whyUnmounted, discImmediate, driveImmediate });
 });
 
-await pin('ES3. eldslide: under prefers-reduced-motion: reduce, DriftSheet has no slide animation CSS and unmounts immediately on close', async () => {
+await pin('ES3. morph4 / eld: under prefers-reduced-motion: reduce, DriftSheet has no morph/slide animation CSS and unmounts immediately on close', async () => {
   const css = readFileSync(`${process.cwd()}/public/styles.css`, 'utf8');
   const block = css.slice(css.indexOf('SPLIT DECISION MOTION SYSTEM'));
-  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet,[\s\S]*?\.sheet\.is-closing,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
+  const hasReducedCss = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet\.morph-origin,[\s\S]*?\.sheet\.morph-origin\.is-closing,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
   const origMM = globalThis.window.matchMedia;
   let immediateUnmount = false;
   try {
@@ -2110,7 +2122,7 @@ await pin('ES3. eldslide: under prefers-reduced-motion: reduce, DriftSheet has n
     const btn = eldCheckBtn();
     if (!btn) return 'missing ELD button under reduced motion';
     fire(btn, 'click'); await sleep(40);
-    if (all((n) => has(n, 'sheet') && has(n, 'slide-up')).length !== 1) return 'DriftSheet did not open under reduced motion';
+    if (all((n) => has(n, 'sheet') && has(n, 'morph-origin') && !has(n, 'slide-up')).length !== 1) return 'DriftSheet did not open with .morph-origin under reduced motion';
     openSheet(null); await sleep(30);
     immediateUnmount = all((n) => has(n, 'sheet')).length === 0;
   } finally {
@@ -2160,28 +2172,28 @@ await pin('RT1. motion system: bottom-sheet entrance declares 320ms cubic-bezier
   const kfBdIn = /@keyframes\s+sheet-backdrop-in\s*\{\s*from\s*\{\s*opacity:\s*0;\s*\}\s*to\s*\{\s*opacity:\s*1;\s*\}\s*\}/.test(block);
   const kfBdOut = /@keyframes\s+sheet-backdrop-out\s*\{\s*from\s*\{\s*opacity:\s*1;\s*\}\s*to\s*\{\s*opacity:\s*0;\s*\}\s*\}/.test(block);
   const reduced = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.sheet,[\s\S]*?\.sheet\.is-closing,[\s\S]*?\.sheet\.morph-origin,[\s\S]*?animation:\s*none;[^}]*transform:\s*none;/.test(block);
-  // Both shared slide-up sheets (DriftSheet + LeverSheet) mount with .slide-up and close via retained .is-closing
+  // LeverSheet keeps .slide-up; DriftSheet now uses .morph-origin — both close via retained .is-closing
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   await seed(nowstripL4Seed());
-  const checkCycle = async (label, triggerBtn) => {
+  const checkCycle = async (label, triggerBtn, expectedClass) => {
     if (!triggerBtn) return `${label}: missing trigger`;
     fire(triggerBtn, 'click'); await sleep(40);
     const ow = all((n) => has(n, 'sheet-wrap'))[0];
     const os = all((n) => has(n, 'sheet'))[0];
-    if (!ow || !os || !has(ow, 'slide-up') || !has(os, 'slide-up') || has(os, 'is-closing')) return `${label}: bad open`;
+    if (!ow || !os || !has(ow, expectedClass) || !has(os, expectedClass) || has(os, 'is-closing')) return `${label}: bad open wrap=${ow && cls(ow)} sh=${os && cls(os)}`;
     openSheet(null); await sleep(30);
     const mw = all((n) => has(n, 'sheet-wrap'))[0];
     const ms = all((n) => has(n, 'sheet'))[0];
-    if (A.currentSheet() !== null || !mw || !ms || !has(mw, 'slide-up') || !has(mw, 'is-closing') || !off(mw) || !hid(mw) || !has(ms, 'slide-up') || !has(ms, 'is-closing')) {
-      return `${label}: bad closing`;
+    if (A.currentSheet() !== null || !mw || !ms || !has(mw, expectedClass) || !has(mw, 'is-closing') || !off(mw) || !hid(mw) || !has(ms, expectedClass) || !has(ms, 'is-closing')) {
+      return `${label}: bad closing wrap=${mw && cls(mw)} sh=${ms && cls(ms)}`;
     }
     await sleep(250);
     if (all((n) => has(n, 'sheet')).length !== 0) return `${label}: did not unmount`;
     return null;
   };
-  const leverErr = await checkCycle('lever', await waitForLeverBtn());
-  const driftErr = await checkCycle('drift', eldCheckBtn());
+  const leverErr = await checkCycle('lever', await waitForLeverBtn(), 'slide-up');
+  const driftErr = await checkCycle('drift', eldCheckBtn(), 'morph-origin');
   const ok = tokens && sheetIn && bdIn && sheetOut && bdOut && kfUp && kfDown && kfBdIn && kfBdOut && reduced && !leverErr && !driftErr;
   return ok || JSON.stringify({ tokens, sheetIn, bdIn, sheetOut, bdOut, kfUp, kfDown, kfBdIn, kfBdOut, reduced, leverErr, driftErr });
 });
@@ -2244,6 +2256,70 @@ await pin('MS3. motion system: Log entry rows carry deterministic data-entry-key
   await sleep(250);
   const unmounted = all((n) => has(n, 'sheet')).length === 0;
   return (openedMorph && closingMorph && unmounted) || JSON.stringify({ key, openedMorph, closingMorph, unmounted });
+});
+
+/* ---------------- (r) morph4 (2026-11-22): Four converted sheets (drift, since, exceptions, status) use origin-morph ---------------- */
+await pin('M4A. morph4: all four converted sheets (drift, since, exceptions, status) open & close with .morph-origin (never .slide-up or .morph-fallback), and SinceSheet preserves morph across pick -> done', async () => {
+  await seed({ tab: 'now', nowCard: 'timeline', nowCardAsked: true, drivingView: false, ...segs });
+  const nowBtns = [
+    ['drift', () => all((n) => n.localName === 'button' && /Check against my ELD/.test(n.textContent), pages()[1])[0], /Check against my ELD/],
+    ['since', () => all((n) => n.localName === 'button' && /Fix the start time/.test(n.textContent), pages()[1])[0], /Fix the start time/],
+    ['exceptions', () => all((n) => n.localName === 'button' && /Exceptions this shift/.test(n.textContent), pages()[1])[0], /Exceptions this shift/],
+    ['status', () => all((n) => n.localName === 'button' && /PC, yard move, or started earlier/.test(n.textContent), pages()[1])[0], /What are you doing now\?/],
+  ];
+  for (const [label, getBtn, titleRe] of nowBtns) {
+    const btn = getBtn();
+    if (!btn) return `${label}: missing opener button on Now`;
+    btn.getBoundingClientRect = () => ({ left: 16, top: 620, width: 380, height: 56, right: 396, bottom: 676 });
+    fire(btn, 'click'); await sleep(40);
+    const wrap = all((n) => has(n, 'sheet-wrap'))[0];
+    const sh = all((n) => has(n, 'sheet'))[0];
+    if (!wrap || !sh || !has(wrap, 'morph-origin') || !has(sh, 'morph-origin') || has(sh, 'slide-up') || !titleRe.test(sh.textContent)) {
+      return `${label}: bad open wrap=${wrap && cls(wrap)} sh=${sh && cls(sh)}`;
+    }
+    if (label === 'since') {
+      // Transition to confirmation step keeps .morph-origin intact
+      openSheet({ kind: 'since', done: T - 70 }); await sleep(40);
+      const doneSh = all((n) => has(n, 'sheet'))[0];
+      if (!doneSh || !has(doneSh, 'morph-origin') || !/Start time fixed/.test(doneSh.textContent)) {
+        return `since done step lost .morph-origin: ${doneSh && cls(doneSh)}`;
+      }
+    }
+    openSheet(null); await sleep(30);
+    const midSh = all((n) => has(n, 'sheet'))[0];
+    if (!midSh || !has(midSh, 'morph-origin') || !has(midSh, 'is-closing') || has(midSh, 'morph-fallback') || has(midSh, 'slide-up')) {
+      return `${label}: bad closing sh=${midSh && cls(midSh)}`;
+    }
+    await sleep(250);
+    if (all((n) => has(n, 'sheet')).length !== 0) return `${label}: did not unmount`;
+  }
+  return true;
+});
+
+await pin('M4B. morph4: programmatic open without opener still uses .morph-origin (no .slide-up / no .morph-fallback), while unconverted sheets (why, lever, add, quickstart) keep slide-up without .morph-origin', async () => {
+  await seed(nowstripL4Seed());
+  for (const kind of ['drift', 'since', 'exceptions', 'status']) {
+    openSheet({ kind }); await sleep(40);
+    const sh = all((n) => has(n, 'sheet'))[0];
+    if (!sh || !has(sh, 'morph-origin') || has(sh, 'slide-up')) return `programmatic ${kind} missing .morph-origin: ${sh && cls(sh)}`;
+    openSheet(null); await sleep(30);
+    const mid = all((n) => has(n, 'sheet'))[0];
+    if (!mid || !has(mid, 'morph-origin') || !has(mid, 'is-closing') || has(mid, 'morph-fallback')) return `programmatic ${kind} bad close: ${mid && cls(mid)}`;
+    await sleep(250);
+  }
+  for (const desc of [{ kind: 'why' }, { kind: 'add' }, { kind: 'quickstart' }]) {
+    openSheet(desc); await sleep(40);
+    const sh = all((n) => has(n, 'sheet'))[0];
+    if (!sh || has(sh, 'morph-origin')) return `unconverted ${desc.kind} unexpectedly got .morph-origin: ${sh && cls(sh)}`;
+    openSheet(null); await sleep(260);
+  }
+  const leverBtn = await waitForLeverBtn();
+  if (!leverBtn) return 'missing L4 lever strip';
+  fire(leverBtn, 'click'); await sleep(40);
+  const leverSh = all((n) => has(n, 'sheet'))[0];
+  const leverOk = !!leverSh && has(leverSh, 'slide-up') && !has(leverSh, 'morph-origin');
+  openSheet(null); await sleep(260);
+  return leverOk || `LeverSheet bad classes: ${leverSh && cls(leverSh)}`;
 });
 
 let fails = 0;

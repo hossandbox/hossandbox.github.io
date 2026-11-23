@@ -238,7 +238,7 @@ await pin('C1. Now shows the current status with "Fix the start time", and it op
 // D6 (audit-fix): typed minutes-ago input removed from SinceSheet in favour of ClockPick; drive the picker's nudge keys (−5, −1, −1) to move the start 7 minutes earlier.
 await pin('C2. editor: nudging 7 minutes earlier on the picker and applying moves the start exactly, and the panel shows the resulting since time', async () => {
   await seed(fieldDay()); openSheet({ kind: 'since' }); await sleep(60);
-  const inSheet = (n) => { for (let p = n; p; p = p.parentNode) if (p.attributes?.class === 'sheet') return true; return false; };
+  const inSheet = (n) => { for (let p = n; p; p = p.parentNode) if (/\bsheet\b/.test(p.attributes?.class ?? '')) return true; return false; };
   const nudge = async (re) => { const b = all((n) => n.localName === 'button' && re.test(n.textContent) && inSheet(n))[0]; if (!b) throw new Error('no picker key ' + re); fire(b, 'click'); await sleep(50); };
   await nudge(/^−5$/); await nudge(/^−1$/); await nudge(/^−1$/);
   const go = button(/^Set start to /);
@@ -247,7 +247,7 @@ await pin('C2. editor: nudging 7 minutes earlier on the picker and applying move
   const s1 = getState();
   if (s1.current.since !== T - 27 || s1.segments[1].end !== T - 27) return plain(s1);
   // read the PANEL only: Now's own row behind it shows the new time too, and must not vouch for the panel
-  const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+  const panel = all((n) => /\bsheet\b/.test(n.attributes?.class ?? ''))[0]?.textContent ?? '';
   return (panel.includes(`On Duty since ${clock(T - 27)}`) && !/When did it really start\?/.test(panel)) || 'the panel does not show the resulting since time: ' + panel;
 });
 // D6 (audit-fix): typed decimal-minutes refusal left SinceSheet with typed entry (still pinned in A11/B3); re-aim to the picker's own refusal at now (not in the past) — reason shown, apply disabled, forced click saves nothing.
@@ -316,7 +316,7 @@ await pin('C8. BUG-2026-11-20: live Driving (drivingView=true, via Details peek)
   const sAfter = getState();
   if (sAfter.current.since !== T - 40 || sAfter.segments[1].end !== T - 40) return 'did not save: ' + plain(sAfter);
   if (A.showsDrivingView(sAfter) || !A.drivingPeeked(sAfter)) return 'applying Fix-start broke DrivingView peek';
-  const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+  const panel = all((n) => /\bsheet\b/.test(n.attributes?.class ?? ''))[0]?.textContent ?? '';
   if (!/Start time fixed/.test(panel) || !panel.includes(`Driving since ${clock(T - 40)}`) || /When did it really start\?/.test(panel) || /Pick the real start time/.test(panel)) {
     return 'stalled instead of confirming: ' + panel.slice(0, 220);
   }
@@ -359,7 +359,7 @@ await pin('C9. BUG-2026-11-20: all four live statuses (Driving, On Duty, Sleeper
     fire(go, 'click'); await sleep(60);
     const s1 = getState();
     if (s1.current.since !== oracle.patch.current.since || s1.segments[1].end !== oracle.patch.segments[1].end) return `${st}: math mismatch ${plain(s1)}`;
-    const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+    const panel = all((n) => /\bsheet\b/.test(n.attributes?.class ?? ''))[0]?.textContent ?? '';
     if (!/Start time fixed/.test(panel) || !panel.includes(`${label} since ${clock(T - 42)}`) || /When did it really start\?/.test(panel)) return `${st}: confirmation missing (${panel.slice(0, 180)})`;
     await click(/^See my clocks$/);
     if (currentSheet() !== null) return `${st}: See my clocks did not close`;
@@ -374,7 +374,7 @@ await pin('C10. BUG-2026-11-20: Driving via DrivingView -> I\'ve stopped -> Fix 
   await click(/Still Driving\? Fix its start time/);
   await type('Start time', hhmm(T - 45));
   await click(/^Set start to /);
-  const panel = all((n) => n.attributes?.class === 'sheet')[0]?.textContent ?? '';
+  const panel = all((n) => /\bsheet\b/.test(n.attributes?.class ?? ''))[0]?.textContent ?? '';
   if (getState().current.since !== T - 45 || !/Start time fixed/.test(panel) || !panel.includes(`Driving since ${clock(T - 45)}`)) return 'confirm failed: ' + panel.slice(0, 180);
   await click(/^See my clocks$/);
   return (currentSheet() === null && A.showsDrivingView(getState())) || 'did not return cleanly to DrivingView';

@@ -453,25 +453,45 @@ export type SheetKind =
   // `inside`: add something inside this entry. `day`: a minute of the day being viewed on the Log.
   // `resume`: the step a "Change" came from, to return to once the new answer is in.
   | { kind: 'add'; step?: EdStep; draft?: Draft; inside?: Segment; day?: number; resume?: EdStep; via?: 'what' };
+type MorphSheetKind = 'drift' | 'since' | 'exceptions' | 'status';
+function isConvertedMorphKind(kind: SheetKind['kind']): kind is MorphSheetKind {
+  return kind === 'drift' || kind === 'since' || kind === 'exceptions' || kind === 'status';
+}
 interface MorphRect { left: number; top: number; width: number; height: number }
-interface SheetMorphOrigin { key: string; rect: MorphRect }
+interface SheetMorphOrigin { mode: 'log' | 'opener'; key?: string; el?: HTMLElement | null; rect: MorphRect | null }
 let activeMorphOrigin: SheetMorphOrigin | null = null;
-let openingFromLogRow = false;
+let openingWithMorph = false;
 function logEntryKey(seg: Pick<Segment, 'status' | 'start' | 'end' | 'tentative'>): string {
   return `${seg.status}-${seg.start}-${seg.end}${seg.tentative ? '-t' : ''}`;
 }
 function openLogEntryEditor(k: Extract<SheetKind, { kind: 'edit' }>, entryKey: string, el: HTMLElement | null) {
   const r = el?.getBoundingClientRect?.();
   if (r && r.width > 0 && r.height > 0) {
-    activeMorphOrigin = { key: entryKey, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+    activeMorphOrigin = { mode: 'log', key: entryKey, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
   } else {
     activeMorphOrigin = null;
   }
-  openingFromLogRow = true;
-  try { openSheet(k); } finally { openingFromLogRow = false; }
+  openingWithMorph = true;
+  try { openSheet(k); } finally { openingWithMorph = false; }
+}
+function captureOpenerRect(el: HTMLElement | null): MorphRect | null {
+  if (!el || typeof el.getBoundingClientRect !== 'function') return null;
+  const r = el.getBoundingClientRect();
+  if (!(r && r.width > 0 && r.height > 0)) return null;
+  if (typeof window !== 'undefined') {
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+    if (vw > 0 && vh > 0 && (r.right <= 0 || r.left >= vw || r.bottom <= 0 || r.top >= vh)) return null;
+  }
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+function openMorphSheet(k: Extract<SheetKind, { kind: MorphSheetKind }>, el: HTMLElement | null) {
+  activeMorphOrigin = { mode: 'opener', el, rect: captureOpenerRect(el) };
+  openingWithMorph = true;
+  try { openSheet(k); } finally { openingWithMorph = false; }
 }
 function updateActiveMorphKey(key: string) {
-  if (activeMorphOrigin) activeMorphOrigin = { ...activeMorphOrigin, key };
+  if (activeMorphOrigin?.mode === 'log') activeMorphOrigin = { ...activeMorphOrigin, key };
 }
 function resolveLogEntryRect(key: string): MorphRect | null {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
@@ -492,6 +512,41 @@ function resolveLogEntryRect(key: string): MorphRect | null {
   const visBot = Math.min(sr.bottom, window.innerHeight || sr.bottom);
   if (r.bottom <= visTop + 8 || r.top >= visBot - 8) return null;
   return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+function resolveOpenerRect(el: HTMLElement | null): MorphRect | null {
+  if (!el || !el.isConnected || typeof el.getBoundingClientRect !== 'function') return null;
+  if (typeof el.closest === 'function') {
+    if (el.closest('[aria-hidden="true"]')) return null;
+    const page = el.closest('section.page');
+    if (page && page.classList && !page.classList.contains('is-active')) return null;
+  }
+  const r = el.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0)) return null;
+  const vw = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0;
+  const vh = typeof window !== 'undefined' ? (window.innerHeight || 0) : 0;
+  if (vw > 0 && vh > 0) {
+    if (r.right <= 8 || r.left >= vw - 8 || r.bottom <= 8 || r.top >= vh - 8) return null;
+  }
+  const scroller = typeof el.closest === 'function' ? el.closest<HTMLElement>('section.page') : null;
+  if (scroller && typeof scroller.getBoundingClientRect === 'function') {
+    const sr = scroller.getBoundingClientRect();
+    if (sr.width > 0 && sr.height > 0) {
+      const visTop = Math.max(sr.top, 0);
+      const visBot = Math.min(sr.bottom, vh || sr.bottom);
+      const visLeft = Math.max(sr.left, 0);
+      const visRight = Math.min(sr.right, vw || sr.right);
+      if (r.bottom <= visTop + 8 || r.top >= visBot - 8 || r.right <= visLeft + 8 || r.left >= visRight - 8) return null;
+    }
+  }
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+function fallbackBottomCenterRect(wrap: HTMLElement): MorphRect | null {
+  if (typeof wrap.getBoundingClientRect !== 'function') return null;
+  const wr = wrap.getBoundingClientRect();
+  if (!(wr.width > 0 && wr.height > 0)) return null;
+  const w = Math.min(wr.width * 0.88, Math.max(1, wr.width - 24));
+  const h = 48;
+  return { left: wr.left + (wr.width - w) / 2, top: wr.bottom - h - 12, width: w, height: h };
 }
 function applyMorphVars(el: HTMLElement, wrap: HTMLElement, rect: MorphRect): boolean {
   if (typeof wrap.getBoundingClientRect !== 'function') return false;
@@ -519,8 +574,17 @@ let sheetNow: SheetKind | null = null;
 const sheetSubs = new Set<() => void>();
 export function openSheet(k: SheetKind | null) {
   if (k !== null) {
-    if (k.kind !== 'edit') activeMorphOrigin = null;
-    else if (!openingFromLogRow && sheetNow?.kind !== 'edit') activeMorphOrigin = null;
+    if (k.kind === 'edit') {
+      if (!openingWithMorph && sheetNow?.kind !== 'edit') activeMorphOrigin = null;
+    } else if (isConvertedMorphKind(k.kind)) {
+      if (!openingWithMorph) {
+        if (sheetNow?.kind !== k.kind || activeMorphOrigin?.mode !== 'opener') {
+          activeMorphOrigin = { mode: 'opener', el: null, rect: null };
+        }
+      }
+    } else {
+      activeMorphOrigin = null;
+    }
   }
   sheetNow = k;
   sheetSubs.forEach((f) => f());
@@ -571,12 +635,19 @@ function Sheet({ title, children, onBack, focusKey, slideUp = false, closing: cl
     if (!closing) {
       if (!didMorphOpenRef.current) {
         didMorphOpenRef.current = true;
-        applyMorphVars(box.current, wrapRef.current, morphOrigin.rect);
+        const openRect = morphOrigin.rect ?? (morphOrigin.mode === 'opener' ? fallbackBottomCenterRect(wrapRef.current) : null);
+        if (openRect) applyMorphVars(box.current, wrapRef.current, openRect);
       }
       return;
     }
-    const closeKey = activeMorphOrigin?.key ?? morphOrigin.key;
-    const liveRect = resolveLogEntryRect(closeKey);
+    if (morphOrigin.mode === 'opener') {
+      box.current.classList?.remove('morph-fallback');
+      const liveRect = resolveOpenerRect(morphOrigin.el ?? null) ?? fallbackBottomCenterRect(wrapRef.current);
+      if (liveRect) applyMorphVars(box.current, wrapRef.current, liveRect);
+      return;
+    }
+    const closeKey = (activeMorphOrigin?.mode === 'log' ? activeMorphOrigin.key : undefined) ?? morphOrigin.key;
+    const liveRect = closeKey ? resolveLogEntryRect(closeKey) : null;
     if (liveRect && applyMorphVars(box.current, wrapRef.current, liveRect)) {
       box.current.classList?.remove('morph-fallback');
     } else {
@@ -2025,7 +2096,7 @@ function StatusDock({ s }: { s: State }) {
         // pulse instead of the 12ms tap tick (data-haptic keeps the global tick off it).
         return <button key={st} data-haptic="status" style={`--led: ${STATUS_COLOR[st]}`} class={on ? 'on' : ''} aria-pressed={on} onClick={() => statusHaptic(tapStatus(st), getState().alertsOn)}>{on && <Icon d={I.check} size={16} />}<span class="dock-ico"><Icon d={STATUS_ICON[st]} size={26} /></span>{STATUS_LABEL[st]}</button>;
       })}</div>
-      <button class="link dock-more" onClick={() => openSheet({ kind: 'status' })}>PC, yard move, or started earlier…</button>
+      <button class="link dock-more" onClick={(e) => openMorphSheet({ kind: 'status' }, e.currentTarget)}>PC, yard move, or started earlier…</button>
     </div>
   );
 }
@@ -2114,7 +2185,7 @@ function WelcomeBackChip({ w, now }: { w: WelcomeBack; now: number }) {
       <p><b>Still {label}?</b> Since {now - w.since < 1440 ? clock(w.since, false) : clock(w.since)} — {dur(now - w.since)}.</p>
       <div class="row">
         <button class="mini primary" onClick={welcomeYes}>Yes, still {label.toLowerCase()}</button>
-        <button class="mini" onClick={() => openSheet({ kind: 'status' })}>I stopped at…</button>
+        <button class="mini" onClick={(e) => openMorphSheet({ kind: 'status' }, e.currentTarget)}>I stopped at…</button>
       </div>
     </div>
   );
@@ -2331,7 +2402,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
           notice already offers the quick start that creates one. */}
       {historyBasis(s, now) !== 'fresh' && (
-        <button class="plan-item" onClick={() => openSheet({ kind: 'drift' })}>
+        <button class="plan-item" onClick={(e) => openMorphSheet({ kind: 'drift' }, e.currentTarget)}>
           <span class="plan-icon"><Icon d={I.check} size={26} /></span>
           <span class="plan-text"><b>Check against my ELD</b><span class="muted small">One number lines this app up with your ELD.</span></span>
           <Icon d={I.next} />
@@ -2369,12 +2440,12 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
           after-the-fact door for a tap made late (or early). The Log's live row says
           "change it on Now"; this is where. */}
       {s.current && (
-        <button class="rowbtn" onClick={() => openSheet({ kind: 'since' })}>
+        <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'since' }, e.currentTarget)}>
           <span><span class="muted">{segLabel(s.current.status, s.current.note)} since {clock(s.current.since)}</span><br /><b>Fix the start time</b></span>
           <Icon d={I.next} />
         </button>
       )}
-      <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
+      <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'exceptions' }, e.currentTarget)}>
         <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
         <Icon d={I.next} />
       </button>
@@ -2461,7 +2532,7 @@ function DrivingView({ s, now, ev, again, onDetails, enter = false }: { s: State
             a pocket tap of Driving no longer needs a trip to the Log to repair. */}
         <StatusUndoChip drive />
         <div class="drive-note">{s.keepAwake ? 'Screen stays on' : 'Screen may lock'} · {soundNote(s.alertsOn, audioReady())}</div>
-        <button class="drive-stop" onClick={() => openSheet({ kind: 'status' })}>I've stopped</button>
+        <button class="drive-stop" onClick={(e) => openMorphSheet({ kind: 'status' }, e.currentTarget)}>I've stopped</button>
       </div>
     </main>
   );
@@ -2806,7 +2877,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
   // start that creates one instead of running a comparison against assumed numbers.
   if (historyBasis(s, now) === 'fresh') {
     return (
-      <Sheet title="Check against my ELD" slideUp closing={closing}>
+      <Sheet title="Check against my ELD" closing={closing}>
         <p class="small">There's nothing to check yet — this app is still on its demo clock, so there's no real day to compare with your ELD. Start from your ELD clocks first; the check works once your real day is in.</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button></div>
       </Sheet>
@@ -2834,7 +2905,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
   if (filled && found) {
     const { plan, after } = filled;
     return (
-      <Sheet title="Check against my ELD" slideUp closing={closing}>
+      <Sheet title="Check against my ELD" closing={closing}>
         {after.verdict === 'sync' ? (
           <p><b>Now in sync</b> — drive time left matches your ELD: {dur(after.eldLeft)}.</p>
         ) : (
@@ -2850,7 +2921,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
     const { check, at, eld } = found;
     if (check.verdict === 'sync') {
       return (
-        <Sheet title="Check against my ELD" slideUp closing={closing}>
+        <Sheet title="Check against my ELD" closing={closing}>
           <p><b>You're in sync</b> — this app and your ELD agree. Drive time left: {dur(check.appLeft)} either way you read it.</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">Nothing was changed.</p>
@@ -2860,7 +2931,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
     }
     if (check.verdict === 'extra') {
       return (
-        <Sheet title="Check against my ELD" slideUp closing={closing}>
+        <Sheet title="Check against my ELD" closing={closing}>
           <p>Your ELD shows <b>{dur(check.gap)} more</b> driving left than this app ({dur(check.eldLeft)} against {dur(check.appLeft)}).</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">This check never takes driving out of a log, so there's no one-tap fix in this direction. The usual reason: a break or an off-duty stretch your ELD counted isn't in the log yet. Add it on the Log and the two will line up.</p>
@@ -2873,7 +2944,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
     }
     const plan = planDriftFill(getState(), -check.gap, at);
     return (
-      <Sheet title="Check against my ELD" slideUp closing={closing}>
+      <Sheet title="Check against my ELD" closing={closing}>
         <p>Your ELD shows <b>{dur(-check.gap)} less</b> driving left than this app — about {dur(-check.gap)} of driving isn't in the log yet. Until it's in, every answer here runs optimistic.</p>
         <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
         {plan && plan.filled > 0 ? (
@@ -2898,7 +2969,7 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
   }
 
   return (
-    <Sheet title="Check against my ELD" slideUp closing={closing}>
+    <Sheet title="Check against my ELD" closing={closing}>
       <p class="small">Your ELD is the official record — this just lines the app up with it. Type the drive time left your ELD shows, and the app compares it with its own.</p>
       <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
       <div class="qs-row">
@@ -2969,7 +3040,7 @@ function StatusSheet({ s, now, closing = false }: { s: State; now: number; closi
       </div>
       {cur && (
         <div class="row">
-          <button onClick={() => openSheet({ kind: 'since' })}>Still {segLabel(cur.status, cur.note)}? Fix its start time</button>
+          <button onClick={(e) => openMorphSheet({ kind: 'since' }, e.currentTarget)}>Still {segLabel(cur.status, cur.note)}? Fix its start time</button>
         </div>
       )}
     </Sheet>
@@ -3422,7 +3493,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [back]);
   const openEditSheet = useSheet();
-  const morphSourceKey = openEditSheet?.kind === 'edit' && activeMorphOrigin ? activeMorphOrigin.key : null;
+  const morphSourceKey = openEditSheet?.kind === 'edit' && activeMorphOrigin?.mode === 'log' ? activeMorphOrigin.key ?? null : null;
   const logViewKey = `${back}:${s.logResolved ? 1 : 0}`;
   const prevLogViewRef = useRef(logViewKey);
   const logSwapEpochRef = useRef(0);
@@ -7563,7 +7634,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         {/* Gemini round, item H: the control is a row, not a section — the last row of the Now
             screen, just above the status buttons — so the copy says where to scroll. */}
         {/* A8 (audit): a button to the sheet, not directions to it. */}
-        <button class="rowbtn" onClick={() => openSheet({ kind: 'exceptions' })}>
+        <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'exceptions' }, e.currentTarget)}>
           <span><span class="muted">Adverse conditions and the 16-hour day are per shift</span><br /><b>Exceptions this shift</b></span>
           <Icon d={I.next} />
         </button>
@@ -8015,9 +8086,16 @@ export function App() {
     sheetEpochRef.current++;
   }
   prevVisibleKeyRef.current = visibleKey;
+  const morphForSheet = (sh: SheetKind): SheetMorphOrigin | null => {
+    if (sh.kind === 'edit') return activeMorphOrigin?.mode === 'log' ? activeMorphOrigin : null;
+    if (isConvertedMorphKind(sh.kind)) {
+      return activeMorphOrigin?.mode === 'opener' ? activeMorphOrigin : { mode: 'opener', el: null, rect: null };
+    }
+    return null;
+  };
   type RetainedSheetEntry = { sheet: SheetKind; key: string; epoch: number; driveUp: boolean; morph: SheetMorphOrigin | null };
   const [retainedSheet, setRetainedSheet] = useState<RetainedSheetEntry | null>(() => (
-    visibleSheet ? { sheet: visibleSheet, key: sheetSessionKey(visibleSheet), epoch: sheetEpochRef.current, driveUp, morph: visibleSheet.kind === 'edit' ? activeMorphOrigin : null } : null
+    visibleSheet ? { sheet: visibleSheet, key: sheetSessionKey(visibleSheet), epoch: sheetEpochRef.current, driveUp, morph: morphForSheet(visibleSheet) } : null
   ));
   const activeSheetEntry: RetainedSheetEntry | null = visibleSheet
     ? {
@@ -8025,7 +8103,9 @@ export function App() {
         key: visibleKey!,
         epoch: sheetEpochRef.current,
         driveUp,
-        morph: visibleSheet.kind === 'edit' ? (retainedSheet && retainedSheet.key === visibleKey && retainedSheet.epoch === sheetEpochRef.current ? retainedSheet.morph : activeMorphOrigin) : null,
+        morph: retainedSheet && retainedSheet.key === visibleKey && retainedSheet.epoch === sheetEpochRef.current
+          ? retainedSheet.morph
+          : morphForSheet(visibleSheet),
       }
     : null;
   const sheetClosing = !visibleSheet && retainedSheet !== null && s.disclaimerAcked && sheet === null && retainedSheet.driveUp === driveUp && !prefersReducedMotion();
