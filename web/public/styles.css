@@ -1493,6 +1493,34 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 .stack-add-bar { display: flex; flex-direction: column; gap: var(--s-8); }
 
 /* ===================================================================================
+   DO I MAKE IT BACK OR MOTEL? — Meet-and-Turn & Relay Wait Cutoff Timer (Plan tool #9)
+   Uses only existing palette tokens so both day and night themes keep WCAG AA contrast.
+   =================================================================================== */
+.motel-verdict { display: flex; flex-direction: column; gap: var(--s-8); }
+.motel-cutoff-block { display: flex; flex-direction: column; gap: 2px; padding: var(--s-8) var(--s-12); border-radius: var(--r-12); background: var(--screen); border: 1px solid var(--line); }
+.motel-cutoff-block.is-bad { border-color: var(--bad); background: var(--tint-bad); }
+.motel-cutoff-block.is-warn { border-color: var(--warn); background: var(--tint-warn); }
+.motel-cutoff-lbl { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.motel-cutoff-time { font-size: 44px; font-weight: 800; line-height: 1.05; letter-spacing: -0.02em; color: var(--text); font-variant-numeric: tabular-nums; }
+.motel-cutoff-block.is-bad .motel-cutoff-time { color: var(--bad); }
+.motel-cutoff-meta { font-size: 14px; font-weight: 700; color: var(--text); }
+.motel-headline { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.3; color: var(--text); }
+.motel-subline { margin: 0; font-size: 14px; color: var(--text); line-height: 1.4; }
+.motel-rule-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); font-size: 13px; font-weight: 700; color: var(--text); align-self: flex-start; max-width: 100%; overflow-wrap: break-word; }
+.motel-break-box { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--accent); font-size: 14px; line-height: 1.38; color: var(--text); }
+.motel-break-box.is-covered { border-left-color: var(--good); }
+.motel-break-box.is-short { border-left-color: var(--warn); }
+.motel-inputs { display: flex; flex-direction: column; gap: var(--s-12); }
+.motel-section { display: flex; flex-direction: column; gap: var(--s-6); padding-top: var(--s-10); border-top: 1px solid var(--line); }
+.motel-section:first-child { padding-top: 0; border-top: 0; }
+.motel-section-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); flex-wrap: wrap; }
+.motel-dur-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-8); flex-wrap: wrap; margin-top: 4px; }
+.motel-bigday-warn { margin-top: var(--s-6); padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 65%, var(--line)); border-left: 4px solid var(--warn); font-size: 13px; line-height: 1.4; color: var(--text); }
+.motel-foot { margin: var(--s-10) 0 0; font-size: 13px; color: var(--muted); line-height: 1.4; }
+.motel-pill-bad { border-color: var(--bad) !important; background: var(--tint-bad) !important; }
+.motel-pill-bad b { color: var(--bad); }
+
+/* ===================================================================================
    SPLIT DECISION MOTION SYSTEM
    One coherent, refresh-rate-independent motion system across the entire app.
    - Curves cap peak velocity <= 1.71x with gentle onset (v0 <= 0.64) and >= 6% travel

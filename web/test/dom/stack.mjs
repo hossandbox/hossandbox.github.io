@@ -98,6 +98,7 @@ const seed = async (rec) => {
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
+  A.openMotelPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -866,12 +867,12 @@ await pin('SK7. cross-timezone stop: engine dual-TZ formatting + UI lets zone be
 });
 
 /* ---------------- SK8: Plan hub 8th item, verdict-first, quick-add chips, duration boxes, ClockPick compliance & Back ---------------- */
-await pin('SK8. Plan hub lists "Stack my stops & loads" 8th (bottom), opens verdict-first, supports +Add/presets, duration boxes, ClockPick (zero <input type="time">), and Back/tab-leave', async () => {
+await pin('SK8. Plan hub lists "Stack my stops & loads" 8th (above "Do I Make It Back or Motel?"), opens verdict-first, supports +Add/presets, duration boxes, ClockPick (zero <input type="time">), and Back/tab-leave', async () => {
   await seed({ tab: 'plan', nowOverride: NOW_06, segments: FRESH_SEGS, current: null });
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 8 || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads') {
+  if (items.length !== 9 || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 

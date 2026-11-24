@@ -175,7 +175,7 @@ for (const [W, H] of [[412, 915], [360, 640]]) {
     // scoped to the Plan page: the strip keeps every panel mounted, and the Now page
     // carries plan-item-styled shortcuts of its own — the hub is the Plan page's list.
     const items = await page.evaluate(() => [...document.querySelectorAll('.page-plan button.plan-item')].map((b) => b.querySelector('b')?.textContent));
-    ok(`${tag} the Plan hub lists 8 items, Hours coming back 4th, Weekly recap vs. 34 5th, When to roll & PTA 6th, Split-sleeper rescue 7th, Stack my stops & loads at bottom`, items.length === 8 && items[3] === 'Hours coming back' && items[4] === 'Weekly recap vs. 34' && items[5] === 'When to roll & PTA' && items[6] === 'Split-sleeper rescue' && items[7] === 'Stack my stops & loads', JSON.stringify(items));
+    ok(`${tag} the Plan hub lists 9 items, Hours coming back 4th, Weekly recap vs. 34 5th, When to roll & PTA 6th, Split-sleeper rescue 7th, Stack my stops & loads 8th, Do I Make It Back or Motel? at bottom`, items.length === 9 && items[3] === 'Hours coming back' && items[4] === 'Weekly recap vs. 34' && items[5] === 'When to roll & PTA' && items[6] === 'Split-sleeper rescue' && items[7] === 'Stack my stops & loads' && items[8] === 'Do I Make It Back or Motel?', JSON.stringify(items));
     // the tab tap animates the strip: the overflow question is about the screen at rest
     await page.waitForFunction(() => { const m = document.querySelector('main'), p = document.querySelector('.page.is-active'); return !m || !p || Math.abs(m.scrollLeft - p.offsetLeft) <= 1; }, null, { timeout: 2000 }).catch(() => {});
     const ov = await overflow(page);

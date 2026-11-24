@@ -90,6 +90,7 @@ const seed = async (rec) => {
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
+  A.openMotelPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -551,12 +552,12 @@ await pin('R7. 2h + 7h = 9h pairing fails FMCSA split qualification (no paused 1
 });
 
 /* ---------------- R8: Plan hub 7th button (above Stack), opens simulator, ClockPick compliance (no <input type="time">) ---------------- */
-await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above "Stack my stops & loads"), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
+await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack & Motel), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
   await seed({ tab: 'plan', nowOverride: NOW_13, segments: BASE_SEGS, current: null });
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 8 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads') {
+  if (items.length !== 9 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
@@ -616,7 +617,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above "Stack my stops 
     && timeInputs.length === 0 && timeInputsAfterToggle.length === 0
     && /21:50/.test(afterDl)
     && openedAgain && !A.isRescuePlannerOpen()
-    && itemsAfterBack.length === 8 && itemsAfterTabLeave.length === 8;
+    && itemsAfterBack.length === 9 && itemsAfterTabLeave.length === 9;
 
   return ok || JSON.stringify({
     h1,

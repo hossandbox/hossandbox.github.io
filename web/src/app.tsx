@@ -54,6 +54,12 @@ import {
   type StackStopInput, type StackResult, type StackStopOutcome, type StackLimitKind,
 } from './stack.ts';
 import {
+  evaluateMotel, loadMotelDraft, saveMotelDraft, clearMotelDraft, defaultMotelDraft, clampMotelMph,
+  MOTEL_MIN_MPH, MOTEL_MAX_MPH, MOTEL_DEFAULT_MPH, MOTEL_MAX_MILES, MOTEL_MAX_DRIVE_MIN, MOTEL_MAX_HOOK_MIN,
+  MOTEL_HOOK_PRESETS, MOTEL_MILES_PRESETS, MOTEL_MPH_PRESETS, MOTEL_DRIVE_PRESETS,
+  type MotelDistanceMode, type MotelResult,
+} from './motel.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -377,6 +383,7 @@ const I = {
   rollout: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   rescue: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
   stack: 'M12 3 3 7.5 12 12 21 7.5 12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
+  motel: 'M3 20V9M3 16h18v4M21 16v-3a3 3 0 0 0-3-3h-7v6M7 14.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM14 5h6m-3-3 3 3-3 3',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -4378,6 +4385,10 @@ export function openWeekPlanner(open = true) {
     stackPlannerOpen = false;
     stackPlannerSubs.forEach((f) => f());
   }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4408,6 +4419,10 @@ export function openRolloutPlanner(open = true) {
   if (open && stackPlannerOpen) {
     stackPlannerOpen = false;
     stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
@@ -4440,6 +4455,10 @@ export function openRescuePlanner(open = true) {
     stackPlannerOpen = false;
     stackPlannerSubs.forEach((f) => f());
   }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
 }
@@ -4471,6 +4490,10 @@ export function openStackPlanner(open = true) {
     rescuePlannerOpen = false;
     rescuePlannerSubs.forEach((f) => f());
   }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   stackPlannerSubs.forEach((f) => f());
 }
@@ -4479,6 +4502,40 @@ function useStackPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); stackPlannerSubs.add(f); return () => { stackPlannerSubs.delete(f); }; }, []);
   return stackPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for Do I Make It Back or Motel? (Meet-and-Turn & Relay Wait Cutoff Timer).
+ * Held outside `store.ts` (store is frozen) in the exact style of the other Plan tools.
+ */
+let motelPlannerOpen = false;
+const motelPlannerSubs = new Set<() => void>();
+export function openMotelPlanner(open = true) {
+  motelPlannerOpen = open;
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  motelPlannerSubs.forEach((f) => f());
+}
+export function isMotelPlannerOpen(): boolean { return motelPlannerOpen; }
+function useMotelPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); motelPlannerSubs.add(f); return () => { motelPlannerSubs.delete(f); }; }, []);
+  return motelPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4516,6 +4573,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openStackPlanner(true)}>
         <span class="plan-icon"><Icon d={I.stack} size={26} /></span>
         <span class="plan-text"><b>Stack my stops &amp; loads</b><span class="muted small">Chain 2–5 stops or back-to-back pre-plans — see where clocks break and how to rescue.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openMotelPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.motel} size={26} /></span>
+        <span class="plan-text"><b>Do I Make It Back or Motel?</b><span class="muted small">Meet-and-turn or relay wait? Exact walk-away minute to make home terminal legal.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -7488,6 +7550,436 @@ function StackTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
   );
 }
 
+/**
+ * Do I Make It Back or Motel? — Meet-and-Turn & Relay Wait Cutoff Timer (Plan tool #9).
+ * Computes the exact wall-clock minute a waiting driver must stop waiting and roll to return
+ * to their home terminal legally from their real evaluate() clocks, with 11-hr drive and
+ * 60/70-hr cycle feasibility checks, 30-min break credit from the current non-driving stretch,
+ * optional 16-hour Big Day (§395.1(o)) toggle, remember-my-lane defaults, and one-tap Night-Dispatch Alert.
+ */
+function MotelTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const appMph = clampMotelMph(s.mph || MOTEL_DEFAULT_MPH);
+  const initDraft = useMemo(() => loadMotelDraft(), []);
+  const [distanceMode, setDistanceMode] = useState<MotelDistanceMode>(initDraft.distanceMode);
+  const [miles, setMiles] = useState<number>(initDraft.miles);
+  const [mph, setMph] = useState<number>(initDraft.mph ?? appMph);
+  const [mphCustom, setMphCustom] = useState<boolean>(initDraft.mph !== null);
+  const [mphText, setMphText] = useState<string>(String(initDraft.mph ?? appMph));
+  const [mphNote, setMphNote] = useState<string | null>(null);
+  const [driveMinutesDirect, setDriveMinutesDirect] = useState<number>(initDraft.driveMinutesDirect);
+  const [hookMinutes, setHookMinutes] = useState<number>(initDraft.hookMinutes);
+  // Big Day (§395.1(o)) is per-turn only — always starts OFF on fresh entry into the tool.
+  const [bigDay, setBigDay] = useState<boolean>(false);
+  const [copyNote, setCopyNote] = useState('');
+
+  // Keep return-leg & hook defaults while the app stays open (module memory; store.ts stays frozen).
+  useEffect(() => {
+    saveMotelDraft({
+      distanceMode,
+      miles,
+      mph: mphCustom ? mph : null,
+      driveMinutesDirect,
+      hookMinutes,
+      bigDay: false,
+    });
+  }, [distanceMode, miles, mph, mphCustom, driveMinutesDirect, hookMinutes]);
+
+  const onMphInput = (raw: string) => {
+    setMphText(raw);
+    const keep = `Still using ${mph} mph.`;
+    if (raw.trim() === '') {
+      setMphNote(`Enter ${MOTEL_MIN_MPH}–${MOTEL_MAX_MPH} mph. ${keep}`);
+      return;
+    }
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v < MOTEL_MIN_MPH || v > MOTEL_MAX_MPH) {
+      setMphNote(`Enter ${MOTEL_MIN_MPH}–${MOTEL_MAX_MPH} mph — your entry was not applied. ${keep}`);
+      return;
+    }
+    const rounded = Math.round(v);
+    setMph(rounded);
+    setMphCustom(true);
+    setMphNote(null);
+  };
+  const onMphBlur = () => {
+    setMphText(String(mph));
+    setMphNote(null);
+  };
+
+  const driveBox = useDurationBoxes('Return drive time', driveMinutesDirect, 0, MOTEL_MAX_DRIVE_MIN, setDriveMinutesDirect);
+  const hookBox = useDurationBoxes('Swap / hook time', hookMinutes, 0, MOTEL_MAX_HOOK_MIN, setHookMinutes);
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const res: MotelResult = useMemo(
+    () => evaluateMotel({
+      segments: logged,
+      now,
+      config: s.config,
+      distanceMode,
+      miles,
+      mph,
+      driveMinutesDirect,
+      hookMinutes,
+      bigDay,
+      currentStatus: s.current?.status ?? null,
+    }),
+    [logged, now, s.config, distanceMode, miles, mph, driveMinutesDirect, hookMinutes, bigDay, s.current?.status],
+  );
+
+  const copyAlert = async () => {
+    if (!res.dispatchText) return;
+    const r = await shareVerdictText(res.dispatchText);
+    if (r === 'shared') return;
+    setCopyNote(r === 'copied' ? 'Copied ✓' : 'Select & copy below');
+    window.setTimeout(() => setCopyNote(''), 2500);
+  };
+
+  const resetLane = () => {
+    clearMotelDraft();
+    const d = defaultMotelDraft();
+    setDistanceMode(d.distanceMode);
+    setMiles(d.miles);
+    setMph(appMph);
+    setMphText(String(appMph));
+    setMphCustom(false);
+    setMphNote(null);
+    setDriveMinutesDirect(d.driveMinutesDirect);
+    setHookMinutes(d.hookMinutes);
+    setBigDay(false);
+  };
+
+  const hist = cycleBasis(s, now, res.cycleWindowDays);
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Do I Make It Back or Motel?</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Exact minute you must stop waiting at the meet point and roll to reach home terminal legally.
+      </p>
+
+      {/* 1. VERDICT FIRST — ONE GIANT CUTOFF TIME */}
+      <Card tone={res.tone}>
+        <div
+          class="motel-verdict"
+          data-motel-verdict="1"
+          data-motel-status={res.status}
+          data-motel-binding={res.binding}
+          data-motel-cutoff={res.cutoffMinute !== null ? String(res.cutoffMinute) : ''}
+        >
+          <Sign kind={res.sign}>{res.verdictLabel}</Sign>
+
+          {res.cutoffMinute !== null && res.cutoffHM && (
+            <div
+              class={`motel-cutoff-block${res.status === 'passed' ? ' is-bad' : res.tone === 'warn' ? ' is-warn' : ''}`}
+              data-motel-cutoff-block="1"
+            >
+              <span class="motel-cutoff-lbl">
+                {res.status === 'passed' ? 'Walk-away cutoff passed' : 'Must roll by'}
+              </span>
+              <span class="motel-cutoff-time mono" data-motel-cutoff-hm="1">{res.cutoffHM}</span>
+              <span class="motel-cutoff-meta">
+                {res.status === 'ready' && res.waitLeftMinutes !== null
+                  ? (res.waitLeftMinutes > 0
+                      ? `${dur(res.waitLeftMinutes)} of wait left · ${res.homeZoneName}`
+                      : `Roll now — 0m of wait left · ${res.homeZoneName}`)
+                  : res.waitLeftMinutes !== null
+                    ? `${dur(-res.waitLeftMinutes)} past cutoff · ${res.homeZoneName}`
+                    : res.homeZoneName}
+              </span>
+            </div>
+          )}
+
+          <p class="motel-headline" data-motel-headline="1">{res.headline}</p>
+          {res.subline && <p class="motel-subline" data-motel-subline="1">{res.subline}</p>}
+
+          {res.earliestRollWarning && (
+            <p
+              class="warnbox"
+              data-motel-earliest-roll="1"
+              data-motel-earliest-roll-hm={res.earliestRollHM ?? ''}
+              data-motel-earliest-roll-minute={res.earliestRollMinute !== null ? String(res.earliestRollMinute) : ''}
+            >
+              {res.earliestRollWarning}
+            </p>
+          )}
+
+          {res.status === 'ready' && res.backIfRollNowHM && res.backAtCutoffHM && (
+            <p
+              class="motel-subline"
+              data-motel-back-eta="1"
+              data-motel-roll-now-over-window={res.rollNowOverWindow ? '1' : '0'}
+            >
+              Est. back at terminal:{' '}
+              <b class="mono" style={res.rollNowOverWindow ? 'color:var(--bad)' : undefined}>{res.backIfRollNowHM}</b> if rolling now
+              {res.enRouteBreakIfRollNowMinutes > 0 && (
+                res.rollNowOverWindow
+                  ? <> (incl. 30m break — <b style="color:var(--bad)">past {res.windowLimitMinutes / 60}h window</b>)</>
+                  : ' (incl. 30m break)'
+              )}
+              {res.rollNowOverWindow && res.enRouteBreakIfRollNowMinutes === 0 && (
+                <> (<b style="color:var(--bad)">past {res.windowLimitMinutes / 60}h window</b>)</>
+              )}
+              {res.backAtCutoffMinute !== res.backIfRollNowMinute && (
+                <> (<b class="mono">{res.backAtCutoffHM}</b> at cutoff{res.enRouteBreakAtCutoffMinutes > 0 ? ', incl. 30m break' : ''})</>
+              )}
+              .
+            </p>
+          )}
+
+          {res.bindingText && (
+            <div class="motel-rule-pill" data-motel-rule="1">
+              <span>{res.bindingText}</span>
+            </div>
+          )}
+
+          {/* Feasibility & real-clock strip */}
+          <div class="rescue-clocks">
+            <div class={`rescue-clock-pill${!res.driveFeasible ? ' motel-pill-bad' : ''}`}>
+              <span>{res.driveLimitMinutes / 60}h drive left</span>
+              <b class="mono">{dur(res.driveRemainingMinutes)}</b>
+            </div>
+            <div class={`rescue-clock-pill${res.status === 'passed' ? ' motel-pill-bad' : ''}`}>
+              <span>{res.windowLimitMinutes / 60}h window ends</span>
+              <b class="mono">{res.windowEndHM}</b>
+            </div>
+            <div class={`rescue-clock-pill${!res.cycleFeasible ? ' motel-pill-bad' : ''}`}>
+              <span>{res.cycleLimitMinutes / 60}h cycle left</span>
+              <b class="mono">{dur(res.cycleRemainingMinutes)}</b>
+            </div>
+          </div>
+
+          {res.waitingOnDutyNote && (
+            <p class="muted small" style="margin:0" data-motel-onduty-note="1">{res.waitingOnDutyNote}</p>
+          )}
+
+          {/* 30-minute break status derived from current non-driving stretch */}
+          <div
+            class={`motel-break-box${res.breakCovered ? ' is-covered' : ' is-short'}`}
+            data-motel-break="1"
+            data-motel-break-covered={res.breakCovered ? '1' : '0'}
+            data-motel-break-short={String(res.breakMinutesShort)}
+          >
+            <div>{res.breakLine}</div>
+            {res.returnOverEightNote && (
+              <div class="muted small" style="margin-top:4px">{res.returnOverEightNote}</div>
+            )}
+          </div>
+
+          <p class="muted small" style="margin:0">
+            Live from your log at <b class="mono">{res.nowHM}</b> ({res.homeZoneName}) · Return drive{' '}
+            <b class="mono">{dur(res.returnDriveMinutes)}</b> + swap/hook <b class="mono">{dur(res.hookMinutes)}</b>.
+          </p>
+
+          {/* One-tap Copy Night-Dispatch Alert */}
+          {res.validInput && res.dispatchText && (
+            <div class="stack-dispatch-box">
+              <div class="rollout-pta-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  data-motel-copy-btn="1"
+                  onClick={copyAlert}
+                >
+                  {copyNote || 'Copy Night-Dispatch Alert'}
+                </button>
+              </div>
+              <pre class="rollout-pta-text" data-motel-dispatch="1">{res.dispatchText}</pre>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* 2. INPUTS — BIG TAP TARGETS FOR 1:45 AM */}
+      <Card title="Your return leg &amp; swap">
+        <div class="motel-inputs" data-motel-inputs="1">
+          {/* Return miles OR Return drive time */}
+          <div class="motel-section">
+            <div class="motel-section-head">
+              <span class="stat-label">Return leg to home terminal</span>
+              <b class="mono">{dur(res.returnDriveMinutes)}</b>
+            </div>
+            <div class="rollout-seg" role="group" aria-label="Return leg entry mode">
+              <button
+                type="button"
+                class={distanceMode === 'miles' ? 'on' : ''}
+                data-motel-mode="miles"
+                onClick={() => setDistanceMode('miles')}
+              >
+                Return miles
+              </button>
+              <button
+                type="button"
+                class={distanceMode === 'time' ? 'on' : ''}
+                data-motel-mode="time"
+                onClick={() => setDistanceMode('time')}
+              >
+                Drive time
+              </button>
+            </div>
+
+            {distanceMode === 'miles' ? (
+              <>
+                <div class="rollout-chips" role="group" aria-label="Return miles presets">
+                  {MOTEL_MILES_PRESETS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      class={miles === m ? 'on' : ''}
+                      onClick={() => setMiles(m)}
+                    >
+                      {m} mi
+                    </button>
+                  ))}
+                </div>
+                <div class="rollout-fieldgrid">
+                  <label>Return miles
+                    <input
+                      type="number"
+                      class="num"
+                      inputMode="numeric"
+                      min={1}
+                      max={MOTEL_MAX_MILES}
+                      data-motel-miles="1"
+                      aria-label="Return miles"
+                      value={miles}
+                      onInput={(e) => {
+                        const v = Number((e.target as HTMLInputElement).value);
+                        setMiles(Number.isFinite(v) ? Math.max(0, Math.min(MOTEL_MAX_MILES, Math.round(v))) : 0);
+                      }}
+                    />
+                  </label>
+                  <label>Avg speed (mph)
+                    <input
+                      type="number"
+                      class="num"
+                      inputMode="numeric"
+                      min={MOTEL_MIN_MPH}
+                      max={MOTEL_MAX_MPH}
+                      data-motel-mph="1"
+                      aria-label="Average speed mph"
+                      value={mphText}
+                      onInput={(e) => onMphInput((e.target as HTMLInputElement).value)}
+                      onBlur={onMphBlur}
+                    />
+                  </label>
+                </div>
+                {mphNote && <p class="small warn" style="margin:2px 0 0" data-motel-mph-note="1">{mphNote}</p>}
+                <div class="rollout-chips" role="group" aria-label="Speed presets">
+                  {MOTEL_MPH_PRESETS.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      class={mph === v ? 'on' : ''}
+                      onClick={() => { setMph(v); setMphText(String(v)); setMphCustom(true); setMphNote(null); }}
+                    >
+                      {v} mph
+                    </button>
+                  ))}
+                </div>
+                <p class="muted small" style="margin:2px 0 0">
+                  Return drive: <b class="mono">{dur(res.returnDriveMinutes)}</b> at {res.effectiveMph} mph.
+                </p>
+              </>
+            ) : (
+              <>
+                <div class="rollout-chips" role="group" aria-label="Return drive time presets">
+                  {MOTEL_DRIVE_PRESETS.map((p) => (
+                    <button
+                      key={p.minutes}
+                      type="button"
+                      class={driveMinutesDirect === p.minutes ? 'on' : ''}
+                      onClick={() => setDriveMinutesDirect(p.minutes)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div class="qs-row motel-dur-row" data-motel-drive-box="1">
+                  <span class="small muted">Custom drive time</span>
+                  {driveBox.boxes}
+                </div>
+                {driveBox.note && <p class="small warn" style="margin:2px 0 0">{driveBox.note}</p>}
+              </>
+            )}
+          </div>
+
+          {/* Swap / break-and-hook time */}
+          <div class="motel-section">
+            <div class="motel-section-head">
+              <span class="stat-label">Swap / break-and-hook time</span>
+              <b class="mono">{dur(hookMinutes)}</b>
+            </div>
+            <div class="rollout-chips" role="group" aria-label="Swap and hook presets">
+              {MOTEL_HOOK_PRESETS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  class={hookMinutes === m ? 'on' : ''}
+                  data-motel-hook-chip={String(m)}
+                  onClick={() => setHookMinutes(m)}
+                >
+                  {m}m
+                </button>
+              ))}
+            </div>
+            <div class="qs-row motel-dur-row" data-motel-hook-box="1">
+              <span class="small muted">Custom hook time</span>
+              {hookBox.boxes}
+            </div>
+            {hookBox.note && <p class="small warn" style="margin:2px 0 0">{hookBox.note}</p>}
+          </div>
+
+          {/* 16-hour Big Day (§395.1(o)) toggle */}
+          <div class="motel-section">
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={bigDay}
+                data-motel-bigday="1"
+                onChange={(e) => setBigDay((e.target as HTMLInputElement).checked)}
+              />
+              <span>
+                <b>16-hour Big Day (§395.1(o))</b>
+                <br />
+                <span class="muted small">Extends window from 14h to 16h — driving limit stays 11h.</span>
+              </span>
+            </label>
+            {bigDay && (
+              <div class="motel-bigday-warn" data-motel-bigday-warn="1">
+                <b>Eligibility check:</b> {res.bigDayEligibilityWarning}
+                {res.bigDayBlockedByLog && res.bigDayLogNote && (
+                  <p style="margin:6px 0 0"><b>From your log:</b> {res.bigDayLogNote}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div class="motel-section">
+            <p class="muted small" style="margin:0" data-motel-lane-note="1">
+              Return leg and hook time are kept while the app stays open (Big Day resets to off each time you open this tool).
+            </p>
+            <button type="button" class="ghost wide" onClick={resetLane}>
+              Reset lane defaults
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* 3. LOG BASIS DISCLOSURE + PLANNING FRAMING */}
+      {hist !== 'known' && (
+        <div class="warnbox small" style="margin-top:10px">
+          Your log does not cover a full {res.cycleWindowDays}-day cycle yet, so unlogged past days count as 0h. Update past days in <b>Log</b> or{' '}
+          <button class="link" style="display:inline;padding:0;min-height:0" onClick={() => { openMotelPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}>Hours coming back</button>.
+        </div>
+      )}
+      <p class="motel-foot">
+        Planning estimate only — not legal advice and not an ELD. Your official log and your carrier's ELD govern.
+      </p>
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -8794,7 +9286,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -8806,15 +9298,17 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   rollout: 'When to roll & PTA',
   rescue: 'Split-sleeper rescue',
   stack: 'Stack my stops & loads',
+  motel: 'Do I Make It Back or Motel?',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
     if (weekOpen) return 'week';
     if (rolloutOpen) return 'rollout';
     if (rescueOpen) return 'rescue';
     if (stackOpen) return 'stack';
+    if (motelOpen) return 'motel';
   }
   return null;
 }
@@ -8870,6 +9364,7 @@ export function App() {
   const rolloutOpen = useRolloutPlanner();
   const rescueOpen = useRescuePlanner();
   const stackOpen = useStackPlanner();
+  const motelOpen = useMotelPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -8877,7 +9372,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -8932,7 +9427,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -9128,6 +9623,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && rolloutPlannerOpen) openRolloutPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && rescuePlannerOpen) openRescuePlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && stackPlannerOpen) openStackPlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && motelPlannerOpen) openMotelPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -9156,15 +9652,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -9214,7 +9710,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -9412,7 +9908,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -9444,6 +9940,7 @@ export function App() {
               {displayedTool.tool === 'rollout' && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
               {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
               {displayedTool.tool === 'stack' && <StackTab s={s} now={now} onBack={() => openStackPlanner(false)} />}
+              {displayedTool.tool === 'motel' && <MotelTab s={s} now={now} onBack={() => openMotelPlanner(false)} />}
               {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}

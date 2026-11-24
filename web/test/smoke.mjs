@@ -6614,15 +6614,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
     `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
 
-  // 8. Plan tab placement (5th .plan-item, above tools #6–#8) & WeekRecapTab SSR render order (verdict banner first)
+  // 8. Plan tab placement (5th .plan-item, above tools #6–#9) & WeekRecapTab SSR render order (verdict banner first)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
+  A.openMotelPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 8 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads',
+  need(itemTitles.length === 9 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6875,15 +6876,16 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(!pCycleInf.feasible && /70-hour cycle/.test(pCycleInf.headline) && pCycleInf.recovery !== null,
     `f6 cycle infeasible: feasible=${pCycleInf.feasible} headline="${pCycleInf.headline}"`);
 
-  // Fixture 7: Plan hub placement (6th item, above tools #7–#8) & RolloutTab SSR render order (verdict first, checklist, PTA)
+  // Fixture 7: Plan hub placement (6th item, above tools #7–#9) & RolloutTab SSR render order (verdict first, checklist, PTA)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
+  A.openMotelPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 8 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 9 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -6991,6 +6993,50 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`stack my stops & loads: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('stack my stops & loads (legal 3-stop, SSR verdict-first, dispatch text, zero input[type=time]): OK');
+}
+// --- Do I Make It Back or Motel? ("Do I Make It Back or Motel?", Plan tab tool #9)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const MT = await import('../src/motel.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, dayStartMinute: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago') + m0;
+  const now0153 = chi(11, 1, 53);
+  const segsMeet = [
+    { status: 'OFF', start: chi(10, 8, 0), end: chi(10, 18, 0), createdAt: 1 },
+    { status: 'ON', start: chi(10, 18, 0), end: chi(10, 18, 30), createdAt: 2 },
+    { status: 'D', start: chi(10, 18, 30), end: chi(10, 23, 30), createdAt: 3 },
+    { status: 'OFF', start: chi(10, 23, 30), end: now0153, createdAt: 4 },
+  ];
+  const rOk = MT.evaluateMotel({
+    segments: segsMeet, now: now0153, config: cfgChi,
+    distanceMode: 'miles', miles: 275, mph: 55, driveMinutesDirect: 300, hookMinutes: 30, bigDay: false,
+  });
+  need(rOk.status === 'ready' && rOk.cutoffMinute === chi(11, 2, 30) && rOk.waitLeftMinutes === 37 && rOk.breakCovered,
+    `motel smoke cutoff: status=${rOk.status} cutoff=${rOk.cutoffHM} wait=${rOk.waitLeftMinutes}`);
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
+  A.openStackPlanner(false);
+  MT.clearMotelDraft();
+  A.openMotelPlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now0153, config: cfgChi, segments: segsMeet, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const motelHtml = pageOut(render(h(App, {})), 'page-tool');
+  const vAt = motelHtml.indexOf('data-motel-verdict="1"');
+  const iAt = motelHtml.indexOf('data-motel-inputs="1"');
+  need(vAt > 0 && iAt > vAt, `motel SSR order wrong: verdict=${vAt} inputs=${iAt}`);
+  need(motelHtml.includes('data-motel-dispatch="1"') && motelHtml.includes('my ELD governs'), 'motel SSR missing dispatch alert');
+  need(!/<input[^>]+type="time"/.test(motelHtml), 'motel SSR must not contain plain <input type="time">');
+  A.openMotelPlanner(false);
+
+  if (bad.length) throw new Error(`do i make it back or motel: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('do i make it back or motel (14h cutoff, SSR verdict-first, dispatch alert, zero input[type=time]): OK');
 }
 // --- Carrier-day exact start time (HH:MM): persistence, clamping, SSR formatting
 {
