@@ -1605,6 +1605,42 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 }
 
 /* ===================================================================================
+   MILES LEFT IN MY 70 — Weekly Miles & Governed-Truck Cycle Pace Check (Plan tool #12)
+   Uses only existing palette tokens so both day and night themes keep WCAG AA contrast.
+   =================================================================================== */
+.miles-standing { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--accent); font-size: 13px; line-height: 1.4; color: var(--text); margin: 0 0 var(--s-10); }
+.miles-verdict { display: flex; flex-direction: column; gap: var(--s-8); }
+.miles-headline { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.3; color: var(--text); }
+.miles-tank { display: flex; flex-direction: column; gap: 4px; padding: var(--s-10) var(--s-12); border-radius: var(--r-12); background: var(--screen); border: 1px solid var(--line); }
+.miles-tank-lbl { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.miles-tank-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-8); flex-wrap: wrap; }
+.miles-hero-hours { font-size: 32px; font-weight: 800; line-height: 1.05; color: var(--text); font-variant-numeric: tabular-nums; }
+.miles-hero-miles { font-size: 20px; font-weight: 800; line-height: 1.15; color: var(--text); font-variant-numeric: tabular-nums; }
+.miles-tank-sub { font-size: 13px; color: var(--muted); line-height: 1.38; }
+.miles-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-6); }
+.miles-metric { display: flex; flex-direction: column; gap: 2px; padding: var(--s-8); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); min-width: 0; }
+.miles-metric-lbl { font-size: 12px; font-weight: 700; color: var(--muted); }
+.miles-metric-val { font-size: 16px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.miles-trim { margin: 0; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 65%, var(--line)); border-left: 4px solid var(--warn); font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text); }
+.miles-cap-note { margin: 0; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--accent); font-size: 13px; line-height: 1.38; color: var(--text); }
+.miles-inputs { display: flex; flex-direction: column; gap: var(--s-12); }
+.miles-section { display: flex; flex-direction: column; gap: var(--s-6); padding-top: var(--s-10); border-top: 1px solid var(--line); }
+.miles-section:first-child { padding-top: 0; border-top: 0; }
+.miles-section-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); flex-wrap: wrap; }
+.miles-dow-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.miles-dow-row button { min-height: 44px; padding: 0 2px; font-size: 13px; font-weight: 700; min-width: 0; }
+.miles-dow-row button.on { border: 2px solid var(--accent); background: var(--tint-accent); color: var(--text); }
+.miles-days { display: flex; flex-direction: column; gap: 6px; }
+.miles-day-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--s-6); padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); font-size: 13px; color: var(--text); }
+.miles-day-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.miles-day-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.miles-day-sub { font-size: 12px; color: var(--muted); }
+@media (max-width: 360px) {
+  .miles-metrics { grid-template-columns: minmax(0, 1fr); }
+  .miles-dow-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ===================================================================================
    SPLIT DECISION MOTION SYSTEM
    One coherent, refresh-rate-independent motion system across the entire app.
    - Curves cap peak velocity <= 1.71x with gentle onset (v0 <= 0.64) and >= 6% travel
