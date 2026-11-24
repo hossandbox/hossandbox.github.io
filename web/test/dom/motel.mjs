@@ -94,6 +94,7 @@ const seed = async (rec) => {
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
   A.openLegalPlanner(false);
+  A.openFlipPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -158,7 +159,7 @@ await pin('M1. 14-hr window binds: exact cutoff = windowEnd - returnDrive - hook
   // DOM check: Plan hub 9th button -> opens MotelTab verdict-first, enters 275 mi, checks live tick +10m
   await seed({ tab: 'plan', nowOverride: NOW_0153, segments: MEET_SEGS, current: { status: 'OFF', since: chi(10, 23, 30), createdAt: 4 } });
   const opened = await openMotelViaHub();
-  if (!opened || opened.items.length !== 10) return `Plan hub count=${opened?.items.length}`;
+  if (!opened || opened.items.length !== 11) return `Plan hub count=${opened?.items.length}`;
   const ninthTitle = all((n) => n.localName === 'b', opened.items[8])[0]?.textContent?.trim();
   if (ninthTitle !== 'Do I Make It Back or Motel?') return `9th title="${ninthTitle}"`;
   const rm = opened.rm;

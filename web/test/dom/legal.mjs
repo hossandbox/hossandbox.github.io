@@ -100,6 +100,7 @@ const seed = async (rec = {}) => {
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
   A.openLegalPlanner(false);
+  A.openFlipPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tab: 'plan',
@@ -484,7 +485,7 @@ await pin('LG9. Safe Haven (§397.5 explosives-only) static card from tool home,
 
   const items = opened.items;
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 10 || titles[9] !== 'Can I Legally Use It?') {
+  if (items.length !== 11 || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock') {
     return `Plan hub placement wrong: count=${items.length} titles=${JSON.stringify(titles)}`;
   }
 

@@ -64,6 +64,11 @@ import {
   type LegalAnswer, type LegalItemId, type LegalVerdict,
 } from './legal.ts';
 import {
+  FLIP_PRESETS, FLIP_STANDING_LINE, defaultShutdownMinute, planFlipBridges,
+  formatFlipWallDateTime, resolveFlipWallMinute, formatHM,
+  type FlipOptionA, type FlipOptionB, type FlipOptionC,
+} from './flip.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -389,6 +394,7 @@ const I = {
   stack: 'M12 3 3 7.5 12 12 21 7.5 12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
   motel: 'M3 20V9M3 16h18v4M21 16v-3a3 3 0 0 0-3-3h-7v6M7 14.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM14 5h6m-3-3 3 3-3 3',
   legal: 'M12 3 5 6v6c0 5 3.5 8.5 7 9.5 3.5-1 7-4.5 7-9.5V6l-7-3zM9 12l2 2 4-4',
+  flip: 'M21 12a9 9 0 0 0-15.5-6.3L3 8M3 3v5h5M3 12a9 9 0 0 0 15.5 6.3L21 16M16 16h5v5M12 7v5l3 2',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -468,6 +474,8 @@ export type SheetKind =
   | { kind: 'rescuetime'; deadlineMinute: number; homeZoneName: string; homeTimeZone: string; onApply: (minute: number) => void }
   // Stack My Stops & Loads: per-stop optional appointment or start time on the shared clock picker.
   | { kind: 'stacktime'; mode: 'appt' | 'departure'; title: string; initialMinute: number; entryZoneName: string; entryTimeZone: string; onApply: (minute: number) => void }
+  // Flip My Clock: shutdown time or custom target roll-out time on the shared clock picker.
+  | { kind: 'fliptime'; mode: 'shutdown' | 'target'; initialMinute: number; targetHour?: number; targetMinute?: number; homeZoneName: string; homeTimeZone: string; onApplyShutdown?: (minute: number) => void; onApplyTarget?: (hour: number, minute: number) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // Carrier-day exact start time (HH:MM) picker in Settings, on the shared ClockPick.
@@ -4398,6 +4406,10 @@ export function openWeekPlanner(open = true) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
   }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4436,6 +4448,10 @@ export function openRolloutPlanner(open = true) {
   if (open && legalPlannerOpen) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
+  }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
@@ -4476,6 +4492,10 @@ export function openRescuePlanner(open = true) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
   }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
 }
@@ -4515,6 +4535,10 @@ export function openStackPlanner(open = true) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
   }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   stackPlannerSubs.forEach((f) => f());
 }
@@ -4552,6 +4576,10 @@ export function openMotelPlanner(open = true) {
   if (open && legalPlannerOpen) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
+  }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   motelPlannerSubs.forEach((f) => f());
@@ -4591,6 +4619,10 @@ export function openLegalPlanner(open = true) {
     motelPlannerOpen = false;
     motelPlannerSubs.forEach((f) => f());
   }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   legalPlannerSubs.forEach((f) => f());
 }
@@ -4599,6 +4631,49 @@ function useLegalPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); legalPlannerSubs.add(f); return () => { legalPlannerSubs.delete(f); }; }, []);
   return legalPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for Flip My Clock (Shift-Start & Schedule-Flip Bridge Planner).
+ * Held outside `store.ts` (store is frozen) in the exact style of the other Plan tools.
+ */
+let flipPlannerOpen = false;
+const flipPlannerSubs = new Set<() => void>();
+export function openFlipPlanner(open = true) {
+  flipPlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'fliptime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  flipPlannerSubs.forEach((f) => f());
+}
+export function isFlipPlannerOpen(): boolean { return flipPlannerOpen; }
+function useFlipPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); flipPlannerSubs.add(f); return () => { flipPlannerSubs.delete(f); }; }, []);
+  return flipPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4646,6 +4721,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openLegalPlanner(true)}>
         <span class="plan-icon"><Icon d={I.legal} size={26} /></span>
         <span class="plan-text"><b>Can I Legally Use It?</b><span class="muted small">3 AM HOS exception check — Adverse, PC, Yard Move, 16-hr Big Day, Safe Haven.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openFlipPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.flip} size={26} /></span>
+        <span class="plan-text"><b>Flip My Clock</b><span class="muted small">Shift your roll-out onto a 21:00, 00:01, 03:00, or custom start window — compare legal bridges.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -8342,6 +8422,406 @@ function LegalTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
   );
 }
 
+/* ============================================================ Flip My Clock (Plan tool #11) */
+
+/**
+ * Shared ClockPick sheet for Flip My Clock:
+ * - `mode === 'shutdown'`: full date + time picker (converted through `deviceTz`, same pattern as StackTimeSheet).
+ * - `mode === 'target'`: time-of-day picker (`timeOnly`, same pattern as Settings DayStartSheet).
+ */
+function FlipTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { kind: 'fliptime' }>; now: number; closing?: boolean }) {
+  if (k.mode === 'target') {
+    const [at, setAt] = useState<number>(() => dayStartAnchor(k.targetHour ?? 21, k.targetMinute ?? 0));
+    const setPick = (v: number) => {
+      const d = new Date(v * 60000);
+      setAt(dayStartAnchor(d.getHours(), d.getMinutes()));
+    };
+    const d = new Date(at * 60000);
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const hm = formatHM(h, m);
+    const apply = () => {
+      k.onApplyTarget?.(h, m);
+      openSheet(null);
+    };
+    return (
+      <Sheet title={`Target roll-out (${k.homeZoneName})`} closing={closing}>
+        <p class="muted small" style="margin:0">Desired roll-out time in <b>{k.homeZoneName}</b> ({k.homeTimeZone}).</p>
+        <ClockPick
+          timeOnly
+          at={at}
+          set={setPick}
+          now={at}
+          future={false}
+          say="Target roll-out"
+          name="Target roll-out time"
+          keys={KEYS_DAYSTART}
+          sub={`Home terminal time (${k.homeZoneName}) · tap the time to pick it`}
+        />
+        <button class="primary wide ed-go" data-flip-time-apply="1" onClick={apply}>
+          Apply · {hm} ({k.homeZoneName})
+        </button>
+      </Sheet>
+    );
+  }
+
+  const nowWall = formatFlipWallDateTime(now, k.homeTimeZone);
+  const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
+  const [at, setAt] = useState<number>(() => {
+    const wall = formatFlipWallDateTime(k.initialMinute, k.homeTimeZone);
+    const parsed = resolveWallDateTime(wall.date, wall.time, deviceTz);
+    return parsed ?? pickerNow;
+  });
+  const apply = () => {
+    const wall = formatFlipWallDateTime(at, deviceTz);
+    const resolved = resolveFlipWallMinute(wall.date, wall.time, k.homeTimeZone);
+    if (resolved !== null) k.onApplyShutdown?.(resolved);
+    openSheet(null);
+  };
+  return (
+    <Sheet title={`Shutting down (${k.homeZoneName})`} closing={closing}>
+      <p class="muted small" style="margin:0">Wall-clock time in <b>{k.homeZoneName}</b> time.</p>
+      <ClockPick
+        at={at}
+        set={setAt}
+        now={pickerNow}
+        future={true}
+        say="Shutting down"
+        name="Shutdown time"
+        keys={KEYS_HOURS}
+      />
+      <button class="primary wide ed-go" data-flip-time-apply="1" onClick={apply}>
+        Apply · {clockFull(at)} ({k.homeZoneName})
+      </button>
+    </Sheet>
+  );
+}
+
+/**
+ * Flip My Clock — Shift-Start & Schedule-Flip Bridge Planner (Plan tool #11 / Spec #4).
+ * Compares 2–3 cleanest legal HOS bridges from shutdown to a target roll-out time using `evaluate()`.
+ * Session-only state (zero new localStorage keys); shared ClockPick for shutdown & custom target.
+ */
+function FlipTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const defShutdown = useMemo(() => defaultShutdownMinute(logged, now), [logged, now]);
+  const [customShutdown, setCustomShutdown] = useState<number | null>(null);
+  const [targetHour, setTargetHour] = useState<number>(21);
+  const [targetMinute, setTargetMinute] = useState<number>(0);
+
+  const shutdownMinute = customShutdown ?? defShutdown.minute;
+
+  const plan = useMemo(
+    () => planFlipBridges({
+      segments: logged,
+      now,
+      config: s.config,
+      shutdownMinute,
+      targetHour,
+      targetMinute,
+    }),
+    [logged, now, s.config, shutdownMinute, targetHour, targetMinute],
+  );
+
+  const openShutdownPicker = () => {
+    openSheet({
+      kind: 'fliptime',
+      mode: 'shutdown',
+      initialMinute: plan.effectiveShutdownMinute,
+      homeZoneName: plan.homeZoneName,
+      homeTimeZone: plan.homeTimeZone,
+      onApplyShutdown: (m) => setCustomShutdown(m),
+    });
+  };
+
+  const openTargetPicker = () => {
+    openSheet({
+      kind: 'fliptime',
+      mode: 'target',
+      initialMinute: now,
+      targetHour: plan.targetHour,
+      targetMinute: plan.targetMinute,
+      homeZoneName: plan.homeZoneName,
+      homeTimeZone: plan.homeTimeZone,
+      onApplyTarget: (h, m) => {
+        setTargetHour(h);
+        setTargetMinute(m);
+      },
+    });
+  };
+
+  const renderOptionA = (a: FlipOptionA) => (
+    <Card tone="good">
+      <div
+        class="flip-card"
+        data-flip-card="A"
+        data-flip-rollout={String(a.rollOutMinute)}
+        data-flip-total-rest={String(a.totalRestMinutes)}
+        data-flip-extra-rest={String(a.extraRestMinutes)}
+        data-flip-dst-gap={a.dstGapShifted ? '1' : '0'}
+        data-flip-drive={String(a.clocks.driveRemaining)}
+        data-flip-window={String(a.clocks.windowRemaining)}
+        data-flip-cycle={String(a.clocks.cycleRemaining)}
+      >
+        <div class="flip-card-head">
+          <h2 class="flip-card-title">{a.title}</h2>
+          <span class="flip-tag is-good">{a.tag}</span>
+        </div>
+        <div class="flip-hero">
+          <span class="flip-hero-lbl">
+            {a.dstGapShifted
+              ? `First roll-out after target (${plan.homeZoneName})`
+              : `Roll out on target (${plan.homeZoneName})`}
+          </span>
+          <span class="flip-hero-time mono" data-flip-a-rollout-text="1">{a.rollOutShort}</span>
+          {a.dstGapShifted && (
+            <span class="flip-note" data-flip-a-dst-note="1">
+              {plan.targetHM} does not occur that day (DST spring-forward) — this is the first roll-out after it.
+            </span>
+          )}
+          <span class="flip-hero-sub" data-flip-a-cost="1">
+            Total rest: <b class="mono">{dur(a.totalRestMinutes)}</b> ({a.restStartShort} → {a.rollOutShort}) ·{' '}
+            {a.extraRestMinutes === 0
+              ? 'Bare 10h — zero extra rest'
+              : `+${dur(a.extraRestMinutes)} extra beyond bare 10h`}
+            {a.includes34Restart ? ' · includes 34-hr cycle restart' : ''}
+          </span>
+        </div>
+        <div class="flip-metrics" data-flip-a-clocks="1">
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{a.clocks.driveLimit / 60}-hr drive</span>
+            <span class="flip-metric-val mono">{dur(a.clocks.driveRemaining)}</span>
+          </div>
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{a.clocks.windowLimit / 60}-hr window</span>
+            <span class="flip-metric-val mono">{dur(a.clocks.windowRemaining)}</span>
+          </div>
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{a.clocks.cycleLimit / 60}-hr cycle</span>
+            <span class="flip-metric-val mono">{dur(a.clocks.cycleRemaining)}</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+
+  const renderOptionB = (b: FlipOptionB) => (
+    <Card>
+      <div
+        class="flip-card"
+        data-flip-card="B"
+        data-flip-split={b.splitPair}
+        data-flip-rollout={String(b.rollOutMinute)}
+        data-flip-drive-leg={String(b.driveLegMinutes)}
+        data-flip-assumes-no-driving={b.assumesNoDrivingBeforeShutdown ? '1' : '0'}
+        data-flip-drive={String(b.clocks.driveRemaining)}
+        data-flip-window={String(b.clocks.windowRemaining)}
+        data-flip-cycle={String(b.clocks.cycleRemaining)}
+      >
+        <div class="flip-card-head">
+          <h2 class="flip-card-title">{b.title}</h2>
+          <span class="flip-tag">{b.tag}</span>
+        </div>
+        <div class="flip-hero">
+          <span class="flip-hero-lbl">
+            {b.dstGapShifted
+              ? `First roll-out after target via slide (${plan.homeZoneName})`
+              : `Roll out on target after slide (${plan.homeZoneName})`}
+          </span>
+          <span class="flip-hero-time mono" data-flip-b-rollout-text="1">{b.rollOutShort}</span>
+          {b.dstGapShifted && (
+            <span class="flip-note" data-flip-b-dst-note="1">
+              {plan.targetHM} does not occur that day (DST spring-forward) — this is the first roll-out after it.
+            </span>
+          )}
+          <span class="flip-hero-sub">
+            {b.splitPair} split-sleeper pair · drives <b class="mono">{dur(b.driveLegMinutes)}</b> between rest legs
+            {b.assumesNoDrivingBeforeShutdown ? '.' : ' (violation-free).'}
+          </span>
+        </div>
+        {b.assumesNoDrivingBeforeShutdown && b.assumptionLine && (
+          <p class="flip-assumption" data-flip-b-assumption="1">{b.assumptionLine}</p>
+        )}
+        <div class="flip-segs" data-flip-b-segments="1">
+          {b.segments.map((seg, i) => (
+            <div
+              key={i}
+              class={`flip-seg${seg.status === 'SB' ? ' is-sb' : seg.status === 'D' ? ' is-d' : ' is-off'}`}
+              data-flip-b-seg-status={seg.status}
+            >
+              <span><b>{seg.label}</b> · <span class="mono">{dur(seg.duration)}</span></span>
+              <span class="mono">{seg.startShort} → {seg.endShort}</span>
+            </div>
+          ))}
+        </div>
+        <div class="flip-metrics" data-flip-b-clocks="1">
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{b.clocks.driveLimit / 60}-hr drive</span>
+            <span class="flip-metric-val mono">{dur(b.clocks.driveRemaining)}</span>
+          </div>
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{b.clocks.windowLimit / 60}-hr window</span>
+            <span class="flip-metric-val mono">{dur(b.clocks.windowRemaining)}</span>
+          </div>
+          <div class="flip-metric">
+            <span class="flip-metric-lbl">{b.clocks.cycleLimit / 60}-hr cycle</span>
+            <span class="flip-metric-val mono">{dur(b.clocks.cycleRemaining)}</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+
+  const renderOptionC = (c: FlipOptionC) => (
+    <Card tone="warn">
+      <div
+        class="flip-card"
+        data-flip-card="C"
+        data-flip-early-start={String(c.earlyStart)}
+        data-flip-after-start={String(c.afterStart)}
+        data-flip-early-cycle={String(c.earlyClocks.cycleRemaining)}
+        data-flip-after-cycle={String(c.afterClocks.cycleRemaining)}
+        data-flip-cycle-gain={String(c.cycleGainMinutes)}
+      >
+        <div class="flip-card-head">
+          <h2 class="flip-card-title">{c.title}</h2>
+          <span class="flip-tag is-warn">{c.tag}</span>
+        </div>
+        <p class="muted small" style="margin:0">
+          Carrier-day boundary at <b class="mono">{c.boundaryShort} {plan.homeZoneName}</b> returns{' '}
+          <b class="mono">+{dur(c.cycleGainMinutes)}</b> to your {c.afterClocks.cycleLimit / 60}-hr cycle.
+        </p>
+        <div class="flip-compare">
+          <div class="flip-compare-col" data-flip-c-early="1">
+            <span class="flip-compare-lbl">Earliest post-10h start</span>
+            <span class="flip-compare-time mono">{c.earlyShort}</span>
+            <span class="flip-compare-cycle mono">{dur(c.earlyClocks.cycleRemaining)} cycle</span>
+            <span class="flip-compare-sub">
+              {c.earlyCanRoll
+                ? `Can drive ${dur(c.earlyClocks.driveNow)} immediately before ${c.boundaryWord} roll-off`
+                : `0m cycle left — cannot roll until ${c.boundaryWord}`}
+            </span>
+          </div>
+          <div class="flip-compare-col is-after" data-flip-c-after="1">
+            <span class="flip-compare-lbl">Hold past {c.boundaryWord}</span>
+            <span class="flip-compare-time mono">{c.afterShort}</span>
+            <span class="flip-compare-cycle mono">{dur(c.afterClocks.cycleRemaining)} cycle</span>
+            <span class="flip-compare-sub">
+              Hold +{dur(c.holdExtraMinutes)} · +{dur(c.cycleGainMinutes)} cycle back · Drive {dur(c.afterClocks.driveRemaining)} / Window {dur(c.afterClocks.windowRemaining)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Flip My Clock</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Compare legal HOS rest and split-sleeper bridges from your shutdown to a target roll-out time.
+      </p>
+
+      <p class="flip-standing" data-flip-standing="1">{plan.standingLine}</p>
+
+      <Card>
+        <div class="flip-controls" data-flip-controls="1" data-flip-target-hm={plan.targetHM}>
+          <div class="flip-field">
+            <div class="flip-field-head">
+              <span class="stat-label">1. Shutting down / finished</span>
+              <span class="muted small">
+                {customShutdown !== null
+                  ? 'Custom'
+                  : defShutdown.source === 'shift_end'
+                    ? 'From end of shift'
+                    : 'Default: now'}
+              </span>
+            </div>
+            <div class="flip-shutdown-row">
+              <button
+                type="button"
+                class="rowbtn"
+                data-flip-shutdown-btn="1"
+                onClick={openShutdownPicker}
+              >
+                <span>
+                  <b class="mono">{plan.shutdownShort}</b>{' '}
+                  <span class="muted small">({plan.homeZoneName})</span>
+                </span>
+                <span class="muted small">Change ›</span>
+              </button>
+              {customShutdown !== null && (
+                <button
+                  type="button"
+                  class="ghost stack-clear-btn"
+                  data-flip-shutdown-reset="1"
+                  onClick={() => setCustomShutdown(null)}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {plan.shutdownClampedToWorkEnd && (
+              <p class="muted small" style="margin:0">
+                Aligned to the end of your last logged work ({plan.shutdownShort}) so logged history is not overwritten.
+              </p>
+            )}
+          </div>
+
+          <div class="flip-field">
+            <div class="flip-field-head">
+              <span class="stat-label">2. Target roll-out time</span>
+              <span class="muted small mono" data-flip-target-display="1">
+                {plan.targetHM} {plan.homeZoneName}
+              </span>
+            </div>
+            <div class="flip-presets" role="group" aria-label="Target roll-out presets">
+              {FLIP_PRESETS.map((p) => {
+                const on = plan.activePreset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    class={on ? 'on' : undefined}
+                    aria-pressed={on}
+                    data-flip-preset={p.id}
+                    onClick={() => { setTargetHour(p.hour); setTargetMinute(p.minute); }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                class={plan.activePreset === null ? 'on' : undefined}
+                aria-pressed={plan.activePreset === null}
+                data-flip-preset="custom"
+                onClick={openTargetPicker}
+              >
+                {plan.activePreset === null ? `Custom (${plan.targetHM})` : 'Custom'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div class="flip-cards" data-flip-cards="1">
+        {plan.optionA && renderOptionA(plan.optionA)}
+        {plan.optionB && renderOptionB(plan.optionB)}
+        {plan.optionC && renderOptionC(plan.optionC)}
+        {plan.bridgeCount === 0 && (
+          <Card tone="warn">
+            <p class="small" style="margin:0">
+              No legal roll-out bridge fits within the next 2 shifts on your current cycle — check <b>Weekly recap vs. 34</b>.
+            </p>
+          </Card>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -9648,7 +10128,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal' | 'flip';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -9662,9 +10142,10 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   stack: 'Stack my stops & loads',
   motel: 'Do I Make It Back or Motel?',
   legal: 'Can I Legally Use It?',
+  flip: 'Flip My Clock',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean, flipOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
     if (weekOpen) return 'week';
@@ -9673,6 +10154,7 @@ function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boo
     if (stackOpen) return 'stack';
     if (motelOpen) return 'motel';
     if (legalOpen) return 'legal';
+    if (flipOpen) return 'flip';
   }
   return null;
 }
@@ -9685,6 +10167,7 @@ function sheetSessionKey(k: SheetKind): string {
     case 'rollouttime': return `rollouttime-${k.apptDate}-${k.apptTime}-${k.entryTimeZone}`;
     case 'rescuetime': return `rescuetime-${k.deadlineMinute}`;
     case 'stacktime': return `stacktime-${k.mode}-${k.title}-${k.initialMinute}-${k.entryTimeZone}`;
+    case 'fliptime': return `fliptime-${k.mode}-${k.initialMinute}-${k.targetHour ?? ''}-${k.targetMinute ?? ''}-${k.homeTimeZone}`;
     case 'confirm': return `confirm-${k.what}`;
     case 'edit': return `e${k.live ? 'live' : ''}${k.seg.start}-${k.live ? '' : k.seg.end}`;
     case 'add': return `a${k.inside?.start ?? ''}`;
@@ -9692,7 +10175,7 @@ function sheetSessionKey(k: SheetKind): string {
   }
 }
 
-function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean): boolean {
+function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, flipOpen: boolean): boolean {
   if (driveUp) return k.kind === 'status' || k.kind === 'since';
   if (k.kind === 'splitblock') return s.tab === 'split';
   if (k.kind === 'loadtime') return s.tab === 'load';
@@ -9700,6 +10183,7 @@ function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, roll
   if (k.kind === 'rollouttime') return s.tab === 'plan' && rolloutOpen;
   if (k.kind === 'rescuetime') return s.tab === 'plan' && rescueOpen;
   if (k.kind === 'stacktime') return s.tab === 'plan' && stackOpen;
+  if (k.kind === 'fliptime') return s.tab === 'plan' && flipOpen;
   if (k.kind === 'daystart') return s.tab === 'settings';
   return true;
 }
@@ -9730,6 +10214,7 @@ export function App() {
   const stackOpen = useStackPlanner();
   const motelOpen = useMotelPlanner();
   const legalOpen = useLegalPlanner();
+  const flipOpen = useFlipPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -9737,7 +10222,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -9792,7 +10277,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -9909,7 +10394,7 @@ export function App() {
   // exiting sheet (inert + aria-hidden) across the 200ms slide-down / morph-return exit, then
   // unmounts cleanly. Direct sheet-to-sheet switches, disclaimer, driving-view flips, and
   // prefers-reduced-motion: reduce bypass exit retention and unmount immediately.
-  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen) ? sheet : null;
+  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen, flipOpen) ? sheet : null;
   const sheetEpochRef = useRef(visibleSheet ? 1 : 0);
   const prevVisibleKeyRef = useRef<string | null>(visibleSheet ? sheetSessionKey(visibleSheet) : null);
   const visibleKey = visibleSheet ? sheetSessionKey(visibleSheet) : null;
@@ -9990,6 +10475,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && stackPlannerOpen) openStackPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && motelPlannerOpen) openMotelPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && legalPlannerOpen) openLegalPlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && flipPlannerOpen) openFlipPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -10018,15 +10504,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : isFlipPlannerOpen() ? 'flip' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); openFlipPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -10076,7 +10562,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen(), isFlipPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -10221,6 +10707,7 @@ export function App() {
       case 'rollouttime': inner = <RolloutTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'rescuetime': inner = <RescueTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'stacktime': inner = <StackTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
+      case 'fliptime': inner = <FlipTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'edit':
       case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
       case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
@@ -10274,7 +10761,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); if (isFlipPlannerOpen()) openFlipPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -10308,6 +10795,7 @@ export function App() {
               {displayedTool.tool === 'stack' && <StackTab s={s} now={now} onBack={() => openStackPlanner(false)} />}
               {displayedTool.tool === 'motel' && <MotelTab s={s} now={now} onBack={() => openMotelPlanner(false)} />}
               {displayedTool.tool === 'legal' && <LegalTab s={s} now={now} onBack={() => openLegalPlanner(false)} />}
+              {displayedTool.tool === 'flip' && <FlipTab s={s} now={now} onBack={() => openFlipPlanner(false)} />}
               {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}

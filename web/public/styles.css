@@ -1559,6 +1559,52 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 .legal-actions { display: flex; flex-wrap: wrap; gap: var(--s-8); margin-top: var(--s-4); }
 
 /* ===================================================================================
+   FLIP MY CLOCK — Shift-Start & Schedule-Flip Bridge Planner (Plan tool #11)
+   Uses only existing palette tokens so both day and night themes keep WCAG AA contrast.
+   =================================================================================== */
+.flip-standing { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--accent); font-size: 13px; line-height: 1.4; color: var(--text); margin: 0 0 var(--s-10); }
+.flip-controls { display: flex; flex-direction: column; gap: var(--s-12); }
+.flip-field { display: flex; flex-direction: column; gap: var(--s-6); }
+.flip-field-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); flex-wrap: wrap; }
+.flip-shutdown-row { display: flex; align-items: stretch; gap: var(--s-8); }
+.flip-shutdown-row > .rowbtn { flex: 1 1 auto; min-width: 0; }
+.flip-presets { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.flip-presets button { min-height: 48px; padding: 0 var(--s-12); font-size: 14px; font-weight: 700; }
+.flip-presets button.on { border: 2px solid var(--accent); background: var(--tint-accent); color: var(--text); }
+.flip-cards { display: flex; flex-direction: column; gap: var(--s-10); margin-top: var(--s-10); }
+.flip-card { display: flex; flex-direction: column; gap: var(--s-8); }
+.flip-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s-8); flex-wrap: wrap; }
+.flip-card-title { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; color: var(--text); }
+.flip-tag { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--screen); border: 1px solid var(--line); font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.flip-tag.is-good { border-color: var(--good); color: var(--good); }
+.flip-tag.is-warn { border-color: var(--warn); color: var(--warn); }
+.flip-hero { display: flex; flex-direction: column; gap: 2px; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); }
+.flip-hero-lbl { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.flip-hero-time { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
+.flip-hero-sub { font-size: 13px; color: var(--text); line-height: 1.38; }
+.flip-note { font-size: 13px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.flip-assumption { margin: 0; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--warn); border-left: 4px solid var(--warn); font-size: 13px; line-height: 1.38; color: var(--text); }
+.flip-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-6); }
+.flip-metric { display: flex; flex-direction: column; gap: 2px; padding: var(--s-8); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); min-width: 0; }
+.flip-metric-lbl { font-size: 12px; font-weight: 700; color: var(--muted); }
+.flip-metric-val { font-size: 17px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.flip-segs { display: flex; flex-direction: column; gap: 6px; }
+.flip-seg { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--s-6); padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--line); font-size: 13px; color: var(--text); }
+.flip-seg.is-sb { border-left-color: var(--sb); }
+.flip-seg.is-d { border-left-color: var(--d); }
+.flip-seg.is-off { border-left-color: var(--accent); }
+.flip-compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-8); }
+.flip-compare-col { display: flex; flex-direction: column; gap: 4px; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); min-width: 0; }
+.flip-compare-col.is-after { border-color: var(--good); }
+.flip-compare-lbl { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.flip-compare-time { font-size: 20px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.flip-compare-cycle { font-size: 15px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.flip-compare-sub { font-size: 12px; color: var(--muted); line-height: 1.35; }
+@media (max-width: 360px) {
+  .flip-metrics, .flip-compare { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ===================================================================================
    SPLIT DECISION MOTION SYSTEM
    One coherent, refresh-rate-independent motion system across the entire app.
    - Curves cap peak velocity <= 1.71x with gentle onset (v0 <= 0.64) and >= 6% travel

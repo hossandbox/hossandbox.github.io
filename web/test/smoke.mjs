@@ -6624,7 +6624,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 10 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?',
+  need(itemTitles.length === 11 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?' && itemTitles[10] === 'Flip My Clock',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6887,7 +6887,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 10 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 11 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?' && titles2[10] === 'Flip My Clock', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -7131,5 +7131,47 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`carrier-day exact start: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('carrier-day exact start (18:40 persistence, garbage clamping, SSR Settings/Notices/Log): OK');
+}
+// --- Flip My Clock ("Flip My Clock", Plan tab tool #11 / Spec #4)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const FL = await import('../src/flip.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, dayStartMinute: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago') + m0;
+  const now12 = chi(10, 12, 0);
+  const segs = [
+    { status: 'OFF', start: chi(9, 20, 0), end: chi(10, 6, 0), createdAt: 1 },
+    { status: 'D', start: chi(10, 6, 0), end: chi(10, 11, 0), createdAt: 2 },
+    { status: 'ON', start: chi(10, 11, 0), end: now12, createdAt: 3 },
+  ];
+  const plan = FL.planFlipBridges({ segments: segs, now: now12, config: cfgChi, shutdownMinute: now12, targetHour: 3, targetMinute: 0 });
+  need(plan.optionA?.rollOutMinute === chi(11, 3, 0) && plan.optionA?.totalRestMinutes === 900 && plan.optionA?.extraRestMinutes === 300,
+    `flip Option A mismatch: ${JSON.stringify(plan.optionA?.rollOutMinute)}`);
+  need(plan.optionB?.splitPair === '7/3' && plan.optionB?.rollOutMinute === chi(11, 3, 0),
+    `flip Option B mismatch: ${JSON.stringify(plan.optionB?.splitPair)}`);
+  need(plan.optionC === null, 'flip Option C should be omitted on roomy cycle');
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
+  A.openStackPlanner(false);
+  A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
+  A.openFlipPlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now12, config: cfgChi, segments: segs, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const flipHtml = pageOut(render(h(App, {})), 'page-tool');
+  need(flipHtml.includes('Flip My Clock') && flipHtml.includes(FL.FLIP_STANDING_LINE) && flipHtml.includes('data-flip-card="A"'),
+    'flip SSR missing title, standing line, or Option A');
+  need(!/<input[^>]+type="time"/.test(flipHtml), 'flip SSR must not contain plain <input type="time">');
+  A.openFlipPlanner(false);
+
+  if (bad.length) throw new Error(`flip my clock: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('flip my clock (Option A/B/C, standing line, SSR, zero input[type=time]): OK');
 }
 console.log('OK');

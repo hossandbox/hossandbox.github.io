@@ -92,6 +92,7 @@ const seed = async (rec) => {
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
   A.openLegalPlanner(false);
+  A.openFlipPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -558,7 +559,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 10 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?') {
+  if (items.length !== 11 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
@@ -618,7 +619,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
     && timeInputs.length === 0 && timeInputsAfterToggle.length === 0
     && /21:50/.test(afterDl)
     && openedAgain && !A.isRescuePlannerOpen()
-    && itemsAfterBack.length === 10 && itemsAfterTabLeave.length === 10;
+    && itemsAfterBack.length === 11 && itemsAfterTabLeave.length === 11;
 
   return ok || JSON.stringify({
     h1,
