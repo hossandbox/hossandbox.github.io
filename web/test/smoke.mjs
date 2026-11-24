@@ -6614,16 +6614,17 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(res70Fresh.recaps.wall === null && res70Fresh.recaps.totalUsableMinutes === 4200,
     `70/8 fresh should have no wall: ${JSON.stringify(res70Fresh.recaps.wall)} total=${res70Fresh.recaps.totalUsableMinutes}`);
 
-  // 8. Plan tab placement (5th .plan-item, above tools #6–#9) & WeekRecapTab SSR render order (verdict banner first)
+  // 8. Plan tab placement (5th .plan-item, above tools #6–#10) & WeekRecapTab SSR render order (verdict banner first)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 9 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?',
+  need(itemTitles.length === 10 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6876,16 +6877,17 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   need(!pCycleInf.feasible && /70-hour cycle/.test(pCycleInf.headline) && pCycleInf.recovery !== null,
     `f6 cycle infeasible: feasible=${pCycleInf.feasible} headline="${pCycleInf.headline}"`);
 
-  // Fixture 7: Plan hub placement (6th item, above tools #7–#9) & RolloutTab SSR render order (verdict first, checklist, PTA)
+  // Fixture 7: Plan hub placement (6th item, above tools #7–#10) & RolloutTab SSR render order (verdict first, checklist, PTA)
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 9 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 10 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -7037,6 +7039,51 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`do i make it back or motel: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('do i make it back or motel (14h cutoff, SSR verdict-first, dispatch alert, zero input[type=time]): OK');
+}
+// --- Can I Legally Use It? ("Can I Legally Use It?", Plan tab tool #10)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const LG = await import('../src/legal.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, dayStartMinute: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago') + m0;
+  const now03 = chi(11, 3, 0);
+  const segs = [
+    { status: 'OFF', start: chi(10, 6, 0), end: chi(10, 16, 0), createdAt: 1 },
+    { status: 'ON', start: chi(10, 16, 0), end: chi(10, 18, 0), createdAt: 2 },
+    { status: 'D', start: chi(10, 18, 0), end: chi(10, 23, 0), createdAt: 3 },
+    { status: 'OFF', start: chi(10, 23, 0), end: now03, createdAt: 4 },
+  ];
+  const evBase = E.evaluate(segs, { asOf: now03, config: cfgChi });
+  const evAdv = E.evaluate(segs, { asOf: now03, config: { ...cfgChi, adverseShifts: [evBase.shift.exceptionKey] } });
+  const advStep = LG.evaluateLegalTree('adverse', ['yes', 'yes'], { segments: segs, now: now03, config: cfgChi });
+  need(advStep.verdict?.verdict === 'YES' && advStep.verdict.preview?.after.mustStopBy === evAdv.mustStopBy,
+    `legal adverse smoke mismatch: mustStop=${advStep.verdict?.preview?.after.mustStopBy} want=${evAdv.mustStopBy}`);
+  const pcStep = LG.evaluateLegalTree('pc', ['yes', 'yes']);
+  need(pcStep.verdict?.verdict === 'YES' && pcStep.verdict.verifyCarrierPolicy === true, 'legal PC must pair YES with verifyCarrierPolicy');
+  const sh = LG.getSafeHavenCard();
+  need(sh.verdict === 'NO' && /397\.5/.test(sh.citation), 'legal Safe Haven card wrong');
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
+  A.openStackPlanner(false);
+  A.openMotelPlanner(false);
+  A.openLegalPlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: now03, config: cfgChi, segments: segs, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const legalHtml = pageOut(render(h(App, {})), 'page-tool');
+  need(legalHtml.includes('Can I Legally Use It?') && legalHtml.includes('data-legal-advisory="1"') && legalHtml.includes('data-legal-pick="safehaven"'),
+    'legal SSR missing title, advisory line, or Safe Haven entry');
+  need(!/<input[^>]+type="time"/.test(legalHtml), 'legal SSR must not contain plain <input type="time">');
+  A.openLegalPlanner(false);
+
+  if (bad.length) throw new Error(`can i legally use it: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('can i legally use it (trees, engine preview, Safe Haven, advisory line, zero input[type=time]): OK');
 }
 // --- Carrier-day exact start time (HH:MM): persistence, clamping, SSR formatting
 {

@@ -911,17 +911,18 @@ await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5
 });
 
 /* ---------------- (w) Weekly Recap vs. 34-Hour Reset & Home-Time Planner ---------------- */
-await pin('W1. Plan hub lists 9 .plan-item tools with "Weekly recap vs. 34" 5th, "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, and "Do I Make It Back or Motel?" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
+await pin('W1. Plan hub lists 10 .plan-item tools with "Weekly recap vs. 34" 5th, "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, "Do I Make It Back or Motel?" 9th, and "Can I Legally Use It?" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 9 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') return `items=${JSON.stringify(titles)}`;
+  if (items.length !== 10 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?') return `items=${JSON.stringify(titles)}`;
   fire(items[4], 'click'); await sleep(60);
   const rm = planRoom();
   const txt = rm.textContent;
@@ -933,7 +934,7 @@ await pin('W1. Plan hub lists 9 .plan-item tools with "Weekly recap vs. 34" 5th,
   if (!back || !/Plan/.test(back.textContent)) return `back=${back?.textContent}`;
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!has(rm, 'is-active') && afterItems.length === 9) || `after back active=${cls(rm)} items=${afterItems.length}`;
+  return (!has(rm, 'is-active') && afterItems.length === 10) || `after back active=${cls(rm)} items=${afterItems.length}`;
 });
 
 await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset net gain; changing budget preset & target home time updates live', async () => {
@@ -985,12 +986,13 @@ await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cy
   return ok || `60/7 text: ${txt.slice(0, 400)}`;
 });
 
-await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 9-item hub', async () => {
+await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returning to Plan shows the 10-item hub', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
@@ -999,7 +1001,7 @@ await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returni
   await seed({ tab: 'now', ...segs });
   await seed({ tab: 'plan', ...segs });
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!A.isWeekPlannerOpen() && items.length === 9) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
+  return (!A.isWeekPlannerOpen() && items.length === 10) || `open=${A.isWeekPlannerOpen()} items=${items.length}`;
 });
 
 /* ---------------- (r) Work-Backwards Appointment & Departure Planner ("When to roll & PTA") ---------------- */
@@ -1019,17 +1021,18 @@ const setRolloutAppt = async (planPg, dateStr, timeStr) => {
   return null;
 };
 
-await pin('R1. Plan hub lists 9 .plan-item tools with "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, and "Do I Make It Back or Motel?" at the bottom; tapping When to roll opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
+await pin('R1. Plan hub lists 10 .plan-item tools with "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, "Do I Make It Back or Motel?" 9th, and "Can I Legally Use It?" at the bottom; tapping When to roll opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 9 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') return `items=${JSON.stringify(titles)}`;
+  if (items.length !== 10 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?') return `items=${JSON.stringify(titles)}`;
   fire(items[5], 'click'); await sleep(60);
   const rm = planRoom();
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
@@ -1042,7 +1045,7 @@ await pin('R1. Plan hub lists 9 .plan-item tools with "When to roll & PTA" 6th, 
   const back = all((n) => n.localName === 'button' && has(n, 'back'), rm)[0];
   fire(back, 'click'); await sleep(60);
   const afterItems = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!has(rm, 'is-active') && afterItems.length === 9) || `after back active=${cls(rm)} items=${afterItems.length}`;
+  return (!has(rm, 'is-active') && afterItems.length === 10) || `after back active=${cls(rm)} items=${afterItems.length}`;
 });
 
 await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Central (home terminal) yields identical dual-displayed roll-out, 08:00-10:00 sweet spot & PTA', async () => {
@@ -1158,12 +1161,13 @@ await pin('R4. infeasible run (10h break cannot complete before roll-out): shows
   return (okChecklist && okPta) || `after shift chk=${okChecklist} pta=${okPta}`;
 });
 
-await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returning to Plan shows the 9-item hub', async () => {
+await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returning to Plan shows the 10-item hub', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
   const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5];
@@ -1172,7 +1176,7 @@ await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returnin
   await seed({ tab: 'now', ...segs });
   await seed({ tab: 'plan', ...segs });
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
-  return (!A.isRolloutPlannerOpen() && items.length === 9) || `open=${A.isRolloutPlannerOpen()} items=${items.length}`;
+  return (!A.isRolloutPlannerOpen() && items.length === 10) || `open=${A.isRolloutPlannerOpen()} items=${items.length}`;
 });
 
 await pin('R6. rollout screen has no raw <input type="time"> or <input type="date"> of its own; ClockPick inputs only appear inside the open sheet', async () => {
@@ -1587,7 +1591,7 @@ await pin('T4. transitions (d): Day/Night toggle applies CSS color/background tr
 });
 
 /* ---------------- (p) plan-dissolve (2026-11-21, Lorico): all Plan tools get the Settings-room dissolve ---------------- */
-await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap, history, week, rollout, rescue, stack, motel) dissolves into plan-room with chrome inert/hidden and ZERO strip scroll', async () => {
+await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap, history, week, rollout, rescue, stack, motel, legal) dissolves into plan-room with chrome inert/hidden and ZERO strip scroll', async () => {
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   const tools = [
@@ -1600,9 +1604,10 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
     ['rescue', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6]; fire(b, 'click'); }, 'Split-sleeper rescue'],
     ['stack', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[7]; fire(b, 'click'); }, 'Stack my stops & loads'],
     ['motel', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[8]; fire(b, 'click'); }, 'Do I Make It Back or Motel?'],
+    ['legal', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[9]; fire(b, 'click'); }, 'Can I Legally Use It?'],
   ];
   for (const [id, openFn, marker] of tools) {
-    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false);
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false);
     await seed({ tab: 'plan', ...segs });
     strip().scrollLeft = 0; scrollCalls.length = 0;
     openFn(); await sleep(60);
@@ -1620,7 +1625,7 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
       && pr.attributes?.['data-plan-tool'] === id
       && pr.textContent.includes(marker)
       && litTab() === null
-      && hubItems.length === 9;
+      && hubItems.length === 10;
     if (!ok) return `${id} failed: scrollCalls=${scrollCalls.length} appCls=${cls(appEl)} prCls=${cls(pr)} tool=${pr.attributes?.['data-plan-tool']} lit=${litTab()} hubItems=${hubItems.length}`;
   }
   // History reached from Recap ("Your last 8 days")
@@ -1636,7 +1641,7 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
     && has(appH, 'in-room') && has(appH, 'in-plan-tool')
     && has(prH, 'is-active') && prH.attributes?.['data-plan-tool'] === 'history'
     && prH.textContent.includes('Your last 8 days');
-  A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false);
+  A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false);
   return okHist || `history failed: scrollCalls=${scrollCalls.length} tool=${prH.attributes?.['data-plan-tool']}`;
 });
 
@@ -1657,8 +1662,8 @@ await pin('P2. plan-dissolve: shared room CSS (motion tokens, fixed inset:0 z-in
 await pin('P3. plan-dissolve: closing every Plan tool via its Back affordance dissolves back to origin (Plan hub / Recap / Now), restores chrome & hub scrollTop with zero strip scroll', async () => {
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
-  for (let idx = 0; idx < 9; idx++) {
-    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false);
+  for (let idx = 0; idx < 10; idx++) {
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false);
     await seed({ tab: 'plan', ...segs });
     strip().scrollLeft = 0;
     pages()[0].scrollTop = 185;
@@ -1673,7 +1678,7 @@ await pin('P3. plan-dissolve: closing every Plan tool via its Back affordance di
     const hdr = all((n) => n.localName === 'header' && has(n, 'top'))[0];
     const nav = all((n) => n.localName === 'nav' && has(n, 'tabs'))[0];
     const ok = getState().tab === 'plan'
-      && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen() && !A.isStackPlannerOpen() && !A.isMotelPlannerOpen()
+      && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen() && !A.isStackPlannerOpen() && !A.isMotelPlannerOpen() && !A.isLegalPlannerOpen()
       && !has(appEl, 'in-room') && !has(appEl, 'in-plan-tool')
       && !off(hdr) && !hid(hdr) && !off(strip()) && !hid(strip()) && !off(nav) && !hid(nav)
       && off(pr) && hid(pr) && !has(pr, 'is-active')
@@ -1717,15 +1722,16 @@ await pin('P4. plan-dissolve: hardware Back (popstate via backnav) closes sheet 
     ['rescue', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6], 'click')],
     ['stack', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[7], 'click')],
     ['motel', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[8], 'click')],
+    ['legal', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[9], 'click')],
   ]) {
-    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false);
+    A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false);
     await seed({ tab: 'plan', ...segs });
     strip().scrollLeft = 0; scrollCalls.length = 0;
     openFn(); await sleep(60);
     if (!has(planRoom(), 'is-active')) return `${id} did not open`;
     pressHardwareBack(); await sleep(60);
     const appEl = all((n) => has(n, 'app'))[0];
-    const ok = getState().tab === 'plan' && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen() && !A.isStackPlannerOpen() && !A.isMotelPlannerOpen()
+    const ok = getState().tab === 'plan' && !A.isWeekPlannerOpen() && !A.isRolloutPlannerOpen() && !A.isRescuePlannerOpen() && !A.isStackPlannerOpen() && !A.isMotelPlannerOpen() && !A.isLegalPlannerOpen()
       && !has(appEl, 'in-room') && !has(planRoom(), 'is-active') && has(pages()[0], 'is-active')
       && scrollCalls.length === 0 && strip().scrollLeft === 0;
     if (!ok) return `hw-back ${id} failed: tab=${getState().tab} appCls=${cls(appEl)} scrollCalls=${scrollCalls.length}`;

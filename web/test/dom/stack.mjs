@@ -99,6 +99,7 @@ const seed = async (rec) => {
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -872,7 +873,7 @@ await pin('SK8. Plan hub lists "Stack my stops & loads" 8th (above "Do I Make It
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 9 || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') {
+  if (items.length !== 10 || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 

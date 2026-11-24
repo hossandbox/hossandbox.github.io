@@ -322,23 +322,25 @@ await pin('M4e. the button rides the No verdict\'s fix line, says "Plan it", and
 
 /* ============================ D10-A + M8: Hours coming back ============================ */
 
-await pin('D10a. the Plan hub lists 9 items; 4th is "Hours coming back" (opens recap), 5th is "Weekly recap vs. 34", 6th is "When to roll & PTA", 7th is "Split-sleeper rescue", 8th is "Stack my stops & loads", 9th at bottom is "Do I Make It Back or Motel?"', async () => {
+await pin('D10a. the Plan hub lists 10 items; 4th is "Hours coming back" (opens recap), 5th is "Weekly recap vs. 34", 6th is "When to roll & PTA", 7th is "Split-sleeper rescue", 8th is "Stack my stops & loads", 9th is "Do I Make It Back or Motel?", 10th at bottom is "Can I Legally Use It?"', async () => {
   WALL = CD(9, 3, 4);
   await mount(driving({ tab: 'plan' }));
   const items = byClass('plan-item', planPage());
-  if (items.length !== 9) return `${items.length} items`;
+  if (items.length !== 10) return `${items.length} items`;
   const fourth = items[3];
   const fifth = items[4];
   const sixth = items[5];
   const seventh = items[6];
   const eighth = items[7];
   const ninth = items[8];
+  const tenth = items[9];
   if (!/Hours coming back/.test(fourth.textContent) || !/When your 70-hour hours return, day by day\./.test(fourth.textContent)) return fourth.textContent;
   if (!/Weekly recap vs\. 34/.test(fifth.textContent)) return `5th item: ${fifth.textContent}`;
   if (!/When to roll & PTA/.test(sixth.textContent)) return `6th item: ${sixth.textContent}`;
   if (!/Split-sleeper rescue/.test(seventh.textContent)) return `7th item: ${seventh.textContent}`;
   if (!/Stack my stops & loads/.test(eighth.textContent)) return `8th item: ${eighth.textContent}`;
   if (!/Do I Make It Back or Motel\?/.test(ninth.textContent)) return `9th item: ${ninth.textContent}`;
+  if (!/Can I Legally Use It\?/.test(tenth.textContent)) return `10th item: ${tenth.textContent}`;
   await click(fourth, 80);
   return (getState().tab === 'recap' && getState().planReturn === 'plan') || `${getState().tab}/${getState().planReturn}`;
 });

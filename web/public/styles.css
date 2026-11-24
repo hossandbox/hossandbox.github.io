@@ -1521,6 +1521,44 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 .motel-pill-bad b { color: var(--bad); }
 
 /* ===================================================================================
+   CAN I LEGALLY USE IT? — 3 AM HOS Exception Sanity Check (Plan tool #10)
+   Uses only existing palette tokens so both day and night themes keep WCAG AA contrast.
+   =================================================================================== */
+.legal-advisory { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--warn); font-size: 13px; line-height: 1.4; color: var(--text); margin: 0 0 var(--s-10); }
+.legal-list { display: flex; flex-direction: column; gap: var(--s-8); }
+.legal-home-btn { width: 100%; min-height: var(--ctl-lg); display: flex; align-items: center; justify-content: space-between; gap: var(--s-10); padding: var(--s-10) var(--s-12); border-radius: var(--r-12); background: var(--panel); border: 1px solid var(--line); color: var(--text); text-align: left; cursor: pointer; }
+.legal-home-btn.is-myth { border-left: 4px solid var(--bad); }
+.legal-home-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.legal-home-title { font-size: 16px; font-weight: 800; color: var(--text); line-height: 1.25; }
+.legal-home-cite { font-size: 12px; font-weight: 700; color: var(--muted); }
+.legal-home-prompt { font-size: 13px; color: var(--muted); line-height: 1.35; }
+.legal-q-card { display: flex; flex-direction: column; gap: var(--s-10); }
+.legal-q-step { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.legal-q-text { margin: 0; font-size: 19px; font-weight: 800; line-height: 1.3; color: var(--text); }
+.legal-q-detail { margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.legal-yn-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-8); }
+.legal-yn-btn { min-height: var(--ctl-lg); font-size: 17px; font-weight: 800; }
+.legal-verdict { display: flex; flex-direction: column; gap: var(--s-8); }
+.legal-headline { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.3; color: var(--text); }
+.legal-explain { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text); }
+.legal-carrier-warn { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--tint-warn); border: 1px solid color-mix(in srgb, var(--warn) 65%, var(--line)); border-left: 4px solid var(--warn); font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text); }
+.legal-reminder { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--accent); font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text); }
+.legal-guidance { padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px dashed var(--line); font-size: 13px; line-height: 1.42; color: var(--text); }
+.legal-preview { display: flex; flex-direction: column; gap: var(--s-8); padding: var(--s-10); border-radius: var(--r-12); background: var(--screen); border: 1px solid var(--line); }
+.legal-preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); flex-wrap: wrap; }
+.legal-preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-8); }
+.legal-preview-col { display: flex; flex-direction: column; gap: 3px; padding: var(--s-8); border-radius: var(--r-10); background: var(--panel); border: 1px solid var(--line); min-width: 0; }
+.legal-preview-col.is-after { border-color: var(--good); }
+.legal-preview-lbl { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.legal-preview-time { font-size: 24px; font-weight: 800; line-height: 1.1; color: var(--text); font-variant-numeric: tabular-nums; }
+.legal-preview-sub { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.legal-preview-rows { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); font-size: 13px; }
+.legal-preview-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-8); flex-wrap: wrap; }
+.legal-trail { display: flex; flex-direction: column; gap: 4px; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.legal-trail-row { display: flex; justify-content: space-between; gap: var(--s-8); }
+.legal-actions { display: flex; flex-wrap: wrap; gap: var(--s-8); margin-top: var(--s-4); }
+
+/* ===================================================================================
    SPLIT DECISION MOTION SYSTEM
    One coherent, refresh-rate-independent motion system across the entire app.
    - Curves cap peak velocity <= 1.71x with gentle onset (v0 <= 0.64) and >= 6% travel

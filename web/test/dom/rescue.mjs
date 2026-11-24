@@ -91,6 +91,7 @@ const seed = async (rec) => {
   A.openRescuePlanner(false);
   A.openStackPlanner(false);
   A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -552,12 +553,12 @@ await pin('R7. 2h + 7h = 9h pairing fails FMCSA split qualification (no paused 1
 });
 
 /* ---------------- R8: Plan hub 7th button (above Stack), opens simulator, ClockPick compliance (no <input type="time">) ---------------- */
-await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack & Motel), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
+await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & Legal), opens simulator verdict-first, uses ClockPick for deadline with zero <input type="time">', async () => {
   await seed({ tab: 'plan', nowOverride: NOW_13, segments: BASE_SEGS, current: null });
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 9 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?') {
+  if (items.length !== 10 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
@@ -617,7 +618,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack & Motel), 
     && timeInputs.length === 0 && timeInputsAfterToggle.length === 0
     && /21:50/.test(afterDl)
     && openedAgain && !A.isRescuePlannerOpen()
-    && itemsAfterBack.length === 9 && itemsAfterTabLeave.length === 9;
+    && itemsAfterBack.length === 10 && itemsAfterTabLeave.length === 10;
 
   return ok || JSON.stringify({
     h1,

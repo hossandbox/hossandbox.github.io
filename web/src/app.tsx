@@ -60,6 +60,10 @@ import {
   type MotelDistanceMode, type MotelResult,
 } from './motel.ts';
 import {
+  LEGAL_ADVISORY_LINE, LEGAL_HOME_ITEMS, evaluateLegalTree, getSafeHavenCard,
+  type LegalAnswer, type LegalItemId, type LegalVerdict,
+} from './legal.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -384,6 +388,7 @@ const I = {
   rescue: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
   stack: 'M12 3 3 7.5 12 12 21 7.5 12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
   motel: 'M3 20V9M3 16h18v4M21 16v-3a3 3 0 0 0-3-3h-7v6M7 14.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM14 5h6m-3-3 3 3-3 3',
+  legal: 'M12 3 5 6v6c0 5 3.5 8.5 7 9.5 3.5-1 7-4.5 7-9.5V6l-7-3zM9 12l2 2 4-4',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -4389,6 +4394,10 @@ export function openWeekPlanner(open = true) {
     motelPlannerOpen = false;
     motelPlannerSubs.forEach((f) => f());
   }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4423,6 +4432,10 @@ export function openRolloutPlanner(open = true) {
   if (open && motelPlannerOpen) {
     motelPlannerOpen = false;
     motelPlannerSubs.forEach((f) => f());
+  }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
@@ -4459,6 +4472,10 @@ export function openRescuePlanner(open = true) {
     motelPlannerOpen = false;
     motelPlannerSubs.forEach((f) => f());
   }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
 }
@@ -4494,6 +4511,10 @@ export function openStackPlanner(open = true) {
     motelPlannerOpen = false;
     motelPlannerSubs.forEach((f) => f());
   }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   stackPlannerSubs.forEach((f) => f());
 }
@@ -4528,6 +4549,10 @@ export function openMotelPlanner(open = true) {
     stackPlannerOpen = false;
     stackPlannerSubs.forEach((f) => f());
   }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   motelPlannerSubs.forEach((f) => f());
 }
@@ -4536,6 +4561,44 @@ function useMotelPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); motelPlannerSubs.add(f); return () => { motelPlannerSubs.delete(f); }; }, []);
   return motelPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for Can I Legally Use It? (3 AM HOS Exception Sanity Check).
+ * Held outside `store.ts` (store is frozen) in the exact style of the other Plan tools.
+ */
+let legalPlannerOpen = false;
+const legalPlannerSubs = new Set<() => void>();
+export function openLegalPlanner(open = true) {
+  legalPlannerOpen = open;
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  legalPlannerSubs.forEach((f) => f());
+}
+export function isLegalPlannerOpen(): boolean { return legalPlannerOpen; }
+function useLegalPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); legalPlannerSubs.add(f); return () => { legalPlannerSubs.delete(f); }; }, []);
+  return legalPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4578,6 +4641,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openMotelPlanner(true)}>
         <span class="plan-icon"><Icon d={I.motel} size={26} /></span>
         <span class="plan-text"><b>Do I Make It Back or Motel?</b><span class="muted small">Meet-and-turn or relay wait? Exact walk-away minute to make home terminal legal.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openLegalPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.legal} size={26} /></span>
+        <span class="plan-text"><b>Can I Legally Use It?</b><span class="muted small">3 AM HOS exception check — Adverse, PC, Yard Move, 16-hr Big Day, Safe Haven.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -7980,6 +8048,300 @@ function MotelTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
   );
 }
 
+/* ============================================================ Can I Legally Use It? */
+
+/**
+ * Can I Legally Use It? — 3 AM HOS Exception & Edge-Case Sanity Check (Plan tool #10).
+ *
+ * Pure offline 3-to-4-tap decision check for Adverse Driving (§395.1(b)(1)), Personal Conveyance
+ * (FMCSA 2018 PC Guidance), Yard Move (§395.28), 16-Hour Short-Haul Big Day (§395.1(o)), plus the
+ * Safe Haven myth-buster card (§397.5). Advisory FMCSA rule check only — never legal advice, never
+ * an ELD override. Session-only state; zero new localStorage keys; zero time inputs.
+ */
+function LegalTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const [selected, setSelected] = useState<LegalItemId | null>(null);
+  const [answers, setAnswers] = useState<LegalAnswer[]>([]);
+  const [copyNote, setCopyNote] = useState('');
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const clockCtx = useMemo(() => ({ segments: logged, now, config: s.config }), [logged, now, s.config]);
+
+  const pickItem = (id: LegalItemId) => {
+    setSelected(id);
+    setAnswers([]);
+    setCopyNote('');
+  };
+  const goHome = () => {
+    setSelected(null);
+    setAnswers([]);
+    setCopyNote('');
+  };
+  const answer = (ans: LegalAnswer) => {
+    setAnswers((prev) => [...prev, ans]);
+    setCopyNote('');
+  };
+  const stepBack = () => {
+    setAnswers((prev) => (prev.length > 0 ? prev.slice(0, -1) : prev));
+    setCopyNote('');
+  };
+
+  const copyAnnotation = async (text: string) => {
+    const r = await shareVerdictText(text);
+    if (r === 'shared') return;
+    setCopyNote(r === 'copied' ? 'Copied ✓' : 'Select & copy below');
+    window.setTimeout(() => setCopyNote(''), 2500);
+  };
+
+  const renderVerdict = (v: LegalVerdict, title: string, trail?: { question: string; answer: LegalAnswer }[]) => (
+    <>
+      <Card tone={v.tone}>
+        <div
+          class="legal-verdict"
+          data-legal-verdict="1"
+          data-legal-tree={v.treeId}
+          data-legal-result={v.verdict}
+          data-legal-verify-carrier={v.verifyCarrierPolicy ? '1' : '0'}
+        >
+          <Sign kind={v.sign}>{v.verdictLabel}</Sign>
+          <p class="legal-headline" data-legal-headline="1">{v.headline}</p>
+          <div class="motel-rule-pill" data-legal-cite="1">
+            <span>{v.citation}</span>
+          </div>
+          <p class="legal-explain" data-legal-explain="1">{v.explanation}</p>
+
+          {v.carrierPolicyWarning && (
+            <div class="legal-carrier-warn" data-legal-carrier-warn="1">
+              {v.carrierPolicyWarning}
+            </div>
+          )}
+
+          {v.standingReminder && (
+            <div class="legal-reminder" data-legal-reminder="1">
+              {v.standingReminder}
+            </div>
+          )}
+
+          {v.clockGuidance && (
+            <div class="legal-guidance" data-legal-clock-guidance="1">
+              {v.clockGuidance}
+            </div>
+          )}
+
+          {v.preview && (
+            <div
+              class="legal-preview"
+              data-legal-preview="1"
+              data-legal-preview-kind={v.preview.kind}
+              data-legal-other-exception={v.preview.otherExceptionActive ?? ''}
+              data-legal-before-must-stop={String(v.preview.before.mustStopBy)}
+              data-legal-after-must-stop={String(v.preview.after.mustStopBy)}
+              data-legal-before-window-end={String(v.preview.before.windowEnd)}
+              data-legal-after-window-end={String(v.preview.after.windowEnd)}
+              data-legal-before-drive-deadline={String(v.preview.before.driveDeadline)}
+              data-legal-after-drive-deadline={String(v.preview.after.driveDeadline)}
+            >
+              <div class="legal-preview-head">
+                <span class="stat-label" data-legal-preview-head="1">Live clock preview from your logged record</span>
+                <span class="muted small mono">As of {v.preview.nowHM} {v.preview.homeZoneName}</span>
+              </div>
+              {v.preview.alreadyActiveOnLog && (
+                <p class="muted small" style="margin:0">
+                  This exception is already toggled on for your current shift — showing off vs. on below.
+                </p>
+              )}
+              {v.preview.stackWarning && (
+                <p class="warnbox small" style="margin:0" data-legal-stack-warn="1">
+                  {v.preview.stackWarning}
+                </p>
+              )}
+              <div class="legal-preview-grid">
+                <div class="legal-preview-col">
+                  <span class="legal-preview-lbl" data-legal-before-lbl="1">{v.preview.beforeLabel}</span>
+                  <span class="legal-preview-time mono" data-legal-before-must-stop-hm="1">{v.preview.before.mustStopHM}</span>
+                  <span class="legal-preview-sub">Must stop by ({v.preview.before.bindingLabel})</span>
+                </div>
+                <div class={`legal-preview-col${!v.preview.blockedByLog ? ' is-after' : ''}`}>
+                  <span class="legal-preview-lbl">
+                    {v.preview.kind === 'adverse' ? 'With Adverse' : 'With 16-Hr Big Day'}
+                  </span>
+                  <span class="legal-preview-time mono" data-legal-after-must-stop-hm="1">{v.preview.after.mustStopHM}</span>
+                  <span class="legal-preview-sub">Must stop by ({v.preview.after.bindingLabel})</span>
+                </div>
+              </div>
+              <div class="legal-preview-rows">
+                <div class="legal-preview-row">
+                  <span class="muted" data-legal-drive-label="1">
+                    11-hr clock runs out (if nothing else stops you) ({v.preview.before.driveLimit / 60}h → {v.preview.after.driveLimit / 60}h)
+                  </span>
+                  <span class="mono" data-legal-drive-row="1">
+                    {v.preview.before.driveDeadlineHM} → <b>{v.preview.after.driveDeadlineHM}</b>
+                    {v.preview.kind === 'sixteen' ? ' (unchanged)' : ''}
+                  </span>
+                </div>
+                <div class="legal-preview-row">
+                  <span class="muted">Shift window ends ({v.preview.before.windowLimit / 60}h → {v.preview.after.windowLimit / 60}h)</span>
+                  <span class="mono" data-legal-window-row="1">
+                    {v.preview.before.windowEndHM} → <b>{v.preview.after.windowEndHM}</b>
+                  </span>
+                </div>
+                <div class="legal-preview-row">
+                  <span class="muted">Drive remaining</span>
+                  <span class="mono">{dur(v.preview.before.driveRemaining)} → <b>{dur(v.preview.after.driveRemaining)}</b></span>
+                </div>
+                <div class="legal-preview-row">
+                  <span class="muted">Window remaining</span>
+                  <span class="mono">{dur(v.preview.before.windowRemaining)} → <b>{dur(v.preview.after.windowRemaining)}</b></span>
+                </div>
+              </div>
+              {v.preview.bindingNote && (
+                <p class="warnbox small" style="margin:0" data-legal-binding-note="1">{v.preview.bindingNote}</p>
+              )}
+            </div>
+          )}
+
+          {v.effectNote && <p class="muted small" style="margin:0">{v.effectNote}</p>}
+
+          {v.annotation && (
+            <div class="stack-dispatch-box">
+              <div class="rollout-pta-actions">
+                <button
+                  type="button"
+                  class="primary"
+                  data-legal-copy-btn="1"
+                  onClick={() => copyAnnotation(v.annotation!)}
+                >
+                  {copyNote || 'Copy template (edit before saving)'}
+                </button>
+              </div>
+              <pre class="rollout-pta-text" data-legal-annotation="1">{v.annotation}</pre>
+            </div>
+          )}
+
+          <p class="legal-advisory" style="margin:4px 0 0" data-legal-advisory="1">{v.advisoryLine}</p>
+        </div>
+      </Card>
+
+      {trail && trail.length > 0 && (
+        <div class="legal-trail" aria-label={`Answers for ${title}`}>
+          {trail.map((item, idx) => (
+            <div key={idx} class="legal-trail-row">
+              <span>{idx + 1}. {item.question}</span>
+              <b>{item.answer === 'yes' ? 'YES' : 'NO'}</b>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div class="legal-actions">
+        {trail && trail.length > 0 && (
+          <button type="button" class="ghost" data-legal-restart="1" onClick={() => { setAnswers([]); setCopyNote(''); }}>
+            Start this check over
+          </button>
+        )}
+        <button type="button" class="ghost" data-legal-all="1" onClick={goHome}>
+          All exception checks
+        </button>
+      </div>
+    </>
+  );
+
+  // 1. HOME LIST
+  if (selected === null) {
+    return (
+      <>
+        <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+        <h1 class="screen-title">Can I Legally Use It?</h1>
+        <p class="muted small" style="margin:-6px 0 10px">
+          3 AM HOS exception sanity check — answer 2–3 quick questions before touching your ELD.
+        </p>
+
+        <p class="legal-advisory" data-legal-advisory="1">{LEGAL_ADVISORY_LINE}</p>
+
+        <div class="legal-list" data-legal-home="1">
+          {LEGAL_HOME_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              class={`legal-home-btn${item.isMythCard ? ' is-myth' : ''}`}
+              data-legal-pick={item.id}
+              onClick={() => pickItem(item.id)}
+            >
+              <span class="legal-home-body">
+                <span class="legal-home-title">{item.title}</span>
+                <span class="legal-home-cite">{item.shortCite}</span>
+                <span class="legal-home-prompt">{item.prompt}</span>
+              </span>
+              <Icon d={I.next} />
+            </button>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  // 2. SAFE HAVEN STATIC MYTH-BUSTER CARD
+  if (selected === 'safehaven') {
+    const sh = getSafeHavenCard();
+    return (
+      <>
+        <button class="back" onClick={goHome}><Icon d={I.back} /> All checks</button>
+        <h1 class="screen-title">&ldquo;Safe Haven&rdquo; — Myth Check</h1>
+        {renderVerdict(sh, 'Safe Haven')}
+      </>
+    );
+  }
+
+  // 3. ACTIVE DECISION TREE (QUESTION OR TERMINAL VERDICT)
+  const step = evaluateLegalTree(selected, answers, clockCtx);
+  return (
+    <>
+      <button class="back" onClick={goHome}><Icon d={I.back} /> All checks</button>
+      <h1 class="screen-title">{step.title}</h1>
+      <p class="muted small" style="margin:-6px 0 10px">{step.shortCite}</p>
+
+      {step.verdict ? (
+        renderVerdict(step.verdict, step.title, step.trail)
+      ) : step.currentQuestion ? (
+        <>
+          <Card>
+            <div class="legal-q-card" data-legal-question="1" data-legal-qid={step.currentQuestion.id}>
+              <span class="legal-q-step">
+                Question {step.answeredCount + 1} of {step.totalQuestions}
+              </span>
+              <p class="legal-q-text">{step.currentQuestion.question}</p>
+              <p class="legal-q-detail">{step.currentQuestion.detail}</p>
+              <div class="legal-yn-row">
+                <button
+                  type="button"
+                  class="primary legal-yn-btn"
+                  data-legal-ans="yes"
+                  onClick={() => answer('yes')}
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  class="danger legal-yn-btn"
+                  data-legal-ans="no"
+                  onClick={() => answer('no')}
+                >
+                  No
+                </button>
+              </div>
+              {step.answeredCount > 0 && (
+                <button type="button" class="ghost" data-legal-prev="1" onClick={stepBack}>
+                  Previous question
+                </button>
+              )}
+            </div>
+          </Card>
+          <p class="legal-advisory" style="margin-top:10px" data-legal-advisory="1">{LEGAL_ADVISORY_LINE}</p>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -9286,7 +9648,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -9299,9 +9661,10 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   rescue: 'Split-sleeper rescue',
   stack: 'Stack my stops & loads',
   motel: 'Do I Make It Back or Motel?',
+  legal: 'Can I Legally Use It?',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
     if (weekOpen) return 'week';
@@ -9309,6 +9672,7 @@ function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boo
     if (rescueOpen) return 'rescue';
     if (stackOpen) return 'stack';
     if (motelOpen) return 'motel';
+    if (legalOpen) return 'legal';
   }
   return null;
 }
@@ -9365,6 +9729,7 @@ export function App() {
   const rescueOpen = useRescuePlanner();
   const stackOpen = useStackPlanner();
   const motelOpen = useMotelPlanner();
+  const legalOpen = useLegalPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -9372,7 +9737,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -9427,7 +9792,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -9624,6 +9989,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && rescuePlannerOpen) openRescuePlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && stackPlannerOpen) openStackPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && motelPlannerOpen) openMotelPlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && legalPlannerOpen) openLegalPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -9652,15 +10018,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -9710,7 +10076,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -9908,7 +10274,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -9941,6 +10307,7 @@ export function App() {
               {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
               {displayedTool.tool === 'stack' && <StackTab s={s} now={now} onBack={() => openStackPlanner(false)} />}
               {displayedTool.tool === 'motel' && <MotelTab s={s} now={now} onBack={() => openMotelPlanner(false)} />}
+              {displayedTool.tool === 'legal' && <LegalTab s={s} now={now} onBack={() => openLegalPlanner(false)} />}
               {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}

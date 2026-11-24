@@ -237,6 +237,7 @@ await sweep('plan-6', [tab('Plan'), planItem(5)]);
 await sweep('plan-7', [tab('Plan'), planItem(6)]);
 await sweep('plan-8', [tab('Plan'), planItem(7)]);
 await sweep('plan-9', [tab('Plan'), planItem(8)]);
+await sweep('plan-10', [tab('Plan'), planItem(9)]);
 await sweep('plan-list', [tab('Plan')]);
 await sweep('more', [tab('More')]);
 const scalePin = (key, floor, label) => {
