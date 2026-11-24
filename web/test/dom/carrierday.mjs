@@ -33,7 +33,7 @@ const L = await import('../../src/levers.ts');
 const RC = await import('../../src/recap.ts');
 const E = await import('../../../engine/src/index.ts');
 
-const { App, setLaunchNotice, openSheet, openWeekPlanner, openRolloutPlanner, openRescuePlanner, openStackPlanner, openMotelPlanner, openLegalPlanner, openFlipPlanner } = A;
+const { App, setLaunchNotice, openSheet, openWeekPlanner, openRolloutPlanner, openRescuePlanner, openStackPlanner, openMotelPlanner, openLegalPlanner, openFlipPlanner, openMilesPlanner } = A;
 const { setState, getState, parseSaved, loadSaved, exportState, applyImportedState, deviceTz } = S;
 setLaunchNotice?.(false);
 
@@ -82,6 +82,7 @@ const resetBase = async (patch = {}) => {
   openMotelPlanner(false);
   openLegalPlanner(false);
   openFlipPlanner(false);
+  openMilesPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     disclaimerAcked: true,

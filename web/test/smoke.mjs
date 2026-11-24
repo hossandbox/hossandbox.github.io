@@ -6624,7 +6624,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 11 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?' && itemTitles[10] === 'Flip My Clock',
+  need(itemTitles.length === 12 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?' && itemTitles[10] === 'Flip My Clock' && itemTitles[11] === 'Miles Left in My 70',
     `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
@@ -6887,7 +6887,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 11 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?' && titles2[10] === 'Flip My Clock', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  need(titles2.length === 12 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?' && titles2[10] === 'Flip My Clock' && titles2[11] === 'Miles Left in My 70', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -7173,5 +7173,54 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (bad.length) throw new Error(`flip my clock: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('flip my clock (Option A/B/C, standing line, SSR, zero input[type=time]): OK');
+}
+// --- Miles Left in My 70 ("Miles Left in My 70", Plan tab tool #12 / Spec #5)
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const ML = await import('../src/miles.ts');
+  const E = await import('../../engine/src/index.ts');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  const cfgChi = { ...S.INITIAL_STATE.config, cycle: '70/8', dayStartHour: 0, dayStartMinute: 0, timeZone: 'America/Chicago', shortHaul: false };
+  const chi = (d, h0, m0 = 0) => E.localToMinute(2026, 11, d, h0, 'America/Chicago', m0);
+  const nowWed06 = chi(11, 6, 0);
+  const segs = [
+    { status: 'D', start: chi(4, 8, 0), end: chi(4, 16, 0), createdAt: 1 },
+    { status: 'D', start: chi(5, 8, 0), end: chi(5, 15, 0), createdAt: 2 },
+    { status: 'D', start: chi(6, 8, 0), end: chi(6, 14, 0), createdAt: 3 },
+    { status: 'D', start: chi(7, 8, 0), end: chi(7, 18, 0), createdAt: 4 },
+    { status: 'D', start: chi(8, 8, 0), end: chi(8, 18, 0), createdAt: 5 },
+    { status: 'D', start: chi(9, 8, 0), end: chi(9, 17, 0), createdAt: 6 },
+    { status: 'D', start: chi(10, 8, 0), end: chi(10, 16, 0), createdAt: 7 },
+  ];
+  const r = ML.evaluateMilesLeft({
+    segments: segs, now: nowWed06, config: cfgChi,
+    milesAlreadyRun: 1400, goalMiles: 2800, mph: 57, overheadMinutes: 75,
+    cutoffDow: 6, cutoffHour: 23, cutoffMinuteOfHour: 59,
+  });
+  need(r.cycleThroughCutoffMinutes === 1980 && r.cycleThroughCutoffHMM === '33:00', `miles hours mismatch: ${r.cycleThroughCutoffHMM}`);
+  need(r.maxLegalMiles === 1596 && r.ceilingMiles === 2996 && r.cushionMiles === 196 && r.status === 'doable',
+    `miles verdict mismatch: ${JSON.stringify({ max: r.maxLegalMiles, ceil: r.ceilingMiles, status: r.status })}`);
+
+  A.openWeekPlanner(false);
+  A.openRolloutPlanner(false);
+  A.openRescuePlanner(false);
+  A.openStackPlanner(false);
+  A.openMotelPlanner(false);
+  A.openLegalPlanner(false);
+  A.openFlipPlanner(false);
+  A.openMilesPlanner(true);
+  setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segs, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
+  const milesHtml = pageOut(render(h(App, {})), 'page-tool');
+  need(milesHtml.includes('Miles Left in My 70') && milesHtml.includes(ML.MILES_STANDING_LINE) && milesHtml.includes('data-miles-card="1"'),
+    'miles SSR missing title, standing line, or card');
+  need(!/<input[^>]+type="time"/.test(milesHtml), 'miles SSR must not contain plain <input type="time">');
+  A.openMilesPlanner(false);
+
+  if (bad.length) throw new Error(`miles left in my 70: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('miles left in my 70 (parity, verdict, standing line, SSR, zero input[type=time]): OK');
 }
 console.log('OK');

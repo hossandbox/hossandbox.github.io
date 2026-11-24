@@ -93,6 +93,7 @@ const seed = async (rec) => {
   A.openMotelPlanner(false);
   A.openLegalPlanner(false);
   A.openFlipPlanner(false);
+  A.openMilesPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tentative: [],
@@ -559,7 +560,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 11 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock') {
+  if (items.length !== 12 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
@@ -619,7 +620,7 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
     && timeInputs.length === 0 && timeInputsAfterToggle.length === 0
     && /21:50/.test(afterDl)
     && openedAgain && !A.isRescuePlannerOpen()
-    && itemsAfterBack.length === 11 && itemsAfterTabLeave.length === 11;
+    && itemsAfterBack.length === 12 && itemsAfterTabLeave.length === 12;
 
   return ok || JSON.stringify({
     h1,

@@ -69,6 +69,13 @@ import {
   type FlipOptionA, type FlipOptionB, type FlipOptionC,
 } from './flip.ts';
 import {
+  MILES_STANDING_LINE, MILES_GOAL_PRESETS, MILES_OVERHEAD_PRESETS, MILES_DOW_LABELS,
+  MILES_DEFAULT_RUN, MILES_DEFAULT_GOAL, MILES_DEFAULT_MPH, MILES_MIN_MPH, MILES_MAX_MPH,
+  MILES_DEFAULT_OVERHEAD_MIN, MILES_MAX_OVERHEAD_MIN, MILES_DEFAULT_CUTOFF_DOW,
+  MILES_DEFAULT_CUTOFF_HOUR, MILES_DEFAULT_CUTOFF_MIN, MILES_MAX_RUN, MILES_MAX_GOAL,
+  evaluateMilesLeft, fmtHMM, fmtMilesNum, formatCutoffHM,
+} from './miles.ts';
+import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
@@ -395,6 +402,7 @@ const I = {
   motel: 'M3 20V9M3 16h18v4M21 16v-3a3 3 0 0 0-3-3h-7v6M7 14.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM14 5h6m-3-3 3 3-3 3',
   legal: 'M12 3 5 6v6c0 5 3.5 8.5 7 9.5 3.5-1 7-4.5 7-9.5V6l-7-3zM9 12l2 2 4-4',
   flip: 'M21 12a9 9 0 0 0-15.5-6.3L3 8M3 3v5h5M3 12a9 9 0 0 0 15.5 6.3L21 16M16 16h5v5M12 7v5l3 2',
+  miles: 'M12 20a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 12l4-3M7 16h10M12 6v1M6.5 11.5h1M16.5 11.5h1',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -476,6 +484,8 @@ export type SheetKind =
   | { kind: 'stacktime'; mode: 'appt' | 'departure'; title: string; initialMinute: number; entryZoneName: string; entryTimeZone: string; onApply: (minute: number) => void }
   // Flip My Clock: shutdown time or custom target roll-out time on the shared clock picker.
   | { kind: 'fliptime'; mode: 'shutdown' | 'target'; initialMinute: number; targetHour?: number; targetMinute?: number; homeZoneName: string; homeTimeZone: string; onApplyShutdown?: (minute: number) => void; onApplyTarget?: (hour: number, minute: number) => void }
+  // Miles Left in My 70: pay-week cutoff time-of-day on the shared clock picker.
+  | { kind: 'milestime'; cutoffHour: number; cutoffMinute: number; cutoffDowName: string; homeZoneName: string; homeTimeZone: string; onApply: (hour: number, minute: number) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // Carrier-day exact start time (HH:MM) picker in Settings, on the shared ClockPick.
@@ -4410,6 +4420,10 @@ export function openWeekPlanner(open = true) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
   }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4452,6 +4466,10 @@ export function openRolloutPlanner(open = true) {
   if (open && flipPlannerOpen) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
+  }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
@@ -4496,6 +4514,10 @@ export function openRescuePlanner(open = true) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
   }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
 }
@@ -4539,6 +4561,10 @@ export function openStackPlanner(open = true) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
   }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   stackPlannerSubs.forEach((f) => f());
 }
@@ -4581,6 +4607,10 @@ export function openMotelPlanner(open = true) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
   }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   motelPlannerSubs.forEach((f) => f());
 }
@@ -4622,6 +4652,10 @@ export function openLegalPlanner(open = true) {
   if (open && flipPlannerOpen) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
+  }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   legalPlannerSubs.forEach((f) => f());
@@ -4666,6 +4700,10 @@ export function openFlipPlanner(open = true) {
     legalPlannerOpen = false;
     legalPlannerSubs.forEach((f) => f());
   }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   flipPlannerSubs.forEach((f) => f());
 }
@@ -4674,6 +4712,53 @@ function useFlipPlanner(): boolean {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); flipPlannerSubs.add(f); return () => { flipPlannerSubs.delete(f); }; }, []);
   return flipPlannerOpen;
+}
+
+/**
+ * Reactive sub-screen flag for Miles Left in My 70 (Weekly Miles & Governed-Truck Cycle Pace Check).
+ * Held outside `store.ts` (store is frozen) in the exact style of the other Plan tools.
+ */
+let milesPlannerOpen = false;
+const milesPlannerSubs = new Set<() => void>();
+export function openMilesPlanner(open = true) {
+  milesPlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'milestime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  milesPlannerSubs.forEach((f) => f());
+}
+export function isMilesPlannerOpen(): boolean { return milesPlannerOpen; }
+function useMilesPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); milesPlannerSubs.add(f); return () => { milesPlannerSubs.delete(f); }; }, []);
+  return milesPlannerOpen;
 }
 
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
@@ -4726,6 +4811,11 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
       <button class="plan-item" onClick={() => openFlipPlanner(true)}>
         <span class="plan-icon"><Icon d={I.flip} size={26} /></span>
         <span class="plan-text"><b>Flip My Clock</b><span class="muted small">Shift your roll-out onto a 21:00, 00:01, 03:00, or custom start window — compare legal bridges.</span></span>
+        <Icon d={I.next} />
+      </button>
+      <button class="plan-item" onClick={() => openMilesPlanner(true)}>
+        <span class="plan-icon"><Icon d={I.miles} size={26} /></span>
+        <span class="plan-text"><b>Miles Left in My 70</b><span class="muted small">Convert remaining cycle + recaps through pay-week cutoff into max legal miles.</span></span>
         <Icon d={I.next} />
       </button>
     </>
@@ -8822,6 +8912,455 @@ function FlipTab({ s, now, onBack }: { s: State; now: number; onBack: () => void
   );
 }
 
+/* ============================================================ Miles Left in My 70 */
+
+/**
+ * Shared ClockPick sheet for Miles Left in My 70 pay-week cutoff time-of-day (`timeOnly`,
+ * exact same pattern as Settings DayStartSheet and FlipTimeSheet target mode).
+ */
+function MilesTimeSheet({ k, closing = false }: { k: Extract<SheetKind, { kind: 'milestime' }>; closing?: boolean }) {
+  const [at, setAt] = useState<number>(() => dayStartAnchor(k.cutoffHour, k.cutoffMinute));
+  const setPick = (v: number) => {
+    const d = new Date(v * 60000);
+    setAt(dayStartAnchor(d.getHours(), d.getMinutes()));
+  };
+  const d = new Date(at * 60000);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const hm = formatCutoffHM(h, m);
+  const apply = () => {
+    k.onApply(h, m);
+    openSheet(null);
+  };
+  return (
+    <Sheet title={`Pay-week cutoff (${k.cutoffDowName})`} closing={closing}>
+      <p class="muted small" style="margin:0">
+        Cutoff time on <b>{k.cutoffDowName}</b> in <b>{k.homeZoneName}</b> ({k.homeTimeZone}).
+      </p>
+      <ClockPick
+        timeOnly
+        at={at}
+        set={setPick}
+        now={at}
+        future={false}
+        say="Pay-week cutoff"
+        name="Pay-week cutoff time"
+        keys={KEYS_DAYSTART}
+        sub={`Home terminal time (${k.homeZoneName}) · tap the time to pick it`}
+      />
+      <button class="primary wide ed-go" data-miles-time-apply="1" onClick={apply}>
+        Apply · {hm} ({k.homeZoneName})
+      </button>
+    </Sheet>
+  );
+}
+
+/**
+ * Miles Left in My 70 — Weekly Miles & Governed-Truck Cycle Pace Check (Plan tool #12 / Spec #5).
+ * Converts remaining cycle + upcoming carrier-day recap drop-offs through pay-week cutoff into
+ * maximum legal miles at a realistic governed-truck average speed, after daily non-driving on-duty
+ * overhead. Session-only state (zero new localStorage keys); shared ClockPick for cutoff time.
+ */
+function MilesTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const [milesAlreadyRun, setMilesAlreadyRun] = useState<number>(MILES_DEFAULT_RUN);
+  const [runText, setRunText] = useState<string>(String(MILES_DEFAULT_RUN));
+  const [runNote, setRunNote] = useState<string | null>(null);
+
+  const [goalMiles, setGoalMiles] = useState<number>(MILES_DEFAULT_GOAL);
+  const [goalText, setGoalText] = useState<string>(String(MILES_DEFAULT_GOAL));
+  const [goalNote, setGoalNote] = useState<string | null>(null);
+
+  const [mph, setMph] = useState<number>(MILES_DEFAULT_MPH);
+  const [mphText, setMphText] = useState<string>(String(MILES_DEFAULT_MPH));
+  const [mphNote, setMphNote] = useState<string | null>(null);
+
+  const [overheadMinutes, setOverheadMinutes] = useState<number>(MILES_DEFAULT_OVERHEAD_MIN);
+  const [cutoffDow, setCutoffDow] = useState<number>(MILES_DEFAULT_CUTOFF_DOW);
+  const [cutoffHour, setCutoffHour] = useState<number>(MILES_DEFAULT_CUTOFF_HOUR);
+  const [cutoffMinuteOfHour, setCutoffMinuteOfHour] = useState<number>(MILES_DEFAULT_CUTOFF_MIN);
+
+  const onRunInput = (raw: string) => {
+    setRunText(raw);
+    const t = raw.trim();
+    if (t === '') {
+      setMilesAlreadyRun(0);
+      setRunNote(null);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 0 || n > MILES_MAX_RUN) {
+      setRunNote(`Enter 0–${fmtMilesNum(MILES_MAX_RUN)} mi. Still using ${fmtMilesNum(milesAlreadyRun)} mi.`);
+      return;
+    }
+    setMilesAlreadyRun(Math.round(n));
+    setRunNote(null);
+  };
+  const onRunBlur = () => {
+    setRunText(String(milesAlreadyRun));
+    setRunNote(null);
+  };
+
+  const onGoalInput = (raw: string) => {
+    setGoalText(raw);
+    const t = raw.trim();
+    if (t === '') {
+      setGoalNote(`Enter 1–${fmtMilesNum(MILES_MAX_GOAL)} mi. Still using ${fmtMilesNum(goalMiles)} mi.`);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 1 || n > MILES_MAX_GOAL) {
+      setGoalNote(`Enter 1–${fmtMilesNum(MILES_MAX_GOAL)} mi. Still using ${fmtMilesNum(goalMiles)} mi.`);
+      return;
+    }
+    setGoalMiles(Math.round(n));
+    setGoalNote(null);
+  };
+  const onGoalBlur = () => {
+    setGoalText(String(goalMiles));
+    setGoalNote(null);
+  };
+
+  const onMphInput = (raw: string) => {
+    setMphText(raw);
+    const t = raw.trim();
+    if (t === '') {
+      setMphNote(`Enter ${MILES_MIN_MPH}–${MILES_MAX_MPH} mph. Still using ${mph} mph.`);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < MILES_MIN_MPH || n > MILES_MAX_MPH) {
+      setMphNote(`Enter ${MILES_MIN_MPH}–${MILES_MAX_MPH} mph. Still using ${mph} mph.`);
+      return;
+    }
+    setMph(Math.round(n));
+    setMphNote(null);
+  };
+  const onMphBlur = () => {
+    setMphText(String(mph));
+    setMphNote(null);
+  };
+
+  const overheadBox = useDurationBoxes(
+    'Daily on-duty overhead',
+    overheadMinutes,
+    0,
+    MILES_MAX_OVERHEAD_MIN,
+    setOverheadMinutes,
+  );
+
+  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const res = useMemo(
+    () => evaluateMilesLeft({
+      segments: logged,
+      now,
+      config: s.config,
+      milesAlreadyRun,
+      goalMiles,
+      mph,
+      overheadMinutes,
+      cutoffDow,
+      cutoffHour,
+      cutoffMinuteOfHour,
+    }),
+    [logged, now, s.config, milesAlreadyRun, goalMiles, mph, overheadMinutes, cutoffDow, cutoffHour, cutoffMinuteOfHour],
+  );
+
+  const cutoffDowInfo = MILES_DOW_LABELS.find((d) => d.dow === res.cutoffDow) ?? MILES_DOW_LABELS[6];
+
+  const openCutoffTimePicker = () => {
+    openSheet({
+      kind: 'milestime',
+      cutoffHour: res.cutoffHour,
+      cutoffMinute: res.cutoffMinuteOfHour,
+      cutoffDowName: cutoffDowInfo.name,
+      homeZoneName: res.homeZoneName,
+      homeTimeZone: res.homeTimeZone,
+      onApply: (h, m) => {
+        setCutoffHour(h);
+        setCutoffMinuteOfHour(m);
+      },
+    });
+  };
+
+  const signKind: SignKind = res.status === 'short' ? (res.tone === 'bad' ? 'stop' : 'warn') : 'go';
+  const signLabel = res.status === 'met' ? 'Already there' : res.status === 'doable' ? 'Doable' : 'Short of goal';
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">Miles Left in My 70</h1>
+      <p class="muted small" style="margin:-6px 0 10px">
+        Check whether your remaining cycle + recaps can legally reach your weekly mileage goal before pay-week cutoff.
+      </p>
+
+      <p class="miles-standing" data-miles-standing="1">{res.standingLine}</p>
+
+      {/* 1. VERDICT & TANK FIRST */}
+      <Card tone={res.tone}>
+        <div
+          class="miles-verdict"
+          data-miles-card="1"
+          data-miles-status={res.status}
+          data-miles-cycle-rule={String(res.cycleLimitHours)}
+          data-miles-hours-min={String(res.cycleThroughCutoffMinutes)}
+          data-miles-recaps-min={String(res.netRecapsBeforeCutoffMinutes)}
+          data-miles-drive-min={String(res.totalDriveMinutes)}
+          data-miles-max={String(res.maxLegalMiles)}
+          data-miles-ceiling={String(res.ceilingMiles)}
+          data-miles-cushion={String(res.cushionMiles)}
+          data-miles-shortfall={String(res.shortfallMiles)}
+          data-miles-trim-adds={String(res.trimAddsMiles)}
+          data-miles-cutoff={String(res.cutoffMinute)}
+          data-miles-day-count={String(res.dayCount)}
+        >
+          <Sign kind={signKind}>{signLabel}</Sign>
+
+          <p class="miles-headline" data-miles-verdict="1">{res.verdictHeadline}</p>
+
+          <div class="miles-tank" data-miles-tank="1">
+            <span class="miles-tank-lbl" data-miles-hours-label="1">
+              {res.cycleLimitHours}-hr cycle + recaps through {res.cutoffShort} ({res.homeZoneName})
+            </span>
+            <div class="miles-tank-row">
+              <span class="miles-hero-hours mono" data-miles-hours-left="1">{res.cycleThroughCutoffHMM}</span>
+              <span class="miles-hero-miles mono" data-miles-max-miles="1">
+                ~{fmtMilesNum(res.maxLegalMiles)} max legal miles (no 34)
+              </span>
+            </div>
+            <span class="miles-tank-sub" data-miles-assumptions="1">
+              At <b class="mono">{res.mph} mph</b> real average · after <b class="mono">{dur(res.overheadMinutes)}/day</b> on-duty overhead ·{' '}
+              <span class="mono">{fmtHMM(res.remainingNowMinutes)}</span> now +{' '}
+              <span class="mono">{fmtHMM(res.netRecapsBeforeCutoffMinutes)}</span> {res.overCycleNowMinutes > 0 ? 'net recaps' : 'recaps'}
+              {res.overCycleNowMinutes > 0 ? ` (after ${fmtHMM(res.overCycleNowMinutes)} over cycle)` : ''}
+            </span>
+            {res.boundaryDropNote && (
+              <span class="miles-tank-sub" data-miles-boundary-note="1">{res.boundaryDropNote}</span>
+            )}
+          </div>
+
+          <div class="miles-metrics">
+            <div class="miles-metric">
+              <span class="miles-metric-lbl">Run so far</span>
+              <span class="miles-metric-val mono">{fmtMilesNum(res.milesAlreadyRun)} mi</span>
+            </div>
+            <div class="miles-metric">
+              <span class="miles-metric-lbl">Max left (no 34)</span>
+              <span class="miles-metric-val mono">~{fmtMilesNum(res.maxLegalMiles)} mi</span>
+            </div>
+            <div class="miles-metric">
+              <span class="miles-metric-lbl">Ceiling without a 34</span>
+              <span class="miles-metric-val mono" data-miles-ceiling-text="1">~{fmtMilesNum(res.ceilingMiles)} mi</span>
+            </div>
+          </div>
+
+          {res.dailyCapNote && (
+            <p class="miles-cap-note" data-miles-cap-note="1">{res.dailyCapNote}</p>
+          )}
+
+          {res.trimLeverLine && (
+            <p class="miles-trim" data-miles-trim="1">{res.trimLeverLine}</p>
+          )}
+        </div>
+      </Card>
+
+      {/* 2. INPUTS (SESSION-ONLY) */}
+      <Card title="Your week &amp; pace">
+        <div class="miles-inputs" data-miles-inputs="1">
+          {/* 1. Miles already run */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <label class="stat-label" for="miles-run-input">1. Miles already run this pay week</label>
+              <b class="mono">{fmtMilesNum(milesAlreadyRun)} mi</b>
+            </div>
+            <input
+              id="miles-run-input"
+              type="number"
+              class="num"
+              inputMode="numeric"
+              min={0}
+              max={MILES_MAX_RUN}
+              step={1}
+              data-miles-run-input="1"
+              aria-label="Miles already run this pay week"
+              value={runText}
+              onInput={(e) => onRunInput((e.target as HTMLInputElement).value)}
+              onBlur={onRunBlur}
+            />
+            {runNote && <p class="small warn" style="margin:2px 0 0">{runNote}</p>}
+          </div>
+
+          {/* 2. Weekly mileage goal */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <label class="stat-label" for="miles-goal-input">2. Weekly mileage goal</label>
+              <b class="mono">{fmtMilesNum(goalMiles)} mi</b>
+            </div>
+            <div class="rollout-chips" role="group" aria-label="Weekly mileage goal presets">
+              {MILES_GOAL_PRESETS.map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  class={goalMiles === g ? 'on' : undefined}
+                  aria-pressed={goalMiles === g}
+                  data-miles-goal-chip={String(g)}
+                  onClick={() => { setGoalMiles(g); setGoalText(String(g)); setGoalNote(null); }}
+                >
+                  {fmtMilesNum(g)}
+                </button>
+              ))}
+            </div>
+            <input
+              id="miles-goal-input"
+              type="number"
+              class="num"
+              inputMode="numeric"
+              min={1}
+              max={MILES_MAX_GOAL}
+              step={1}
+              data-miles-goal-input="1"
+              aria-label="Weekly mileage goal"
+              value={goalText}
+              onInput={(e) => onGoalInput((e.target as HTMLInputElement).value)}
+              onBlur={onGoalBlur}
+            />
+            {goalNote && <p class="small warn" style="margin:2px 0 0">{goalNote}</p>}
+          </div>
+
+          {/* 3. Real average speed */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <label class="stat-label" for="miles-mph-input">3. Real average speed (mph)</label>
+              <b class="mono">{mph} mph</b>
+            </div>
+            <p class="muted small" style="margin:0">
+              Your real average speed — not your truck's governor setting.
+            </p>
+            <input
+              id="miles-mph-input"
+              type="number"
+              class="num"
+              inputMode="numeric"
+              min={MILES_MIN_MPH}
+              max={MILES_MAX_MPH}
+              step={1}
+              data-miles-mph-input="1"
+              aria-label="Real average speed (mph)"
+              value={mphText}
+              onInput={(e) => onMphInput((e.target as HTMLInputElement).value)}
+              onBlur={onMphBlur}
+            />
+            {mphNote && <p class="small warn" style="margin:2px 0 0">{mphNote}</p>}
+          </div>
+
+          {/* 4. Daily on-duty overhead */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <span class="stat-label">4. Daily on-duty overhead</span>
+              <b class="mono">{dur(overheadMinutes)}/day</b>
+            </div>
+            <p class="muted small" style="margin:0">
+              Pre-trip, fuel, drop/hook, and dock time logged on duty each running day.
+            </p>
+            <div class="rollout-chips" role="group" aria-label="Daily overhead presets">
+              {MILES_OVERHEAD_PRESETS.map((p) => (
+                <button
+                  key={p.minutes}
+                  type="button"
+                  class={overheadMinutes === p.minutes ? 'on' : undefined}
+                  aria-pressed={overheadMinutes === p.minutes}
+                  data-miles-overhead-chip={String(p.minutes)}
+                  onClick={() => setOverheadMinutes(p.minutes)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div class="qs-row motel-dur-row" data-miles-overhead-box="1">
+              <span class="small muted">Exact overhead</span>
+              {overheadBox.boxes}
+            </div>
+            {overheadBox.note && <p class="small warn" style="margin:2px 0 0">{overheadBox.note}</p>}
+          </div>
+
+          {/* 5. Pay-week cutoff */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <span class="stat-label">5. Pay-week cutoff</span>
+              <b class="mono" data-miles-cutoff-display="1">{res.cutoffShort} {res.homeZoneName}</b>
+            </div>
+            <div class="miles-dow-row" role="group" aria-label="Pay-week cutoff day">
+              {MILES_DOW_LABELS.map((d) => {
+                const on = cutoffDow === d.dow;
+                return (
+                  <button
+                    key={d.dow}
+                    type="button"
+                    class={on ? 'on' : undefined}
+                    aria-pressed={on}
+                    data-miles-dow={String(d.dow)}
+                    onClick={() => setCutoffDow(d.dow)}
+                  >
+                    {d.short}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              class="rowbtn"
+              data-miles-cutoff-time-btn="1"
+              onClick={openCutoffTimePicker}
+            >
+              <span>
+                Cutoff time: <b class="mono">{res.cutoffHM}</b>{' '}
+                <span class="muted small">({res.homeZoneName})</span>
+              </span>
+              <span class="muted small">Change ›</span>
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* 3. DAY-BY-DAY CARRIER-DAY BREAKDOWN */}
+      <Card title="Day-by-day capacity">
+        <p class="muted small" style="margin:0 0 8px">
+          Carrier days roll at <b class="mono">{res.dayStartLabel}</b> ({res.dayStartHM} {res.homeZoneName}) · {res.cycleLimitHours}-hr / {res.windowDays}-day rule.
+        </p>
+        <div class="miles-days" data-miles-days="1">
+          {res.days.map((d) => (
+            <div
+              key={d.dayStart}
+              class="miles-day-row"
+              data-miles-day={String(d.dayIndex)}
+              data-miles-day-drops={String(d.dropsOffMinutes)}
+              data-miles-day-drive={String(d.driveMinutes)}
+              data-miles-day-miles={String(d.displayMiles)}
+            >
+              <div class="miles-day-left">
+                <b>{d.dayIndex === 0 ? `Today (${d.shortLabel})` : d.shortLabel}</b>
+                <span class="miles-day-sub">
+                  {d.dropsOffMinutes > 0
+                    ? `+${fmtHMM(d.dropsOffMinutes)} drops off at ${res.dayStartLabel} · `
+                    : ''}
+                  Cycle avail {fmtHMM(d.availCycleMinutes)}
+                </span>
+              </div>
+              <div class="miles-day-right">
+                <b class="mono">~{fmtMilesNum(d.displayMiles)} mi</b>
+                <span class="miles-day-sub mono">
+                  {dur(d.driveMinutes)} drive
+                  {d.capKind === 'window14' ? ' (14h window cap)' : d.capKind === 'drive11' ? ' (11h cap)' : ''}
+                  {d.wallMinutes === 0 && d.dropsOffMinutes > 0 && d.dayStart === res.cutoffMinute ? ' (at cutoff)' : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -10128,7 +10667,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal' | 'flip';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal' | 'flip' | 'miles';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -10143,9 +10682,10 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   motel: 'Do I Make It Back or Motel?',
   legal: 'Can I Legally Use It?',
   flip: 'Flip My Clock',
+  miles: 'Miles Left in My 70',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean, flipOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean, flipOpen: boolean, milesOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
     if (weekOpen) return 'week';
@@ -10155,6 +10695,7 @@ function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boo
     if (motelOpen) return 'motel';
     if (legalOpen) return 'legal';
     if (flipOpen) return 'flip';
+    if (milesOpen) return 'miles';
   }
   return null;
 }
@@ -10168,6 +10709,7 @@ function sheetSessionKey(k: SheetKind): string {
     case 'rescuetime': return `rescuetime-${k.deadlineMinute}`;
     case 'stacktime': return `stacktime-${k.mode}-${k.title}-${k.initialMinute}-${k.entryTimeZone}`;
     case 'fliptime': return `fliptime-${k.mode}-${k.initialMinute}-${k.targetHour ?? ''}-${k.targetMinute ?? ''}-${k.homeTimeZone}`;
+    case 'milestime': return `milestime-${k.cutoffDowName}-${k.cutoffHour}-${k.cutoffMinute}-${k.homeTimeZone}`;
     case 'confirm': return `confirm-${k.what}`;
     case 'edit': return `e${k.live ? 'live' : ''}${k.seg.start}-${k.live ? '' : k.seg.end}`;
     case 'add': return `a${k.inside?.start ?? ''}`;
@@ -10175,7 +10717,7 @@ function sheetSessionKey(k: SheetKind): string {
   }
 }
 
-function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, flipOpen: boolean): boolean {
+function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, flipOpen: boolean, milesOpen: boolean): boolean {
   if (driveUp) return k.kind === 'status' || k.kind === 'since';
   if (k.kind === 'splitblock') return s.tab === 'split';
   if (k.kind === 'loadtime') return s.tab === 'load';
@@ -10184,6 +10726,7 @@ function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, roll
   if (k.kind === 'rescuetime') return s.tab === 'plan' && rescueOpen;
   if (k.kind === 'stacktime') return s.tab === 'plan' && stackOpen;
   if (k.kind === 'fliptime') return s.tab === 'plan' && flipOpen;
+  if (k.kind === 'milestime') return s.tab === 'plan' && milesOpen;
   if (k.kind === 'daystart') return s.tab === 'settings';
   return true;
 }
@@ -10215,6 +10758,7 @@ export function App() {
   const motelOpen = useMotelPlanner();
   const legalOpen = useLegalPlanner();
   const flipOpen = useFlipPlanner();
+  const milesOpen = useMilesPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -10222,7 +10766,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -10277,7 +10821,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -10394,7 +10938,7 @@ export function App() {
   // exiting sheet (inert + aria-hidden) across the 200ms slide-down / morph-return exit, then
   // unmounts cleanly. Direct sheet-to-sheet switches, disclaimer, driving-view flips, and
   // prefers-reduced-motion: reduce bypass exit retention and unmount immediately.
-  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen, flipOpen) ? sheet : null;
+  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen, flipOpen, milesOpen) ? sheet : null;
   const sheetEpochRef = useRef(visibleSheet ? 1 : 0);
   const prevVisibleKeyRef = useRef<string | null>(visibleSheet ? sheetSessionKey(visibleSheet) : null);
   const visibleKey = visibleSheet ? sheetSessionKey(visibleSheet) : null;
@@ -10476,6 +11020,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && motelPlannerOpen) openMotelPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && legalPlannerOpen) openLegalPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && flipPlannerOpen) openFlipPlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && milesPlannerOpen) openMilesPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -10504,15 +11049,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : isFlipPlannerOpen() ? 'flip' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); openFlipPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : isFlipPlannerOpen() ? 'flip' : isMilesPlannerOpen() ? 'miles' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); openFlipPlanner(false); openMilesPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -10562,7 +11107,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen(), isFlipPlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen(), isFlipPlannerOpen(), isMilesPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -10708,6 +11253,7 @@ export function App() {
       case 'rescuetime': inner = <RescueTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'stacktime': inner = <StackTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'fliptime': inner = <FlipTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
+      case 'milestime': inner = <MilesTimeSheet key={mk} k={sh} closing={sheetClosing} />; break;
       case 'edit':
       case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
       case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
@@ -10761,7 +11307,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); if (isFlipPlannerOpen()) openFlipPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); if (isFlipPlannerOpen()) openFlipPlanner(false); if (isMilesPlannerOpen()) openMilesPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -10796,6 +11342,7 @@ export function App() {
               {displayedTool.tool === 'motel' && <MotelTab s={s} now={now} onBack={() => openMotelPlanner(false)} />}
               {displayedTool.tool === 'legal' && <LegalTab s={s} now={now} onBack={() => openLegalPlanner(false)} />}
               {displayedTool.tool === 'flip' && <FlipTab s={s} now={now} onBack={() => openFlipPlanner(false)} />}
+              {displayedTool.tool === 'miles' && <MilesTab s={s} now={now} onBack={() => openMilesPlanner(false)} />}
               {displayedTool.tool === 'split' && <SplitTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'recap' && <RecapTab s={s} now={now} ev={ev} />}
               {displayedTool.tool === 'history' && <HistoryTab s={s} now={now} />}

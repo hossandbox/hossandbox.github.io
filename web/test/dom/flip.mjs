@@ -97,6 +97,7 @@ const seed = async (rec = {}) => {
   A.openMotelPlanner(false);
   A.openLegalPlanner(false);
   A.openFlipPlanner(false);
+  A.openMilesPlanner(false);
   setState({
     ...S.INITIAL_STATE,
     tab: 'plan',
@@ -546,7 +547,7 @@ await pin('FL8. Standing line, non-medical framing, default shutdown from shift 
   if (!opened) return 'Could not open Flip My Clock';
 
   const titles = opened.items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (opened.items.length !== 11 || titles[10] !== 'Flip My Clock') {
+  if (opened.items.length !== 12 || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
     return `Plan hub placement wrong: count=${opened.items.length} titles=${JSON.stringify(titles)}`;
   }
 
