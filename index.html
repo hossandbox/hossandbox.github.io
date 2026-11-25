@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#090c10" />
+<meta name="theme-color" content="#06112e" />
 <!-- The shell starts DARK (patch 16, P1a — sanction S1): the static colour is the night page
      colour, so a cold start can splash dark, never light — the failure this prevents is a dark
      cab flooded by a white splash at 3 a.m. The inline script below runs before the stylesheet
@@ -40,7 +40,7 @@
   var root = document.documentElement;
   if (theme === 'day') root.setAttribute('data-theme', 'day'); else root.removeAttribute('data-theme');
   var meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'day' ? '#e4e9ee' : '#090c10');
+  if (meta) meta.setAttribute('content', theme === 'day' ? '#e4e9ee' : '#06112e');
 })();
 </script>
 <meta name="apple-mobile-web-app-capable" content="yes" />
