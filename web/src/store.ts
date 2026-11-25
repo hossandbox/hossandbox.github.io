@@ -48,6 +48,8 @@ export interface State {
   split: SplitDraft;
   /** Recap "can I take this load?" scenario — same reason. */
   loadCheck: LoadCheckDraft;
+  /** Master planner ("My Week") scenario: 1–5 upcoming loads, home-time target, and planning preferences. */
+  weekPlan: WeekPlanDraft;
   /**
    * The driver has explicitly confirmed the record starts here. Until then the app keeps disclosing
    * that its picture of past duty is incomplete — tapping a status is a statement about NOW, not
@@ -208,6 +210,100 @@ export const DEFAULT_SPLIT: SplitDraft = { b1: 180, b1s: 'OFF', dwell: 30, drive
 export interface LoadCheckDraft { miles: number; dwell: number; dwellOff: boolean; leaveIn: number; waitOff: boolean; answered: boolean; appt?: number | null }
 export const DEFAULT_LOADCHECK: LoadCheckDraft = { miles: 1200, dwell: 120, dwellOff: false, leaveIn: 0, waitOff: false, answered: false };
 
+/** Maximum upcoming loads in My Week (compute & 3 AM readability guardrail). */
+export const WEEK_MAX_LOADS = 5;
+
+/** One upcoming load/run in My Week (G1 + G6). */
+export interface WeekLoadDraft {
+  id: string;
+  label: string;
+  distanceMode: 'miles' | 'hours';
+  miles: number;
+  driveMinutes: number;
+  /** null = inherit state.mph */
+  mph: number | null;
+  hasAppt: boolean;
+  /** YYYY-MM-DD in apptTimeZone (or home terminal zone when apptTimeZone is empty) */
+  apptDate: string;
+  /** HH:MM 24h in apptTimeZone */
+  apptTime: string;
+  /** IANA timezone of the facility; empty string = inherit config.timeZone */
+  apptTimeZone: string;
+  dockMinutes: number;
+  dockOff: boolean;
+  /** null = inherit weekPlan.defaultPreTripMinutes */
+  preTripMinutes: number | null;
+  /** null = inherit weekPlan.defaultBufferMinutes */
+  bufferMinutes: number | null;
+  /** Optional empty reposition miles before this load (G6, collapsed default 0). */
+  deadheadMiles: number;
+  /** Optional shipper/pickup dwell in minutes (G6, collapsed default 0). */
+  pickupDwellMinutes: number;
+  pickupDwellOff: boolean;
+  /** Driver marked a past-due load done so it does not silently corrupt forward chaining. */
+  done: boolean;
+}
+
+/** Home-time target in home-terminal wall time (G3). */
+export interface WeekHomeTarget {
+  /** YYYY-MM-DD in home-terminal time */
+  date: string;
+  /** HH:MM 24h in home-terminal time */
+  time: string;
+}
+
+/** Master Week Planner ("My Week") persisted draft (G1, G3, G4, G6). */
+export interface WeekPlanDraft {
+  loads: WeekLoadDraft[];
+  homeTarget: WeekHomeTarget | null;
+  fillOpenNights: boolean;
+  /** Usual nightly shift start, minutes from 00:00 home-terminal time (default 21:00 = 1260). */
+  usualShiftStartMinutes: number;
+  /** Usual nightly shift budget in minutes (default 9h 30m = 570). */
+  usualShiftBudgetMinutes: number;
+  /** Carrier/driver preference: allow 7/3 and 8/2 sleeper splits (G4). */
+  allowSplits: boolean;
+  defaultPreTripMinutes: number;
+  defaultBufferMinutes: number;
+  strategyView: 'recaps' | 'reset34';
+}
+
+export const WEEK_DISTANCE_MODES = ['miles', 'hours'] as const;
+export const WEEK_STRATEGY_VIEWS = ['recaps', 'reset34'] as const;
+
+export const DEFAULT_WEEK_LOAD: WeekLoadDraft = {
+  id: 'load-1',
+  label: '',
+  distanceMode: 'miles',
+  miles: 500,
+  driveMinutes: 540,
+  mph: null,
+  hasAppt: false,
+  apptDate: '',
+  apptTime: '08:00',
+  apptTimeZone: '',
+  dockMinutes: 120,
+  dockOff: false,
+  preTripMinutes: null,
+  bufferMinutes: null,
+  deadheadMiles: 0,
+  pickupDwellMinutes: 0,
+  pickupDwellOff: false,
+  done: false,
+};
+
+export const DEFAULT_WEEK_PLAN: WeekPlanDraft = {
+  loads: [],
+  homeTarget: null,
+  fillOpenNights: true,
+  usualShiftStartMinutes: 21 * 60,
+  usualShiftBudgetMinutes: 570,
+  allowSplits: true,
+  defaultPreTripMinutes: 15,
+  defaultBufferMinutes: 45,
+  strategyView: 'recaps',
+};
+
 /** The state a fresh install starts from. Exported so the defaults are assertable, not folklore. */
 /** One break button: what the driver calls it, how long it is, and how it is logged (never Driving or Sleeper). */
 export interface BreakPreset { name: string; minutes: number; status: 'OFF' | 'ON' }
@@ -238,7 +334,7 @@ export const breakNote = (name: string) => `${BREAK_NOTE}${name}`;
 export const INITIAL_STATE: State = {
   segments: [], tentative: [], current: null,
   config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
-  mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK },
+  mph: 55, trip: { ...DEFAULT_TRIP }, split: { ...DEFAULT_SPLIT }, loadCheck: { ...DEFAULT_LOADCHECK }, weekPlan: { ...DEFAULT_WEEK_PLAN, loads: [] },
   historyAcknowledged: false, logResolved: false, theme: 'day', themeChosen: false, themeNotice: false,
   nowCard: 'dial', nowCardAsked: false,
   disclaimerAcked: false, seededAt: null, dayCloses: [],
@@ -394,6 +490,7 @@ export function parseSaved(raw: string | null): State {
       trip: sanitizeTrip(s.trip, INITIAL_STATE.trip),
       split: sanitizeSplit(s.split, INITIAL_STATE.split),
       loadCheck: sanitizeLoadCheck(s.loadCheck, INITIAL_STATE.loadCheck),
+      weekPlan: sanitizeWeekPlan(s.weekPlan, INITIAL_STATE.weekPlan),
       // a save from before break buttons has none: it gets the default; a damaged list is cleaned, not trusted
       breakPresets: s.breakPresets === undefined ? DEFAULT_BREAKS.map((b) => ({ ...b })) : sanitizeBreaks(s.breakPresets) };
     // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
@@ -488,7 +585,7 @@ export function getState() { return state; }
  */
 function snapshotSimRecord(s: State) {
   try {
-    const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, tzChosen: s.tzChosen };
+    const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, tzChosen: s.tzChosen, weekPlan: s.weekPlan };
     localStorage.setItem(SIM_KEY, JSON.stringify({ record }));
   } catch { /* storage failing leaves the session's writes unquarantined, never blocks the write */ }
 }
@@ -979,6 +1076,120 @@ export function sanitizeTrip(d: unknown, fallback: TripDraft): TripDraft {
   };
 }
 
+/** Hoisted helpers for sanitizeWeekPlan — parseSaved runs at module load (TDZ-safe). */
+function validIsoDate(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const check = new Date(Date.UTC(y, mo - 1, d));
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function validWallHM(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+}
+
+function optIntIn(v: unknown, lo: number, hi: number): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return Math.round(Math.min(hi, Math.max(lo, v)));
+}
+
+function canonicalWeekTimeZone(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  const raw = v.trim();
+  if (!raw || !isValidTimeZone(raw)) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: raw }).resolvedOptions().timeZone || raw;
+  } catch {
+    return '';
+  }
+}
+
+export function sanitizeWeekHomeTarget(v: unknown): WeekHomeTarget | null {
+  if (!isObj(v)) return null;
+  const date = validIsoDate(v.date);
+  const time = validWallHM(v.time);
+  return date && time ? { date, time } : null;
+}
+
+export function sanitizeWeekLoad(x: unknown, idx: number, usedIds: Set<string>): WeekLoadDraft | null {
+  if (!isObj(x)) return null;
+  const rawId = typeof x.id === 'string' ? x.id.trim().slice(0, 24) : '';
+  let id = rawId || `load-${idx + 1}`;
+  if (usedIds.has(id)) {
+    let seq = usedIds.size + 1;
+    do { id = `load-${idx + 1}-${seq++}`; } while (usedIds.has(id));
+  }
+  usedIds.add(id);
+  const label = typeof x.label === 'string' ? x.label.trim().slice(0, 40) : '';
+  const distanceMode = oneOf(x.distanceMode, WEEK_DISTANCE_MODES, DEFAULT_WEEK_LOAD.distanceMode);
+  const miles = Math.round(numIn(x.miles, 1, 3000, DEFAULT_WEEK_LOAD.miles));
+  const driveMinutes = Math.round(numIn(x.driveMinutes, 0, 1800, DEFAULT_WEEK_LOAD.driveMinutes));
+  const mph = optIntIn(x.mph, 45, 65);
+  const apptDate = validIsoDate(x.apptDate) ?? '';
+  const parsedTime = validWallHM(x.apptTime);
+  const apptTime = parsedTime ?? DEFAULT_WEEK_LOAD.apptTime;
+  const apptTimeZone = canonicalWeekTimeZone(x.apptTimeZone);
+  const hasAppt = boolAt(x.hasAppt, false) && apptDate !== '' && parsedTime !== null;
+  const dockMinutes = Math.round(numIn(x.dockMinutes, 0, 720, DEFAULT_WEEK_LOAD.dockMinutes));
+  const dockOff = boolAt(x.dockOff, DEFAULT_WEEK_LOAD.dockOff);
+  const preTripMinutes = optIntIn(x.preTripMinutes, 0, 180);
+  const bufferMinutes = optIntIn(x.bufferMinutes, 0, 240);
+  const deadheadMiles = Math.round(numIn(x.deadheadMiles, 0, 1000, DEFAULT_WEEK_LOAD.deadheadMiles));
+  const pickupDwellMinutes = Math.round(numIn(x.pickupDwellMinutes, 0, 480, DEFAULT_WEEK_LOAD.pickupDwellMinutes));
+  const pickupDwellOff = boolAt(x.pickupDwellOff, DEFAULT_WEEK_LOAD.pickupDwellOff);
+  const done = boolAt(x.done, false);
+  return {
+    id, label, distanceMode, miles, driveMinutes, mph,
+    hasAppt, apptDate, apptTime, apptTimeZone,
+    dockMinutes, dockOff, preTripMinutes, bufferMinutes,
+    deadheadMiles, pickupDwellMinutes, pickupDwellOff, done,
+  };
+}
+
+export function sanitizeWeekPlan(d: unknown, fallback: WeekPlanDraft = DEFAULT_WEEK_PLAN): WeekPlanDraft {
+  const fb: WeekPlanDraft = {
+    ...DEFAULT_WEEK_PLAN,
+    ...fallback,
+    loads: Array.isArray(fallback.loads) ? fallback.loads.map((l) => ({ ...l })) : [],
+    homeTarget: fallback.homeTarget ? { ...fallback.homeTarget } : null,
+  };
+  if (!isObj(d)) return fb;
+  const loads: WeekLoadDraft[] = [];
+  if (Array.isArray(d.loads)) {
+    const usedIds = new Set<string>();
+    for (let i = 0; i < d.loads.length && loads.length < WEEK_MAX_LOADS; i++) {
+      const item = sanitizeWeekLoad(d.loads[i], loads.length, usedIds);
+      if (item) loads.push(item);
+    }
+  } else if (d.loads === undefined) {
+    loads.push(...fb.loads);
+  }
+  const homeTarget = 'homeTarget' in d
+    ? (d.homeTarget === null ? null : sanitizeWeekHomeTarget(d.homeTarget))
+    : fb.homeTarget;
+  return {
+    loads,
+    homeTarget,
+    fillOpenNights: boolAt(d.fillOpenNights, fb.fillOpenNights),
+    usualShiftStartMinutes: Math.round(numIn(d.usualShiftStartMinutes, 0, 1439, fb.usualShiftStartMinutes)),
+    usualShiftBudgetMinutes: Math.round(numIn(d.usualShiftBudgetMinutes, 60, 840, fb.usualShiftBudgetMinutes)),
+    allowSplits: boolAt(d.allowSplits, fb.allowSplits),
+    defaultPreTripMinutes: Math.round(numIn(d.defaultPreTripMinutes, 0, 180, fb.defaultPreTripMinutes)),
+    defaultBufferMinutes: Math.round(numIn(d.defaultBufferMinutes, 0, 240, fb.defaultBufferMinutes)),
+    strategyView: oneOf(d.strategyView, WEEK_STRATEGY_VIEWS, fb.strategyView),
+  };
+}
+
 const DUTY = ['OFF', 'SB', 'D', 'ON'] as const;
 /** The live status, checked: a bad one is the same class as a bad segment row. */
 export function sanitizeCurrent(d: unknown): State['current'] {
@@ -1006,6 +1217,7 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
     // before they were exported has neither, and then what is on screen stays rather than being reset.
     split: 'split' in d ? sanitizeSplit(d.split, cur.split) : cur.split,
     loadCheck: 'loadCheck' in d ? sanitizeLoadCheck(d.loadCheck, cur.loadCheck) : cur.loadCheck,
+    weekPlan: 'weekPlan' in d ? sanitizeWeekPlan(d.weekPlan, cur.weekPlan) : cur.weekPlan,
   };
 }
 
@@ -1023,6 +1235,48 @@ export function draftResets(d: unknown, cur: State): string[] {
     const raw = { ...DEFAULT_TRIP, ...d.trip } as TripDraft;
     const got = sanitizeTrip(d.trip, cur.trip);
     if (raw.miles !== got.miles || raw.pre !== got.pre || raw.stopMile !== got.stopMile || raw.stopMin !== got.stopMin || raw.dep !== got.dep || raw.until !== got.until || raw.view !== got.view) out.push('the trip plan');
+  }
+  if ('weekPlan' in d && d.weekPlan !== undefined) {
+    if (!isObj(d.weekPlan)) {
+      out.push('My Week plan');
+    } else {
+      const got = sanitizeWeekPlan(d.weekPlan, cur.weekPlan);
+      const raw = d.weekPlan;
+      const badTop =
+        (raw.loads !== undefined && (!Array.isArray(raw.loads) || raw.loads.length !== got.loads.length))
+        || (raw.homeTarget !== undefined && raw.homeTarget !== null && (!got.homeTarget || !isObj(raw.homeTarget) || raw.homeTarget.date !== got.homeTarget.date || raw.homeTarget.time !== got.homeTarget.time))
+        || (raw.fillOpenNights !== undefined && raw.fillOpenNights !== got.fillOpenNights)
+        || (raw.usualShiftStartMinutes !== undefined && raw.usualShiftStartMinutes !== got.usualShiftStartMinutes)
+        || (raw.usualShiftBudgetMinutes !== undefined && raw.usualShiftBudgetMinutes !== got.usualShiftBudgetMinutes)
+        || (raw.allowSplits !== undefined && raw.allowSplits !== got.allowSplits)
+        || (raw.defaultPreTripMinutes !== undefined && raw.defaultPreTripMinutes !== got.defaultPreTripMinutes)
+        || (raw.defaultBufferMinutes !== undefined && raw.defaultBufferMinutes !== got.defaultBufferMinutes)
+        || (raw.strategyView !== undefined && raw.strategyView !== got.strategyView);
+      const badLoad = !badTop && Array.isArray(raw.loads) && raw.loads.some((x, i) => {
+        if (!isObj(x)) return true;
+        const g = got.loads[i];
+        if (!g) return true;
+        return (x.id !== undefined && x.id !== g.id)
+          || (x.label !== undefined && x.label !== g.label)
+          || (x.distanceMode !== undefined && x.distanceMode !== g.distanceMode)
+          || (x.miles !== undefined && x.miles !== g.miles)
+          || (x.driveMinutes !== undefined && x.driveMinutes !== g.driveMinutes)
+          || (x.mph !== undefined && x.mph !== g.mph)
+          || (x.hasAppt !== undefined && x.hasAppt !== g.hasAppt)
+          || (x.apptDate !== undefined && x.apptDate !== g.apptDate)
+          || (x.apptTime !== undefined && x.apptTime !== g.apptTime)
+          || (x.apptTimeZone !== undefined && x.apptTimeZone !== g.apptTimeZone)
+          || (x.dockMinutes !== undefined && x.dockMinutes !== g.dockMinutes)
+          || (x.dockOff !== undefined && x.dockOff !== g.dockOff)
+          || (x.preTripMinutes !== undefined && x.preTripMinutes !== g.preTripMinutes)
+          || (x.bufferMinutes !== undefined && x.bufferMinutes !== g.bufferMinutes)
+          || (x.deadheadMiles !== undefined && x.deadheadMiles !== g.deadheadMiles)
+          || (x.pickupDwellMinutes !== undefined && x.pickupDwellMinutes !== g.pickupDwellMinutes)
+          || (x.pickupDwellOff !== undefined && x.pickupDwellOff !== g.pickupDwellOff)
+          || (x.done !== undefined && x.done !== g.done);
+      });
+      if (badTop || badLoad) out.push('My Week plan');
+    }
   }
   return out;
 }
@@ -1998,5 +2252,5 @@ export function segLabel(status: DutyStatus, note?: string): string {
 /** Everything a bug report needs. Kept small enough to paste into an email. */
 export function exportState(s: State): string {
   return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, nowOverride: s.nowOverride });
+    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, weekPlan: s.weekPlan, nowOverride: s.nowOverride });
 }

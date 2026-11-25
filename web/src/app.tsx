@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, dayLabel, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
 } from './store.ts';
 import { clampDayStartMinute, safeRulesConfig, formatDayStartHM, dayStartWord } from './carrierday.ts';
 import {
@@ -75,6 +75,17 @@ import {
   MILES_DEFAULT_CUTOFF_HOUR, MILES_DEFAULT_CUTOFF_MIN, MILES_MAX_RUN, MILES_MAX_GOAL,
   evaluateMilesLeft, fmtHMM, fmtMilesNum, formatCutoffHM,
 } from './miles.ts';
+import {
+  synthesizeWeek, createNextWeekLoad, getWeekHubSummary, primeWeekHubCache, clearWeekHubCache,
+  getWeekSynthesisCount, resetWeekSynthesisCount, computeWeekHubFingerprint,
+  WEEK_MILES_PRESETS, WEEK_DOCK_PRESETS,
+  WEEK_USUAL_BUDGET_PRESETS, WEEK_USUAL_START_PRESETS,
+  type WeekSynthesisResult, type WeekLoadOutcome, type WeekConflict, type WeekHubSnapshot, type WeekStrategyId,
+} from './week.ts';
+export {
+  synthesizeWeek, createNextWeekLoad, getWeekHubSummary, clearWeekHubCache,
+  getWeekSynthesisCount, resetWeekSynthesisCount, computeWeekHubFingerprint,
+};
 import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
@@ -403,6 +414,7 @@ const I = {
   legal: 'M12 3 5 6v6c0 5 3.5 8.5 7 9.5 3.5-1 7-4.5 7-9.5V6l-7-3zM9 12l2 2 4-4',
   flip: 'M21 12a9 9 0 0 0-15.5-6.3L3 8M3 3v5h5M3 12a9 9 0 0 0 15.5 6.3L21 16M16 16h5v5M12 7v5l3 2',
   miles: 'M12 20a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 12l4-3M7 16h10M12 6v1M6.5 11.5h1M16.5 11.5h1',
+  myweek: 'M4 5h16v14H4zM4 9h16M8 3v4M16 3v4M8 13h3M13 13h3M8 16h5',
 };
 function Icon({ d, size = 22 }: { d: string; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={d} /></svg>;
@@ -486,6 +498,8 @@ export type SheetKind =
   | { kind: 'fliptime'; mode: 'shutdown' | 'target'; initialMinute: number; targetHour?: number; targetMinute?: number; homeZoneName: string; homeTimeZone: string; onApplyShutdown?: (minute: number) => void; onApplyTarget?: (hour: number, minute: number) => void }
   // Miles Left in My 70: pay-week cutoff time-of-day on the shared clock picker.
   | { kind: 'milestime'; cutoffHour: number; cutoffMinute: number; cutoffDowName: string; homeZoneName: string; homeTimeZone: string; onApply: (hour: number, minute: number) => void }
+  // My Week: home-time target, per-load hard appointment, or usual nightly start on the shared clock picker.
+  | { kind: 'myweektime'; mode: 'home' | 'appt' | 'usualstart'; title: string; dateStr: string; timeStr: string; entryZoneName: string; entryTimeZone: string; onApply: (date: string, time: string) => void }
   // A9 (audit): More's two destructive actions confirm in the app's own sheet, not confirm().
   | { kind: 'confirm'; what: 'startover' | 'erase' }
   // Carrier-day exact start time (HH:MM) picker in Settings, on the shared ClockPick.
@@ -787,7 +801,7 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0): boolea
  * clock is set; this section holds the reading side: the shape checks a stored
  * snapshot must pass, and useRealClock, which restores it. */
 
-type SimSnap = Pick<State, 'segments' | 'tentative' | 'current' | 'dayCloses' | 'historyAcknowledged' | 'config' | 'seededAt' | 'tzChosen'>;
+type SimSnap = Pick<State, 'segments' | 'tentative' | 'current' | 'dayCloses' | 'historyAcknowledged' | 'config' | 'seededAt' | 'tzChosen'> & { weekPlan?: WeekPlanDraft };
 const SIM_STATUSES = new Set(['OFF', 'SB', 'D', 'ON']);
 /**
  * A row read back from storage (a sim snapshot, a stored undo) is only trusted when it is
@@ -855,6 +869,9 @@ export function useRealClock() {
           // vouched for their shapes.
           if (snap.record.seededAt !== undefined) restore.seededAt = snap.record.seededAt;
           if (typeof snap.record.tzChosen === 'boolean') restore.tzChosen = snap.record.tzChosen;
+          restore.weekPlan = snap.record.weekPlan !== undefined
+            ? sanitizeWeekPlan(snap.record.weekPlan, DEFAULT_WEEK_PLAN)
+            : { ...DEFAULT_WEEK_PLAN, loads: [] };
         }
       }
     } catch { /* a damaged snapshot is dropped, never fatal */ }
@@ -4424,6 +4441,10 @@ export function openWeekPlanner(open = true) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   weekPlannerSubs.forEach((f) => f());
 }
@@ -4434,14 +4455,42 @@ function useWeekPlanner(): boolean {
   return weekPlannerOpen;
 }
 
+/** G7 parameter handoff payload for drilling into When to roll & PTA from My Week (or Load Check). */
+export interface RolloutPrefill {
+  apptDate?: string;
+  apptTime?: string;
+  apptTimeZone?: string;
+  distanceMode?: DistanceMode;
+  miles?: number;
+  mph?: number;
+  driveMinutes?: number;
+  bufferMinutes?: number;
+  dockMinutes?: number;
+  preTripMinutes?: number;
+  returnToMyWeek?: boolean;
+  /** H4: Prior planned loads' simulated segments & cursor from My Week chain. */
+  chainedPriorSegments?: Segment[];
+  chainedCursor?: number;
+  chainedFromLabel?: string;
+}
+let pendingRolloutPrefill: RolloutPrefill | null = null;
+let rolloutReturnToMyWeek = false;
+
 /**
  * Reactive sub-screen flag for the Work-Backwards Appointment & Departure Planner ("When to roll & PTA").
  * Held outside `store.ts` (store is frozen) in the exact style of `useWeekPlanner()` above.
  */
 let rolloutPlannerOpen = false;
 const rolloutPlannerSubs = new Set<() => void>();
-export function openRolloutPlanner(open = true) {
+export function openRolloutPlanner(open = true, prefill?: RolloutPrefill) {
   rolloutPlannerOpen = open;
+  if (open) {
+    pendingRolloutPrefill = prefill ?? null;
+    rolloutReturnToMyWeek = Boolean(prefill?.returnToMyWeek);
+  } else {
+    pendingRolloutPrefill = null;
+    rolloutReturnToMyWeek = false;
+  }
   if (!open && currentSheet()?.kind === 'rollouttime') openSheet(null);
   if (open && weekPlannerOpen) {
     weekPlannerOpen = false;
@@ -4471,6 +4520,10 @@ export function openRolloutPlanner(open = true) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rolloutPlannerSubs.forEach((f) => f());
 }
@@ -4481,14 +4534,38 @@ function useRolloutPlanner(): boolean {
   return rolloutPlannerOpen;
 }
 
+/** G7 parameter handoff payload for drilling into Split-sleeper rescue from My Week. */
+export interface RescuePrefill {
+  dockWaitMinutes?: number;
+  distanceMode?: RescueDistanceMode;
+  miles?: number;
+  mph?: number;
+  driveMinutes?: number;
+  deadlineMinute?: number | null;
+  returnToMyWeek?: boolean;
+  /** H4: Prior planned loads' simulated segments & cursor from My Week chain. */
+  chainedPriorSegments?: Segment[];
+  chainedCursor?: number;
+  chainedFromLabel?: string;
+}
+let pendingRescuePrefill: RescuePrefill | null = null;
+let rescueReturnToMyWeek = false;
+
 /**
  * Reactive sub-screen flag for the Split-Sleeper Rescue Simulator ("Split-sleeper rescue").
  * Held outside `store.ts` (store is frozen) in the exact style of `useWeekPlanner()` / `useRolloutPlanner()`.
  */
 let rescuePlannerOpen = false;
 const rescuePlannerSubs = new Set<() => void>();
-export function openRescuePlanner(open = true) {
+export function openRescuePlanner(open = true, prefill?: RescuePrefill) {
   rescuePlannerOpen = open;
+  if (open) {
+    pendingRescuePrefill = prefill ?? null;
+    rescueReturnToMyWeek = Boolean(prefill?.returnToMyWeek);
+  } else {
+    pendingRescuePrefill = null;
+    rescueReturnToMyWeek = false;
+  }
   if (!open && currentSheet()?.kind === 'rescuetime') openSheet(null);
   if (open && weekPlannerOpen) {
     weekPlannerOpen = false;
@@ -4517,6 +4594,10 @@ export function openRescuePlanner(open = true) {
   if (open && milesPlannerOpen) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
+  }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   rescuePlannerSubs.forEach((f) => f());
@@ -4565,6 +4646,10 @@ export function openStackPlanner(open = true) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   stackPlannerSubs.forEach((f) => f());
 }
@@ -4611,6 +4696,10 @@ export function openMotelPlanner(open = true) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   motelPlannerSubs.forEach((f) => f());
 }
@@ -4656,6 +4745,10 @@ export function openLegalPlanner(open = true) {
   if (open && milesPlannerOpen) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
+  }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
   }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   legalPlannerSubs.forEach((f) => f());
@@ -4704,6 +4797,10 @@ export function openFlipPlanner(open = true) {
     milesPlannerOpen = false;
     milesPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   flipPlannerSubs.forEach((f) => f());
 }
@@ -4751,6 +4848,10 @@ export function openMilesPlanner(open = true) {
     flipPlannerOpen = false;
     flipPlannerSubs.forEach((f) => f());
   }
+  if (open && myWeekPlannerOpen) {
+    myWeekPlannerOpen = false;
+    myWeekPlannerSubs.forEach((f) => f());
+  }
   if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
   milesPlannerSubs.forEach((f) => f());
 }
@@ -4761,8 +4862,128 @@ function useMilesPlanner(): boolean {
   return milesPlannerOpen;
 }
 
+/**
+ * Reactive sub-screen flag for My Week (Master Week Synthesizer — Plan capstone tool).
+ */
+let myWeekPlannerOpen = false;
+const myWeekPlannerSubs = new Set<() => void>();
+export function openMyWeekPlanner(open = true) {
+  myWeekPlannerOpen = open;
+  if (!open && currentSheet()?.kind === 'myweektime') openSheet(null);
+  if (open && weekPlannerOpen) {
+    weekPlannerOpen = false;
+    weekPlannerSubs.forEach((f) => f());
+  }
+  if (open && rolloutPlannerOpen) {
+    rolloutPlannerOpen = false;
+    rolloutPlannerSubs.forEach((f) => f());
+  }
+  if (open && rescuePlannerOpen) {
+    rescuePlannerOpen = false;
+    rescuePlannerSubs.forEach((f) => f());
+  }
+  if (open && stackPlannerOpen) {
+    stackPlannerOpen = false;
+    stackPlannerSubs.forEach((f) => f());
+  }
+  if (open && motelPlannerOpen) {
+    motelPlannerOpen = false;
+    motelPlannerSubs.forEach((f) => f());
+  }
+  if (open && legalPlannerOpen) {
+    legalPlannerOpen = false;
+    legalPlannerSubs.forEach((f) => f());
+  }
+  if (open && flipPlannerOpen) {
+    flipPlannerOpen = false;
+    flipPlannerSubs.forEach((f) => f());
+  }
+  if (open && milesPlannerOpen) {
+    milesPlannerOpen = false;
+    milesPlannerSubs.forEach((f) => f());
+  }
+  if (open && getState().tab !== 'plan') setState({ tab: 'plan', planReturn: 'plan' });
+  myWeekPlannerSubs.forEach((f) => f());
+}
+export function isMyWeekPlannerOpen(): boolean { return myWeekPlannerOpen; }
+function useMyWeekPlanner(): boolean {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((x) => x + 1); myWeekPlannerSubs.add(f); return () => { myWeekPlannerSubs.delete(f); }; }, []);
+  return myWeekPlannerOpen;
+}
+
 /** The planning tools, one big button each: a question a driver asks, not a tool name. */
-function PlanTab({ ev }: { ev: FullEvaluation }) {
+function PlanTab({ s, now, ev, isActive = true }: { s: State; now: number; ev: FullEvaluation; isActive?: boolean }) {
+  const lastHubRef = useRef<{ fp: string; snap: WeekHubSnapshot } | null>(null);
+  const nonDoneCount = s.weekPlan.loads.filter((l) => !l.done).length;
+  const hubFp = useMemo(() => {
+    if (nonDoneCount === 0) return '';
+    const { windowDays } = cycleParamsOf(s.config);
+    return computeWeekHubFingerprint({
+      segments: s.segments,
+      current: s.current,
+      now,
+      config: s.config,
+      mph: s.mph,
+      draft: s.weekPlan,
+      historyBasis: cycleBasis(s, now, windowDays),
+    });
+  }, [nonDoneCount, s.segments, s.current, s.config, s.mph, s.weekPlan, s.historyAcknowledged, s.seededAt, now]);
+
+  type PlanHubDisplay = WeekHubSnapshot & { placeholder?: boolean };
+  const weekSnap: PlanHubDisplay = useMemo(() => {
+    if (nonDoneCount === 0) {
+      lastHubRef.current = null;
+      return {
+        activeLoadCount: 0,
+        staleLoadCount: 0,
+        verdictStatus: 'all_clear',
+        verdictTone: 'good',
+        hubSummary: 'Stack 1–5 upcoming loads + home time — one chained verdict, priced conflicts, and Recaps vs. 34.',
+        recommendedStrategy: 'recaps',
+      };
+    }
+    if (!isActive) {
+      if (lastHubRef.current && lastHubRef.current.fp === hubFp) return lastHubRef.current.snap;
+      return {
+        activeLoadCount: nonDoneCount,
+        staleLoadCount: 0,
+        verdictStatus: 'provisional',
+        verdictTone: 'warn',
+        hubSummary: `${nonDoneCount} load${nonDoneCount === 1 ? '' : 's'} planned — tap to review`,
+        recommendedStrategy: 'recaps',
+        placeholder: true,
+      };
+    }
+    const { windowDays } = cycleParamsOf(s.config);
+    const snap = getWeekHubSummary({
+      segments: s.segments,
+      current: s.current,
+      now,
+      config: s.config,
+      mph: s.mph,
+      draft: s.weekPlan,
+      historyBasis: cycleBasis(s, now, windowDays),
+    });
+    lastHubRef.current = { fp: hubFp, snap };
+    return snap;
+  }, [isActive, nonDoneCount, hubFp]);
+
+  const hasWeekContent = weekSnap.activeLoadCount > 0 || weekSnap.staleLoadCount > 0;
+  const capstoneTone = !hasWeekContent || weekSnap.placeholder ? '' : ` tone-${weekSnap.verdictTone}`;
+  const capstonePill =
+    !hasWeekContent
+      ? '1–5 loads'
+      : weekSnap.placeholder
+        ? 'Review'
+        : weekSnap.verdictStatus === 'all_clear'
+          ? 'All clear'
+          : weekSnap.verdictStatus === 'conflict'
+            ? 'Conflict'
+            : weekSnap.verdictStatus === 'provisional'
+              ? 'Provisional'
+              : 'Tight';
+
   const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
     <button class="plan-item" onClick={() => setState({ tab, planReturn: 'plan' })}>
       <span class="plan-icon"><Icon d={icon} size={26} /></span>
@@ -4773,6 +4994,26 @@ function PlanTab({ ev }: { ev: FullEvaluation }) {
   return (
     <>
       <h1 class="screen-title">Plan</h1>
+      <button
+        type="button"
+        class={`plan-capstone${capstoneTone}`}
+        data-myweek-entry="1"
+        onClick={() => openMyWeekPlanner(true)}
+      >
+        <span class="plan-capstone-top">
+          <span class="plan-capstone-kicker">Your Week Ahead</span>
+          <span class={`plan-capstone-pill${capstoneTone}`}>{capstonePill}</span>
+        </span>
+        <span class="plan-capstone-main">
+          <span class="plan-capstone-icon"><Icon d={I.myweek} size={26} /></span>
+          <span>
+            <b class="plan-capstone-title">My Week</b>
+            <span class="plan-capstone-sub">{weekSnap.hubSummary}</span>
+          </span>
+          <Icon d={I.next} />
+        </span>
+      </button>
+      <h2 class="plan-section-head">Single-load &amp; shift tools</h2>
       {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
       {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
@@ -6035,22 +6276,33 @@ function RolloutTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, {
  * produce a concrete execution checklist and copyable dispatch PTA.
  */
 function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
+  const prefill = useMemo(() => {
+    const p = pendingRolloutPrefill;
+    pendingRolloutPrefill = null;
+    return p;
+  }, []);
   const initAppt = useMemo(() => defaultAppointmentFor(now, s.config), []);
-  const [apptDate, setApptDate] = useState(initAppt.apptDate);
-  const [apptTime, setApptTime] = useState(initAppt.apptTime);
-  const [apptTz, setApptTz] = useState(s.config.timeZone);
+  const [apptDate, setApptDate] = useState(prefill?.apptDate || initAppt.apptDate);
+  const [apptTime, setApptTime] = useState(prefill?.apptTime || initAppt.apptTime);
+  const [apptTz, setApptTz] = useState(prefill?.apptTimeZone && isValidTimeZone(prefill.apptTimeZone) ? prefill.apptTimeZone : s.config.timeZone);
   const [entryZoneMode, setEntryZoneMode] = useState<ZoneEntryMode>('local');
-  const [distanceMode, setDistanceMode] = useState<DistanceMode>('miles');
-  const [miles, setMiles] = useState(DEFAULT_MILES);
-  const [mph, setMph] = useState(() => Math.max(MIN_MPH, Math.min(MAX_MPH, Math.round(s.mph || DEFAULT_MPH))));
-  const [driveHours, setDriveHours] = useState(9);
-  const [driveMins, setDriveMins] = useState(0);
-  const [bufferMin, setBufferMin] = useState(DEFAULT_BUFFER_MIN);
-  const [dockMin, setDockMin] = useState(DEFAULT_DOCK_MIN);
-  const [preTripMin, setPreTripMin] = useState(DEFAULT_PRETRIP_MIN);
+  const [distanceMode, setDistanceMode] = useState<DistanceMode>(prefill?.distanceMode ?? 'miles');
+  const [miles, setMiles] = useState(prefill?.miles ?? DEFAULT_MILES);
+  const [mph, setMph] = useState(() => Math.max(MIN_MPH, Math.min(MAX_MPH, Math.round(prefill?.mph ?? (s.mph || DEFAULT_MPH)))));
+  const [driveHours, setDriveHours] = useState(prefill?.driveMinutes !== undefined ? Math.floor(prefill.driveMinutes / 60) : 9);
+  const [driveMins, setDriveMins] = useState(prefill?.driveMinutes !== undefined ? prefill.driveMinutes % 60 : 0);
+  const [bufferMin, setBufferMin] = useState(prefill?.bufferMinutes ?? DEFAULT_BUFFER_MIN);
+  const [dockMin, setDockMin] = useState(prefill?.dockMinutes ?? DEFAULT_DOCK_MIN);
+  const [preTripMin, setPreTripMin] = useState(prefill?.preTripMinutes ?? DEFAULT_PRETRIP_MIN);
   const [copyNote, setCopyNote] = useState('');
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const evalNow = prefill?.chainedCursor ?? now;
+  const logged = useMemo(() => {
+    const base = loggedSegments(s, now);
+    if (!prefill?.chainedPriorSegments?.length) return base;
+    const prior = prefill.chainedPriorSegments.map(({ tentative: _t, ...rest }) => rest);
+    return [...base, ...prior];
+  }, [s, now, prefill]);
   const zoneChoices = useMemo(() => {
     const set = new Set<string>([s.config.timeZone, deviceTz, ...COMMON_APPT_ZONES]);
     return [...set].filter((z) => isValidTimeZone(z));
@@ -6059,7 +6311,7 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
   const plan = useMemo(
     () => planRollout({
       segments: logged,
-      now,
+      now: evalNow,
       config: s.config,
       apptDate,
       apptTime,
@@ -6073,7 +6325,7 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
       dockMinutes: dockMin,
       preTripMinutes: preTripMin,
     }),
-    [logged, now, s.config, apptDate, apptTime, entryZoneMode, apptTz, distanceMode, miles, mph, driveHours, driveMins, bufferMin, dockMin, preTripMin],
+    [logged, evalNow, s.config, apptDate, apptTime, entryZoneMode, apptTz, distanceMode, miles, mph, driveHours, driveMins, bufferMin, dockMin, preTripMin],
   );
 
   const copyPta = async () => {
@@ -6112,7 +6364,7 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
           <p class="rollout-headline">{plan.headline}</p>
           <p class="rollout-subline">{plan.reason}</p>
           <p class="muted small" style="margin:0">
-            Seeded from your log · {plan.cycleLimit / 60}h/{plan.cycleWindowDays}d cycle ({dur(plan.cycleRemainingNow)} left) · Home terminal: <b>{plan.homeZoneName}</b>
+            {prefill?.chainedFromLabel ? `Seeded from My Week chain (${prefill.chainedFromLabel})` : 'Seeded from your log'} · {plan.cycleLimit / 60}h/{plan.cycleWindowDays}d cycle ({dur(plan.cycleRemainingNow)} left) · Home terminal: <b>{plan.homeZoneName}</b>
             {!plan.sameZone && <> · Appointment: <b>{plan.apptZoneName}</b></>}.
           </p>
         </div>
@@ -6125,7 +6377,7 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
             {plan.recovery ? (
               <>
                 <p class="small" style="margin:0">
-                  No legal timetable meets <b>{plan.appointment.apptText}</b> with a <b>{dur(plan.bufferMinutes)}</b> arrival buffer from your current clocks.
+                  No legal timetable meets <b>{plan.appointment.apptText}</b> ({distanceMode === 'miles' ? `${miles} mi @ ${plan.effectiveMph} mph, ` : ''}{dur(plan.driveMinutes)} drive) with a <b>{dur(plan.bufferMinutes)}</b> arrival buffer from your current clocks.
                   {plan.recovery.needsRestart34 && <> Clearing your {plan.cycleLimit / 60}-hour cycle requires a 34-hour reset first.</>}
                 </p>
                 <div class="rollout-recovery-grid">
@@ -6690,24 +6942,37 @@ function RescueStrategyCard({ st, deadlineShort }: { st: RescueStrategyResult; d
  * 8/2 split, 7/3 split, and Roll now side-by-side through `engine/src/index.ts`.
  */
 function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
-  const [waitHours, setWaitHours] = useState(Math.floor(RESCUE_DEFAULT_WAIT_MIN / 60));
-  const [waitMins, setWaitMins] = useState(RESCUE_DEFAULT_WAIT_MIN % 60);
-  const [distanceMode, setDistanceMode] = useState<RescueDistanceMode>('hours');
-  const [miles, setMiles] = useState(RESCUE_DEFAULT_MILES);
-  const [mph, setMph] = useState(() => Math.max(RESCUE_MIN_MPH, Math.min(RESCUE_MAX_MPH, Math.round(s.mph || RESCUE_DEFAULT_MPH))));
-  const [driveHours, setDriveHours] = useState(Math.floor(RESCUE_DEFAULT_DRIVE_DIRECT / 60));
-  const [driveMins, setDriveMins] = useState(RESCUE_DEFAULT_DRIVE_DIRECT % 60);
-  const [useDeadline, setUseDeadline] = useState(false);
-  const [deadlineMin, setDeadlineMin] = useState<number>(() => now + 10 * 60);
+  const prefill = useMemo(() => {
+    const p = pendingRescuePrefill;
+    pendingRescuePrefill = null;
+    return p;
+  }, []);
+  const initWait = prefill?.dockWaitMinutes ?? RESCUE_DEFAULT_WAIT_MIN;
+  const initDrive = prefill?.driveMinutes ?? RESCUE_DEFAULT_DRIVE_DIRECT;
+  const [waitHours, setWaitHours] = useState(Math.floor(initWait / 60));
+  const [waitMins, setWaitMins] = useState(initWait % 60);
+  const [distanceMode, setDistanceMode] = useState<RescueDistanceMode>(prefill?.distanceMode ?? 'hours');
+  const [miles, setMiles] = useState(prefill?.miles ?? RESCUE_DEFAULT_MILES);
+  const [mph, setMph] = useState(() => Math.max(RESCUE_MIN_MPH, Math.min(RESCUE_MAX_MPH, Math.round(prefill?.mph ?? (s.mph || RESCUE_DEFAULT_MPH)))));
+  const [driveHours, setDriveHours] = useState(Math.floor(initDrive / 60));
+  const [driveMins, setDriveMins] = useState(initDrive % 60);
+  const [useDeadline, setUseDeadline] = useState(Boolean(prefill?.deadlineMinute != null));
+  const [deadlineMin, setDeadlineMin] = useState<number>(() => prefill?.deadlineMinute ?? (now + 10 * 60));
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const evalNow = prefill?.chainedCursor ?? now;
+  const logged = useMemo(() => {
+    const base = loggedSegments(s, now);
+    if (!prefill?.chainedPriorSegments?.length) return base;
+    const prior = prefill.chainedPriorSegments.map(({ tentative: _t, ...rest }) => rest);
+    return [...base, ...prior];
+  }, [s, now, prefill]);
   const dockWaitMinutes = waitHours * 60 + waitMins;
   const driveMinutesDirect = driveHours * 60 + driveMins;
 
   const sim = useMemo(
     () => simulateRescue({
       segments: logged,
-      now,
+      now: evalNow,
       config: s.config,
       dockWaitMinutes,
       distanceMode,
@@ -6716,7 +6981,7 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
       driveMinutesDirect,
       deadlineMinute: useDeadline ? deadlineMin : null,
     }),
-    [logged, now, s.config, dockWaitMinutes, distanceMode, miles, mph, driveMinutesDirect, useDeadline, deadlineMin],
+    [logged, evalNow, s.config, dockWaitMinutes, distanceMode, miles, mph, driveMinutesDirect, useDeadline, deadlineMin],
   );
 
   const hist = cycleBasis(s, now, sim.cycleWindowDays);
@@ -6754,7 +7019,7 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
             </div>
           </div>
           <p class="muted small" style="margin:0">
-            Seeded from your log at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
+            {prefill?.chainedFromLabel ? `Seeded from My Week chain (${prefill.chainedFromLabel})` : 'Seeded from your log'} at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
             {sim.pendingSplitLeg && (
               <> · Pending split leg on log: <b>{dur(sim.pendingSplitLeg.duration)}</b> ({sim.pendingSplitLeg.qualifiesLongSB ? 'Sleeper Berth' : 'OFF/SB'})</>
             )}
@@ -9361,6 +9626,1032 @@ function MilesTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
   );
 }
 
+/* ============================================================ My Week (Master Week Synthesizer — Plan capstone) */
+
+/**
+ * Shared ClockPick sheet for My Week:
+ *  - 'home': home-time target date & time (home-terminal zone)
+ *  - 'appt': per-load hard appointment date & time (facility zone)
+ *  - 'usualstart': usual nightly shift start time-of-day (`timeOnly`, home-terminal zone)
+ * Converts wall-clock strings through `deviceTz` so TZ=UTC and TZ=America/Chicago stay exact.
+ */
+function MyWeekTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { kind: 'myweektime' }>; now: number; closing?: boolean }) {
+  const nowWall = formatWallDateTime(now, k.entryTimeZone);
+  const pickerNow = resolveWallDateTime(nowWall.date, nowWall.time, deviceTz) ?? now;
+  const [at, setAt] = useState<number>(() => {
+    const parsed = resolveWallDateTime(k.dateStr || nowWall.date, k.timeStr || '08:00', deviceTz);
+    return parsed ?? nextHour(pickerNow);
+  });
+  const apply = () => {
+    const wall = formatWallDateTime(at, deviceTz);
+    k.onApply(wall.date, wall.time);
+    openSheet(null);
+  };
+  const isTimeOnly = k.mode === 'usualstart';
+  return (
+    <Sheet title={`${k.title} (${k.entryZoneName})`} closing={closing}>
+      <p class="muted small" style="margin:0">
+        {isTimeOnly
+          ? <>Usual nightly roll-out time in <b>{k.entryZoneName}</b> time.</>
+          : <>Wall-clock time in <b>{k.entryZoneName}</b> time.</>}
+      </p>
+      <ClockPick
+        at={at}
+        set={setAt}
+        now={pickerNow}
+        future={!isTimeOnly}
+        timeOnly={isTimeOnly}
+        say={k.mode === 'home' ? 'Home by' : k.mode === 'usualstart' ? 'Usual start' : 'Appointment'}
+        name={k.title}
+        keys={KEYS_HOURS}
+      />
+      <button class="primary wide ed-go" onClick={apply}>
+        {isTimeOnly
+          ? `Apply · ${formatWallDateTime(at, deviceTz).time} (${k.entryZoneName})`
+          : `Apply · ${clockFull(at)} (${k.entryZoneName})`}
+      </button>
+    </Sheet>
+  );
+}
+
+/** Inline duration editor row using the shared duration-box pattern. */
+function MyWeekDurRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  const box = useDurationBoxes(label, value, min, max, onChange);
+  return (
+    <div class="mw-field-row">
+      <div class="qs-row motel-dur-row">
+        <span class="small muted">{label}</span>
+        {box.boxes}
+      </div>
+      {box.note && <p class="small warn" style="margin:0">{box.note}</p>}
+    </div>
+  );
+}
+
+/**
+ * My Week — Master Week Synthesizer (Plan capstone tool).
+ * Persists draft in `s.weekPlan` (`store.ts`). Chains 1–5 upcoming loads + home-time target +
+ * open-night shift fill through the real engine as ONE timeline, handing back one 5-second
+ * verdict, priced conflict cards with 1-tap trade previews, Recaps vs. 34 comparison, and an
+ * expandable week strip with 1-tap drill-downs to When to Roll & PTA and Split-Sleeper Rescue.
+ */
+function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; onBack: () => void; active?: boolean }) {
+  const draft = s.weekPlan;
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [moreOpenId, setMoreOpenId] = useState<string | null>(null);
+  const [previewTradeId, setPreviewTradeId] = useState<string | null>(null);
+  const [manualStrat, setManualStrat] = useState<WeekStrategyId | null>(null);
+  const [prefsMore, setPrefsMore] = useState(false);
+  const [showDispatch, setShowDispatch] = useState(false);
+  const [copyNote, setCopyNote] = useState('');
+  const lastBaseResRef = useRef<WeekSynthesisResult | null>(null);
+  const lastResRef = useRef<WeekSynthesisResult | null>(null);
+
+  const updatePlan = (fn: (cur: WeekPlanDraft) => WeekPlanDraft, keepManualStrat = false) => {
+    setPreviewTradeId(null);
+    if (!keepManualStrat) setManualStrat(null);
+    setState((cur) => ({ weekPlan: fn(cur.weekPlan) }));
+  };
+
+  const updateLoad = (id: string, patch: Partial<WeekLoadDraft>) => {
+    updatePlan((p) => ({
+      ...p,
+      loads: p.loads.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+    }));
+  };
+
+  const addLoad = () => {
+    if (draft.loads.length >= WEEK_MAX_LOADS) return;
+    const next = createNextWeekLoad(draft.loads, now, s.config);
+    updatePlan((p) => ({ ...p, loads: [...p.loads, next] }));
+    setExpandedId(next.id);
+  };
+
+  const importFromLoadCheck = () => {
+    if (draft.loads.length >= WEEK_MAX_LOADS) return;
+    const lc = s.loadCheck;
+    const base = createNextWeekLoad(draft.loads, now, s.config);
+    const hasAppt = lc.appt != null && Number.isFinite(lc.appt);
+    const apptWall = hasAppt ? formatWallDateTime(lc.appt as number, s.config.timeZone) : null;
+    const imported: WeekLoadDraft = {
+      ...base,
+      label: 'From Load Check',
+      distanceMode: 'miles',
+      miles: Math.max(1, Math.min(3000, Math.round(lc.miles))),
+      dockMinutes: Math.max(0, Math.min(720, Math.round(lc.dwell))),
+      dockOff: Boolean(lc.dwellOff),
+      hasAppt: Boolean(apptWall),
+      apptDate: apptWall?.date ?? base.apptDate,
+      apptTime: apptWall?.time ?? base.apptTime,
+    };
+    updatePlan((p) => ({ ...p, loads: [...p.loads, imported] }));
+    setExpandedId(imported.id);
+  };
+
+  const removeLoad = (id: string) => {
+    updatePlan((p) => ({ ...p, loads: p.loads.filter((l) => l.id !== id) }));
+    if (expandedId === id) setExpandedId(null);
+  };
+
+  const moveLoad = (idx: number, dir: -1 | 1) => {
+    const j = idx + dir;
+    if (j < 0 || j >= draft.loads.length) return;
+    updatePlan((p) => {
+      const next = [...p.loads];
+      const [item] = next.splice(idx, 1);
+      next.splice(j, 0, item);
+      return { ...p, loads: next };
+    });
+  };
+
+  const logged = useMemo(() => loggedSegments(s, now), [s.segments, s.current, now]);
+  const { windowDays } = cycleParamsOf(s.config);
+  const basis = useMemo(() => cycleBasis(s, now, windowDays), [s, now, windowDays]);
+
+  const baseRes: WeekSynthesisResult = useMemo(() => {
+    // H1: Never re-synthesize while the room is closing/dissolving off-screen.
+    if (!active && lastBaseResRef.current) return lastBaseResRef.current;
+    const out = synthesizeWeek({
+      segments: logged,
+      now,
+      config: s.config,
+      mph: s.mph,
+      draft,
+      historyBasis: basis,
+      previewTradeId: null,
+    });
+    lastBaseResRef.current = out;
+    primeWeekHubCache({
+      segments: s.segments,
+      current: s.current,
+      now,
+      config: s.config,
+      mph: s.mph,
+      draft,
+      historyBasis: basis,
+    }, out);
+    return out;
+  }, [active, logged, now, s.segments, s.current, s.config, s.mph, draft, basis]);
+
+  const activePreviewConflict = previewTradeId
+    ? baseRes.conflicts.find((c) => c.previewTrade?.id === previewTradeId) ?? null
+    : null;
+
+  const res: WeekSynthesisResult = useMemo(() => {
+    if (!active && lastResRef.current) return lastResRef.current;
+    const trade = activePreviewConflict?.previewTrade;
+    if (!trade) {
+      lastResRef.current = baseRes;
+      return baseRes;
+    }
+    const mutated = trade.apply({
+      ...draft,
+      loads: draft.loads.map((l) => ({ ...l })),
+      homeTarget: draft.homeTarget ? { ...draft.homeTarget } : null,
+    });
+    const out = synthesizeWeek({
+      segments: logged,
+      now,
+      config: s.config,
+      mph: s.mph,
+      draft: mutated,
+      historyBasis: basis,
+      previewTradeId: null,
+    });
+    const withId = { ...out, activePreviewTradeId: previewTradeId };
+    lastResRef.current = withId;
+    return withId;
+  }, [active, activePreviewConflict, previewTradeId, baseRes, logged, now, s.config, s.mph, draft, basis]);
+
+  const applyPreviewTrade = () => {
+    const trade = activePreviewConflict?.previewTrade;
+    if (!trade) return;
+    updatePlan((p) => trade.apply(p));
+    setPreviewTradeId(null);
+  };
+
+  const zoneChoices = useMemo(() => {
+    const set = new Set<string>([s.config.timeZone, deviceTz, ...COMMON_APPT_ZONES]);
+    return [...set].filter((z) => isValidTimeZone(z));
+  }, [s.config.timeZone]);
+
+  // M4: Default the Week Strip to the recommended lane; manual toggle overrides locally.
+  const effectiveStratId: WeekStrategyId = previewTradeId?.startsWith('push-for-34')
+    ? 'reset34'
+    : (manualStrat ?? res.recommendedStrategy);
+  const shownStrat = effectiveStratId === 'reset34' ? res.reset34 : res.recaps;
+  const topConflicts = baseRes.conflicts.slice(0, 3);
+
+  const openHomeTargetPicker = () => {
+    const fallbackWall = formatWallDateTime(now + 48 * 60, res.homeTimeZone);
+    openSheet({
+      kind: 'myweektime',
+      mode: 'home',
+      title: 'Home-time target',
+      dateStr: draft.homeTarget?.date ?? fallbackWall.date,
+      timeStr: draft.homeTarget?.time ?? '09:00',
+      entryZoneName: res.homeZoneName,
+      entryTimeZone: res.homeTimeZone,
+      onApply: (date, time) => updatePlan((p) => ({ ...p, homeTarget: { date, time } })),
+    });
+  };
+
+  const openLoadApptPicker = (l: WeekLoadDraft) => {
+    const tz = l.apptTimeZone && isValidTimeZone(l.apptTimeZone) ? l.apptTimeZone : res.homeTimeZone;
+    const fallbackWall = formatWallDateTime(now + 24 * 60, tz);
+    openSheet({
+      kind: 'myweektime',
+      mode: 'appt',
+      title: `${l.label.trim() || 'Load'} appointment`,
+      dateStr: l.apptDate || fallbackWall.date,
+      timeStr: l.apptTime || '08:00',
+      entryZoneName: zoneShort(tz),
+      entryTimeZone: tz,
+      onApply: (date, time) => updateLoad(l.id, { hasAppt: true, apptDate: date, apptTime: time }),
+    });
+  };
+
+  const openUsualStartPicker = () => {
+    const nowWall = formatWallDateTime(now, res.homeTimeZone);
+    const hh = String(Math.floor(draft.usualShiftStartMinutes / 60)).padStart(2, '0');
+    const mm = String(draft.usualShiftStartMinutes % 60).padStart(2, '0');
+    openSheet({
+      kind: 'myweektime',
+      mode: 'usualstart',
+      title: 'Usual shift start',
+      dateStr: nowWall.date,
+      timeStr: `${hh}:${mm}`,
+      entryZoneName: res.homeZoneName,
+      entryTimeZone: res.homeTimeZone,
+      onApply: (_date, time) => {
+        const m = /^(\d{2}):(\d{2})$/.exec(time);
+        if (m) updatePlan((p) => ({ ...p, usualShiftStartMinutes: Number(m[1]) * 60 + Number(m[2]) }));
+      },
+    });
+  };
+
+  // M5: Always copy the APPLIED plan (`baseRes.dispatchText`), never an active unapplied preview.
+  const copyDispatch = async () => {
+    try {
+      await navigator.clipboard.writeText(baseRes.dispatchText);
+      setCopyNote('Copied ✓');
+    } catch {
+      setCopyNote('Select & copy below');
+      setShowDispatch(true);
+    }
+  };
+
+  // H4: Seed Rollout & Rescue drill-downs from the CHAINED state at Load `o` (prior planned loads' simulated
+  // segments + chained evaluation cursor), so Load 2+ never claim an illegal roll-out "Fits cleanly".
+  const chainContextFor = (o: WeekLoadOutcome) => {
+    if (o.index <= 0) return { chainedPriorSegments: undefined, chainedCursor: res.now, chainedFromLabel: undefined };
+    const priorLoads = shownStrat.loads.slice(0, o.index);
+    const prev = priorLoads[priorLoads.length - 1];
+    return {
+      chainedPriorSegments: priorLoads.flatMap((pl) => pl.simSegments),
+      chainedCursor: prev ? prev.pta.minute : res.now,
+      chainedFromLabel: prev ? `after ${prev.displayName}` : undefined,
+    };
+  };
+
+  const drillRollout = (o: WeekLoadOutcome) => {
+    const apptMin = o.appointment?.minute ?? o.arrival.minute + o.bufferMinutes;
+    const wd = formatWallDateTime(apptMin, o.apptTimeZone);
+    const chainCtx = chainContextFor(o);
+    openRolloutPlanner(true, {
+      apptDate: wd.date,
+      apptTime: wd.time,
+      apptTimeZone: o.apptTimeZone,
+      distanceMode: o.load.distanceMode,
+      miles: o.load.miles + o.load.deadheadMiles,
+      mph: o.effectiveMph,
+      driveMinutes: o.totalDriveMinutes,
+      bufferMinutes: o.bufferMinutes,
+      dockMinutes: o.dockMinutes,
+      preTripMinutes: o.preTripMinutes,
+      returnToMyWeek: true,
+      ...chainCtx,
+    });
+  };
+
+  const drillRescue = (o: WeekLoadOutcome) => {
+    const chainCtx = chainContextFor(o);
+    openRescuePlanner(true, {
+      dockWaitMinutes: o.dockMinutes || 120,
+      distanceMode: o.load.distanceMode,
+      miles: o.load.miles + o.load.deadheadMiles,
+      mph: o.effectiveMph,
+      driveMinutes: o.totalDriveMinutes,
+      deadlineMinute: o.appointment?.minute ?? null,
+      returnToMyWeek: true,
+      ...chainCtx,
+    });
+  };
+
+  return (
+    <>
+      <button class="back" onClick={onBack}><Icon d={I.back} /> Plan</button>
+      <h1 class="screen-title">My Week</h1>
+
+      {/* Starting clocks bar (shared floor — automatic, 0 taps) */}
+      <div class="mw-clocks-bar" data-myweek-clocks="1">
+        <span>
+          Now: <b class="mono">{dur(res.cycleRemainingNow)}</b> cycle · <b class="mono">{dur(res.driveRemainingNow)}</b> drive · <b class="mono">{dur(res.windowRemainingNow)}</b> window
+        </span>
+        {res.provisional && (
+          <button
+            type="button"
+            class="link"
+            style="display:inline;padding:0;min-height:0"
+            onClick={() => { openMyWeekPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}
+          >
+            Fix a day
+          </button>
+        )}
+      </div>
+
+      {/* 1. TOP CARD — ONE 5-SECOND VERDICT BANNER */}
+      <Card tone={res.verdict.tone}>
+        <div
+          class="mw-verdict"
+          data-myweek-verdict="1"
+          data-myweek-status={res.verdict.status}
+          data-myweek-rec-strat={res.recommendedStrategy}
+        >
+          <Sign kind={res.verdict.sign}>{res.verdict.label}</Sign>
+          <p class="mw-headline">{res.verdict.headline}</p>
+          <p class="mw-subline mono">{res.verdict.subline}</p>
+          {res.verdict.fragilityNote && (
+            <p class="mw-note">{res.verdict.fragilityNote}</p>
+          )}
+          {res.verdict.splitCallout && (
+            <p class="mw-note" data-myweek-split-callout="1"><b>{res.verdict.splitCallout}</b></p>
+          )}
+          {res.provisional && (
+            <div class="row" style="gap:10px;flex-wrap:wrap">
+              <button
+                type="button"
+                class="mini"
+                onClick={() => { openMyWeekPlanner(false); setState({ tab: 'recap', planReturn: 'plan' }); }}
+              >
+                Hours coming back → Fix a day
+              </button>
+              <button
+                type="button"
+                class="mini"
+                onClick={() => openSheet({ kind: 'drift' })}
+              >
+                Drift check
+              </button>
+            </div>
+          )}
+          <p class="muted small" style="margin:2px 0 0">
+            Planning estimate at {res.effectiveMph} mph ({res.homeZoneName} terminal, {res.dayStartWord} day roll) — your ELD governs.
+          </p>
+        </div>
+      </Card>
+
+      {/* Active Trade Preview Bar */}
+      {activePreviewConflict?.previewTrade && (
+        <div class="mw-preview-bar" data-myweek-preview-bar="1">
+          <span><b>Previewing trade:</b> {activePreviewConflict.previewTrade.label}</span>
+          <div class="row" style="gap:6px">
+            <button type="button" class="mini primary" onClick={applyPreviewTrade}>Apply to week</button>
+            <button type="button" class="mini" onClick={() => setPreviewTradeId(null)}>Exit preview</button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. CONFLICTS & TRADES (ONLY SHOWN WHEN TOOLS DISAGREE) */}
+      {topConflicts.length > 0 && (
+        <div class="mw-conflicts" data-myweek-conflicts="1">
+          <h2 style="margin:0">Conflicts &amp; trades</h2>
+          {topConflicts.map((c: WeekConflict) => {
+            const isPreviewing = Boolean(c.previewTrade && previewTradeId === c.previewTrade.id);
+            return (
+              <div
+                key={c.id}
+                class={`mw-conflict sev-${c.severity}`}
+                data-myweek-conflict={c.kind}
+              >
+                <div class="mw-conflict-head">
+                  <span class="mw-conflict-title">{c.title}</span>
+                  <span class="mw-conflict-price mono">{c.priceLabel}</span>
+                </div>
+                <p class="mw-conflict-body">{c.body}</p>
+                <p class="mw-conflict-trade"><b>Trade:</b> {c.tradeText}</p>
+                {c.previewTrade && (
+                  <div>
+                    <button
+                      type="button"
+                      class={isPreviewing ? 'mini primary' : 'mini'}
+                      data-myweek-preview-btn={c.previewTrade.id}
+                      onClick={() => setPreviewTradeId(isPreviewing ? null : c.previewTrade!.id)}
+                    >
+                      {isPreviewing ? 'Hide preview' : `Preview: ${c.previewTrade.label}`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 3. STRATEGY SWITCHER (A · Run Recaps vs. B · Fit a 34) */}
+      <div class="mw-strat-row" role="group" aria-label="Weekly strategy comparison" data-myweek-strategies="1">
+        {(['recaps', 'reset34'] as const).map((sid) => {
+          const st = sid === 'recaps' ? res.recaps : res.reset34;
+          const active = effectiveStratId === sid;
+          const isRec = res.recommendedStrategy === sid;
+          const summary = res.activeLoadCount === 0
+            ? (sid === 'recaps'
+                ? `${dur(res.macroRecap.recaps.totalUsableMinutes)} usable over 7 shifts`
+                : `${dur(res.macroRecap.reset34.totalUsableMinutes)} usable with 34`)
+            : st.missedApptCount > 0
+              ? `Misses ${st.missedApptCount} appt${st.missedApptCount === 1 ? '' : 's'} (late ${dur(st.maxApptLateMinutes)})`
+              : st.homeCheck && !st.homeCheck.meetsTarget
+                ? `Home ${dur(Math.abs(st.homeCheck.slackMinutes))} past · ${dur(st.cycleRemainingAtEnd)} left`
+                : `${dur(st.cycleRemainingAtEnd)} cycle left${st.usesSplit ? ' · uses split' : ''}`;
+          return (
+            <button
+              key={sid}
+              type="button"
+              class={`mw-strat-btn${active ? ' on' : ''}`}
+              aria-pressed={active}
+              data-myweek-strat={sid}
+              onClick={() => { setManualStrat(sid); updatePlan((p) => ({ ...p, strategyView: sid }), true); }}
+            >
+              <b>{st.label}{isRec ? ' ★' : ''}</b>
+              <span>{summary}</span>
+              {sid === 'reset34' && st.resetPlacement && (
+                <span>34: {st.resetPlacement.start.homeShort} → {st.resetPlacement.end.homeShort}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 4. THE CHAINED WEEK STRIP */}
+      <div class="mw-strip" data-myweek-strip="1">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="margin:0">Week strip ({res.activeLoadCount}/{WEEK_MAX_LOADS} loads)</h2>
+          <div class="row" style="gap:6px">
+            {draft.loads.length < WEEK_MAX_LOADS && (
+              <button type="button" class="mini" data-myweek-import-lc="1" onClick={importFromLoadCheck}>
+                + From Load Check
+              </button>
+            )}
+            {draft.loads.length < WEEK_MAX_LOADS && (
+              <button type="button" class="mini primary" data-myweek-add-load="1" onClick={addLoad}>
+                + Add load
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Stale / past-due load guardrail (Section F.1) */}
+        {res.staleLoads.map((st) => (
+          <div key={st.load.id} class="mw-stale-card" data-myweek-stale={st.load.id}>
+            <span><b>{st.displayName} passed</b> ({st.apptText}) — excluded until confirmed.</span>
+            <div class="row" style="gap:6px">
+              <button type="button" class="mini" onClick={() => updateLoad(st.load.id, { done: true })}>Mark done</button>
+              <button type="button" class="mini" onClick={() => openLoadApptPicker(st.load)}>Move appt</button>
+            </div>
+          </div>
+        ))}
+
+        {/* Active chained load cards */}
+        {shownStrat.loads.map((o) => {
+          const isOpen = expandedId === o.id;
+          const isMore = moreOpenId === o.id;
+          const rawIdx = draft.loads.findIndex((x) => x.id === o.id);
+          return (
+            <div
+              key={o.id}
+              class={`mw-load-card tone-${o.statusTone}`}
+              data-myweek-load-card={o.id}
+              data-myweek-gate={String(o.midnightGateMinutes)}
+              data-myweek-cycle-after={String(o.cycleRemainingAfter)}
+              data-myweek-split={o.usedSplit ? (o.splitKind ?? 'split') : 'none'}
+            >
+              <button
+                type="button"
+                class="mw-load-head"
+                aria-expanded={isOpen}
+                onClick={() => setExpandedId(isOpen ? null : o.id)}
+              >
+                <span>
+                  <b>{o.displayName}</b>{' '}
+                  <span class="muted small mono">
+                    {o.load.distanceMode === 'miles' ? `${o.load.miles} mi` : dur(o.loadedDriveMinutes)}
+                    {o.load.deadheadMiles > 0 ? ` (+${o.load.deadheadMiles} DH)` : ''}
+                  </span>
+                </span>
+                <span class={`mw-load-badge tone-${o.statusTone}`}>{o.statusBadge}</span>
+              </button>
+
+              {/* At-a-glance chained timetable */}
+              <div class="mw-load-grid">
+                <div class="mw-load-cell">
+                  <span>Roll out</span>
+                  <b class="mono">{o.rollOut.homeShort}</b>
+                  {o.midnightGateMinutes > 0 && (
+                    <small>
+                      {o.midnightGateKind === 'restart34'
+                        ? `34h restart wait +${dur(o.midnightGateMinutes)}`
+                        : `Gated +${dur(o.midnightGateMinutes)} for ${res.dayStartWord}`}
+                    </small>
+                  )}
+                </div>
+                <div class="mw-load-cell">
+                  <span>{o.appointment ? 'Arrival vs Appt' : 'Arrival'}</span>
+                  <b class="mono">{o.arrival.apptShort}</b>
+                  {!o.sameZone && <small class="mono">{o.arrival.homeShort} home</small>}
+                  {o.appointment && (
+                    <small>
+                      Appt {o.appointment.apptShort}
+                      {o.apptSlackMinutes !== null
+                        ? (o.apptSlackMinutes >= 0 ? ` (${dur(o.apptSlackMinutes)} early)` : ` (${dur(Math.abs(o.apptSlackMinutes))} late)`)
+                        : ''}
+                    </small>
+                  )}
+                </div>
+                <div class="mw-load-cell">
+                  <span>PTA &amp; rest</span>
+                  <b class="mono">{o.pta.apptShort}</b>
+                  <small>
+                    {o.dockMinutes > 0 ? `${dur(o.dockMinutes)} ${o.dockOff ? 'OFF' : 'ON'} dock` : '0m dock'}
+                    {o.ptaInSweetSpot ? ' · sweet spot' : ''}
+                  </small>
+                </div>
+                <div class="mw-load-cell">
+                  <span>Cycle left after</span>
+                  <b class="mono">{dur(o.cycleRemainingAfter)}</b>
+                  {o.index < shownStrat.loads.length - 1 && !o.usedSplit && (
+                    <small>10h break ends {o.restAfterEnd.homeHM}</small>
+                  )}
+                </div>
+              </div>
+
+              {o.splitCallout && (
+                <p class="mw-note" style="margin:0"><b>{o.splitCallout}</b></p>
+              )}
+
+              {/* Expanded inline editor + 1-tap drill-downs */}
+              {isOpen && (
+                <div class="mw-load-edit" data-myweek-load-edit={o.id}>
+                  <div class="mw-field-row">
+                    <label class="small muted">
+                      Load tag (optional)
+                      <input
+                        type="text"
+                        maxLength={40}
+                        placeholder={`Load ${o.index + 1} (e.g. Chi → Nash)`}
+                        value={o.load.label}
+                        onInput={(e) => updateLoad(o.id, { label: (e.target as HTMLInputElement).value })}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Run length: Miles vs Direct hours */}
+                  <div class="mw-field-row">
+                    <div class="mw-field-head">
+                      <span class="small muted">Run length</span>
+                      <div class="toggle">
+                        <button
+                          type="button"
+                          class={o.load.distanceMode === 'miles' ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { distanceMode: 'miles' })}
+                        >Miles</button>
+                        <button
+                          type="button"
+                          class={o.load.distanceMode === 'hours' ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { distanceMode: 'hours' })}
+                        >Hours</button>
+                      </div>
+                    </div>
+                    {o.load.distanceMode === 'miles' ? (
+                      <>
+                        <div class="rollout-chips">
+                          {WEEK_MILES_PRESETS.map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              class={o.load.miles === m ? 'on' : undefined}
+                              onClick={() => updateLoad(o.id, { miles: m })}
+                            >{m} mi</button>
+                          ))}
+                        </div>
+                        <div class="qs-row">
+                          <span class="small muted">Exact miles</span>
+                          <input
+                            type="number"
+                            class="num"
+                            inputMode="numeric"
+                            min={1}
+                            max={3000}
+                            value={o.load.miles}
+                            aria-label="Load miles"
+                            onInput={(e) => {
+                              const v = Number((e.target as HTMLInputElement).value);
+                              if (Number.isFinite(v) && v >= 1) updateLoad(o.id, { miles: Math.min(3000, Math.round(v)) });
+                            }}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <MyWeekDurRow
+                        label="Drive time"
+                        value={o.load.driveMinutes}
+                        min={15}
+                        max={1800}
+                        onChange={(v) => updateLoad(o.id, { driveMinutes: v })}
+                      />
+                    )}
+                  </div>
+
+                  {/* Hard appointment (ClockPick + facility timezone) */}
+                  <div class="mw-field-row">
+                    <div class="mw-field-head">
+                      <span class="small muted">Hard appointment</span>
+                      <div class="toggle">
+                        <button
+                          type="button"
+                          class={!o.load.hasAppt ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { hasAppt: false })}
+                        >None</button>
+                        <button
+                          type="button"
+                          class={o.load.hasAppt ? 'on' : undefined}
+                          onClick={() => {
+                            if (!o.load.apptDate) openLoadApptPicker(o.load);
+                            else updateLoad(o.id, { hasAppt: true });
+                          }}
+                        >Set appt</button>
+                      </div>
+                    </div>
+                    {o.load.hasAppt && (
+                      <>
+                        <button
+                          type="button"
+                          class="rowbtn"
+                          data-myweek-appt-btn={o.id}
+                          onClick={() => openLoadApptPicker(o.load)}
+                        >
+                          <span>
+                            Appt: <b class="mono">{o.appointment ? o.appointment.apptShort : `${o.load.apptDate} ${o.load.apptTime}`}</b>
+                          </span>
+                          <span class="muted small">Change ›</span>
+                        </button>
+                        <label class="small muted">
+                          Facility time zone
+                          <select
+                            value={o.apptTimeZone}
+                            onChange={(e) => updateLoad(o.id, { apptTimeZone: (e.target as HTMLSelectElement).value })}
+                          >
+                            {zoneChoices.map((z) => (
+                              <option key={z} value={z}>{zoneLabel(z) ?? z}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Dock / unload dwell */}
+                  <div class="mw-field-row">
+                    <div class="mw-field-head">
+                      <span class="small muted">Dock / unload</span>
+                      <div class="toggle">
+                        <button
+                          type="button"
+                          class={!o.load.dockOff ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { dockOff: false })}
+                        >ON duty</button>
+                        <button
+                          type="button"
+                          class={o.load.dockOff ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { dockOff: true })}
+                        >OFF / relieved</button>
+                      </div>
+                    </div>
+                    <div class="rollout-chips">
+                      {WEEK_DOCK_PRESETS.map((p) => (
+                        <button
+                          key={p.minutes}
+                          type="button"
+                          class={o.load.dockMinutes === p.minutes ? 'on' : undefined}
+                          onClick={() => updateLoad(o.id, { dockMinutes: p.minutes })}
+                        >{p.label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Collapsed G6 fields: deadhead, pickup dwell, per-load pre-trip/buffer/mph */}
+                  <div>
+                    <button
+                      type="button"
+                      class="link"
+                      style="padding:0;min-height:36px"
+                      onClick={() => setMoreOpenId(isMore ? null : o.id)}
+                    >
+                      {isMore ? 'Hide deadhead & overrides ▴' : 'Deadhead, pickup dwell & overrides ▾'}
+                    </button>
+                    {isMore && (
+                      <div class="mw-load-edit" style="margin-top:6px">
+                        <div class="qs-row">
+                          <span class="small muted">Deadhead miles</span>
+                          <input
+                            type="number"
+                            class="num"
+                            inputMode="numeric"
+                            min={0}
+                            max={1000}
+                            value={o.load.deadheadMiles}
+                            aria-label="Deadhead miles"
+                            onInput={(e) => {
+                              const v = Number((e.target as HTMLInputElement).value);
+                              if (Number.isFinite(v) && v >= 0) updateLoad(o.id, { deadheadMiles: Math.min(1000, Math.round(v)) });
+                            }}
+                          />
+                        </div>
+                        <MyWeekDurRow
+                          label="Pickup dwell"
+                          value={o.load.pickupDwellMinutes}
+                          min={0}
+                          max={480}
+                          onChange={(v) => updateLoad(o.id, { pickupDwellMinutes: v })}
+                        />
+                        <div class="mw-field-row">
+                          <span class="small muted">Pre-trip ({dur(o.preTripMinutes)})</span>
+                          <div class="rollout-chips">
+                            {PRETRIP_PRESETS.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                class={o.preTripMinutes === m ? 'on' : undefined}
+                                onClick={() => updateLoad(o.id, { preTripMinutes: m })}
+                              >{m}m</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div class="mw-field-row">
+                          <span class="small muted">Arrival buffer ({dur(o.bufferMinutes)})</span>
+                          <div class="rollout-chips">
+                            {BUFFER_PRESETS.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                class={o.bufferMinutes === m ? 'on' : undefined}
+                                onClick={() => updateLoad(o.id, { bufferMinutes: m })}
+                              >{m}m</button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Two 1-tap drill-down buttons (G7 parameter handoff; M3 hides Rescue when allowSplits=false) */}
+                  <div class="mw-drill-row">
+                    <button
+                      type="button"
+                      data-myweek-drill-rollout={o.id}
+                      onClick={() => drillRollout(o)}
+                    >
+                      Open When to Roll &amp; PTA
+                    </button>
+                    {draft.allowSplits && (
+                      <button
+                        type="button"
+                        data-myweek-drill-rescue={o.id}
+                        onClick={() => drillRescue(o)}
+                      >
+                        Dock delayed? Open Rescue
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Reorder / remove */}
+                  <div class="row" style="justify-content:space-between">
+                    <div class="row" style="gap:6px">
+                      <button type="button" class="mini" disabled={rawIdx <= 0} onClick={() => moveLoad(rawIdx, -1)}>↑ Up</button>
+                      <button type="button" class="mini" disabled={rawIdx < 0 || rawIdx >= draft.loads.length - 1} onClick={() => moveLoad(rawIdx, 1)}>↓ Down</button>
+                    </div>
+                    <button type="button" class="mini danger" onClick={() => removeLoad(o.id)}>Remove load</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Open nights filled by usual nightly shift */}
+        {shownStrat.openNights.map((n) => (
+          <div key={`open-${n.label}-${n.index}`} class="mw-open-night" data-myweek-open-night={n.label}>
+            <span>
+              <b>Open night · {n.shortLabel}</b>{' '}
+              <span class="muted small">({n.shiftStart.homeHM} · {dur(n.usableMinutes)}/{dur(n.plannedMinutes)})</span>
+            </span>
+            <span class="mono small">
+              {n.dropsOffMinutes > 0 ? `+${dur(n.dropsOffMinutes)} back · ` : ''}
+              {n.pinched ? `Short ${dur(n.shortfallMinutes)}` : `${dur(n.availAfterMinutes)} left`}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* 5. HOME TIME & WEEK PREFERENCES (PERSISTED IN store.ts) */}
+      <Card title="Home time &amp; week rules">
+        <div class="miles-inputs">
+          {/* Home-time target */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <span class="stat-label">Home-time target</span>
+              <div class="toggle">
+                <button
+                  type="button"
+                  class={!draft.homeTarget ? 'on' : undefined}
+                  onClick={() => updatePlan((p) => ({ ...p, homeTarget: null }))}
+                >None</button>
+                <button
+                  type="button"
+                  class={draft.homeTarget ? 'on' : undefined}
+                  data-myweek-home-enable="1"
+                  onClick={openHomeTargetPicker}
+                >{draft.homeTarget ? 'Set' : 'Set target'}</button>
+              </div>
+            </div>
+            {draft.homeTarget && (
+              <button
+                type="button"
+                class="rowbtn"
+                data-myweek-home-btn="1"
+                onClick={openHomeTargetPicker}
+              >
+                <span>
+                  Home by: <b class="mono">{shownStrat.homeCheck ? shownStrat.homeCheck.target.homeShort : `${draft.homeTarget.date} ${draft.homeTarget.time}`}</b>
+                </span>
+                <span class="muted small">Change ›</span>
+              </button>
+            )}
+          </div>
+
+          {/* Sleeper splits allowed toggle (G4) */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <span class="stat-label">Sleeper splits</span>
+              <div class="toggle" data-myweek-splits-toggle="1">
+                <button
+                  type="button"
+                  class={draft.allowSplits ? 'on' : undefined}
+                  aria-pressed={draft.allowSplits}
+                  data-myweek-splits-yes="1"
+                  onClick={() => updatePlan((p) => ({ ...p, allowSplits: true }))}
+                >Allowed (7/3 &amp; 8/2)</button>
+                <button
+                  type="button"
+                  class={!draft.allowSplits ? 'on' : undefined}
+                  aria-pressed={!draft.allowSplits}
+                  data-myweek-splits-no="1"
+                  onClick={() => updatePlan((p) => ({ ...p, allowSplits: false }))}
+                >Straight 10s only</button>
+              </div>
+            </div>
+            <p class="muted small" style="margin:0">
+              {draft.allowSplits
+                ? 'Tests 7/3 and 8/2 splits on tight handoffs — and flags Next-Shift Traps on the following load.'
+                : 'Splits suppressed — only full 10-hour resets and 34-hour restarts are recommended.'}
+            </p>
+          </div>
+
+          {/* Fill open nights toggle */}
+          <div class="miles-section">
+            <div class="miles-section-head">
+              <span class="stat-label">Fill open nights with usual shift</span>
+              <div class="toggle">
+                <button
+                  type="button"
+                  class={draft.fillOpenNights ? 'on' : undefined}
+                  onClick={() => updatePlan((p) => ({ ...p, fillOpenNights: true }))}
+                >On</button>
+                <button
+                  type="button"
+                  class={!draft.fillOpenNights ? 'on' : undefined}
+                  onClick={() => updatePlan((p) => ({ ...p, fillOpenNights: false }))}
+                >Off</button>
+              </div>
+            </div>
+            {draft.fillOpenNights && (
+              <>
+                <button
+                  type="button"
+                  class="rowbtn"
+                  data-myweek-usual-start-btn="1"
+                  onClick={openUsualStartPicker}
+                >
+                  <span>
+                    Usual shift start: <b class="mono">{fmtWallHM(draft.usualShiftStartMinutes)}</b>{' '}
+                    <span class="muted small">({res.homeZoneName})</span>
+                  </span>
+                  <span class="muted small">Change ›</span>
+                </button>
+                <div class="rollout-chips">
+                  {WEEK_USUAL_BUDGET_PRESETS.map((p) => (
+                    <button
+                      key={p.minutes}
+                      type="button"
+                      class={draft.usualShiftBudgetMinutes === p.minutes ? 'on' : undefined}
+                      onClick={() => updatePlan((d) => ({ ...d, usualShiftBudgetMinutes: p.minutes }))}
+                    >{p.label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Collapsed defaults */}
+          <div class="miles-section">
+            <div class="row" style="justify-content:space-between">
+              <button type="button" class="link" style="padding:0;min-height:36px" onClick={() => setPrefsMore(!prefsMore)}>
+                {prefsMore ? 'Hide default pre-trip & buffer ▴' : `Defaults: ${draft.defaultPreTripMinutes}m pre-trip · ${draft.defaultBufferMinutes}m buffer ▾`}
+              </button>
+              {draft.loads.length > 0 && (
+                <button
+                  type="button"
+                  class="mini"
+                  onClick={() => updatePlan((p) => ({ ...p, loads: [], homeTarget: null }))}
+                >Clear week</button>
+              )}
+            </div>
+            {prefsMore && (
+              <div class="mw-load-edit" style="border-top:0;padding-top:4px">
+                <div class="mw-field-row">
+                  <span class="small muted">Default pre-trip</span>
+                  <div class="rollout-chips">
+                    {PRETRIP_PRESETS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        class={draft.defaultPreTripMinutes === m ? 'on' : undefined}
+                        onClick={() => updatePlan((p) => ({ ...p, defaultPreTripMinutes: m }))}
+                      >{m}m</button>
+                    ))}
+                  </div>
+                </div>
+                <div class="mw-field-row">
+                  <span class="small muted">Default arrival buffer</span>
+                  <div class="rollout-chips">
+                    {BUFFER_PRESETS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        class={draft.defaultBufferMinutes === m ? 'on' : undefined}
+                        onClick={() => updatePlan((p) => ({ ...p, defaultBufferMinutes: m }))}
+                      >{m}m</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {/* 6. BOTTOM ACTION — COPYABLE DISPATCH SUMMARY (M5: always applied plan, never unapplied preview) */}
+      {baseRes.activeLoadCount > 0 && (
+        <Card title="Dispatch summary">
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <button type="button" class="primary" data-myweek-copy-btn="1" onClick={copyDispatch}>
+              Copy week summary for dispatch
+            </button>
+            <button type="button" class="mini" onClick={() => setShowDispatch(!showDispatch)}>
+              {showDispatch ? 'Hide text' : 'Preview text'}
+            </button>
+            {copyNote && <span class="small ok">{copyNote}</span>}
+          </div>
+          {showDispatch && (
+            <pre class="mw-dispatch-pre mono" style="margin-top:8px">{baseRes.dispatchText}</pre>
+          )}
+        </Card>
+      )}
+    </>
+  );
+}
+
 /* ============================================================ Your last 8 days */
 
 /**
@@ -10667,7 +11958,7 @@ export function navPanelOf(t: State['tab']): State['tab'] {
   return t === 'split' || t === 'trip' || t === 'load' || t === 'recap' || t === 'history' ? 'plan' : t;
 }
 
-type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal' | 'flip' | 'miles';
+type PlanToolId = 'load' | 'split' | 'trip' | 'recap' | 'history' | 'week' | 'rollout' | 'rescue' | 'stack' | 'motel' | 'legal' | 'flip' | 'miles' | 'myweek';
 
 const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   load: 'Can I take this load?',
@@ -10683,11 +11974,13 @@ const PLAN_TOOL_LABEL: Record<PlanToolId, string> = {
   legal: 'Can I Legally Use It?',
   flip: 'Flip My Clock',
   miles: 'Miles Left in My 70',
+  myweek: 'My Week',
 };
 
-function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean, flipOpen: boolean, milesOpen: boolean): PlanToolId | null {
+function activePlanToolOf(tab: State['tab'], weekOpen: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, motelOpen: boolean, legalOpen: boolean, flipOpen: boolean, milesOpen: boolean, myWeekOpen: boolean): PlanToolId | null {
   if (tab === 'load' || tab === 'split' || tab === 'trip' || tab === 'recap' || tab === 'history') return tab;
   if (tab === 'plan') {
+    if (myWeekOpen) return 'myweek';
     if (weekOpen) return 'week';
     if (rolloutOpen) return 'rollout';
     if (rescueOpen) return 'rescue';
@@ -10710,6 +12003,7 @@ function sheetSessionKey(k: SheetKind): string {
     case 'stacktime': return `stacktime-${k.mode}-${k.title}-${k.initialMinute}-${k.entryTimeZone}`;
     case 'fliptime': return `fliptime-${k.mode}-${k.initialMinute}-${k.targetHour ?? ''}-${k.targetMinute ?? ''}-${k.homeTimeZone}`;
     case 'milestime': return `milestime-${k.cutoffDowName}-${k.cutoffHour}-${k.cutoffMinute}-${k.homeTimeZone}`;
+    case 'myweektime': return `myweektime-${k.mode}-${k.title}-${k.dateStr}-${k.timeStr}-${k.entryTimeZone}`;
     case 'confirm': return `confirm-${k.what}`;
     case 'edit': return `e${k.live ? 'live' : ''}${k.seg.start}-${k.live ? '' : k.seg.end}`;
     case 'add': return `a${k.inside?.start ?? ''}`;
@@ -10717,7 +12011,7 @@ function sheetSessionKey(k: SheetKind): string {
   }
 }
 
-function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, flipOpen: boolean, milesOpen: boolean): boolean {
+function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, rolloutOpen: boolean, rescueOpen: boolean, stackOpen: boolean, flipOpen: boolean, milesOpen: boolean, myWeekOpen: boolean): boolean {
   if (driveUp) return k.kind === 'status' || k.kind === 'since';
   if (k.kind === 'splitblock') return s.tab === 'split';
   if (k.kind === 'loadtime') return s.tab === 'load';
@@ -10727,6 +12021,7 @@ function isSheetVisibleForContext(k: SheetKind, s: State, driveUp: boolean, roll
   if (k.kind === 'stacktime') return s.tab === 'plan' && stackOpen;
   if (k.kind === 'fliptime') return s.tab === 'plan' && flipOpen;
   if (k.kind === 'milestime') return s.tab === 'plan' && milesOpen;
+  if (k.kind === 'myweektime') return s.tab === 'plan' && myWeekOpen;
   if (k.kind === 'daystart') return s.tab === 'settings';
   return true;
 }
@@ -10759,6 +12054,7 @@ export function App() {
   const legalOpen = useLegalPlanner();
   const flipOpen = useFlipPlanner();
   const milesOpen = useMilesPlanner();
+  const myWeekOpen = useMyWeekPlanner();
   // Panel strip: the <main class="pages"> element, and the panel the bottom bar currently
   // lights — the strip's nearest snapped panel while a gesture runs, the store's panel at
   // rest (The Daily Number's scroll-follows-the-strip bar, adapted to a store-driven app).
@@ -10766,7 +12062,7 @@ export function App() {
   // strip (Lorico, 2026-11-21 transitions + plan-dissolve): the strip stays mounted and
   // untouched behind the room so entering/leaving never scrolls the strip and preserves state.
   const inSettings = s.tab === 'settings';
-  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen);
+  const activePlanTool = activePlanToolOf(s.tab, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen, myWeekOpen);
   const inPlanTool = activePlanTool !== null;
   const inRoom = inSettings || inPlanTool;
   const settingsReturnTab = useRef<State['tab']>(s.tab === 'settings' ? 'now' : s.tab);
@@ -10821,7 +12117,7 @@ export function App() {
     : null;
   wasToolOpenRef.current = inPlanTool;
   const preserveBehindSettings = inSettings && retainedTool !== null
-    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen) === retainedTool.tool;
+    && activePlanToolOf(settingsReturnTab.current, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen, myWeekOpen) === retainedTool.tool;
   const showRetained = !inPlanTool && retainedTool !== null && (preserveBehindSettings || (!inSettings && !prefersReducedMotion()));
   const displayedTool = activeEntry ?? (showRetained ? retainedTool : null);
   useEffect(() => {
@@ -10938,7 +12234,7 @@ export function App() {
   // exiting sheet (inert + aria-hidden) across the 200ms slide-down / morph-return exit, then
   // unmounts cleanly. Direct sheet-to-sheet switches, disclaimer, driving-view flips, and
   // prefers-reduced-motion: reduce bypass exit retention and unmount immediately.
-  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen, flipOpen, milesOpen) ? sheet : null;
+  const visibleSheet = s.disclaimerAcked && sheet && isSheetVisibleForContext(sheet, s, driveUp, rolloutOpen, rescueOpen, stackOpen, flipOpen, milesOpen, myWeekOpen) ? sheet : null;
   const sheetEpochRef = useRef(visibleSheet ? 1 : 0);
   const prevVisibleKeyRef = useRef<string | null>(visibleSheet ? sheetSessionKey(visibleSheet) : null);
   const visibleKey = visibleSheet ? sheetSessionKey(visibleSheet) : null;
@@ -11021,6 +12317,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && legalPlannerOpen) openLegalPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && flipPlannerOpen) openFlipPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && milesPlannerOpen) openMilesPlanner(false);
+    if (s.tab !== 'plan' && s.tab !== 'settings' && myWeekPlannerOpen) openMyWeekPlanner(false);
   }, [s.tab]);
   // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
   // and clean the address — keeping history.state, which carries the back-nav marker. Runs
@@ -11049,15 +12346,15 @@ export function App() {
   }, []);
   // The phone's Back button closes a panel, steps back to Plan or Now, then leaves (backnav.ts, re-check M11).
   useEffect(() => {
-    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : isFlipPlannerOpen() ? 'flip' : isMilesPlannerOpen() ? 'miles' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
-      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); openFlipPlanner(false); openMilesPlanner(false); setState({ tab }); } });
+    const nav = createBackNav(window.history, () => ({ tab: getState().tab === 'plan' ? (isMyWeekPlannerOpen() ? 'myweek' : isWeekPlannerOpen() ? 'week' : isRolloutPlannerOpen() ? 'rollout' : isRescuePlannerOpen() ? 'rescue' : isStackPlannerOpen() ? 'stack' : isMotelPlannerOpen() ? 'motel' : isLegalPlannerOpen() ? 'legal' : isFlipPlannerOpen() ? 'flip' : isMilesPlannerOpen() ? 'miles' : 'plan') : getState().tab, sheet: currentSheet() !== null }),
+      { closeSheet: sheetBack, goTo: (tab) => { if (getState().tab === 'settings' && tab === 'now') { setState({ tab: settingsReturnTab.current }); return; } openMyWeekPlanner(false); openWeekPlanner(false); openRolloutPlanner(false); openRescuePlanner(false); openStackPlanner(false); openMotelPlanner(false); openLegalPlanner(false); openFlipPlanner(false); openMilesPlanner(false); setState({ tab }); } });
     backNav = nav;
     const f = () => nav.onPop();
     window.addEventListener('popstate', f);
     nav.sync();
     return () => { window.removeEventListener('popstate', f); backNav = null; };
   }, []);
-  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen]);
+  useEffect(() => { backNav?.sync(); }, [s.tab, sheet, weekOpen, rolloutOpen, rescueOpen, stackOpen, motelOpen, legalOpen, flipOpen, milesOpen, myWeekOpen]);
   if (!ev) {
     return (
       <div class="app"><main>
@@ -11107,7 +12404,7 @@ export function App() {
   const activeStripPanel = inRoom ? null : stripPanel;
   const isInRoomNow = () => {
     const t = getState().tab;
-    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen(), isFlipPlannerOpen(), isMilesPlannerOpen()) !== null;
+    return t === 'settings' || activePlanToolOf(t, isWeekPlannerOpen(), isRolloutPlannerOpen(), isRescuePlannerOpen(), isStackPlannerOpen(), isMotelPlannerOpen(), isLegalPlannerOpen(), isFlipPlannerOpen(), isMilesPlannerOpen(), isMyWeekPlannerOpen()) !== null;
   };
   const onPagesScroll = () => {
     if (isInRoomNow()) return;
@@ -11254,6 +12551,7 @@ export function App() {
       case 'stacktime': inner = <StackTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'fliptime': inner = <FlipTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'milestime': inner = <MilesTimeSheet key={mk} k={sh} closing={sheetClosing} />; break;
+      case 'myweektime': inner = <MyWeekTimeSheet key={mk} k={sh} now={now} closing={sheetClosing} />; break;
       case 'edit':
       case 'add': inner = <EditorSheet key={mk} k={sh} s={s} now={now} closing={sheetClosing} morphOrigin={displayedSheet.morph} />; break;
       case 'confirm': inner = <ConfirmSheet key={mk} s={s} now={now} what={sh.what} closing={sheetClosing} />; break;
@@ -11285,7 +12583,7 @@ export function App() {
           {themeNoticeCard}
           <Notices ev={ev} now={now} s={s} />
           <TabBoundary key="plan" tab="plan">
-            <PlanTab ev={ev} />
+            <PlanTab s={s} now={now} ev={ev} isActive={s.tab === 'plan' && !inRoom} />
           </TabBoundary>
         </section>
         <section class={`page page-now has-dock${activeStripPanel === 'now' ? ' is-active' : ''}`} inert={activeStripPanel !== 'now'} aria-hidden={activeStripPanel !== 'now'}>
@@ -11307,7 +12605,7 @@ export function App() {
         const cls = on ? 'on' : '';
         // data-haptic: no tick on the tap — the strip's settle ticks when it locks onto the
         // panel (haptic timing, 2026-11-20). A tap on the panel already showing never ticks.
-        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); if (isFlipPlannerOpen()) openFlipPlanner(false); if (isMilesPlannerOpen()) openMilesPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
+        return <button key={k} data-haptic="lock" class={cls} aria-current={on ? 'page' : undefined} onClick={() => { if (k === 'plan') { if (isMyWeekPlannerOpen()) openMyWeekPlanner(false); if (isWeekPlannerOpen()) openWeekPlanner(false); if (isRolloutPlannerOpen()) openRolloutPlanner(false); if (isRescuePlannerOpen()) openRescuePlanner(false); if (isStackPlannerOpen()) openStackPlanner(false); if (isMotelPlannerOpen()) openMotelPlanner(false); if (isLegalPlannerOpen()) openLegalPlanner(false); if (isFlipPlannerOpen()) openFlipPlanner(false); if (isMilesPlannerOpen()) openMilesPlanner(false); } if (navPanelOf(getState().tab) !== k) tapGoal.current = PANEL_ORDER.indexOf(k); setState({ tab: k }); }}><Icon d={icon} /> {l}</button>;
       })}</nav>
       <section ref={settingsRef} class={`page page-settings room settings-room${inSettings ? ' is-active' : ''}`} aria-label="Settings" inert={blocked || !inSettings} aria-hidden={!inSettings}>
         <div class="settings-head">
@@ -11335,9 +12633,10 @@ export function App() {
             {themeNoticeCard}
             <Notices ev={ev} now={now} s={s} />
             <TabBoundary key={`${displayedTool.tool}-${displayedTool.epoch}`} tab={displayedTool.tool}>
+              {displayedTool.tool === 'myweek' && <MyWeekTab s={s} now={now} active={inPlanTool && myWeekOpen} onBack={() => openMyWeekPlanner(false)} />}
               {displayedTool.tool === 'week' && <WeekRecapTab s={s} now={now} onBack={() => openWeekPlanner(false)} />}
-              {displayedTool.tool === 'rollout' && <RolloutTab s={s} now={now} onBack={() => openRolloutPlanner(false)} />}
-              {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => openRescuePlanner(false)} />}
+              {displayedTool.tool === 'rollout' && <RolloutTab s={s} now={now} onBack={() => { const ret = rolloutReturnToMyWeek; openRolloutPlanner(false); if (ret) openMyWeekPlanner(true); }} />}
+              {displayedTool.tool === 'rescue' && <RescueTab s={s} now={now} onBack={() => { const ret = rescueReturnToMyWeek; openRescuePlanner(false); if (ret) openMyWeekPlanner(true); }} />}
               {displayedTool.tool === 'stack' && <StackTab s={s} now={now} onBack={() => openStackPlanner(false)} />}
               {displayedTool.tool === 'motel' && <MotelTab s={s} now={now} onBack={() => openMotelPlanner(false)} />}
               {displayedTool.tool === 'legal' && <LegalTab s={s} now={now} onBack={() => openLegalPlanner(false)} />}
