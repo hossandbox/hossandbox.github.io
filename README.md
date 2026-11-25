@@ -1,4 +1,4 @@
-# Split Decision — HOS What-If Planner
+# Clock 14 — HOS What-If Planner
 
 **Open the app: https://hossandbox.github.io/** — in Chrome or Safari, then *Add to Home Screen*.
 
@@ -7,7 +7,7 @@ A driver's **planning scratchpad** for FMCSA hours-of-service: split-sleeper "wh
 FMCSA registration, no carrier reporting, no account. Everything stays on your phone.
 Property-carrying drivers, 49 CFR Part 395.
 
-> Split Decision is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not
+> Clock 14 is a planning scratchpad. It is not an ELD, is not FMCSA-registered, and does not
 > replace your record of duty status. Your official log and your carrier's ELD govern.
 
 ## Free beta

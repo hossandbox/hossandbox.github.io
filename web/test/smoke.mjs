@@ -835,7 +835,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now' });
 
   // Startup disclaimer pop-up: shown once when disclaimerAcked is false; header line removed from TopBar.
-  const ABOUT_DISC = "Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.";
+  const ABOUT_DISC = "Clock 14 — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.";
   setState({ disclaimerAcked: false, tab: 'now' });
   const dx = out('startup disclaimer');
   if (/class="disclaimer-banner"|class="disclaimer-line"|Planning only — not a log, not an ELD/.test(dx)) throw new Error('disclaimer: TopBar header line and .disclaimer-banner must be absent');
@@ -2768,20 +2768,20 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const idx = rf('public/index.html', 'utf8');
   const mf = JSON.parse(rf('public/manifest.webmanifest', 'utf8'));
   const readme = rf('../README.md', 'utf8');
-  if (!/<title>Split Decision — HOS What-If Planner<\/title>/.test(idx)) throw new Error('patch 7.1: the page title must be the launch lockup');
-  if (mf.name !== 'Split Decision — HOS What-If Planner' || mf.short_name !== 'Split Decision') throw new Error('patch 7.1: the manifest must carry the launch name and short name');
-  if (!/^# Split Decision — HOS What-If Planner/.test(readme) || /HOS Sandbox/.test(readme)) throw new Error('patch 7.1: the README must lead with the launch name and drop the codename');
+  if (!/<title>Clock 14 — HOS What-If Planner<\/title>/.test(idx)) throw new Error('patch 7.1: the page title must be the launch lockup');
+  if (mf.name !== 'Clock 14 — HOS What-If Planner' || mf.short_name !== 'Clock 14') throw new Error('patch 7.1: the manifest must carry the launch name and short name');
+  if (!/^# Clock 14 — HOS What-If Planner/.test(readme) || /HOS Sandbox/.test(readme)) throw new Error('patch 7.1: the README must lead with the launch name and drop the codename');
   if (!/const KEY = 'hos-sandbox-v1'/.test(store) || !/'hos-sandbox-v1-backup'/.test(store) || !/UNDO_KEY = 'hos-sandbox-undo-v1'/.test(app)) throw new Error('patch 7.1: the storage keys must not move — renaming them wipes every log');
   if (!/REPO = 'hossandbox\/hossandbox\.github\.io'/.test(app)) throw new Error('patch 7.1: the repo path must not move — the repo is not renamed');
   ss({ tab: 'settings', nowOverride: null });
   h = out('patch 7.1/about name');
-  if (!/Split Decision — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: About must open with the launch lockup');
+  if (!/Clock 14 — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: About must open with the launch lockup');
   if (/Your HOS what-if planner\./.test(h)) throw new Error('D18 (audit): the About filler line is retired');
   if (/what-if machine/.test(h)) throw new Error('patch 7.1: the retired "machine" line must not render');
   if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: no rendered surface may carry the old name');
   ss({ tab: 'now', disclaimerAcked: false });
   h = out('patch 7.1/startup disclaimer name');
-  if (!/Split Decision — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: the startup disclaimer must carry the new name');
+  if (!/Clock 14 — HOS What-If Planner\./.test(h)) throw new Error('patch 7.1: the startup disclaimer must carry the new name');
   if (/HOS Sandbox/.test(h)) throw new Error('patch 7.1: the startup disclaimer must not carry the old name');
   ss({ disclaimerAcked: true });
 
@@ -6496,7 +6496,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     need(daySecs.length === n && svgs.length === n && totalsRows.length === n, `pdf (${n}d): expected ${n} sections/grids/totals, got ${daySecs.length}/${svgs.length}/${totalsRows.length}`);
     const head = (rep.match(/<header class="pr-head">[\s\S]*?<\/header>/) || [''])[0];
     const foot = (rep.match(/<footer class="pr-foot">[\s\S]*?<\/footer>/) || [''])[0];
-    need(head.includes('Split Decision') && head.includes(`${n} days`) && head.includes('Generated') && head.includes(DISC), `pdf (${n}d): header missing app name, day count, timestamp, or disclaimer`);
+    need(head.includes('Clock 14') && head.includes(`${n} days`) && head.includes('Generated') && head.includes(DISC), `pdf (${n}d): header missing app name, day count, timestamp, or disclaimer`);
     need(foot.includes(DISC), `pdf (${n}d): footer missing disclaimer`);
     need(rep.includes('No duty entries logged — no-duty day.'), `pdf (${n}d): empty day must show no-duty marker`);
   }

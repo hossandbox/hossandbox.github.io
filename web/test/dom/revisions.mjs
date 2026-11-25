@@ -656,7 +656,7 @@ await pin('D1. fresh state (disclaimerAcked false): startup pop-up renders verba
   const dlg = all((n) => n.attributes?.role === 'dialog' && n.attributes?.['aria-labelledby'] === 'disclaimer-title')[0];
   if (!dlg) return 'missing startup disclaimer dialog';
   const morePg = settingsRoom();
-  const aboutP = all((n) => n.localName === 'p' && /Split Decision — HOS What-If Planner\./.test(n.textContent), morePg)[0];
+  const aboutP = all((n) => n.localName === 'p' && /Clock 14 — HOS What-If Planner\./.test(n.textContent), morePg)[0];
   const modalP = all((n) => n.localName === 'p', dlg)[0];
   const btns = all((n) => n.localName === 'button', dlg);
   if (!aboutP || !modalP) return 'missing About or modal paragraph';
@@ -838,7 +838,7 @@ await pin('P2. log summary PDF: entering 8 produces 8 day sections and 14 produc
       // Header & footer disclaimers + metadata
       const head = all((n) => n.localName === 'header' && has(n, 'pr-head'), rep)[0];
       const foot = all((n) => n.localName === 'footer' && has(n, 'pr-foot'), rep)[0];
-      if (!head || !head.textContent.includes('Split Decision') || !head.textContent.includes(`${want} days`) || !head.textContent.includes('Generated') || !head.textContent.includes(PDF_DISC)) {
+      if (!head || !head.textContent.includes('Clock 14') || !head.textContent.includes(`${want} days`) || !head.textContent.includes('Generated') || !head.textContent.includes(PDF_DISC)) {
         return `header missing required fields for ${want} days`;
       }
       if (!foot || !foot.textContent.includes(PDF_DISC)) return `footer missing disclaimer for ${want} days`;

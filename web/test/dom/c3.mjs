@@ -601,8 +601,8 @@ await pin('M13e. no vibrate API (iPhone): a dock tap and an alert no-op without 
 await pin('M14a. manifest: identity fields byte-identical to C2; three shortcuts (load, I\'ve stopped, Hours coming back) on the 192px icon', async () => {
   const m = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'));
   const id = JSON.stringify([m.name, m.short_name, m.description, m.start_url, m.scope, m.display, m.orientation, m.background_color, m.theme_color, m.icons]);
-  const want = JSON.stringify(['Split Decision — HOS What-If Planner', 'Split Decision', 'Split-sleeper, recap and trip planning scratchpad for truck drivers. Not an ELD.', './', './', 'standalone', 'portrait', '#090c10', '#090c10',
-    [{ src: './icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }, { src: './icon-192.png', sizes: '192x192', type: 'image/png' }, { src: './icon-512.png', sizes: '512x512', type: 'image/png' }, { src: './icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]]);
+  const want = JSON.stringify(['Clock 14 — HOS What-If Planner', 'Clock 14', 'Split-sleeper, recap and trip planning scratchpad for truck drivers. Not an ELD.', './', './', 'standalone', 'portrait', '#090c10', '#090c10',
+    [{ src: './icon-192.png', sizes: '192x192', type: 'image/png' }, { src: './icon-512.png', sizes: '512x512', type: 'image/png' }, { src: './icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]]);
   const sc = (m.shortcuts || []).map((x) => [x.name, x.url, x.icons?.[0]?.src]);
   const wantSc = [['Can I take this load?', './?go=load', './icon-192.png'], ["I've stopped", './?go=stopped', './icon-192.png'], ['Hours coming back', './?go=recap', './icon-192.png']];
   return (id === want && JSON.stringify(sc) === JSON.stringify(wantSc)) || `${id === want} ${JSON.stringify(sc)}`;

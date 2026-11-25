@@ -1231,7 +1231,7 @@ for (const [W, H] of SIZES) {
       day1Totals: cellsOf(secs[1]),
       day2NoDuty: /no-duty day/i.test(secs[2].textContent) && secs[2].querySelectorAll('li.pr-entry').length === 0,
       day3Totals: cellsOf(secs[3]),
-      headOk: head.textContent.includes('Split Decision') && head.textContent.includes('8 days') && head.textContent.includes('Generated') && head.textContent.includes(DISC),
+      headOk: head.textContent.includes('Clock 14') && head.textContent.includes('8 days') && head.textContent.includes('Generated') && head.textContent.includes(DISC),
       footOk: foot.textContent.includes(DISC),
     };
   });

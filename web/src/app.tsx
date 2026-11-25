@@ -11443,7 +11443,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
       <header class="pr-head">
         <div class="pr-brand-row">
           <div>
-            <div class="pr-app">Split Decision <span class="pr-app-sub">— HOS What-If Planner</span></div>
+            <div class="pr-app">Clock 14 <span class="pr-app-sub">— HOS What-If Planner</span></div>
             <h1 class="pr-title">Log Summary</h1>
           </div>
           <div class="pr-count-badge">{days.length} {days.length === 1 ? 'day' : 'days'}</div>
@@ -11527,7 +11527,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
 
       <footer class="pr-foot">
         <p class="pr-foot-disclaimer">{PDF_DISCLAIMER}</p>
-        <p class="pr-foot-meta">Split Decision — HOS What-If Planner · Generated {genStr}</p>
+        <p class="pr-foot-meta">Clock 14 — HOS What-If Planner · Generated {genStr}</p>
       </footer>
     </article>
   );
@@ -11558,7 +11558,7 @@ function DrivingAlertsCard({ s }: { s: State }) {
       <p class="muted small">
         {notif === 'granted' ? 'Notifications are on: if the app is open behind another app, alerts also show as notifications. ' : ''}
         {notif === 'denied' ? 'Notifications are blocked for this site in your browser settings. ' : ''}
-        Alerts only work while Split Decision is open — when the phone locks or the app is closed, the phone stops it. <b>Your ELD is your official warning.</b>
+        Alerts only work while Clock 14 is open — when the phone locks or the app is closed, the phone stops it. <b>Your ELD is your official warning.</b>
       </p>
       <Help label="Keeping alerts running"><p class="muted small">Keeping the screen on is what keeps it running in a mounted phone; it uses more battery, so keep the phone charging. iPhones do not let web apps vibrate, and the silent switch can mute the sound: use "Test alert" to check. Nothing needs a tap while you drive.</p></Help>
     </Card>
@@ -11744,7 +11744,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">
-        <p class="small">Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <p class="small">Clock 14 — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
         <p class="muted small build-line" data-build-line onContextMenu={(e) => e.preventDefault()} onPointerDown={startPress} onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress} onMouseDown={startPress} onMouseUp={cancelPress} onMouseLeave={cancelPress} onTouchStart={startPress} onTouchEnd={cancelPress} onTouchCancel={cancelPress}>Build {__BUILD__} · now {clock(now)}</p>
       </Card>
       {/* C5 (taste, 2026-11-20): hidden from casual poking on More behind a long-press on the build
@@ -11865,7 +11865,7 @@ function DisclaimerDialog({ closing = false }: { closing?: boolean }) {
     <div class={`backdrop${closing ? ' is-closing' : ''}`} role={closing ? undefined : 'dialog'} aria-modal={closing ? undefined : 'true'} aria-labelledby={closing ? undefined : 'disclaimer-title'} inert={closing || undefined} aria-hidden={closing || undefined}>
       <div class="modal">
         <h2 id="disclaimer-title">Before you start</h2>
-        <p class="small">Split Decision — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <p class="small">Clock 14 — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
         <button type="button" class="primary" onClick={() => acknowledgeDisclaimer()}>Understood — don't show again</button>
       </div>
     </div>
@@ -11900,7 +11900,7 @@ function SpeakAskDialog({ closing = false }: { closing?: boolean }) {
     <div class={`backdrop${closing ? ' is-closing' : ''}`} role={closing ? undefined : 'dialog'} aria-modal={closing ? undefined : 'true'} aria-labelledby={closing ? undefined : 'speakask-title'} inert={closing || undefined} aria-hidden={closing || undefined}>
       <div class="modal">
         <h2 id="speakask-title">Want the alerts read out loud?</h2>
-        <p class="small">While you drive, Split Decision can say the numbers out loud — how much driving is left at 60, 30 and 15 minutes, when time runs out, and a spoken confirmation when you tap a status — so you never have to read the screen. It uses this browser's voice. Nothing is recorded, and nothing leaves your phone.</p>
+        <p class="small">While you drive, Clock 14 can say the numbers out loud — how much driving is left at 60, 30 and 15 minutes, when time runs out, and a spoken confirmation when you tap a status — so you never have to read the screen. It uses this browser's voice. Nothing is recorded, and nothing leaves your phone.</p>
         <div class="row">
           <button class="primary" onClick={yes}>Yes, say them</button>
           <button onClick={no}>No thanks</button>
@@ -12359,7 +12359,7 @@ export function App() {
     return (
       <div class="app"><main>
         <div class="card warn">
-          <h3>Split Decision could not calculate your clocks</h3>
+          <h3>Clock 14 could not calculate your clocks</h3>
           <p class="small">Your log is still saved. The error was:</p>
           <pre class="small" style="white-space:pre-wrap">{result.err}</pre>
           <p class="small">Resetting the rules settings (cycle, carrier day, time zone, exceptions) usually fixes this and keeps your log.</p>
