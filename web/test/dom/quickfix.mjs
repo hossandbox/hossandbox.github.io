@@ -39,6 +39,12 @@ const save = (theme, tab) => JSON.stringify({
   themeChosen: true, theme, nowCard: 'timeline', nowCardAsked: true, tab, config: { timeZone: 'America/Chicago' },
 });
 
+// Re-aimed (2026-11-25 navy finish, Lorico): the night rocker's chosen key and track are read from the design TOKENS in the
+// shipped styles.css (the contrast.mjs pattern), not literal RGB, so a palette change moves the pin with it.
+const tokCss = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+const tokens = (sel) => { const i = tokCss.indexOf(sel); if (i < 0) throw new Error(`no "${sel}" block in styles.css`); const o = tokCss.indexOf('{', i), c = tokCss.indexOf('}', o); const out = {}; for (const m of tokCss.slice(o + 1, c).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim(); return out; };
+const tokRgb = (hex) => { const h = hex.replace('#', ''); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };
+const NIGHT = tokens(':root {'), DAY = tokens(':root[data-theme="day"]');
 const res = []; const ok = (name, cond, info = '') => { res.push({ pass: !!cond, name, info }); };
 const lum = (rgb) => { const m = String(rgb).match(/[\d.]+/g); if (!m) return NaN; const [r, g, b] = m.slice(0, 3).map((v) => { const c = Number(v) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 const ratio = (a, b) => { const x = lum(a), y = lum(b); const hi = Math.max(x, y), lo = Math.min(x, y); return (hi + 0.05) / (lo + 0.05); };
@@ -88,7 +94,7 @@ const toggles = (page) => page.evaluate(() => [...document.querySelectorAll('.to
   const ts = await toggles(page);
   ok('night/now: the screen carries toggles', ts.length >= 1, `found ${ts.length}`);
   for (const t of ts) {
-    ok(`night/now: "${t.label}" unchanged (panel2 key on night track)`, t.onBg === 'rgb(25, 33, 42)' && t.track === 'rgb(9, 12, 16)', `on ${t.onBg}, track ${t.track}`);
+    ok(`night/now: "${t.label}" panel2 key on the night well (tokens)`, t.onBg === tokRgb(NIGHT['--panel2']) && t.track === tokRgb(NIGHT['--screen']), `on ${t.onBg}, track ${t.track}; want ${tokRgb(NIGHT['--panel2'])} on ${tokRgb(NIGHT['--screen'])}`);
   }
   ok('night/now: no page errors', errors.length === 0, errors.join('; ').slice(0, 200));
   await ctx.close();

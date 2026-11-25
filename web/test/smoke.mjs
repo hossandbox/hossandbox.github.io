@@ -5460,12 +5460,12 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   // P1a: the shell starts dark and the boot script corrects it pre-paint — all eight cases
   // of (chosen day / chosen night / unchosen / no usable save) × (phone dark / light) must
   // land where the app's own effective-theme rule lands.
-  if (!html16.includes('content="#090c10"')) throw new Error('patch 16: the static theme-color must be the night page colour');
-  if (mf16.background_color !== '#090c10' || mf16.theme_color !== '#090c10') throw new Error('patch 16: the manifest must splash dark, never light');
+  if (!html16.includes('content="#06112e"')) throw new Error('patch 16: the static theme-color must be the night page colour');
+  if (mf16.background_color !== '#06112e' || mf16.theme_color !== '#06112e') throw new Error('patch 16: the manifest must splash dark, never light');
   const boot16 = html16.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   if (!boot16) throw new Error('patch 16: index.html must carry the inline boot script');
   const runBoot16 = (save, prefersDark) => {
-    const attrs = { theme: 'day', meta: '#090c10' };
+    const attrs = { theme: 'day', meta: '#06112e' };
     const doc = {
       documentElement: { setAttribute: (k, v) => { if (k === 'data-theme') attrs.theme = v; }, removeAttribute: (k) => { if (k === 'data-theme') attrs.theme = null; } },
       querySelector: (sel) => (sel === 'meta[name="theme-color"]' ? { setAttribute: (k, v) => { if (k === 'content') attrs.meta = v; } } : null),
@@ -5480,9 +5480,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const saveUnchosen16 = JSON.stringify({ theme: 'day', themeChosen: false });
   for (const [save, dark, theme, meta] of [
     [saveDay16, true, 'day', '#e4e9ee'], [saveDay16, false, 'day', '#e4e9ee'],
-    [saveNight16, true, null, '#090c10'], [saveNight16, false, null, '#090c10'],
-    [saveUnchosen16, true, null, '#090c10'], [saveUnchosen16, false, 'day', '#e4e9ee'],
-    [null, true, null, '#090c10'], ['{corrupt', false, 'day', '#e4e9ee'],
+    [saveNight16, true, null, '#06112e'], [saveNight16, false, null, '#06112e'],
+    [saveUnchosen16, true, null, '#06112e'], [saveUnchosen16, false, 'day', '#e4e9ee'],
+    [null, true, null, '#06112e'], ['{corrupt', false, 'day', '#e4e9ee'],
   ]) {
     const got = runBoot16(save, dark);
     if (got.theme !== theme || got.meta !== meta) throw new Error(`patch 16: boot script case save=${String(save).slice(0, 24)} phoneDark=${dark} gave theme=${got.theme} meta=${got.meta}, expected theme=${theme} meta=${meta}`);

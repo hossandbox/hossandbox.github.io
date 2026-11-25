@@ -1320,7 +1320,7 @@ function TopBar({ ev, now, s, inert, ariaHidden, onNow, onSettings, settingsActi
         <span class="top-right">
           <span class="muted clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
           <button type="button" class={settingsActive ? 'theme-btn gear-btn on' : 'theme-btn gear-btn'} aria-label="Settings" title="Settings" aria-current={settingsActive ? 'page' : undefined} onClick={onSettings}><Icon d={I.gear} size={18} /></button>
-          <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /> {next === 'night' ? 'Night' : 'Day'}</button>
+          <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /><span class="theme-word">{next === 'night' ? 'Night' : 'Day'}</span></button>
         </span>
       </div>
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
@@ -5013,7 +5013,10 @@ function PlanTab({ s, now, ev, isActive = true }: { s: State; now: number; ev: F
           <Icon d={I.next} />
         </span>
       </button>
-      <h2 class="plan-section-head">Single-load &amp; shift tools</h2>
+      {/* Opus UI pass: the twelve tools sit as a two-column rack of tiles (one screen, not three);
+          DOM order is unchanged — it is pinned by the suites and it is the reading order. */}
+      <h2 class="plan-section-head">The toolbox</h2>
+      <div class="plan-rack">
       {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
       {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
       {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
@@ -5059,6 +5062,7 @@ function PlanTab({ s, now, ev, isActive = true }: { s: State; now: number; ev: F
         <span class="plan-text"><b>Miles Left in My 70</b><span class="muted small">Convert remaining cycle + recaps through pay-week cutoff into max legal miles.</span></span>
         <Icon d={I.next} />
       </button>
+      </div>
     </>
   );
 }

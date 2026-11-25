@@ -81,6 +81,12 @@ const seedRecord = (nowCard) => ({
 
 const SIZES = [[412, 915], [360, 640]];
 const TABS = ['Now', 'Log', 'Split', 'More'];
+// Re-aimed (2026-11-25 navy finish, Lorico): the tab bar's text, muted text, icon and lamp are read from the design TOKENS in the
+// shipped styles.css (the contrast.mjs pattern), not literal RGB, so a palette change moves the pin with it.
+const tokCss = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+const tokens = (sel) => { const i = tokCss.indexOf(sel); if (i < 0) throw new Error(`no "${sel}" block in styles.css`); const o = tokCss.indexOf('{', i), c = tokCss.indexOf('}', o); const out = {}; for (const m of tokCss.slice(o + 1, c).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim(); return out; };
+const tokRgb = (hex) => { const h = hex.replace('#', ''); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };
+const NIGHT = tokens(':root {'), DAY = tokens(':root[data-theme="day"]');
 const res = []; const ok = (name, cond, info = '') => { res.push({ pass: !!cond, name, info }); };
 const report = [];
 
@@ -629,9 +635,10 @@ for (const [W, H] of SIZES) {
         svgCol,
       };
     });
-    const wantText = theme === 'day' ? 'rgb(11, 17, 23)' : 'rgb(243, 238, 228)';
-    const wantMuted = theme === 'day' ? 'rgb(69, 82, 95)' : 'rgb(170, 167, 157)';
-    const wantAccent = theme === 'day' ? 'rgb(11, 95, 168)' : 'rgb(124, 200, 255)';
+    const T = theme === 'day' ? DAY : NIGHT;
+    const wantText = tokRgb(T['--text']);
+    const wantMuted = tokRgb(T['--muted']);
+    const wantAccent = tokRgb(T['--ring']); // the bar's icon + lamp wear the bezel ring
     // Re-aimed (2026-11-21 nav-gear, Lorico): three equal-width columns (1fr 1fr 1fr) spanning exact viewport width.
     const maxW = Math.max(...nowStyle.widths), minW = Math.min(...nowStyle.widths);
     ok(`${tag} (e) equal-width tabs: all three measure equal width (${(W / 3).toFixed(1)}px), span [0..${W}], 60px height, nothing raised`,

@@ -2199,7 +2199,7 @@ export function applyTheme(t: Theme) {
   // in index.html it would show a dark strip above the light app on a fresh install.
   const meta = document.querySelector('meta[name="theme-color"]');
   // The page colour of each palette (--bg in styles.css; the smoke test holds the two together).
-  if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : '#090c10');
+  if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : '#06112e');
 }
 
 /** The hour (0–23) an epoch minute falls in on the DEVICE's own clock — what "at night" means for a screen rule. */
