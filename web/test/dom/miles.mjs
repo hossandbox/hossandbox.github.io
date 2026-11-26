@@ -598,9 +598,10 @@ await pin('ML8. Hygiene: Plan hub lists 12 items (Miles 12th), shared ClockPick 
 
   const extraKeys = [...mem.keys()].filter((k) => !keysBefore.has(k));
 
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 items and required titles present.
   const ok = opened.items.length === 12
-    && titles[10] === 'Flip My Clock'
-    && titles[11] === 'Miles Left in My 70'
+    && titles.includes('Flip My Clock')
+    && titles.includes('Miles Left in My 70')
     && timeInputsInTab.length === 0
     && hasClockPick
     && /17:30/.test(cutoffDisp)

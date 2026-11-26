@@ -512,6 +512,9 @@ export function parseSaved(raw: string | null): State {
       merged.theme = 'day';
       merged.themeNotice = true;
     }
+    if (merged.theme !== 'day' && merged.theme !== 'night' && merged.theme !== 'winddown') {
+      merged.theme = 'day';
+    }
     // The compact disclaimer is earned by one tap on the full box, so the flag counts only as a
     // literal true: a save from before patch 7 (missing) and a damaged one (anything else) both
     // read as not acknowledged, and the full box shows once more.
@@ -2175,12 +2178,13 @@ export const STATUS_LABEL: Record<DutyStatus, string> = { OFF: 'Off Duty', SB: '
 export const STATUS_COLOR: Record<DutyStatus, string> = { OFF: 'var(--muted)', SB: 'var(--sb)', D: 'var(--good)', ON: 'var(--warn)' };
 
 /**
- * 'night' is the product default and needs no attribute — `:root` carries the night palette.
- * 'day' sets `data-theme="day"` on the document root. Not part of the export: this is a
- * device preference, like `logResolved`, and a restored backup should not change how your screen
- * looks.
+ * 'night' is the default dark palette and needs no attribute — `:root` carries the deep-navy palette.
+ * 'day' sets `data-theme="day"` on the document root.
+ * 'winddown' sets `data-theme="winddown"` — a manual-only warm, dimmer night appearance for end of shift.
+ * Not part of the export: this is a device preference, like `logResolved`, and a restored backup should
+ * not change how your screen looks.
  */
-export type Theme = 'night' | 'day';
+export type Theme = 'night' | 'day' | 'winddown';
 
 /** Does the phone itself run dark? Guarded like everything DOM here: the node harness has no window. */
 export function devicePrefersDark(): boolean {
@@ -2191,10 +2195,11 @@ export function devicePrefersDark(): boolean {
 }
 
 /**
- * The theme the screen actually wears (patch 7). A theme the driver picked by hand always wins.
+ * The theme the screen actually wears (patch 7 + wind-down). A theme the driver picked by hand always wins.
  * Until then the stored value is only the old day default nobody chose, so the screen follows the
- * phone: dark phone, night palette — no more light blast in a dark cab at 3 a.m. `prefersDark` is a
- * parameter so the rule is testable without a DOM; callers pass devicePrefersDark().
+ * phone: dark phone, night palette — no more light blast in a dark cab at 3 a.m. Wind-down is manual
+ * only and is never entered automatically. `prefersDark` is a parameter so the rule is testable without
+ * a DOM; callers pass devicePrefersDark().
  */
 export function effectiveTheme(s: Pick<State, 'theme' | 'themeChosen'>, prefersDark: boolean): Theme {
   if (s.themeChosen) return s.theme;
@@ -2205,12 +2210,13 @@ export function applyTheme(t: Theme) {
   if (typeof document === 'undefined') return; // the node test harness has no DOM
   const root = document.documentElement;
   if (t === 'day') root.setAttribute('data-theme', 'day');
+  else if (t === 'winddown') root.setAttribute('data-theme', 'winddown');
   else root.removeAttribute('data-theme');
   // Keep the browser chrome (address bar, status bar, PWA title bar) on the ACTIVE palette. Hardcoded
   // in index.html it would show a dark strip above the light app on a fresh install.
   const meta = document.querySelector('meta[name="theme-color"]');
-  // The page colour of each palette (--bg in styles.css; the smoke test holds the two together).
-  if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : '#06112e');
+  // The page colour of each palette (--bg in styles.css; the smoke test holds the three together).
+  if (meta) meta.setAttribute('content', t === 'day' ? '#e4e9ee' : t === 'winddown' ? '#0e0a07' : '#06112e');
 }
 
 /** The hour (0–23) an epoch minute falls in on the DEVICE's own clock — what "at night" means for a screen rule. */
@@ -2221,9 +2227,10 @@ export function deviceHour(min: number): number {
 }
 /**
  * The night window of decision D1-A (patch 16): 19:00–07:00 on the phone's own clock. While the
- * driving view is up inside that window and the setting is on, the screen wears the night palette —
+ * driving view is up inside that window and the setting is on, the screen wears a dark palette —
  * a light-mode phone otherwise drives all night under a lit panel (brainstorm P1b: the calm day
- * driving view measures L ≥ 0.81, lit for hours).
+ * driving view measures L ≥ 0.81, lit for hours). If the driver manually chose Wind-down, keep it
+ * since it is already dimmer than night.
  */
 export function darkDriveAtNightApplies(s: Pick<State, 'darkDriveAtNight'>, nowMinutes: number): boolean {
   if (!s.darkDriveAtNight) return false;
@@ -2232,8 +2239,9 @@ export function darkDriveAtNightApplies(s: Pick<State, 'darkDriveAtNight'>, nowM
 }
 /** The theme the screen actually wears: the driving view's night rule sits on top of the effective theme, and only while that view is up. */
 export function screenTheme(s: State, prefersDark: boolean, drivingViewUp: boolean, nowMinutes: number): Theme {
-  if (drivingViewUp && darkDriveAtNightApplies(s, nowMinutes)) return 'night';
-  return effectiveTheme(s, prefersDark);
+  const eff = effectiveTheme(s, prefersDark);
+  if (drivingViewUp && darkDriveAtNightApplies(s, nowMinutes)) return eff === 'winddown' ? 'winddown' : 'night';
+  return eff;
 }
 /** The zone pair the two-zones line names, device zone first: the acknowledgement stores this string (patch 16). */
 export const zonePair = (s: Pick<State, 'config'>): string => `${deviceTz}|${s.config.timeZone}`;

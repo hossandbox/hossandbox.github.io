@@ -39,6 +39,7 @@ function vars(selector) {
 }
 const night = vars(':root {');
 const day = vars(':root[data-theme="day"]');
+const winddown = vars(':root[data-theme="winddown"]');
 
 function toRgb(v) {
   const s = v.trim();
@@ -80,10 +81,35 @@ const notes = [];
   };
   if (/background:\s*var\(--good\)/.test(rule('.verdict.yes'))) failures.push('.verdict.yes must not fill with the solid --good (the slab is what P1c removed)');
   if (/background:\s*var\(--bad\)/.test(rule('.verdict.no'))) failures.push('.verdict.no must not fill with the solid --bad (the slab is what P1c removed)');
+
+  // Wind-down (A3) light budget: strictly dimmer than night on bg/panel/surface-hi and within 10x own page luminance.
+  const wdBudget = 10 * lum(winddown['--bg']);
+  const wdYes = winddown['--surface-hi'];
+  const wdNo = over(winddown['--tint-bad'], winddown['--panel']);
+  notes.push(`wind-down page L=${lum(winddown['--bg']).toFixed(4)} (< night ${lum(night['--bg']).toFixed(4)}); budget L≤${wdBudget.toFixed(4)}; Yes L=${lum(wdYes).toFixed(4)}; No L=${lum(wdNo).toFixed(4)}`);
+  if (lum(winddown['--bg']) >= lum(night['--bg'])) failures.push(`wind-down --bg luminance ${lum(winddown['--bg']).toFixed(4)} must be lower than night ${lum(night['--bg']).toFixed(4)}`);
+  if (lum(winddown['--panel']) >= lum(night['--panel'])) failures.push(`wind-down --panel luminance ${lum(winddown['--panel']).toFixed(4)} must be lower than night ${lum(night['--panel']).toFixed(4)}`);
+  if (lum(wdYes) > wdBudget) failures.push(`wind-down Yes surface luminance ${lum(wdYes).toFixed(4)} exceeds 10x budget ${wdBudget.toFixed(4)}`);
+  if (lum(wdNo) > wdBudget) failures.push(`wind-down No surface luminance ${lum(wdNo).toFixed(4)} exceeds 10x budget ${wdBudget.toFixed(4)}`);
+
+  // A1 & A2 source pins (navy1 night-mode research):
+  // A1: #0d2a64 must not appear on full-screen ground tokens (--ground / --ground-hi).
+  if (/--ground(?:-hi)?:\s*[^;]*#0d2a64/i.test(css) || /@property\s+--ground-hi\s*\{[^}]*#0d2a64/i.test(css)) {
+    failures.push('A1: #0d2a64 must not be used on full-screen page ground (--ground / --ground-hi)');
+  } else {
+    notes.push('A1: #0d2a64 absent from full-screen ground tokens (headers/cards/raised panels only)');
+  }
+  // A2: #0b5fa8 must never be used as text color on navy (CSS or TSX).
+  const cssNoPrint = css.replace(/@media\s+print\s*\{[\s\S]*?\n\}/g, '');
+  if (/color:\s*#0b5fa8/i.test(cssNoPrint) || /#0b5fa8/i.test(appSrc)) {
+    failures.push('A2: #0B5FA8 found as text color on navy in styles.css or app.tsx');
+  } else {
+    notes.push('A2: zero #0B5FA8 text-on-navy in styles.css and app.tsx');
+  }
 }
 
 /* ---- 2. the warning/violation graphic pairs ---- */
-for (const [name, V] of [['day', day], ['night', night]]) {
+for (const [name, V] of [['day', day], ['night', night], ['winddown', winddown]]) {
   const warnOnCard = over(V['--tint-warn'], V['--panel']);
   const warnOnPage = over(V['--tint-warn'], V['--bg']);
   const badOnCard = over(V['--tint-bad'], V['--panel']);
@@ -143,7 +169,7 @@ const PAIRS = [
   ['SB vs ON', '--sb', '--warn', ['statusWords']],
   ['D (driving) vs ON', '--good', '--warn', ['statusWords']],
 ];
-for (const [themeName, V] of [['day', day], ['night', night]]) {
+for (const [themeName, V] of [['day', day], ['night', night], ['winddown', winddown]]) {
   for (const simName of Object.keys(MACHADO)) {
     for (const [label, ta, tb, cues] of PAIRS) {
       const dE = deltaE(V[ta], V[tb], MACHADO[simName]);

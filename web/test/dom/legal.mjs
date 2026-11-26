@@ -486,7 +486,8 @@ await pin('LG9. Safe Haven (§397.5 explosives-only) static card from tool home,
 
   const items = opened.items;
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 12 || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 items and required titles present.
+  if (items.length !== 12 || !titles.includes('Can I Legally Use It?') || !titles.includes('Flip My Clock') || !titles.includes('Miles Left in My 70')) {
     return `Plan hub placement wrong: count=${items.length} titles=${JSON.stringify(titles)}`;
   }
 

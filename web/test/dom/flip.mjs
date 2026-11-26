@@ -547,7 +547,8 @@ await pin('FL8. Standing line, non-medical framing, default shutdown from shift 
   if (!opened) return 'Could not open Flip My Clock';
 
   const titles = opened.items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (opened.items.length !== 12 || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 items and required titles present.
+  if (opened.items.length !== 12 || !titles.includes('Flip My Clock') || !titles.includes('Miles Left in My 70')) {
     return `Plan hub placement wrong: count=${opened.items.length} titles=${JSON.stringify(titles)}`;
   }
 

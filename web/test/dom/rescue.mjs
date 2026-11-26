@@ -560,11 +560,14 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 12 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; locate by title instead of fixed index.
+  const required = ['When to roll & PTA', 'Split-sleeper rescue', 'Stack my stops & loads', 'Do I Make It Back or Motel?', 'Can I Legally Use It?', 'Flip My Clock', 'Miles Left in My 70'];
+  if (items.length !== 12 || !required.every((t) => titles.includes(t))) {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
-  fire(items[6], 'click');
+  const rescueBtn = items[titles.indexOf('Split-sleeper rescue')];
+  fire(rescueBtn, 'click');
   await sleep(60);
   if (!A.isRescuePlannerOpen()) return 'simulator did not open';
 
@@ -607,8 +610,9 @@ await pin('R8. Plan hub lists "Split-sleeper rescue" 7th (above Stack, Motel & L
   await sleep(60);
   const itemsAfterBack = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
 
-  // Re-open, then leave Plan tab -> Rescue closes cleanly and returning to Plan shows the 8-item hub
-  fire(itemsAfterBack[6], 'click');
+  // Re-open, then leave Plan tab -> Rescue closes cleanly and returning to Plan shows the 12-item hub
+  const rescueAgainBtn = itemsAfterBack.find((b) => /Split-sleeper rescue/.test(b.textContent));
+  fire(rescueAgainBtn, 'click');
   await sleep(50);
   const openedAgain = A.isRescuePlannerOpen();
   setState({ tab: 'now' }); await sleep(50);

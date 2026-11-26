@@ -19,7 +19,7 @@
     raw = localStorage.getItem('hos-sandbox-v1');
     if (raw) {
       var s = JSON.parse(raw);
-      if (s && s.themeChosen && (s.theme === 'day' || s.theme === 'night')) theme = s.theme;
+      if (s && s.themeChosen && (s.theme === 'day' || s.theme === 'night' || s.theme === 'winddown')) theme = s.theme;
     }
   } catch (e) { /* an unreadable save falls back to the phone's own setting below */ }
   if (!theme) {
@@ -34,13 +34,15 @@
     if (sv && sv.current && sv.current.status === 'D' && sv.drivingView !== false && sv.darkDriveAtNight !== false) {
       var at = typeof sv.nowOverride === 'number' && isFinite(sv.nowOverride) ? new Date(sv.nowOverride * 60000) : new Date();
       var hr = at.getHours();
-      if (hr >= 19 || hr < 7) theme = 'night';
+      if (hr >= 19 || hr < 7) theme = theme === 'winddown' ? 'winddown' : 'night';
     }
   } catch (e) { /* keep the effective theme */ }
   var root = document.documentElement;
-  if (theme === 'day') root.setAttribute('data-theme', 'day'); else root.removeAttribute('data-theme');
+  if (theme === 'day') root.setAttribute('data-theme', 'day');
+  else if (theme === 'winddown') root.setAttribute('data-theme', 'winddown');
+  else root.removeAttribute('data-theme');
   var meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'day' ? '#e4e9ee' : '#06112e');
+  if (meta) meta.setAttribute('content', theme === 'day' ? '#e4e9ee' : theme === 'winddown' ? '#0e0a07' : '#06112e');
 })();
 </script>
 <meta name="apple-mobile-web-app-capable" content="yes" />

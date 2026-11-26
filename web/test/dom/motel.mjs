@@ -157,12 +157,13 @@ await pin('M1. 14-hr window binds: exact cutoff = windowEnd - returnDrive - hook
     return `binding mismatch: ${r.binding} "${r.bindingText}"`;
   }
 
-  // DOM check: Plan hub 9th button -> opens MotelTab verdict-first, enters 275 mi, checks live tick +10m
+  // DOM check: Plan hub lists all 12 tools including Motel -> opens MotelTab verdict-first, enters 275 mi, checks live tick +10m
   await seed({ tab: 'plan', nowOverride: NOW_0153, segments: MEET_SEGS, current: { status: 'OFF', since: chi(10, 23, 30), createdAt: 4 } });
   const opened = await openMotelViaHub();
   if (!opened || opened.items.length !== 12) return `Plan hub count=${opened?.items.length}`;
-  const ninthTitle = all((n) => n.localName === 'b', opened.items[8])[0]?.textContent?.trim();
-  if (ninthTitle !== 'Do I Make It Back or Motel?') return `9th title="${ninthTitle}"`;
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify title present rather than fixed index.
+  const allTitles = opened.items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
+  if (!allTitles.includes('Do I Make It Back or Motel?')) return `missing motel title in ${JSON.stringify(allTitles)}`;
   const rm = opened.rm;
   const timeInputs = all((n) => n.localName === 'input' && n.attributes?.type === 'time', rm);
   if (timeInputs.length !== 0) return `found ${timeInputs.length} <input type="time">`;

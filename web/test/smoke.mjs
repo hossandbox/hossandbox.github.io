@@ -510,21 +510,23 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
 
   chooseTheme('night');
   hh = out('log/night, theme control');
-  if (!/aria-label="Switch to day theme"/.test(hh)) throw new Error('the header switch must offer the way back');
+  // Re-aimed (navy1 A3): header switch cycles Day -> Night -> Wind-down -> Day.
+  if (!/aria-label="Switch to wind-down theme"/.test(hh)) throw new Error('night header switch must offer wind-down next');
+  chooseTheme('winddown');
+  hh = out('log/winddown, theme control');
+  if (!/aria-label="Switch to day theme"/.test(hh)) throw new Error('wind-down header switch must offer the way back to day');
 
   setState({ tab: 'settings', theme: 'night' });
   hh = out('settings/screen theme');
-  // The toggle now reads plain "Day" / "Night" — the driver asked for the words, not a label suffix.
-  // The "(default)" claim had to go somewhere or nowhere, so assert BOTH: the words, and that day is
-  // still declared the default in the explainer beneath. Removing the suffix must not silently drop
-  // the claim that day is the product default.
-  if (!/>Day</.test(hh) || !/>Night</.test(hh)) throw new Error('the settings control must name both themes in words');
+  // The toggle now reads plain "Day" / "Night" / "Wind-down" — manual-only third night state (A3).
+  if (!/>Day</.test(hh) || !/>Night</.test(hh) || !/>Wind-down</.test(hh)) throw new Error('the settings control must name Day, Night, and Wind-down in words');
   if (!/Day is the default/.test(hh)) throw new Error('the settings control must still declare day as the default');
   if (!/contrast-checked against WCAG AA/.test(hh)) throw new Error('the setting should say the palettes are contrast-checked');
 
   // applyTheme must not explode when there is no DOM (the node harness has none)
   applyTheme('day');
   applyTheme('night');
+  applyTheme('winddown');
 
   // With a DOM it must also move the browser chrome, or the address bar keeps the wrong colour after
   // a toggle. Minimal stub: only what applyTheme touches.
@@ -541,11 +543,14 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     const { readFileSync: rf } = await import('node:fs');
     const css = rf('public/styles.css', 'utf8');
     const bgOf = (sel) => (css.slice(css.indexOf(sel)).match(/--bg:\s*(#[0-9a-f]{6})/i) || [])[1];
-    const nightBg = bgOf(':root {'), dayBg = bgOf(':root[data-theme="day"] {');
+    const nightBg = bgOf(':root {'), dayBg = bgOf(':root[data-theme="day"] {'), wdBg = bgOf(':root[data-theme="winddown"] {');
     try {
       applyTheme('night');
       if (attrs.theme !== null) throw new Error(`night must clear data-theme, got ${attrs.theme}`);
       if (attrs.meta !== nightBg) throw new Error(`night must set the dark chrome colour ${nightBg}, got ${attrs.meta}`);
+      applyTheme('winddown');
+      if (attrs.theme !== 'winddown') throw new Error(`winddown must set data-theme=winddown, got ${attrs.theme}`);
+      if (attrs.meta !== wdBg) throw new Error(`winddown must set the warm chrome colour ${wdBg}, got ${attrs.meta}`);
       applyTheme('day');
       if (attrs.theme !== 'day') throw new Error(`day must set data-theme=day, got ${attrs.theme}`);
       if (attrs.meta !== dayBg) throw new Error(`day must set the light chrome colour ${dayBg}, got ${attrs.meta}`);
@@ -555,6 +560,28 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
     } finally {
       delete globalThis.document;
     }
+  }
+  // A3: Wind-down is manual-only (never auto-selected when unchosen) and persists cleanly in parseSaved.
+  {
+    const { effectiveTheme: et, parseSaved: ps } = await import('../src/store.ts');
+    if (et({ theme: 'day', themeChosen: false }, true) !== 'night') throw new Error('A3: dark phone unchosen stays night, never auto winddown');
+    if (et({ theme: 'winddown', themeChosen: true }, false) !== 'winddown') throw new Error('A3: explicit winddown choice must win');
+    const savedWd = ps(JSON.stringify({ segments: [], theme: 'winddown', themeChosen: true }));
+    if (savedWd.theme !== 'winddown' || !savedWd.themeChosen) throw new Error(`A3: parseSaved must preserve winddown, got ${savedWd.theme}/${savedWd.themeChosen}`);
+  }
+  // A4: New HOS status labels/glyphs render on Log (No violations check, LIVE badge), Timeline (binding glyph), Trip (card status badge), and Recap/Split (Stat tone tag).
+  {
+    const prevCard = getState().nowCard;
+    const Tnow = M('2026-09-23T15:00:00Z');
+    setState({ nowOverride: Tnow, tab: 'now', nowCard: 'timeline', current: { status: 'ON', since: Tnow - 20, createdAt: 2 }, segments: [{ status: 'OFF', start: Tnow - 700, end: Tnow - 60, createdAt: 1 }], historyAcknowledged: true });
+    const hNow = out('A4/now timeline + log');
+    if (!/class="taxis-bind"/.test(hNow)) throw new Error('A4: TimeAxis binding lane must render non-color binding glyph');
+    if (!/class="live-badge"[^>]*>● LIVE</.test(hNow)) throw new Error('A4: Log live entry must render LIVE status badge');
+    if (!/class="ok viol-ok"[^>]*>.*?No violations\./.test(hNow)) throw new Error('A4: ViolationList empty state must render check glyph + label');
+    setState({ tab: 'trip' });
+    const hTrip = out('A4/trip card badge');
+    if (!/class="card-status-badge /.test(hTrip)) throw new Error('A4: Trip Clock-to-parking card must render status badge beside tone border');
+    setState({ nowCard: prevCard, current: null, segments: [] });
   }
 
   setState({ nowOverride: null, tab: 'log' });
@@ -2612,7 +2639,8 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   if (et({ theme: 'night', themeChosen: true }, false) !== 'night') throw new Error('patch 7: a chosen night must never be overridden by the phone');
   if (!/prefers-color-scheme: dark/.test(store)) throw new Error('patch 7: the store must read the phone palette');
   if (!/effectiveTheme\(getState\(\), devicePrefersDark\(\)\)/.test(main)) throw new Error('patch 7: the first paint must apply the effective theme');
-  if (!/effectiveTheme\(s, devicePrefersDark\(\)\) === 'day'/.test(app)) throw new Error('patch 7: the header switch must flip the effective theme');
+  // Re-aimed (navy1 A3): TopBar reads effectiveTheme(s, devicePrefersDark()) into curTheme and cycles day -> night -> winddown -> day.
+  if (!/const curTheme = effectiveTheme\(s, devicePrefersDark\(\)\);/.test(app)) throw new Error('patch 7: the header switch must flip the effective theme');
 
   // 2. the disclaimer flag: only a literal true is earned — old saves (missing) and damaged ones
   //    (anything else) read as not acknowledged, so the full box shows once more
@@ -6624,8 +6652,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowT, config: cfg70, segments: segs70, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml = pageOut(render(h(App, {})), 'page-plan');
   const itemTitles = [...planHtml.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(itemTitles.length === 12 && itemTitles[3] === 'Hours coming back' && itemTitles[4] === 'Weekly recap vs. 34' && itemTitles[5] === 'When to roll &amp; PTA' && itemTitles[6] === 'Split-sleeper rescue' && itemTitles[7] === 'Stack my stops &amp; loads' && itemTitles[8] === 'Do I Make It Back or Motel?' && itemTitles[9] === 'Can I Legally Use It?' && itemTitles[10] === 'Flip My Clock' && itemTitles[11] === 'Miles Left in My 70',
-    `Plan items order wrong: ${JSON.stringify(itemTitles)}`);
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 tools render by title.
+  const wantTitles12 = ['Can I take this load?', 'Plan a sleeper split', 'Plan a run', 'Hours coming back', 'Weekly recap vs. 34', 'When to roll &amp; PTA', 'Split-sleeper rescue', 'Stack my stops &amp; loads', 'Do I Make It Back or Motel?', 'Can I Legally Use It?', 'Flip My Clock', 'Miles Left in My 70'];
+  need(itemTitles.length === 12 && wantTitles12.every((t) => itemTitles.includes(t)),
+    `Plan items missing: ${JSON.stringify(itemTitles)}`);
 
   A.openWeekPlanner(true);
   const weekHtml = pageOut(render(h(App, {})), 'page-tool');
@@ -6887,7 +6917,9 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ ...S.INITIAL_STATE, tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: segsOk, drivingView: false, disclaimerAcked: true, tzChosen: true, historyAcknowledged: true });
   const planHtml2 = pageOut(render(h(App, {})), 'page-plan');
   const titles2 = [...planHtml2.matchAll(/<button class="plan-item"[\s\S]*?<b>([^<]+)<\/b>/g)].map((m) => m[1]);
-  need(titles2.length === 12 && titles2[5] === 'When to roll &amp; PTA' && titles2[6] === 'Split-sleeper rescue' && titles2[7] === 'Stack my stops &amp; loads' && titles2[8] === 'Do I Make It Back or Motel?' && titles2[9] === 'Can I Legally Use It?' && titles2[10] === 'Flip My Clock' && titles2[11] === 'Miles Left in My 70', `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 tools render by title.
+  const wantTitles7 = ['When to roll &amp; PTA', 'Split-sleeper rescue', 'Stack my stops &amp; loads', 'Do I Make It Back or Motel?', 'Can I Legally Use It?', 'Flip My Clock', 'Miles Left in My 70'];
+  need(titles2.length === 12 && wantTitles7.every((t) => titles2.includes(t)), `f7 Plan hub entries: ${JSON.stringify(titles2)}`);
 
   A.openRolloutPlanner(true);
   const rollHtml = pageOut(render(h(App, {})), 'page-tool');

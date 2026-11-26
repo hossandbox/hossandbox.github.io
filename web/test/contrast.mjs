@@ -110,7 +110,19 @@ function audit(name, V) {
 
 const night = vars(':root {');
 const day = vars(':root[data-theme="day"]');
-const failures = [...audit('day (default)', day), ...audit('night', night)];
+const winddown = vars(':root[data-theme="winddown"]');
+const failures = [...audit('day (default)', day), ...audit('night', night), ...audit('wind-down', winddown)];
+
+// Wind-down (A3): big clock/countdown figures >= 7:1 (AAA) on page/panel/surface-hi/screen, and no pure #000/#fff tokens.
+for (const [label, bgKey] of [['page', '--bg'], ['panel', '--panel'], ['surface-hi', '--surface-hi'], ['screen', '--screen']]) {
+  const r = ratio(winddown['--text'], winddown[bgKey]);
+  if (r < 7.0) failures.push(`  wind-down big clock on ${label}: ${r.toFixed(2)}:1 (need >= 7.0) — ${winddown['--text']} on ${winddown[bgKey]}`);
+}
+for (const [k, v] of Object.entries(winddown)) {
+  if (/^#(?:000|000000|fff|ffffff)$/i.test(v.trim())) {
+    failures.push(`  wind-down token ${k} uses pure ${v} — no pure #000/#FFF surfaces allowed`);
+  }
+}
 
 // The shell has to be DARK-SAFE before any script runs (patch 16, P1a — sanction S1): the static
 // colours are the night palette's, so a cold start can splash dark but never light — a white splash

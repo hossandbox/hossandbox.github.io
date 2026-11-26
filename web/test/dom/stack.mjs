@@ -713,7 +713,7 @@ await pin('SK7. cross-timezone stop: engine dual-TZ formatting + UI lets zone be
   // UI-level F2 pin: open Stack tool with default CT stops (apptMinute === null)
   await seed({ tab: 'plan', nowOverride: NOW_06, segments: FRESH_SEGS, current: null });
   const pg = planPage();
-  const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg)[7];
+  const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), pg)[0];
   fire(stackItem, 'click');
   await sleep(60);
   const rm = planRoom();
@@ -823,7 +823,7 @@ await pin('SK7. cross-timezone stop: engine dual-TZ formatting + UI lets zone be
     departureMinute: null,
     untilDepartureStatus: 'ON',
   });
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPage())[7], 'click');
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), planPage())[0], 'click');
   await sleep(60);
   const rmSpring = planRoom();
 
@@ -875,11 +875,14 @@ await pin('SK8. Plan hub lists "Stack my stops & loads" 8th (above "Do I Make It
   const pg = planPage();
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 12 || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') {
+  // Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; locate by title instead of fixed index.
+  const required = ['Split-sleeper rescue', 'Stack my stops & loads', 'Do I Make It Back or Motel?', 'Can I Legally Use It?', 'Flip My Clock', 'Miles Left in My 70'];
+  if (items.length !== 12 || !required.every((t) => titles.includes(t))) {
     return `unexpected Plan hub items: ${JSON.stringify(titles)}`;
   }
 
-  fire(items[7], 'click');
+  const stackBtn = items[titles.indexOf('Stack my stops & loads')];
+  fire(stackBtn, 'click');
   await sleep(60);
   if (!A.isStackPlannerOpen()) return 'stack tool did not open';
 
@@ -928,7 +931,7 @@ await pin('SK8. Plan hub lists "Stack my stops & loads" 8th (above "Do I Make It
   await sleep(60);
   const closedOnBack = !A.isStackPlannerOpen() && !has(rm, 'is-active');
 
-  fire(items[7], 'click');
+  fire(stackBtn, 'click');
   await sleep(50);
   const reopened = A.isStackPlannerOpen();
   setState({ tab: 'now' }); await sleep(50);
@@ -1081,7 +1084,7 @@ await pin('SK11. pinned start time (F5) is stored as an absolute minute, does no
   Tms = baseTms;
   await seed({ tab: 'plan', nowOverride: NOW_06, segments: FRESH_SEGS, current: null });
   const pg = planPage();
-  const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg)[7];
+  const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), pg)[0];
   fire(stackItem, 'click');
   await sleep(60);
   const rm = planRoom();
@@ -1135,7 +1138,7 @@ await pin('SK11. pinned start time (F5) is stored as an absolute minute, does no
   // R2: Picking beyond 72h in the "Start chain at" ClockPick clamps at pick time to now + 72h,
   // displays the clamped time visibly (never the unkept 4-day-out time), and survives draft save/load & tab re-entry unchanged.
   await seed({ tab: 'plan', nowOverride: NOW_06, segments: FRESH_SEGS, current: null });
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPage())[7], 'click');
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), planPage())[0], 'click');
   await sleep(60);
   const rmR2 = planRoom();
   const depBtnR2 = all((n) => n.localName === 'button' && n.attributes?.['data-stack-dep-btn'] === '1', rmR2)[0];
@@ -1162,7 +1165,7 @@ await pin('SK11. pinned start time (F5) is stored as an absolute minute, does no
   // Leave Stack tab and re-enter: clamped value MUST survive unchanged (never silently dropped to "Now").
   fire(all((n) => n.localName === 'button' && has(n, 'back'), rmR2)[0], 'click');
   await sleep(60);
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPage())[7], 'click');
+  fire(all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), planPage())[0], 'click');
   await sleep(60);
   const rmR2Reenter = planRoom();
   const depBtnR2Reenter = all((n) => n.localName === 'button' && n.attributes?.['data-stack-dep-btn'] === '1', rmR2Reenter)[0];
@@ -1284,7 +1287,7 @@ await pin('SK12. drive-minutes parity with engine (93 mi @ 45 mph = 125m, F8), c
     await seed({ tab: 'plan', nowOverride: NOW_06, segments: segs, current: null });
     ST.saveStackDraft({ stops, departureMinute: null, untilDepartureStatus: 'ON' });
     const pg = planPage();
-    const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item'), pg)[7];
+    const stackItem = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Stack my stops & loads/.test(n.textContent), pg)[0];
     fire(stackItem, 'click');
     await sleep(60);
     const rm = planRoom();

@@ -910,8 +910,19 @@ await pin('P3. log summary PDF: invalid/out-of-range inputs (0, blank, 500, 14.5
   }
 });
 
+const planToolBtn = (titleOrRe, scope = pages()[0]) => all((n) => n.localName === 'button' && has(n, 'plan-item'), scope).find((b) => {
+  const t = all((n) => n.localName === 'b', b)[0]?.textContent?.trim() ?? '';
+  return typeof titleOrRe === 'string' ? t === titleOrRe : titleOrRe.test(t);
+});
+const ALL_12_PLAN_TITLES = [
+  'Can I take this load?', 'Plan a sleeper split', 'Plan a run', 'Hours coming back',
+  'Weekly recap vs. 34', 'When to roll & PTA', 'Split-sleeper rescue', 'Stack my stops & loads',
+  'Do I Make It Back or Motel?', 'Can I Legally Use It?', 'Flip My Clock', 'Miles Left in My 70',
+];
+
 /* ---------------- (w) Weekly Recap vs. 34-Hour Reset & Home-Time Planner ---------------- */
-await pin('W1. Plan hub lists 12 .plan-item tools with "Weekly recap vs. 34" 5th, "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, "Do I Make It Back or Motel?" 9th, "Can I Legally Use It?" 10th, "Flip My Clock" 11th, and "Miles Left in My 70" at the bottom; tapping Weekly opens verdict banner first and Back returns to Plan', async () => {
+// Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 titles present and open Weekly recap by title.
+await pin('W1. Plan hub lists all 12 .plan-item tools across horizon groups; tapping Weekly recap opens verdict banner first and Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
@@ -924,8 +935,8 @@ await pin('W1. Plan hub lists 12 .plan-item tools with "Weekly recap vs. 34" 5th
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 12 || titles[4] !== 'Weekly recap vs. 34' || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') return `items=${JSON.stringify(titles)}`;
-  fire(items[4], 'click'); await sleep(60);
+  if (items.length !== 12 || !ALL_12_PLAN_TITLES.every((t) => titles.includes(t))) return `items=${JSON.stringify(titles)}`;
+  fire(planToolBtn('Weekly recap vs. 34', planPg), 'click'); await sleep(60);
   const rm = planRoom();
   const txt = rm.textContent;
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
@@ -951,7 +962,7 @@ await pin('W2. tight cycle fixture: verdict banner names Recap Wall & 34h reset 
   const tightSegs = hrs.map((h, i) => ({ status: 'D', start: starts[i] + 60, end: starts[i] + 60 + h * 60, createdAt: i + 1 }));
   await seed({ tab: 'plan', config: cfg, segments: tightSegs, current: null });
   const planPg = pages()[0];
-  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  const lastBtn = planToolBtn('Weekly recap vs. 34', planPg);
   fire(lastBtn, 'click'); await sleep(60);
   const rm = planRoom();
   const v1 = all((n) => n.attributes?.['data-wrecap-verdict'] === '1', rm)[0]?.textContent ?? '';
@@ -978,7 +989,7 @@ await pin('W3. 60/7 cycle variant & empty past days: displays 60-hour / 7-day cy
   const cfg60 = { ...getState().config, cycle: '60/7', dayStartHour: 0, timeZone: 'America/Chicago' };
   await seed({ tab: 'plan', config: cfg60, segments: [], current: null, historyAcknowledged: false });
   const planPg = pages()[0];
-  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  const lastBtn = planToolBtn('Weekly recap vs. 34', planPg);
   fire(lastBtn, 'click'); await sleep(60);
   const txt = planRoom().textContent;
   const ok = /60-hour \/ 7-day cycle/.test(txt)
@@ -999,7 +1010,7 @@ await pin('W4. leaving Plan tab closes Weekly recap vs. 34 sub-screen so returni
   A.openMilesPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
-  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[4];
+  const lastBtn = planToolBtn('Weekly recap vs. 34', planPg);
   fire(lastBtn, 'click'); await sleep(60);
   if (!A.isWeekPlannerOpen()) return 'did not open';
   await seed({ tab: 'now', ...segs });
@@ -1025,7 +1036,8 @@ const setRolloutAppt = async (planPg, dateStr, timeStr) => {
   return null;
 };
 
-await pin('R1. Plan hub lists 12 .plan-item tools with "When to roll & PTA" 6th, "Split-sleeper rescue" 7th, "Stack my stops & loads" 8th, "Do I Make It Back or Motel?" 9th, "Can I Legally Use It?" 10th, "Flip My Clock" 11th, and "Miles Left in My 70" at the bottom; tapping When to roll opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
+// Re-aimed (navy1 B1): Plan hub groups the 12 tools by time horizon; verify all 12 titles present and open When to roll & PTA by title.
+await pin('R1. Plan hub lists all 12 .plan-item tools across horizon groups; tapping When to roll opens verdict banner before checklist & PTA, Back returns to Plan', async () => {
   A.openWeekPlanner(false);
   A.openRolloutPlanner(false);
   A.openRescuePlanner(false);
@@ -1038,8 +1050,8 @@ await pin('R1. Plan hub lists 12 .plan-item tools with "When to roll & PTA" 6th,
   const planPg = pages()[0];
   const items = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg);
   const titles = items.map((b) => all((n) => n.localName === 'b', b)[0]?.textContent?.trim());
-  if (items.length !== 12 || titles[5] !== 'When to roll & PTA' || titles[6] !== 'Split-sleeper rescue' || titles[7] !== 'Stack my stops & loads' || titles[8] !== 'Do I Make It Back or Motel?' || titles[9] !== 'Can I Legally Use It?' || titles[10] !== 'Flip My Clock' || titles[11] !== 'Miles Left in My 70') return `items=${JSON.stringify(titles)}`;
-  fire(items[5], 'click'); await sleep(60);
+  if (items.length !== 12 || !ALL_12_PLAN_TITLES.every((t) => titles.includes(t))) return `items=${JSON.stringify(titles)}`;
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
   const h1 = all((n) => n.localName === 'h1' && has(n, 'screen-title'), rm)[0]?.textContent?.trim();
   const verdict = all((n) => n.attributes?.['data-rollout-verdict'] === '1', rm)[0];
@@ -1069,7 +1081,7 @@ await pin('R2. cross-zone timezone toggle: 08:00 Eastern (local) vs 07:00 Centra
   ];
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: sOk, current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   // Choose America/New_York, date 2026-11-12, time 08:00 in local mode via ClockPick sheet, 550 mi @ 55 mph
@@ -1110,7 +1122,7 @@ await pin('R3. miles + speed vs direct drive hours mode equivalence in live DOM 
   const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   const btn550 = all((n) => n.localName === 'button' && n.textContent.trim() === '550 mi', rm)[0];
@@ -1144,7 +1156,7 @@ await pin('R4. infeasible run (10h break cannot complete before roll-out): shows
   ];
   await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   const errSet = await setRolloutAppt(rm, '2026-11-12', '10:00');
@@ -1178,7 +1190,7 @@ await pin('R5. leaving Plan tab closes When to roll & PTA sub-screen so returnin
   A.openMilesPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
-  const lastBtn = all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5];
+  const lastBtn = planToolBtn('When to roll & PTA', planPg);
   fire(lastBtn, 'click'); await sleep(60);
   if (!A.isRolloutPlannerOpen()) return 'did not open';
   await seed({ tab: 'now', ...segs });
@@ -1192,7 +1204,7 @@ await pin('R6. rollout screen has no raw <input type="time"> or <input type="dat
   A.openRolloutPlanner(false);
   await seed({ tab: 'plan', ...segs });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   const rawClosed = all((n) => n.localName === 'input' && (n.attributes?.type === 'time' || n.attributes?.type === 'date'), rm);
@@ -1222,7 +1234,7 @@ await pin('R7. tapping rollout appointment opens ClockPick sheet naming entry zo
   const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   const tzSel = all((n) => n.localName === 'select' && n.attributes?.['aria-label'] === 'Appointment time zone', rm)[0];
@@ -1266,7 +1278,7 @@ await pin('R8. cross-zone (Chicago home / New York entry) sets 08:00 -> stores d
   const nowWed06 = E.localToMinute(2026, 11, 11, 6, 'America/Chicago');
   await seed({ tab: 'plan', nowOverride: nowWed06, config: cfgChi, segments: [], current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   // Cross-zone: home America/Chicago, entry America/New_York (local mode)
@@ -1334,7 +1346,7 @@ await pin('R9. recovery "Use earliest workable appointment" updates stored appoi
   ];
   await seed({ tab: 'plan', nowOverride: nowWed16, config: cfgChi, segments: segsTired, current: null });
   const planPg = pages()[0];
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), planPg)[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA', planPg), 'click'); await sleep(60);
   const rm = planRoom();
 
   const errSet = await setRolloutAppt(rm, '2026-11-12', '10:00');
@@ -1399,7 +1411,7 @@ await pin('G2. nav-gear: TopBar .top-right DOM order is clock → gear → theme
     && gear.attributes?.title === 'Settings';
   const gearPath = all((n) => n.localName === 'path', gear)[0]?.attributes?.d ?? '';
   const isCog = gearPath.length > 60 && gearPath !== 'M5 12h.01M12 12h.01M19 12h.01';
-  const themeOk = theme.localName === 'button' && has(theme, 'theme-btn') && /Switch to (day|night) theme/.test(theme.attributes?.['aria-label'] || '');
+  const themeOk = theme.localName === 'button' && has(theme, 'theme-btn') && /Switch to (day|night|wind-down) theme/.test(theme.attributes?.['aria-label'] || '');
   return (clkOk && gearOk && isCog && themeOk)
     || JSON.stringify({ clkOk, gearOk, isCog, gearPathLen: gearPath.length, themeOk, kids: kids.map((k) => `${k.localName}.${cls(k)}`) });
 });
@@ -1577,10 +1589,17 @@ await pin('T4. transitions (d): Day/Night toggle applies CSS color/background tr
     return `css check failed: dur=${dur} hasColorAndBg=${hasColorAndBg} noGeometry=${noGeometry} hasReducedMotion=${hasReducedMotion} rule=${themeRule}`;
   }
   await seed({ tab: 'now', theme: 'day', themeChosen: true, ...segs });
-  const themeBtn = () => all((n) => n.localName === 'button' && has(n, 'theme-btn') && /Switch to (day|night) theme/.test(n.attributes?.['aria-label'] || ''))[0];
+  const themeBtn = () => all((n) => n.localName === 'button' && has(n, 'theme-btn') && /Switch to (day|night|wind-down) theme/.test(n.attributes?.['aria-label'] || ''))[0];
   if (document.documentElement.attributes?.['data-theme'] !== 'day') return `initial data-theme=${document.documentElement.attributes?.['data-theme']}`;
   fire(themeBtn(), 'click'); await sleep(60);
   const afterNight = {
+    theme: getState().theme,
+    chosen: getState().themeChosen,
+    attr: document.documentElement.attributes?.['data-theme'] ?? null,
+    saved: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').theme,
+  };
+  fire(themeBtn(), 'click'); await sleep(60);
+  const afterWindDown = {
     theme: getState().theme,
     chosen: getState().themeChosen,
     attr: document.documentElement.attributes?.['data-theme'] ?? null,
@@ -1594,8 +1613,9 @@ await pin('T4. transitions (d): Day/Night toggle applies CSS color/background tr
     saved: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').theme,
   };
   const ok = afterNight.theme === 'night' && afterNight.chosen === true && afterNight.attr === null && afterNight.saved === 'night'
+    && afterWindDown.theme === 'winddown' && afterWindDown.chosen === true && afterWindDown.attr === 'winddown' && afterWindDown.saved === 'winddown'
     && afterDay.theme === 'day' && afterDay.chosen === true && afterDay.attr === 'day' && afterDay.saved === 'day';
-  return ok || JSON.stringify({ afterNight, afterDay });
+  return ok || JSON.stringify({ afterNight, afterWindDown, afterDay });
 });
 
 /* ---------------- (p) plan-dissolve (2026-11-21, Lorico): all Plan tools get the Settings-room dissolve ---------------- */
@@ -1603,18 +1623,18 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
   const off = (p) => (p.attributes.inert !== undefined && p.attributes.inert !== 'false') || p.inert === true;
   const hid = (p) => p.attributes['aria-hidden'] === 'true' || p.attributes['aria-hidden'] === true;
   const tools = [
-    ['load', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[0]; fire(b, 'click'); }, 'How far is the load?'],
-    ['split', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1]; fire(b, 'click'); }, 'Break 1'],
-    ['trip', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[2]; fire(b, 'click'); }, 'Clock-to-parking'],
-    ['recap', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3]; fire(b, 'click'); }, 'Hours coming back'],
-    ['week', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[4]; fire(b, 'click'); }, 'Weekly recap vs. 34'],
-    ['rollout', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5]; fire(b, 'click'); }, 'When to roll & PTA'],
-    ['rescue', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6]; fire(b, 'click'); }, 'Split-sleeper rescue'],
-    ['stack', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[7]; fire(b, 'click'); }, 'Stack my stops & loads'],
-    ['motel', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[8]; fire(b, 'click'); }, 'Do I Make It Back or Motel?'],
-    ['legal', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[9]; fire(b, 'click'); }, 'Can I Legally Use It?'],
-    ['flip', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[10]; fire(b, 'click'); }, 'Flip My Clock'],
-    ['miles', () => { const b = all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[11]; fire(b, 'click'); }, 'Miles Left in My 70'],
+    ['load', () => fire(planToolBtn('Can I take this load?'), 'click'), 'How far is the load?'],
+    ['split', () => fire(planToolBtn('Plan a sleeper split'), 'click'), 'Break 1'],
+    ['trip', () => fire(planToolBtn('Plan a run'), 'click'), 'Clock-to-parking'],
+    ['recap', () => fire(planToolBtn('Hours coming back'), 'click'), 'Hours coming back'],
+    ['week', () => fire(planToolBtn('Weekly recap vs. 34'), 'click'), 'Weekly recap vs. 34'],
+    ['rollout', () => fire(planToolBtn('When to roll & PTA'), 'click'), 'When to roll & PTA'],
+    ['rescue', () => fire(planToolBtn('Split-sleeper rescue'), 'click'), 'Split-sleeper rescue'],
+    ['stack', () => fire(planToolBtn('Stack my stops & loads'), 'click'), 'Stack my stops & loads'],
+    ['motel', () => fire(planToolBtn('Do I Make It Back or Motel?'), 'click'), 'Do I Make It Back or Motel?'],
+    ['legal', () => fire(planToolBtn('Can I Legally Use It?'), 'click'), 'Can I Legally Use It?'],
+    ['flip', () => fire(planToolBtn('Flip My Clock'), 'click'), 'Flip My Clock'],
+    ['miles', () => fire(planToolBtn('Miles Left in My 70'), 'click'), 'Miles Left in My 70'],
   ];
   for (const [id, openFn, marker] of tools) {
     A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false); A.openFlipPlanner(false); A.openMilesPlanner(false);
@@ -1641,7 +1661,7 @@ await pin('P1. plan-dissolve: opening every Plan tool (load, split, trip, recap,
   // History reached from Recap ("Your last 8 days")
   await seed({ tab: 'plan', ...segs });
   strip().scrollLeft = 0; scrollCalls.length = 0;
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  fire(planToolBtn('Hours coming back'), 'click'); await sleep(60);
   const histBtn = all((n) => n.localName === 'button' && has(n, 'plan-item') && /Your last 8 days/.test(n.textContent), planRoom())[0];
   if (!histBtn) return 'missing Your last 8 days door in Recap';
   fire(histBtn, 'click'); await sleep(60);
@@ -1700,7 +1720,7 @@ await pin('P3. plan-dissolve: closing every Plan tool via its Back affordance di
   // Recap -> History -> Back to Recap -> Back to Plan (nested origin return)
   await seed({ tab: 'plan', ...segs });
   strip().scrollLeft = 0; scrollCalls.length = 0;
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  fire(planToolBtn('Hours coming back'), 'click'); await sleep(60);
   fire(all((n) => n.localName === 'button' && has(n, 'plan-item') && /Your last 8 days/.test(n.textContent), planRoom())[0], 'click'); await sleep(60);
   const backRecap = all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0];
   if (!backRecap || !backRecap.textContent.includes('Recap')) return `history back wrong: ${backRecap?.textContent}`;
@@ -1723,18 +1743,18 @@ await pin('P3. plan-dissolve: closing every Plan tool via its Back affordance di
 
 await pin('P4. plan-dissolve: hardware Back (popstate via backnav) closes sheet first if open, then dissolves Plan tool back to Plan hub with zero strip scroll', async () => {
   for (const [id, openFn] of [
-    ['load', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[0], 'click')],
-    ['split', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1], 'click')],
-    ['trip', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[2], 'click')],
-    ['recap', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click')],
-    ['week', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[4], 'click')],
-    ['rollout', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5], 'click')],
-    ['rescue', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[6], 'click')],
-    ['stack', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[7], 'click')],
-    ['motel', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[8], 'click')],
-    ['legal', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[9], 'click')],
-    ['flip', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[10], 'click')],
-    ['miles', () => fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[11], 'click')],
+    ['load', () => fire(planToolBtn('Can I take this load?'), 'click')],
+    ['split', () => fire(planToolBtn('Plan a sleeper split'), 'click')],
+    ['trip', () => fire(planToolBtn('Plan a run'), 'click')],
+    ['recap', () => fire(planToolBtn('Hours coming back'), 'click')],
+    ['week', () => fire(planToolBtn('Weekly recap vs. 34'), 'click')],
+    ['rollout', () => fire(planToolBtn('When to roll & PTA'), 'click')],
+    ['rescue', () => fire(planToolBtn('Split-sleeper rescue'), 'click')],
+    ['stack', () => fire(planToolBtn('Stack my stops & loads'), 'click')],
+    ['motel', () => fire(planToolBtn('Do I Make It Back or Motel?'), 'click')],
+    ['legal', () => fire(planToolBtn('Can I Legally Use It?'), 'click')],
+    ['flip', () => fire(planToolBtn('Flip My Clock'), 'click')],
+    ['miles', () => fire(planToolBtn('Miles Left in My 70'), 'click')],
   ]) {
     A.openWeekPlanner(false); A.openRolloutPlanner(false); A.openRescuePlanner(false); A.openStackPlanner(false); A.openMotelPlanner(false); A.openLegalPlanner(false); A.openFlipPlanner(false); A.openMilesPlanner(false);
     await seed({ tab: 'plan', ...segs });
@@ -1751,7 +1771,7 @@ await pin('P4. plan-dissolve: hardware Back (popstate via backnav) closes sheet 
   // Open a sheet inside Rollout -> first hardware Back closes sheet while keeping Rollout room open; second closes Rollout
   await seed({ tab: 'plan', ...segs });
   strip().scrollLeft = 0; scrollCalls.length = 0;
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[5], 'click'); await sleep(60);
+  fire(planToolBtn('When to roll & PTA'), 'click'); await sleep(60);
   const apptBtn = all((n) => n.localName === 'button' && n.attributes?.['data-rollout-appt-btn'] === '1', planRoom())[0];
   fire(apptBtn, 'click'); await sleep(60);
   if (!all((n) => has(n, 'sheet')).length) return 'rollout sheet did not open';
@@ -1769,13 +1789,13 @@ await pin('P5. plan-dissolve: opening a Plan tool resets planRoom.scrollTop to 0
   await seed({ tab: 'plan', ...segs });
   pages()[0].scrollTop = 240;
   planRoom().scrollTop = 310;
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[1], 'click'); await sleep(60);
+  fire(planToolBtn('Plan a sleeper split'), 'click'); await sleep(60);
   const afterSplit = planRoom().scrollTop;
   // Scroll inside Split Lab, return to Plan, open Recap -> resets to 0 again; hub scrollTop stays 240
   planRoom().scrollTop = 420;
   fire(all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0], 'click'); await sleep(60);
   const hubAfterSplit = pages()[0].scrollTop;
-  fire(all((n) => n.localName === 'button' && has(n, 'plan-item'), pages()[0])[3], 'click'); await sleep(60);
+  fire(planToolBtn('Hours coming back'), 'click'); await sleep(60);
   const afterRecap = planRoom().scrollTop;
   // Switch directly from Recap to Load -> resets planRoom.scrollTop to 0
   planRoom().scrollTop = 190;

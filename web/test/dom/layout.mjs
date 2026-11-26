@@ -483,7 +483,16 @@ for (const [W, H] of SIZES) {
       const intoView = { cardBottom: card.getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top };
       pg.scrollTop = 1e6; await two();
       const rest = [...pg.querySelectorAll('.now-rest > *')].filter((e) => !e.classList.contains('dock') && e.getBoundingClientRect().height > 0);
-      const atEnd = { lastBottom: rest[rest.length - 1].getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top, lastText: rest[rest.length - 1].textContent.slice(0, 30) };
+      const lastEl = rest[rest.length - 1];
+      // B3 grouped Now's post-graph actions inside `.shift-actions-card`; verify both the card bottom and the "Exceptions this shift" button clear the dock.
+      const excBtn = [...lastEl.querySelectorAll('button')].find((b) => /Exceptions this shift/.test(b.textContent));
+      const atEnd = {
+        lastBottom: lastEl.getBoundingClientRect().bottom,
+        excBottom: excBtn ? excBtn.getBoundingClientRect().bottom : 1e9,
+        hasExc: !!excBtn,
+        dockTop: dock.getBoundingClientRect().top,
+        lastText: lastEl.textContent.slice(0, 80),
+      };
       pg.scrollTop = 0; await two();
       return { meters, over, arrows, intoView, atEnd, dockH: getComputedStyle(document.documentElement).getPropertyValue('--dock-h') };
     });
@@ -493,7 +502,7 @@ for (const [W, H] of SIZES) {
       ok(`${tag} (d) F: nothing on a Timeline axis track reaches past either end (cap, walls, run-past arrow)`, now.over.length === 0 && now.arrows > 0, `${now.arrows} arrow(s); ${now.over.join(' ; ')}`);
     }
     ok(`${tag} (d) C: the Last-24h card scrolled into view (block end) lands clear of the status dock`, now.intoView.cardBottom <= now.intoView.dockTop + 0.5, `card bottom ${now.intoView.cardBottom.toFixed(1)}, dock top ${now.intoView.dockTop.toFixed(1)} (--dock-h ${now.dockH})`);
-    ok(`${tag} (d) C: at the end of Now's scroll the last row ("Exceptions this shift") clears the dock`, now.atEnd.lastBottom <= now.atEnd.dockTop && /Exceptions this shift/.test(now.atEnd.lastText), `${now.atEnd.lastText} bottom ${now.atEnd.lastBottom.toFixed(1)}, dock top ${now.atEnd.dockTop.toFixed(1)}`);
+    ok(`${tag} (d) C: at the end of Now's scroll the last block ("Exceptions this shift" in Shift actions) clears the dock`, now.atEnd.lastBottom <= now.atEnd.dockTop && now.atEnd.hasExc && now.atEnd.excBottom <= now.atEnd.dockTop, `${now.atEnd.lastText} bottom ${now.atEnd.lastBottom.toFixed(1)}, excBottom ${now.atEnd.excBottom.toFixed(1)}, dock top ${now.atEnd.dockTop.toFixed(1)}`);
     if (nowCard === 'dial') {
       // ---- E: the banner on Plan / the load check / More
       const banner = () => page.evaluate(() => { const pg = document.querySelector('.page.is-active'); const box = [...pg.querySelectorAll('.warnbox')].find((b) => b.textContent.includes('History incomplete')); if (!box) return null; const btn = box.querySelector('button'); const cs = getComputedStyle(box); return +(btn.getBoundingClientRect().bottom - (box.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth))).toFixed(1); });
@@ -815,11 +824,11 @@ for (const [W, H] of SIZES) {
     ok(`${tag} (e) Plan tool Back dissolves cleanly to Plan hub with chrome restored and zero strip scroll`,
       !afterToolBack.inRoom && afterToolBack.sl === slBeforeTool && !afterToolBack.hdrInert && afterToolBack.activePlan,
       JSON.stringify(afterToolBack));
-    // Transitions (d): verify theme CSS transition rule on color/background (no geometry) and theme flip + persistence
+    // Transitions (d) + A3 Wind-down: verify theme CSS transition rule on color/background (no geometry) and 3-way theme cycle + persistence
     const themeCheck = await page.evaluate(() => {
       const appCs = getComputedStyle(document.querySelector('.app'));
       const cardCs = getComputedStyle(document.querySelector('.card'));
-      const btn = [...document.querySelectorAll('header.top button.theme-btn')].find((b) => /Switch to (day|night) theme/.test(b.getAttribute('aria-label') || ''));
+      const btn = [...document.querySelectorAll('header.top button.theme-btn')].find((b) => /Switch to (day|night|wind-down) theme/.test(b.getAttribute('aria-label') || ''));
       const beforeAttr = document.documentElement.getAttribute('data-theme');
       btn?.click();
       return {
@@ -834,9 +843,10 @@ for (const [W, H] of SIZES) {
       afterAttr: document.documentElement.getAttribute('data-theme'),
       savedTheme: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').theme,
     }));
-    const wantAfterAttr = theme === 'day' ? null : 'day';
-    const wantSaved = theme === 'day' ? 'night' : 'day';
-    ok(`${tag} (e) transitions (d): theme toggle applies color/background CSS transition and flips + persists theme`,
+    // Re-aimed (navy1 A3): header button cycles Day -> Night (null) -> Wind-down ('winddown') -> Day.
+    const wantAfterAttr = theme === 'day' ? null : 'winddown';
+    const wantSaved = theme === 'day' ? 'night' : 'winddown';
+    ok(`${tag} (e) transitions (d): theme toggle applies color/background CSS transition and flips + persists theme (${theme} -> ${wantSaved})`,
       /background-color/.test(themeCheck.appProps) && /color/.test(themeCheck.appProps)
       && /background-color/.test(themeCheck.cardProps) && /border-color/.test(themeCheck.cardProps)
       && themeAfter.afterAttr === wantAfterAttr && themeAfter.savedTheme === wantSaved,

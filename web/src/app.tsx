@@ -114,11 +114,25 @@ export function displaySegLabel(status: DutyStatus, note?: string): string {
 }
 const segLabel = displaySegLabel;
 
-function Card({ title, children, tone }: { title?: string; children: ComponentChildren; tone?: 'warn' | 'bad' | 'good' }) {
-  return <section class={`card ${tone ?? ''}`}>{title && <h2>{title}</h2>}{children}</section>;
+function Card({ title, children, tone, statusBadge }: { title?: string; children: ComponentChildren; tone?: 'warn' | 'bad' | 'good'; statusBadge?: { tone: 'good' | 'warn' | 'bad'; label: string } }) {
+  return (
+    <section class={`card ${tone ?? ''}`}>
+      {title && (statusBadge
+        ? <div class="card-head-row"><h2>{title}</h2><span class={`card-status-badge ${statusBadge.tone}`} data-status-label="1">{statusBadge.label}</span></div>
+        : <h2>{title}</h2>)}
+      {children}
+    </section>
+  );
 }
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
-  return <div class={`stat ${tone ?? ''}`}><div class="stat-label">{label}</div><div class="stat-value">{value}</div>{sub && <div class="stat-sub">{sub}</div>}</div>;
+  const tag = tone === 'bad' ? '✕ Low' : tone === 'warn' ? '⚠ Watch' : tone === 'good' ? '✓ OK' : null;
+  return (
+    <div class={`stat ${tone ?? ''}`}>
+      <div class="stat-label">{label}{tag && <span class={`stat-tone-tag ${tone}`} data-status-label="1">{tag}</span>}</div>
+      <div class="stat-value">{value}</div>
+      {sub && <div class="stat-sub">{sub}</div>}
+    </div>
+  );
 }
 /**
  * A4 (audit): ONE way to type a duration — hours and minutes boxes, the ELD quick start's form —
@@ -276,8 +290,8 @@ function TimeZoneField({ value, onChange }: { value: string; onChange: (v: strin
 }
 function ViolationList({ items, from }: { items: Violation[]; from?: number }) {
   const list = from === undefined ? items : items.filter((v) => v.start >= from);
-  if (!list.length) return <p class="ok">No violations.</p>;
-  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><b>{violationLabel[v.kind]}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}{' '}<span class="sev" title="Size only says how much time is involved — any of these can be cited.">{severityWord[v.severity]}</span><br /><small>{v.detail}</small></li>)}</ul>;
+  if (!list.length) return <p class="ok viol-ok" data-status-label="1"><Icon d={I.check} size={16} /> No violations.</p>;
+  return <ul class="viol">{list.map((v, i) => <li key={i} class={v.severity}><span class={`viol-glyph ${v.severity}`} aria-hidden="true" data-status-label="1">{v.severity === 'nominal' ? '⚠' : '✕'}</span><b>{violationLabel[v.kind]}</b> · {dur(v.minutes)} · {clock(v.start)} → {clock(v.end)}{' '}<span class="sev" title="Size only says how much time is involved — any of these can be cited.">{severityWord[v.severity]}</span><br /><small>{v.detail}</small></li>)}</ul>;
 }
 /** Severity in the driver's words. The internal enum says "nominal", which reads as "acceptable" —
  *  nothing short of zero hours is acceptable; it is simply less (stress-test 2.8). */
@@ -392,6 +406,7 @@ const I = {
   gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
   sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  winddown: 'M12 10a4 4 0 0 0-4 4h8a4 4 0 0 0-4-4zM12 4v2M4.9 6.9l1.4 1.4M17.7 8.3l1.4-1.4M3 14h2M19 14h2M4 18h16',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5',
   share: 'M12 14V4M7 9l5-5 5 5M5 13v8h14v-8',
   x: 'M6 6l12 12M18 6 6 18',
@@ -1300,9 +1315,13 @@ function AlertBanner({ s, ev }: { s: State; ev: FullEvaluation }) {
  */
 function TopBar({ ev, now, s, inert, ariaHidden, onNow, onSettings, settingsActive }: { ev: FullEvaluation; now: number; s: State; inert?: boolean; ariaHidden?: boolean; onNow: boolean; onSettings: () => void; settingsActive: boolean }) {
   const status = s.current?.status ?? 'OFF';
-  // The switch flips what is on screen — the effective theme — and the tap records the choice, so
-  // from then on the phone's setting no longer moves it (patch 7).
-  const next = effectiveTheme(s, devicePrefersDark()) === 'day' ? 'night' : 'day';
+  // The switch cycles manual appearance states: Day → Night → Wind-down → Day. The tap records the
+  // choice so the phone's setting no longer moves it (patch 7 + A3 wind-down, manual only).
+  const curTheme = effectiveTheme(s, devicePrefersDark());
+  const next: Theme = curTheme === 'day' ? 'night' : curTheme === 'night' ? 'winddown' : 'day';
+  const nextLabel = next === 'night' ? 'Night' : next === 'winddown' ? 'Wind-down' : 'Day';
+  const nextAria = next === 'winddown' ? 'wind-down' : next;
+  const nextIcon = next === 'night' ? I.moon : next === 'winddown' ? I.winddown : I.sun;
   // P3: the header measures ITSELF into --top-h for as long as it is on screen (the driving view
   // unmounts it, and a new header element comes back after Details).
   const headerRef = useRef<HTMLElement>(null);
@@ -1322,7 +1341,7 @@ function TopBar({ ev, now, s, inert, ariaHidden, onNow, onSettings, settingsActi
         <span class="top-right">
           <span class="muted clock">{s.nowOverride ? `SIM ${clock(now)}` : clock(now)}</span>
           <button type="button" class={settingsActive ? 'theme-btn gear-btn on' : 'theme-btn gear-btn'} aria-label="Settings" title="Settings" aria-current={settingsActive ? 'page' : undefined} onClick={onSettings}><Icon d={I.gear} size={18} /></button>
-          <button class="theme-btn" aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`} onClick={() => chooseTheme(next)}><Icon d={next === 'night' ? I.moon : I.sun} size={18} /><span class="theme-word">{next === 'night' ? 'Night' : 'Day'}</span></button>
+          <button class="theme-btn" data-theme-current={curTheme} aria-label={`Switch to ${nextAria} theme`} title={`Switch to ${nextAria} theme`} onClick={() => chooseTheme(next)}><Icon d={nextIcon} size={18} /><span class="theme-word">{nextLabel}</span></button>
         </span>
       </div>
       {/* On Now the out-of-hours card already says this; a second box saying the same thing was noise. */}
@@ -1778,14 +1797,15 @@ function TimeAxis({ from, lanes, wall, ghostWall, hazard, twin, onTrack, plan }:
         {lanes.map((l) => {
           const inner = (
             <>
-              <span class="taxis-label"><span class="tl-full">{l.label}</span><span class="tl-short">{l.short}</span></span>
+              <span class="taxis-label">{l.binding && <span class="taxis-bind" aria-hidden="true" data-status-label="1">◆</span>}<span class="tl-full">{l.label}</span><span class="tl-short">{l.short}</span></span>
               {track(l)}
               <span class="taxis-value mono">{l.value}</span>
             </>
           );
+          const rowCls = l.binding ? 'taxis-row is-binding' : 'taxis-row';
           return l.onTap
-            ? <button key={l.key} class="taxis-row taxis-tap" onClick={l.onTap}>{inner}</button>
-            : <div key={l.key} class="taxis-row">{inner}</div>;
+            ? <button key={l.key} class={`${rowCls} taxis-tap`} data-binding={l.binding ? '1' : undefined} onClick={l.onTap}>{inner}</button>
+            : <div key={l.key} class={rowCls} data-binding={l.binding ? '1' : undefined}>{inner}</div>;
         })}
       </div>
     </div>
@@ -2463,57 +2483,54 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
       {timeline ? <SplitPairChip ev={ev} /> : <SplitPairLine ev={ev} />}
       {/* Declutter (Lorico, 2026-11-20): the load check lives on Plan only, not Now. */}
       <Card title="Last 24 hours"><Grid segments={allSegments(s, now)} from={now - 1440} to={now} /></Card>
-      {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
-          Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
-          notice already offers the quick start that creates one. */}
-      {historyBasis(s, now) !== 'fresh' && (
-        <button class="plan-item" onClick={(e) => openMorphSheet({ kind: 'drift' }, e.currentTarget)}>
-          <span class="plan-icon"><Icon d={I.check} size={26} /></span>
-          <span class="plan-text"><b>Check against my ELD</b><span class="muted small">One number lines this app up with your ELD.</span></span>
-          <Icon d={I.next} />
-        </button>
-      )}
-      {/* End my day (patch 13; moved below the grid as a plain wide key by patch 16, P9 —
-          decision D6-A): the day's last act belongs at the end of the wrap-up, under the
-          picture of the day it closes, not floating above the clocks in the pre-trip zone.
-          Same gate as the drift check — the demo clock has no real day to close. While the
-          close's own undo stands, the slot shows it above the closed line ("Closed the day
-          at … · Undo", P9); the closed line and its Reopen — which clears the bookmark
-          only — stay either way. New activity after the close reopens the day on its own
-          (the dayCloseFor rule in the store) and the button comes back. */}
-      {/* D19 (audit): ONE control once the day is closed — Reopen, which outlives the undo
-          slot (the close's undo is still on the Log). And the close asks the one question it
-          used to guess: Off Duty or Sleeper. */}
-      {historyBasis(s, now) !== 'fresh' && (closedToday ? (
-        <div class={`row undo${daySwapIn ? ' day-swap-in' : ''}`}>
-          <span>Day closed · {clock(closedToday.at, false)} · {segLabel(s.current?.status ?? 'OFF', s.current?.note)}</span>
-          <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
+      {/* Navy1 UI overhaul (B3): group post-graph shift actions into one cohesive cab control card
+          instead of four mismatched loose buttons, keeping every control, class, and 64px floor intact. */}
+      <section class="card shift-actions-card">
+        <h2>Shift actions</h2>
+        <div class="shift-actions-list">
+          {/* The drift check (patch 9): one number from the ELD, compared against the app's own.
+              Only on a real record — on the DEMO clock there is no day to compare, and the DEMO
+              notice already offers the quick start that creates one. */}
+          {historyBasis(s, now) !== 'fresh' && (
+            <button class="plan-item" onClick={(e) => openMorphSheet({ kind: 'drift' }, e.currentTarget)}>
+              <span class="plan-icon"><Icon d={I.check} size={26} /></span>
+              <span class="plan-text"><b>Check against my ELD</b><span class="muted small">One number lines this app up with your ELD.</span></span>
+              <Icon d={I.next} />
+            </button>
+          )}
+          {/* Patch 19: the status the driver is in, with the way to fix when it started — the
+              after-the-fact door for a tap made late (or early). The Log's live row says
+              "change it on Now"; this is where. */}
+          {s.current && (
+            <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'since' }, e.currentTarget)}>
+              <span><span class="muted">{segLabel(s.current.status, s.current.note)} since {clock(s.current.since)}</span><br /><b>Fix the start time</b></span>
+              <Icon d={I.next} />
+            </button>
+          )}
+          <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'exceptions' }, e.currentTarget)}>
+            <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
+            <Icon d={I.next} />
+          </button>
+          {/* End my day (patch 13; D19 audit): ONE control once closed (Reopen); asks Off Duty or Sleeper before closing. */}
+          {historyBasis(s, now) !== 'fresh' && (closedToday ? (
+            <div class={`row undo${daySwapIn ? ' day-swap-in' : ''}`}>
+              <span>Day closed · {clock(closedToday.at, false)} · {segLabel(s.current?.status ?? 'OFF', s.current?.note)}</span>
+              <button class="mini" onClick={() => reopenDay(now)}>Reopen</button>
+            </div>
+          ) : endAsk ? (
+            <div class={`endday-ask${daySwapIn ? ' day-swap-in' : ''}`} role="group" aria-label="End the day in">
+              <p class="endday-q"><b>End the day in…</b></p>
+              <div class="row">
+                <button class="primary" onClick={() => { setEndAsk(false); endDay(now, 'OFF'); }}>{STATUS_LABEL.OFF}</button>
+                <button class="primary" onClick={() => { setEndAsk(false); endDay(now, 'SB'); }}>{STATUS_LABEL.SB}</button>
+              </div>
+              <button class="link" onClick={() => setEndAsk(false)}>Not yet</button>
+            </div>
+          ) : (
+            <button class={`wide${daySwapIn ? ' day-swap-in' : ''}`} onClick={() => setEndAsk(true)}>End my day</button>
+          ))}
         </div>
-      ) : endAsk ? (
-        <div class={`endday-ask${daySwapIn ? ' day-swap-in' : ''}`} role="group" aria-label="End the day in">
-          <p class="endday-q"><b>End the day in…</b></p>
-          <div class="row">
-            <button class="primary" onClick={() => { setEndAsk(false); endDay(now, 'OFF'); }}>{STATUS_LABEL.OFF}</button>
-            <button class="primary" onClick={() => { setEndAsk(false); endDay(now, 'SB'); }}>{STATUS_LABEL.SB}</button>
-          </div>
-          <button class="link" onClick={() => setEndAsk(false)}>Not yet</button>
-        </div>
-      ) : (
-        <button class={`wide${daySwapIn ? ' day-swap-in' : ''}`} onClick={() => setEndAsk(true)}>End my day</button>
-      ))}
-      {/* Patch 19: the status the driver is in, with the way to fix when it started — the
-          after-the-fact door for a tap made late (or early). The Log's live row says
-          "change it on Now"; this is where. */}
-      {s.current && (
-        <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'since' }, e.currentTarget)}>
-          <span><span class="muted">{segLabel(s.current.status, s.current.note)} since {clock(s.current.since)}</span><br /><b>Fix the start time</b></span>
-          <Icon d={I.next} />
-        </button>
-      )}
-      <button class="rowbtn" onClick={(e) => openMorphSheet({ kind: 'exceptions' }, e.currentTarget)}>
-        <span><span class="muted">Exceptions this shift</span><br /><b>{active.length ? active.join(' · ') : 'None'}</b></span>
-        <Icon d={I.next} />
-      </button>
+      </section>
       {/* The engine's shift notes carry their own ⚠; the warnbox shape now supplies it (patch 16, P5), so the baked-in one is dropped here to keep it single. */}
       {warn.map((n, i) => <p key={i} class="warnbox small">{n.replace(/^⚠\s*/, '')}</p>)}
       <StatusDock s={s} />
@@ -3649,7 +3666,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
               drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
           <Grid segments={resolved} from={day.start} to={day.end} tz={s.config.timeZone} />
           <div class="daytotals">
-            {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
+            {(['D', 'ON', 'OFF', 'SB'] as DutyStatus[]).map((k) => <div key={k} style={`--led: ${STATUS_COLOR[k]}`}><span class="muted small">{STATUS_LABEL[k]}</span><b>{dur(dayTotals[k])}</b></div>)}
           </div>
         </section>
       </div>
@@ -3685,7 +3702,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
                 /* Patch L1 item 1: the open entry is edited like every other row — same panel, same steps. */
                 <button class={`entry live${morphSourceKey === 'live' ? ' is-morph-source' : ''}`} aria-label={`Edit ${segLabel(s.current.status, s.current.note)} since ${clock(s.current.since)}, now`} data-entry-key="live" onClick={(e) => openLogEntryEditor({ kind: 'edit', seg: liveSeg(s, now)!, live: true }, 'live', e.currentTarget)}>
                   <span class="dot" style={{ background: STATUS_COLOR[s.current.status] }} />
-                  <span><b>{segLabel(s.current.status, s.current.note)}</b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
+                  <span><b class="entry-title-row">{segLabel(s.current.status, s.current.note)} <span class="live-badge" data-status-label="1">● LIVE</span></b><span class="muted small">since {clock(s.current.since)} · now — tap to fix it</span></span>
                   <span class="entry-len">{dur(Math.max(0, now - s.current.since))}</span>
                   <Icon d={I.next} size={18} />
                 </button>
@@ -3707,7 +3724,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
         </Card>
         <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
         {ev.violations.some((v) => v.tentative) && (
-          <Card title="This plan would violate" tone="warn">
+          <Card title="This plan would violate" tone="warn" statusBadge={{ tone: 'warn', label: '⚠ What-if' }}>
             <p class="muted small">These come from the what-if rows you placed, not from duty you have logged. Nothing here has happened yet.</p>
             <ViolationList items={ev.violations.filter((v) => v.tentative)} />
           </Card>
@@ -4987,7 +5004,7 @@ function PlanTab({ s, now, ev, isActive = true }: { s: State; now: number; ev: F
               : 'Tight';
 
   const item = (tab: State['tab'], icon: string, title: string, sub: string) => (
-    <button class="plan-item" onClick={() => setState({ tab, planReturn: 'plan' })}>
+    <button class="plan-item" data-plan-tool={tab} onClick={() => setState({ tab, planReturn: 'plan' })}>
       <span class="plan-icon"><Icon d={icon} size={26} /></span>
       <span class="plan-text"><b>{title}</b><span class="muted small">{sub}</span></span>
       <Icon d={I.next} />
@@ -5015,55 +5032,67 @@ function PlanTab({ s, now, ev, isActive = true }: { s: State; now: number; ev: F
           <Icon d={I.next} />
         </span>
       </button>
-      {/* Opus UI pass: the twelve tools sit as a two-column rack of tiles (one screen, not three);
-          DOM order is unchanged — it is pinned by the suites and it is the reading order. */}
-      <h2 class="plan-section-head">The toolbox</h2>
-      <div class="plan-rack">
-      {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
-      {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
-      {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
-      {/* Capstone C3 (D10-A): one of the two founding workflows leaves the settings drawer. */}
-      {item('recap', I.recap, 'Hours coming back', `When your ${ev.cycle.limit / 60}-hour hours return, day by day.`)}
-      <button class="plan-item" onClick={() => openWeekPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.week} size={26} /></span>
-        <span class="plan-text"><b>Weekly recap vs. 34</b><span class="muted small">Compare recaps against a 34-hour reset and plan home time.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openRolloutPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.rollout} size={26} /></span>
-        <span class="plan-text"><b>When to roll &amp; PTA</b><span class="muted small">Work backwards from a hard appointment for shutdown, roll-out, break, and dispatch PTA.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openRescuePlanner(true)}>
-        <span class="plan-icon"><Icon d={I.rescue} size={26} /></span>
-        <span class="plan-text"><b>Split-sleeper rescue</b><span class="muted small">Stuck at the dock? Compare a straight 10 against 7/3 and 8/2 splits before you commit.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openStackPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.stack} size={26} /></span>
-        <span class="plan-text"><b>Stack my stops &amp; loads</b><span class="muted small">Chain 2–5 stops or back-to-back pre-plans — see where clocks break and how to rescue.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openMotelPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.motel} size={26} /></span>
-        <span class="plan-text"><b>Do I Make It Back or Motel?</b><span class="muted small">Meet-and-turn or relay wait? Exact walk-away minute to make home terminal legal.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openLegalPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.legal} size={26} /></span>
-        <span class="plan-text"><b>Can I Legally Use It?</b><span class="muted small">3 AM HOS exception check — Adverse, PC, Yard Move, 16-hr Big Day, Safe Haven.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openFlipPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.flip} size={26} /></span>
-        <span class="plan-text"><b>Flip My Clock</b><span class="muted small">Shift your roll-out onto a 21:00, 00:01, 03:00, or custom start window — compare legal bridges.</span></span>
-        <Icon d={I.next} />
-      </button>
-      <button class="plan-item" onClick={() => openMilesPlanner(true)}>
-        <span class="plan-icon"><Icon d={I.miles} size={26} /></span>
-        <span class="plan-text"><b>Miles Left in My 70</b><span class="muted small">Convert remaining cycle + recaps through pay-week cutoff into max legal miles.</span></span>
-        <Icon d={I.next} />
-      </button>
+      {/* Navy1 UI overhaul (B1): group the 12 planning tools by driver time-horizon so a tired
+          driver at 3 AM finds the right answer by question, not by scanning a 12-item flat dump. */}
+      <h2 class="plan-section-head">Right now</h2>
+      <div class="plan-rack" data-plan-group="now">
+        <button class="plan-item" data-plan-tool="legal" onClick={() => openLegalPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.legal} size={26} /></span>
+          <span class="plan-text"><b>Can I Legally Use It?</b><span class="muted small">3 AM HOS exception check — Adverse, PC, Yard Move, 16-hr Big Day, Safe Haven.</span></span>
+          <Icon d={I.next} />
+        </button>
+        <button class="plan-item" data-plan-tool="rescue" onClick={() => openRescuePlanner(true)}>
+          <span class="plan-icon"><Icon d={I.rescue} size={26} /></span>
+          <span class="plan-text"><b>Split-sleeper rescue</b><span class="muted small">Stuck at the dock? Compare a straight 10 against 7/3 and 8/2 splits before you commit.</span></span>
+          <Icon d={I.next} />
+        </button>
+        <button class="plan-item" data-plan-tool="motel" onClick={() => openMotelPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.motel} size={26} /></span>
+          <span class="plan-text"><b>Do I Make It Back or Motel?</b><span class="muted small">Meet-and-turn or relay wait? Exact walk-away minute to make home terminal legal.</span></span>
+          <Icon d={I.next} />
+        </button>
+      </div>
+
+      <h2 class="plan-section-head">This load</h2>
+      <div class="plan-rack" data-plan-group="load">
+        {item('load', I.truck, 'Can I take this load?', 'Four quick questions, get a yes or no.')}
+        <button class="plan-item" data-plan-tool="rollout" onClick={() => openRolloutPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.rollout} size={26} /></span>
+          <span class="plan-text"><b>When to roll &amp; PTA</b><span class="muted small">Work backwards from a hard appointment for shutdown, roll-out, break, and dispatch PTA.</span></span>
+          <Icon d={I.next} />
+        </button>
+        {item('trip', I.route, 'Plan a run', 'Where you will need to rest, three ways, and where to park now.')}
+        <button class="plan-item" data-plan-tool="stack" onClick={() => openStackPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.stack} size={26} /></span>
+          <span class="plan-text"><b>Stack my stops &amp; loads</b><span class="muted small">Chain 2–5 stops or back-to-back pre-plans — see where clocks break and how to rescue.</span></span>
+          <Icon d={I.next} />
+        </button>
+      </div>
+
+      <h2 class="plan-section-head">This shift</h2>
+      <div class="plan-rack" data-plan-group="shift">
+        {item('split', I.bunk, 'Plan a sleeper split', 'Try the two breaks before you take them.')}
+        <button class="plan-item" data-plan-tool="flip" onClick={() => openFlipPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.flip} size={26} /></span>
+          <span class="plan-text"><b>Flip My Clock</b><span class="muted small">Shift your roll-out onto a 21:00, 00:01, 03:00, or custom start window — compare legal bridges.</span></span>
+          <Icon d={I.next} />
+        </button>
+      </div>
+
+      <h2 class="plan-section-head">This week</h2>
+      <div class="plan-rack" data-plan-group="week">
+        {/* Capstone C3 (D10-A): one of the two founding workflows leaves the settings drawer. */}
+        {item('recap', I.recap, 'Hours coming back', `When your ${ev.cycle.limit / 60}-hour hours return, day by day.`)}
+        <button class="plan-item" data-plan-tool="week" onClick={() => openWeekPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.week} size={26} /></span>
+          <span class="plan-text"><b>Weekly recap vs. 34</b><span class="muted small">Compare recaps against a 34-hour reset and plan home time.</span></span>
+          <Icon d={I.next} />
+        </button>
+        <button class="plan-item" data-plan-tool="miles" onClick={() => openMilesPlanner(true)}>
+          <span class="plan-icon"><Icon d={I.miles} size={26} /></span>
+          <span class="plan-text"><b>Miles Left in My 70</b><span class="muted small">Convert remaining cycle + recaps through pay-week cutoff into max legal miles.</span></span>
+          <Icon d={I.next} />
+        </button>
       </div>
     </>
   );
@@ -5430,6 +5459,8 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
   return (
     <>
       <BackToPlan s={s} />
+      <h1 class="screen-title">Plan a sleeper split</h1>
+      <p class="muted small tool-sub">Try two rest breaks before you commit — see how they move your 14-hour window.</p>
       {/* P7 (audit §2.5): the strip is the time axis in plan mode — the sentence, then the
           one bar. The strip's own sticky slot is unchanged (P3). */}
       <div class="split-now-after" data-tone={planViol.length ? 'bad' : undefined}>
@@ -5442,7 +5473,7 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <button class="mini" onClick={() => undoSplitDraft()}>Undo</button>
         </div>
       )}
-      <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined}>
+      <Card title="Current pair status" tone={ev.shift.pendingSplitLeg && !activeNow ? 'warn' : undefined} statusBadge={ev.shift.pendingSplitLeg && !activeNow ? { tone: 'warn', label: '⚠ Pending' } : activeNow ? { tone: 'good', label: '✓ Active' } : undefined}>
         {/* Informational lines are neutral (.trust), not green: green means Driving (audit §2.5). */}
         {activeNow && <p class="trust"><b>Split in use:</b> {pairWords(activeNow)}. Your clocks count from {clock(ev.shift.anchor)}, the end of the first rest.</p>}
         {activeNow
@@ -8698,6 +8729,19 @@ function LegalTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
 
         <p class="legal-advisory" data-legal-advisory="1">{LEGAL_ADVISORY_LINE}</p>
 
+        {/* Navy1 UI overhaul (B5): 1-tap "What happened?" quick-jump strip above the 5 full cards. */}
+        <div class="legal-quick" role="group" aria-label="Quick jump by situation" data-legal-quick="1">
+          {([
+            ['adverse', 'Weather / crash'],
+            ['pc', 'Personal use'],
+            ['ym', 'Yard move'],
+            ['bigday', '16-hr day'],
+            ['safehaven', 'Safe haven'],
+          ] as [LegalItemId, string][]).map(([id, label]) => (
+            <button key={id} type="button" class="mini" data-legal-quick-pick={id} onClick={() => pickItem(id)}>{label}</button>
+          ))}
+        </div>
+
         <div class="legal-list" data-legal-home="1">
           {LEGAL_HOME_ITEMS.map((item) => (
             <button
@@ -9998,7 +10042,7 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
         >
           <Sign kind={res.verdict.sign}>{res.verdict.label}</Sign>
           <p class="mw-headline">{res.verdict.headline}</p>
-          <p class="mw-subline mono">{res.verdict.subline}</p>
+          <p class="mw-subline">{res.verdict.subline}</p>
           {res.verdict.fragilityNote && (
             <p class="mw-note">{res.verdict.fragilityNote}</p>
           )}
@@ -10053,7 +10097,7 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
                 data-myweek-conflict={c.kind}
               >
                 <div class="mw-conflict-head">
-                  <span class="mw-conflict-title">{c.title}</span>
+                  <span class="mw-conflict-title"><span class={`mw-conflict-glyph sev-${c.severity}`} aria-hidden="true" data-status-label="1">{c.severity === 'bad' ? '✕' : c.severity === 'warn' ? '⚠' : 'ⓘ'}</span> {c.title}</span>
                   <span class="mw-conflict-price mono">{c.priceLabel}</span>
                 </div>
                 <p class="mw-conflict-body">{c.body}</p>
@@ -11155,7 +11199,9 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   return (
     <>
       <BackToPlan s={s} />
-      <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'}>
+      <h1 class="screen-title">Plan a run</h1>
+      <p class="muted small tool-sub">Clock-to-parking range right now, plus three legal ways to run your trip.</p>
+      <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'} statusBadge={ev.driveNow < 60 ? { tone: 'bad', label: '✕ Under 1h' } : ev.driveNow < 120 ? { tone: 'warn', label: '⚠ Under 2h' } : { tone: 'good', label: '✓ Plenty of time' }}>
         <div class="clocks">
           <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
           <Stat label="Hard stop" value={clockFull(ev.mustStopBy)} sub={bindingLabel(ev)} />
@@ -11728,8 +11774,8 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <Slider label="Net average speed" value={s.mph} min={40} max={70} step={1} onChange={(v) => setState({ mph: v })} fmt={(v) => `${v} mph`} unit="mph" />
         <label>Main card on Now<Toggle options={NOW_CARD_OPTIONS} value={s.nowCard} onChange={(v) => setNowCard(v)} /></label>
         <Help label="Timeline or Dial?"><p class="muted small">Timeline shows your limits as lanes ending at their clock times, so you can see which one ends first. Dial is the gauge the app has always had. The driving view keeps the dial either way.</p></Help>
-        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
-        <Help label="How Day and Night are picked"><p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, and the readable one outdoors, which is where most planning happens. Once you pick, your pick stays. Both palettes are contrast-checked against WCAG AA, and there is a one-tap switch in the header.</p></Help>
+        <label>Screen<Toggle options={[['day', 'Day'], ['night', 'Night'], ['winddown', 'Wind-down']]} value={effectiveTheme(s, devicePrefersDark())} onChange={(v) => chooseTheme(v as Theme)} /></label>
+        <Help label="How Day, Night and Wind-down work"><p class="muted small">Until you pick one here, the screen follows your phone's light/dark setting — a dark phone gets the deep-navy Night palette, so there is no blast of white in a dark cab. Day is the default the app ships with, built for bright sunlight outdoors. Wind-down is a manual-only warm, dimmer night screen for the end of your shift (it never switches on by itself). Once you pick, your pick stays. All three palettes are contrast-checked against WCAG AA, and the header key cycles Day → Night → Wind-down.</p></Help>
       </Card>
       <DrivingAlertsCard s={s} />
       <BreakButtonsCard s={s} />
