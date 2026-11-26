@@ -524,7 +524,7 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
           <div class="splash-picker">
             <div class="splash-brand">
               <div class="splash-logo-frame">
-                <img class="splash-logo" src="./icon-512.png" alt="Clock 14 logo" width={132} height={132} />
+                <img class="splash-logo" src="./icon-512.png" alt="Clock 14 logo" width={512} height={512} />
               </div>
               <h1 class="splash-title">Clock 14</h1>
               <p class="splash-sub muted">HOS What-If Planner</p>
