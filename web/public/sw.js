@@ -1,4 +1,4 @@
-const CACHE = 'hos-sandbox-' + (self.__BUILD__ || 'dev');
+const CACHE = 'clock14-' + (self.__BUILD__ || 'dev');
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png',
   './fonts/atkinson-next-400.woff2', './fonts/atkinson-next-600.woff2', './fonts/atkinson-next-700.woff2', './fonts/atkinson-next-800.woff2',
   './fonts/atkinson-mono-500.woff2', './fonts/atkinson-mono-700.woff2'];
@@ -7,7 +7,22 @@ self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) =
 // network-first, fall back to cache (so fixes ship instantly but the app still opens offline in the truck)
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(fetch(e.request).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request).then((r) => r || caches.match('./index.html'))));
+  const sameOrigin = new URL(e.request.url).origin === self.location.origin;
+  e.respondWith(
+    fetch(e.request)
+      .then((r) => {
+        if (r.ok && sameOrigin) {
+          const copy = r.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return r;
+      })
+      .catch((err) => caches.match(e.request).then((r) => {
+        if (r) return r;
+        if (e.request.mode === 'navigate') return caches.match('./index.html').then((idx) => idx || Promise.reject(err));
+        return Promise.reject(err);
+      }))
+  );
 });
 // A driving-alert notification (alerts.ts): tapping it brings the app back to the front.
 self.addEventListener('notificationclick', (e) => {

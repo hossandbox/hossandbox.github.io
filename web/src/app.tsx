@@ -397,6 +397,8 @@ const I = {
   x: 'M6 6l12 12M18 6 6 18',
   back: 'M15 5l-7 7 7 7',
   next: 'M9 5l7 7-7 7',
+  up: 'M5 15l7-7 7 7',
+  down: 'M5 9l7 7 7-7',
   truck: 'M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM17 19.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z',
   bunk: 'M3 18V8M3 14h18v4M21 14v-3a3 3 0 0 0-3-3h-7v6M7 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   route: 'M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 15V9a4 4 0 0 1 4-4h6M18 9v6a4 4 0 0 1-4 4H8',
@@ -5473,11 +5475,11 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
       {/* Sanction S11 (decision C5-A): a green card promises a plan that pairs AND breaks no limit. */}
       <Card title="Does it pair?" tone={paired && planViol.length === 0 ? 'good' : 'bad'}>
         <ul class="checks">
-          <li class={b1 >= 120 && b2 >= 120 ? 'ok' : 'no'}>Both breaks ≥ 2h{fixBtn('short2h')}</li>
-          <li class={longOk ? 'ok' : 'no'}>One break ≥ 7h in the sleeper berth{fixBtn('sleeper7')}</li>
-          <li class={totalOk ? 'ok' : 'no'}>Total ≥ 10h ({dur(b1 + b2)}){fixBtn('total10')}</li>
-          <li class={paired ? 'ok' : 'no'}>The rules pair these two breaks</li>
-          <li class={planViol.length === 0 ? 'ok' : 'no'}>{planViol.length === 0 ? 'No plan violations' : `Plan runs over: ${overrunList(planViol, after)}`}{fixBtn('shortenDrive')}</li>
+          <li class={b1 >= 120 && b2 >= 120 ? 'ok' : 'no'}><Icon d={b1 >= 120 && b2 >= 120 ? I.check : I.x} size={16} />Both breaks ≥ 2h{fixBtn('short2h')}</li>
+          <li class={longOk ? 'ok' : 'no'}><Icon d={longOk ? I.check : I.x} size={16} />One break ≥ 7h in the sleeper berth{fixBtn('sleeper7')}</li>
+          <li class={totalOk ? 'ok' : 'no'}><Icon d={totalOk ? I.check : I.x} size={16} />Total ≥ 10h ({dur(b1 + b2)}){fixBtn('total10')}</li>
+          <li class={paired ? 'ok' : 'no'}><Icon d={paired ? I.check : I.x} size={16} />The rules pair these two breaks</li>
+          <li class={planViol.length === 0 ? 'ok' : 'no'}><Icon d={planViol.length === 0 ? I.check : I.x} size={16} />{planViol.length === 0 ? 'No plan violations' : `Plan runs over: ${overrunList(planViol, after)}`}{fixBtn('shortenDrive')}</li>
         </ul>
         {(b1 >= 600 || b2 >= 600) && <p class="trust">A break of 10h+ gives you a full reset on its own. If it has at least 7 hours straight in the sleeper, it can <i>also</i> pair with a later 2h+ break — whichever gives you more time (FMCSA FAQ 22).</p>}
         {!paired && b1 >= 120 && b2 >= 120 && longOk && totalOk && timeline.length > 0 && (timeline[timeline.length - 1].status === 'OFF' || timeline[timeline.length - 1].status === 'SB') && (() => {
@@ -10372,7 +10374,7 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
                       style="padding:0;min-height:36px"
                       onClick={() => setMoreOpenId(isMore ? null : o.id)}
                     >
-                      {isMore ? 'Hide deadhead & overrides ▴' : 'Deadhead, pickup dwell & overrides ▾'}
+                      {isMore ? 'Hide deadhead & overrides' : 'Deadhead, pickup dwell & overrides'} <Icon d={isMore ? I.up : I.down} size={16} />
                     </button>
                     {isMore && (
                       <div class="mw-load-edit" style="margin-top:6px">
@@ -10591,7 +10593,7 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
           <div class="miles-section">
             <div class="row" style="justify-content:space-between">
               <button type="button" class="link" style="padding:0;min-height:36px" onClick={() => setPrefsMore(!prefsMore)}>
-                {prefsMore ? 'Hide default pre-trip & buffer ▴' : `Defaults: ${draft.defaultPreTripMinutes}m pre-trip · ${draft.defaultBufferMinutes}m buffer ▾`}
+                {prefsMore ? 'Hide default pre-trip & buffer' : `Defaults: ${draft.defaultPreTripMinutes}m pre-trip · ${draft.defaultBufferMinutes}m buffer`} <Icon d={prefsMore ? I.up : I.down} size={16} />
               </button>
               {draft.loads.length > 0 && (
                 <button
@@ -10945,9 +10947,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const head = (n: number) => (
     <>
       <div class="flow-head">
-        <button class="icon-btn" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n - 1))}><Icon d={I.back} /></button>
-        <b>Can I take this load?</b>
-        <span />
+        <button class="back flow-back" aria-label={n === 1 ? `Back to ${returnLabel}` : 'Previous question'} onClick={() => (n === 1 ? setState({ tab: s.planReturn }) : setStep(n - 1))}><Icon d={I.back} /><b>Can I take this load?</b></button>
       </div>
       <StepCount at={n} of={FLOW_SCREENS} label={n === 3 ? 'Optional' : undefined} optAt={3} barClass="flow-dots" />
     </>
@@ -11030,8 +11030,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   return (
     <>
       <div class="flow-head">
-        <button class="icon-btn" aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /></button>
-        <b>Can I take this load?</b><span />
+        <button class="back flow-back" aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: s.planReturn })}><Icon d={I.back} /><b>Can I take this load?</b></button>
       </div>
       <div key="s5" class={stepSwap ? 'flow-body step-dissolve' : 'flow-body'}>
       <section class={`verdict ${best.feasible ? 'yes' : 'no'}`}>
@@ -11303,10 +11302,14 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 /* ============================================================ Settings */
 
 /** Ask the browser to download the export; returns the file name. */
-function downloadExport(s: State): string {
+export function downloadExport(s: State): string {
   const blob = new Blob([exportState(s)], { type: 'application/json' });
-  const name = `hos-sandbox-${new Date().toISOString().slice(0, 10)}.json`;
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  const d = new Date();
+  const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const name = `clock14-${ymd}.json`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   return name;
 }
 

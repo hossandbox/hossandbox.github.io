@@ -6,7 +6,7 @@
 //   item 5: the on-card Timeline / Dial switch. It is on the Now card, its keys meet the 48px floor,
 //     and it and More → Planning → "Main card on Now" are ONE setting: flipping either moves the other
 //     and survives a reload. None in the driving view (that view keeps the dial).
-// Checked at 412x915 and 360x640, day + night, parked Off Duty and On Duty.
+// Checked at 412x915, 360x640, 350x640, 344x882, 340x640 and 320x568, day + night, parked Off Duty and On Duty.
 // usage: node test/dom/lebrowser.mjs [--root dist] [--shots DIR]
 // A missing browser is a FAILURE (exit 2), never a silent pass.
 import { createServer } from 'node:http';
@@ -89,7 +89,7 @@ const switchInfo = (page) => page.evaluate(() => {
 const pressed = (loc) => loc.evaluateAll((bs) => bs.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim()));
 const stored = (page) => page.evaluate(() => { try { return JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').nowCard; } catch { return 'unreadable'; } });
 
-for (const [W, H] of [[412, 915], [360, 640]]) {
+for (const [W, H] of [[412, 915], [360, 640], [350, 640], [344, 882], [340, 640], [320, 568]]) {
   /* ---------------- item 6: the axis head, every theme × parked status ---------------- */
   for (const theme of ['day', 'night']) for (const cur of ['OFF', 'ON']) {
     const tag = `${W}x${H} ${theme} ${cur}`;

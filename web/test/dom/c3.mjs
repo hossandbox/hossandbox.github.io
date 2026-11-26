@@ -646,9 +646,15 @@ await pin('M14e. go=stopped opens the status panel immediately when acked (no mo
   return (noModal && panelOpen && noBanner && noHeaderDisclaimer) || JSON.stringify({ noModal, panelOpen, noBanner, noHeaderDisclaimer });
 });
 
-await pin('M14f. offline: the service worker still falls back to index.html on a miss, and its cache prefix is unchanged', async () => {
+// Re-aimed (geminifix2): cache prefix rolled to clock14-; fetch caches only ok same-origin responses and falls back to ./index.html on navigation requests only.
+await pin('M14f. offline: sw.js uses clock14- cache prefix, caches only ok same-origin responses, and falls back to index.html on navigation requests only', async () => {
   const sw = readFileSync('public/sw.js', 'utf8');
-  return (/caches\.match\('\.\/index\.html'\)/.test(sw) && /const CACHE = 'hos-sandbox-' \+/.test(sw)) || 'sw.js fallback / prefix changed';
+  return (
+    /const CACHE = 'clock14-' \+/.test(sw)
+    && /r\.ok && sameOrigin/.test(sw)
+    && /e\.request\.mode === 'navigate'/.test(sw)
+    && /caches\.match\('\.\/index\.html'\)/.test(sw)
+  ) || 'sw.js cache prefix / same-origin / navigate fallback check failed';
 });
 
 render(null, root);

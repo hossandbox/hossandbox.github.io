@@ -128,7 +128,7 @@ const CUES = {
   stripes: { ok: /main\.drive\.bad::after/.test(css) && /repeating-linear-gradient\(45deg/.test(css), what: 'hazard stripes on the out-of-time driving view' },
   warnGlyph: { ok: /\.warnbox::before/.test(css) && /\.alertbox::before/.test(css), what: '⚠ glyph before every warning box' },
   verdictIcons: { ok: /best\.feasible \? I\.check : I\.x/.test(appSrc), what: '✓ / ✕ verdict icon before the word' },
-  listGlyphs: { ok: /\.checks li::before/.test(css), what: '✓ / ✗ glyphs on the pairing check list' },
+  listGlyphs: { ok: /\.checks li > svg/.test(css) && /\.checks li\.ok > svg/.test(css) && /<ul class="checks">[\s\S]*?I\.check : I\.x/.test(appSrc), what: 'SVG check / x icons on the pairing check list' },
   statusWords: { ok: /STATUS_LABEL/.test(appSrc) && /segLabel/.test(appSrc), what: 'status words always rendered beside the status colours' },
 };
 const PAIRS = [

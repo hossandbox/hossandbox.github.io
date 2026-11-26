@@ -351,6 +351,7 @@ export function sanitizeConfig(c: Partial<RulesConfig> | null | undefined, fallb
   const cfg = { ...fallback, ...(c && typeof c === 'object' ? c : {}) };
   if (typeof cfg.timeZone !== 'string' || !isValidTimeZone(cfg.timeZone)) cfg.timeZone = isValidTimeZone(fallback.timeZone) ? fallback.timeZone : deviceTz;
   if (!Number.isInteger(cfg.dayStartHour) || cfg.dayStartHour < 0 || cfg.dayStartHour > 23) cfg.dayStartHour = 0;
+  if (typeof cfg.dayStartMinute !== 'number' || !Number.isInteger(cfg.dayStartMinute) || cfg.dayStartMinute < 0 || cfg.dayStartMinute > 59) cfg.dayStartMinute = 0;
   if (cfg.cycle !== '60/7' && cfg.cycle !== '70/8') cfg.cycle = '70/8';
   const nums = (v: unknown) => (Array.isArray(v) ? v.filter((x) => Number.isFinite(x)) : []);
   cfg.adverseShifts = nums(cfg.adverseShifts);
@@ -606,10 +607,16 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   // Autosave, with the save being replaced kept as the last-known-good copy: if the new write is
   // ever found damaged, loadSaved falls back to it instead of a fresh, empty record. Only a usable
   // save is kept — rotating a damaged one in would destroy the very copy the fallback needs.
-  const prev = localStorage.getItem(KEY);
-  const next = JSON.stringify(state);
-  if (prev && prev !== next && usableSave(prev)) localStorage.setItem(BACKUP_KEY, prev);
-  localStorage.setItem(KEY, next);
+  // Wrapped so a storage failure (quota, blocked storage) never blocks the in-memory update or subscribers.
+  let prev: string | null = null;
+  try { prev = localStorage.getItem(KEY); } catch { /* read blocked: still try primary save without rotation */ }
+  try {
+    const next = JSON.stringify(state);
+    if (prev && prev !== next && usableSave(prev)) {
+      try { localStorage.setItem(BACKUP_KEY, prev); } catch { /* quota/blocked: still try primary save */ }
+    }
+    localStorage.setItem(KEY, next);
+  } catch { /* storage blocked or full: keep UI in sync with in-memory state */ }
   subs.forEach((f) => f());
 }
 
@@ -734,9 +741,13 @@ export function reopenDayPatch(cur: State, now: number): Partial<State> | null {
   if (!cur.dayCloses.some((c) => c.dayStart === dayStart)) return null;
   return { dayCloses: cur.dayCloses.filter((c) => c.dayStart !== dayStart) };
 }
+export function subscribe(f: () => void): () => void {
+  subs.add(f);
+  return () => { subs.delete(f); };
+}
 export function useStore(): State {
   const [, tick] = useState(0);
-  useEffect(() => { const f = () => tick((n) => n + 1); subs.add(f); return () => { subs.delete(f); }; }, []);
+  useEffect(() => subscribe(() => tick((n) => n + 1)), []);
   return state;
 }
 
@@ -1298,9 +1309,9 @@ const rowProblem = (x: unknown): string | null => {
  * (bug report C1). Returns a driver-facing reason, or null when the payload is usable.
  */
 export function importProblem(d: unknown): string | null {
-  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'This is not a Split Decision export (expected a JSON object).';
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'This is not a Clock 14 export (expected a JSON object).';
   const o = d as Record<string, unknown>;
-  if (!Array.isArray(o.segments)) return 'This is not a Split Decision export: it has no "segments" list.';
+  if (!Array.isArray(o.segments)) return 'This is not a Clock 14 export: it has no "segments" list.';
   if (o.tentative !== undefined && !Array.isArray(o.tentative)) return 'The "tentative" field is not a list.';
   for (const [name, list] of [['segments', o.segments], ['tentative', (o.tentative ?? []) as unknown[]]] as const) {
     for (let i = 0; i < list.length; i++) {

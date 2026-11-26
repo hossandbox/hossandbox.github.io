@@ -7223,4 +7223,113 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
   console.log('miles left in my 70 (parity, verdict, standing line, SSR, zero input[type=time]): OK');
 }
+// --- Gemini review fix round 2 (geminifix2): storage-failure resilience, sanitizeConfig dayStartMinute,
+//     importProblem Clock 14 wording, downloadExport local date + prefix + revoke, flow-head back button, SVG icons
+{
+  const S = await import('../src/store.ts');
+  const A = await import('../src/app.tsx');
+  const { readFileSync } = await import('node:fs');
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+
+  // (a) setState still updates state and notifies subscribers when localStorage.setItem / getItem throws
+  {
+    const origLS = globalThis.localStorage;
+    const prevMph = S.getState().mph;
+    let calls = 0;
+    const unsub = S.subscribe(() => { calls++; });
+    try {
+      globalThis.localStorage = {
+        getItem: (k) => origLS.getItem(k),
+        setItem: () => { throw new Error('QuotaExceededError'); },
+        removeItem: (k) => origLS.removeItem(k),
+      };
+      S.setState({ mph: 61 });
+      need(S.getState().mph === 61, 'setState must still update in-memory state when localStorage.setItem throws');
+      need(calls === 1, `setState must still notify subscribers when localStorage.setItem throws (got ${calls})`);
+
+      globalThis.localStorage = {
+        getItem: () => { throw new Error('SecurityError'); },
+        setItem: () => { throw new Error('SecurityError'); },
+        removeItem: () => { throw new Error('SecurityError'); },
+      };
+      S.setState({ mph: 62 });
+      need(S.getState().mph === 62, 'setState must still update in-memory state when localStorage.getItem throws');
+      need(calls === 2, `setState must still notify subscribers when localStorage.getItem throws (got ${calls})`);
+    } finally {
+      unsub();
+      globalThis.localStorage = origLS;
+      S.setState({ mph: prevMph });
+    }
+  }
+
+  // (b) sanitizeConfig clamps out-of-range / invalid dayStartMinute to 0 and keeps valid 0..59
+  for (const invalid of [-1, 60, 99, 40.5, NaN, Infinity, '30', null, undefined]) {
+    const cfg = S.sanitizeConfig({ dayStartHour: 6, dayStartMinute: invalid });
+    need(cfg.dayStartMinute === 0, `sanitizeConfig failed to clamp invalid dayStartMinute=${JSON.stringify(invalid)} -> got ${cfg.dayStartMinute}`);
+  }
+  for (const valid of [0, 15, 40, 59]) {
+    const cfg = S.sanitizeConfig({ dayStartHour: 6, dayStartMinute: valid });
+    need(cfg.dayStartMinute === valid, `sanitizeConfig dropped valid dayStartMinute=${valid} -> got ${cfg.dayStartMinute}`);
+  }
+
+  // (c) importProblem references Clock 14 (not Split Decision)
+  const errObj = S.importProblem(null) || '';
+  const errSeg = S.importProblem({}) || '';
+  need(errObj.includes('Clock 14') && !errObj.includes('Split Decision'), `importProblem(null) wording wrong: ${errObj}`);
+  need(errSeg.includes('Clock 14') && !errSeg.includes('Split Decision'), `importProblem({}) wording wrong: ${errSeg}`);
+
+  // (d) LoadTab flow-head wraps the title inside the back button on both step head and verdict head
+  {
+    S.setState({ ...S.INITIAL_STATE, tab: 'load', planReturn: 'plan', loadCheck: { ...S.DEFAULT_LOADCHECK, answered: false }, disclaimerAcked: true, tzChosen: true });
+    const stepHtml = pageOut(render(h(App, {})), 'page-tool');
+    need(/<div class="flow-head"><button class="back flow-back"[^>]*aria-label="Back to Plan"[^>]*>[\s\S]*?Can I take this load\?<\/b><\/button><\/div>/.test(stepHtml), 'LoadTab step flow-head must put title inside back button');
+    S.setState({ ...S.INITIAL_STATE, tab: 'load', planReturn: 'plan', loadCheck: { ...S.DEFAULT_LOADCHECK, answered: true }, disclaimerAcked: true, tzChosen: true });
+    const verdictHtml = pageOut(render(h(App, {})), 'page-tool');
+    need(/<div class="flow-head"><button class="back flow-back"[^>]*aria-label="Back to Plan"[^>]*>[\s\S]*?Can I take this load\?<\/b><\/button><\/div>/.test(verdictHtml), 'LoadTab verdict flow-head must put title inside back button');
+  }
+
+  // (e) Missing-glyph fix: no CSS ::before U+2717/U+2713 on .checks, and no U+25B4/U+25BE triangles in app.tsx
+  {
+    const cssText = readFileSync('public/styles.css', 'utf8');
+    const appText = readFileSync('src/app.tsx', 'utf8');
+    need(!/\.checks li(?:\.ok)?::before/.test(cssText), 'styles.css must not use .checks li::before raw glyph content');
+    need(!/[\u25b4\u25be]/.test(appText), 'app.tsx must not contain U+25B4/U+25BE raw triangle glyphs');
+    S.setState({ ...S.INITIAL_STATE, tab: 'split', disclaimerAcked: true, tzChosen: true });
+    const splitHtml = pageOut(render(h(App, {})), 'page-tool');
+    need(/<ul class="checks"><li class="(?:ok|no)"><svg\b/.test(splitHtml), 'SplitTab .checks items must render SVG Icon');
+  }
+
+  // (f) downloadExport uses clock14- + local YYYY-MM-DD and revokes the object URL
+  {
+    const origDoc = globalThis.document;
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    const origST = globalThis.setTimeout;
+    let clicked = false, revokedUrl = null, createdUrl = 'blob:clock14-test';
+    const scheduled = [];
+    try {
+      globalThis.document = { createElement: () => ({ href: '', download: '', click() { clicked = true; } }) };
+      URL.createObjectURL = () => createdUrl;
+      URL.revokeObjectURL = (u) => { revokedUrl = u; };
+      globalThis.setTimeout = (fn) => { scheduled.push(fn); return 1; };
+      const nowD = new Date();
+      const wantName = `clock14-${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}.json`;
+      const gotName = A.downloadExport(S.getState());
+      need(gotName === wantName, `downloadExport name expected ${wantName}, got ${gotName}`);
+      need(clicked, 'downloadExport did not click anchor');
+      for (const fn of scheduled) fn();
+      need(revokedUrl === createdUrl, `downloadExport did not revoke object URL (got ${revokedUrl})`);
+    } finally {
+      globalThis.document = origDoc;
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+      globalThis.setTimeout = origST;
+    }
+  }
+
+  if (bad.length) throw new Error(`geminifix2: ${bad.length} pin(s) red:\n  - ${bad.join('\n  - ')}`);
+  S.setState({ tab: 'now', planReturn: 'plan', nowOverride: null, segments: [], tentative: [], current: null, nowCard: 'dial', nowCardAsked: false, drivingView: true, config: S.INITIAL_STATE.config });
+  console.log('geminifix2 (setState storage-throw, sanitizeConfig dayStartMinute, Clock 14 import/export, flow-head back, SVG glyphs): OK');
+}
 console.log('OK');
