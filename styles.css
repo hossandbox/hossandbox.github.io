@@ -34,11 +34,13 @@ html {
   --accent: #5ccbea; --accent-solid: #1857c8; --on-accent: #fff; --chip-ink: #000; --link: #8fdcf4;
   --sb: #b09cff; --hand: #ff7a1f; --chrome: #06112e; --ring: #5ccbea;
   --tint-warn: rgba(255,189,74,.15); --tint-bad: rgba(255,107,107,.15); --tint-accent: rgba(92,203,234,.11);
-  /* materials: lit top edge, surface gradient, drop shadow, key faces, the recessed log screen, glow */
-  --edge-hi: rgba(160,215,255,.08); --surface-hi: #102352; --drop: rgba(0,4,20,.55);
+  /* materials: lit top edge, surface gradient, drop shadow, key faces, the recessed log screen, glow.
+     A1 (night-mode research): brighter navy #0d2a64 stays on headers/cards/raised panels (--raised-hi)
+     only — full-screen ground uses the base deep-navy token #06112e -> #050e26. */
+  --edge-hi: rgba(160,215,255,.08); --surface-hi: #102352; --raised-hi: #0d2a64; --drop: rgba(0,4,20,.55);
   --key-hi: #142a58; --key-lo: #0c1c41; --key-base: #020818; --screen: #06122f;
   --glow: rgba(92,203,234,.5); --dial-track: #142a57;
-  --ground: radial-gradient(120% 55% at 50% 0%, #0d2a64 0%, #071636 50%, #050e26 100%);
+  --ground: radial-gradient(120% 55% at 50% 0%, #06112e 0%, #06112e 55%, #050e26 100%);
   color-scheme: dark;
 }
 /* Day theme: for reading in sunlight. Chosen by the driver, or by the phone's light setting
@@ -51,11 +53,25 @@ html {
   --accent: #0b56c0; --accent-solid: #0b56c0; --on-accent: #fff; --chip-ink: #fff; --link: #0a479f;
   --sb: #5b3fc4; --hand: #d4570a; --chrome: #eef3fa; --ring: #0b56c0;
   --tint-warn: rgba(138,82,0,.16); --tint-bad: rgba(179,32,32,.12); --tint-accent: rgba(11,86,192,.09);
-  --edge-hi: rgba(255,255,255,.9); --surface-hi: #ffffff; --drop: rgba(10,30,70,.14);
+  --edge-hi: rgba(255,255,255,.9); --surface-hi: #ffffff; --raised-hi: #ffffff; --drop: rgba(10,30,70,.14);
   --key-hi: #ffffff; --key-lo: #e7eef8; --key-base: #aebbd0; --screen: #f1f5fb;
   --glow: rgba(11,86,192,0); --dial-track: #d9e2ef;
   --ground: linear-gradient(180deg, #edf2f9 0%, #dbe4f0 100%);
   color-scheme: light;
+}
+/* Wind-down theme (A3): manual-only warm, dimmer night appearance for end of shift — amber-warm
+   tint, strictly lower luminance than night, zero pure #000/#FFF surfaces, WCAG AA/AAA verified. */
+:root[data-theme="winddown"] {
+  --bg: #0e0a07; --panel: #16100b; --panel2: #221810; --line: #3a2a1d; --tick: #5e4632;
+  --text: #e4ceb4; --muted: #b39b80; --good: #66c78c; --warn: #efb44d; --bad: #ee7b6e;
+  --accent: #e59f52; --accent-solid: #8f4e14; --on-accent: #f5eadc; --chip-ink: #120c07; --link: #f2be7e;
+  --sb: #baa3ea; --hand: #f27c2c; --chrome: #0e0a07; --ring: #e59f52;
+  --tint-warn: rgba(239,180,77,.14); --tint-bad: rgba(238,123,110,.15); --tint-accent: rgba(229,159,82,.12);
+  --edge-hi: rgba(240,196,145,.08); --surface-hi: #1c140d; --raised-hi: #231910; --drop: rgba(8,5,3,.58);
+  --key-hi: #241a11; --key-lo: #17110b; --key-base: #090604; --screen: #0b0805;
+  --glow: rgba(229,159,82,.32); --dial-track: #281d14;
+  --ground: radial-gradient(120% 55% at 50% 0%, #0e0a07 0%, #0c0906 55%, #0a0705 100%);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 "Atkinson Hyperlegible Next", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
@@ -1608,7 +1624,7 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
 .flip-segs { display: flex; flex-direction: column; gap: 6px; }
 .flip-seg { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--s-6); padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); border-left: 4px solid var(--line); font-size: 13px; color: var(--text); }
 .flip-seg.is-sb { border-left-color: var(--sb); }
-.flip-seg.is-d { border-left-color: var(--d); }
+.flip-seg.is-d { border-left-color: var(--good); }
 .flip-seg.is-off { border-left-color: var(--accent); }
 .flip-compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-8); }
 .flip-compare-col { display: flex; flex-direction: column; gap: 4px; padding: var(--s-8) var(--s-10); border-radius: var(--r-10); background: var(--screen); border: 1px solid var(--line); min-width: 0; }
@@ -1968,7 +1984,7 @@ button.plan-capstone {
 }
 
 @property --bg { syntax: '<color>'; inherits: true; initial-value: #06112e; }
-@property --ground-hi { syntax: '<color>'; inherits: true; initial-value: #0d2a64; }
+@property --ground-hi { syntax: '<color>'; inherits: true; initial-value: #06112e; }
 @property --ground-lo { syntax: '<color>'; inherits: true; initial-value: #050e26; }
 @property --panel { syntax: '<color>'; inherits: true; initial-value: #0b1a3c; }
 @property --panel2 { syntax: '<color>'; inherits: true; initial-value: #11244d; }
@@ -1997,13 +2013,17 @@ button.plan-capstone {
 @property --dial-track { syntax: '<color>'; inherits: true; initial-value: #142a57; }
 
 html {
-  --ground-hi: #0d2a64;
+  --ground-hi: #06112e;
   --ground-lo: #050e26;
   transition: --bg 280ms ease, --ground-hi 280ms ease, --ground-lo 280ms ease, --panel 280ms ease, --panel2 280ms ease, --surface-hi 280ms ease, --line 280ms ease, --tick 280ms ease, --text 280ms ease, --muted 280ms ease, --key-hi 280ms ease, --key-lo 280ms ease, --key-base 280ms ease, --screen 280ms ease, --t-well 280ms ease, --accent 280ms ease, --accent-solid 280ms ease, --link 280ms ease, --good 280ms ease, --warn 280ms ease, --bad 280ms ease, --sb 280ms ease, --tint-warn 280ms ease, --tint-bad 280ms ease, --tint-accent 280ms ease, --edge-hi 280ms ease, --drop 280ms ease, --dial-track 280ms ease, background-color 280ms ease, color 280ms ease;
 }
 html[data-theme="day"] {
   --ground-hi: #edf2f9;
   --ground-lo: #dbe4f0;
+}
+html[data-theme="winddown"] {
+  --ground-hi: #0e0a07;
+  --ground-lo: #0a0705;
 }
 .app {
   background-color: var(--bg);
@@ -2399,7 +2419,7 @@ main.drive.drive-enter {
     --warn: #8a5200;
     --bad: #b32020;
     --sb: #5b3fc4;
-    --accent: #0b5fa8;
+    --accent: #0b56c0;
     --tint-warn: #fef6e7;
     color: var(--text);
     background: #ffffff;
@@ -2427,7 +2447,7 @@ main.drive.drive-enter {
     font-weight: 800;
     letter-spacing: .06em;
     text-transform: uppercase;
-    color: #0b5fa8;
+    color: #0b56c0;
   }
   .print-report .pr-app-sub {
     font-weight: 600;
@@ -2444,10 +2464,10 @@ main.drive.drive-enter {
   }
   .print-report .pr-count-badge {
     padding: 4px 10px;
-    border: 1.5px solid #0b5fa8;
+    border: 1.5px solid #0b56c0;
     border-radius: 999px;
     background: #eef5fc;
-    color: #0b5fa8;
+    color: #0b56c0;
     font-family: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
     font-size: 9pt;
     font-weight: 700;
@@ -2644,9 +2664,9 @@ main.drive.drive-enter {
   }
   .print-report .pr-live-tag {
     padding: 0 5px;
-    border: 1px solid #0b5fa8;
+    border: 1px solid #0b56c0;
     border-radius: 999px;
-    color: #0b5fa8;
+    color: #0b56c0;
     font-size: 7pt;
     font-weight: 700;
     text-transform: uppercase;
@@ -2792,3 +2812,149 @@ button.back { color: var(--link); }
 .card, .hero { border-color: color-mix(in srgb, var(--ring) 14%, var(--line)); }
 .hero { background: radial-gradient(90% 70% at 50% 30%, color-mix(in srgb, var(--accent-solid) 22%, var(--surface-hi)) 0%, var(--panel) 72%); }
 :root[data-theme="day"] .hero { background: radial-gradient(90% 70% at 50% 30%, #ffffff 0%, var(--panel) 72%); }
+
+/* ===================================================================================
+   NAVY1 OVERHAUL (2026-11-26) — Night-mode research fixes (A1–A4) + driver-first UI
+   overhaul (B1–B7). Built exclusively on the existing design-token system (Day, Night,
+   Wind-down) with zero parallel palette.
+   =================================================================================== */
+
+/* ---- A1: brighter navy #0d2a64 (--raised-hi) on headers/cards/raised panels ONLY ---- */
+.top { background: linear-gradient(180deg, color-mix(in srgb, var(--raised-hi) 46%, var(--chrome)) 0%, var(--chrome) 100%); }
+.settings-head { background: linear-gradient(180deg, color-mix(in srgb, var(--raised-hi) 42%, var(--chrome)) 0%, var(--chrome) 100%); }
+.hero {
+  background:
+    radial-gradient(110% 60% at 50% 0%, color-mix(in srgb, var(--raised-hi) 52%, transparent) 0%, transparent 65%),
+    linear-gradient(180deg, var(--surface-hi), var(--panel));
+}
+:root[data-theme="day"] .hero { background: radial-gradient(90% 70% at 50% 30%, #ffffff 0%, var(--panel) 72%); }
+button.plan-capstone {
+  background:
+    radial-gradient(130% 85% at 95% 0%, color-mix(in srgb, var(--raised-hi) 68%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg, var(--surface-hi), var(--panel));
+}
+:root[data-theme="day"] button.plan-capstone {
+  background:
+    radial-gradient(140% 90% at 100% 0%, color-mix(in srgb, var(--accent-solid) 14%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, var(--surface-hi), var(--panel));
+}
+
+/* ---- A3: Wind-down tactile & surface refinements (zero pure #000/#FFF) ---- */
+html[data-theme="winddown"] {
+  --t-well: var(--screen);
+  --t-grip: linear-gradient(180deg, #8b725b, #5e4b3a);
+  --t-grip-edge: #382a1e;
+  --t-well-in: inset 0 2px 5px rgba(8,5,3,.78), inset 0 0 0 1px rgba(8,5,3,.45);
+  --t-lip: 0 1px 0 rgba(240,196,145,.07);
+  --t-bevel: rgba(8,5,3,.5);
+  --t-cast: rgba(8,5,3,.55);
+  --t-press: inset 0 2px 6px rgba(8,5,3,.72);
+  --t-accent-lo: color-mix(in srgb, var(--accent-solid) 82%, #120c07);
+  --t-accent-skirt: color-mix(in srgb, var(--accent-solid) 48%, #120c07);
+}
+:root[data-theme="winddown"] .s-D { filter: drop-shadow(0 0 2px rgba(102,199,140,.35)); }
+:root[data-theme="winddown"] .s-ON { filter: drop-shadow(0 0 2px rgba(239,180,77,.35)); }
+:root[data-theme="winddown"] .sheet-backdrop,
+:root[data-theme="winddown"] button.sheet-backdrop { background: rgba(10,7,5,.70); }
+:root[data-theme="winddown"] .backdrop { background: rgba(10,7,5,.72); }
+:root[data-theme="winddown"] button.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-solid) 90%, #f5eadc), var(--accent-solid));
+  border-color: color-mix(in srgb, var(--ring) 50%, var(--accent-solid));
+  box-shadow: inset 0 1px 0 rgba(245,234,220,.20), inset 0 -1px 0 rgba(18,12,7,.28), 0 3px 0 var(--t-accent-skirt), 0 5px 10px var(--t-cast);
+}
+:root[data-theme="winddown"] .sign {
+  background: color-mix(in srgb, var(--sg) 22%, #120c07);
+}
+:root[data-theme="winddown"] .sign-mark { stroke: #120c07; }
+:root[data-theme="winddown"] .status-buttons button.on,
+:root[data-theme="winddown"] .big-status button.on {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--led) 92%, #f5eadc), var(--led));
+  box-shadow: inset 0 3px 6px rgba(18,12,7,.30), 0 1px 0 var(--key-base), 0 0 14px color-mix(in srgb, var(--led) 28%, transparent);
+}
+:root[data-theme="winddown"] .app.is-demo .hero::after { color: rgba(228,206,180,.05); }
+
+/* ---- A4: HOS status never by color alone (glyphs & concise badges) ---- */
+.viol-ok { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; margin: 4px 0; }
+.viol-ok > svg { flex: none; stroke-width: 2.5; }
+.viol-glyph { display: inline-block; font-weight: 800; margin-right: 6px; color: var(--bad); }
+.viol-glyph.nominal { color: var(--warn); }
+.stat-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.stat-tone-tag {
+  display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.stat-tone-tag.bad { color: var(--bad); border-color: var(--bad); background: var(--tint-bad); }
+.stat-tone-tag.warn { color: var(--warn); border-color: var(--warn); background: var(--tint-warn); }
+.stat-tone-tag.good { color: var(--good); border-color: var(--good); }
+.card-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.card-head-row > h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
+.card-head-row > h2::before { content: ""; width: 3px; height: 12px; border-radius: 2px; background: var(--ring); flex: none; box-shadow: 0 0 6px var(--glow); }
+.card-status-badge {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
+  background: var(--screen); border: 1px solid var(--line); color: var(--text);
+}
+.card-status-badge.good { border-color: var(--good); color: var(--good); }
+.card-status-badge.warn { border-color: var(--warn); color: var(--warn); background: var(--tint-warn); }
+.card-status-badge.bad { border-color: var(--bad); color: var(--bad); background: var(--tint-bad); }
+.entry-title-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.live-badge {
+  display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--tint-accent); border: 1px solid var(--ring); color: var(--link);
+}
+.taxis-row.is-binding .taxis-label { color: var(--text); font-weight: 800; }
+.taxis-row.is-binding .taxis-value { color: var(--link); }
+.taxis-bind { color: var(--hand); margin-right: 4px; font-size: 12px; vertical-align: 0; }
+.mw-conflict-glyph { font-weight: 800; margin-right: 2px; }
+.mw-conflict-glyph.sev-bad { color: var(--bad); }
+.mw-conflict-glyph.sev-warn { color: var(--warn); }
+.mw-conflict-glyph.sev-info { color: var(--link); }
+
+/* ---- B1: Plan hub grouped 2-column racks with balanced orphan tiles ---- */
+.plan-section-head { margin: var(--s-14) 2px var(--s-2); font-size: 12px; font-weight: 800; letter-spacing: .10em; color: var(--muted); }
+.plan-rack { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-10); }
+.plan-rack > .plan-item { min-height: 136px; padding: var(--s-12); gap: var(--s-8); }
+.plan-rack > .plan-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1; min-height: 82px; flex-direction: row; align-items: center; gap: var(--s-12); padding: var(--s-12) var(--s-14);
+}
+.plan-rack > .plan-item:last-child:nth-child(odd) .plan-text { flex: 1; }
+.plan-rack > .plan-item:last-child:nth-child(odd) > svg:last-child { display: block; flex: none; color: var(--ring); }
+.plan-rack .plan-text .small { -webkit-line-clamp: 2; line-clamp: 2; }
+
+/* ---- B2: Unified tool header subtitle ---- */
+.tool-sub { margin: -6px 2px 4px; line-height: 1.38; }
+
+/* ---- B3: Now cohesive Shift actions card + hero & dock polish ---- */
+.shift-actions-card { padding: var(--s-14); }
+.shift-actions-list { display: flex; flex-direction: column; gap: var(--s-10); }
+.shift-actions-list > .plan-item { background: var(--t-key); border-radius: var(--r-16); }
+.shift-actions-list > .rowbtn { background: var(--t-key); }
+.hero-foot { padding-top: var(--s-8); border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); margin-top: var(--s-8); }
+.dock { position: sticky; }
+.dock::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--ring) 42%, transparent) 50%, transparent 100%);
+}
+.meter { transition: border-color 180ms ease, box-shadow 180ms ease; }
+
+/* ---- B4: Log status-keyed day totals & chrome framing ---- */
+.page.page-log > .log-pin,
+.page.page-log > .log-foot { background: var(--chrome); }
+.daytotals > div {
+  position: relative; padding: 8px 4px 2px; border-radius: var(--r-8);
+}
+.daytotals > div::before {
+  content: ""; position: absolute; top: 0; left: 18%; right: 18%; height: 3px;
+  border-radius: 2px; background: var(--led, var(--muted)); opacity: .85;
+}
+
+/* ---- B5: Legal 3 AM quick-jump strip ---- */
+.legal-quick {
+  display: flex; flex-wrap: wrap; gap: var(--s-6); margin: 0 0 var(--s-10);
+}
+.legal-quick button.mini {
+  flex: 1 1 auto; min-height: 48px; padding: var(--s-8) var(--s-10);
+  font-size: 13px; font-weight: 800; border-radius: var(--r-pill);
+}
