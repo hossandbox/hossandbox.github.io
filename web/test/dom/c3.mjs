@@ -51,6 +51,7 @@ const { App, setLaunchNotice, openSheet, currentSheet } = A;
 const { setState, getState, INITIAL_STATE: INIT, allSegments, dur, clock, clockFull, DEFAULT_LOADCHECK, DEFAULT_SPLIT } = S;
 const { readFileSync } = await import('node:fs');
 setLaunchNotice(false);
+A.setDriverGateBypassForTest?.(true);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];
 const pin = async (name, f) => { try { const r = await f(); res.push([r === true ? 'PASS' : 'FAIL', name, r === true ? '' : String(r)]); } catch (e) { res.push(['FAIL', name, 'threw: ' + (e && e.message || e)]); } };

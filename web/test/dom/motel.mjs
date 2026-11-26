@@ -38,6 +38,7 @@ const E = await import('../../../engine/src/index.ts');
 const { App, setLaunchNotice, openSheet } = A;
 const { setState } = S;
 setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];

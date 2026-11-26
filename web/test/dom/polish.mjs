@@ -13,6 +13,7 @@ import { createServer } from 'node:http';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { join, normalize, extname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { wrapDriverSeed, unlockSplashInBrowser } from './driver-test-seed.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i < 0 ? d : process.argv[i + 1]; };
 const ROOT = resolve(arg('--root', 'dist')) + '/';
@@ -57,12 +58,13 @@ const open = async (saved, { width = 412, reducedMotion } = {}) => {
   const opts = { viewport: { width, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' };
   if (reducedMotion) opts.reducedMotion = reducedMotion;
   const ctx = await browser.newContext(opts);
-  await ctx.addInitScript((s) => { try { if (!sessionStorage.getItem('polseeded')) { localStorage.setItem('hos-sandbox-v1', s); sessionStorage.setItem('polseeded', '1'); } } catch { /* ignore */ } }, saved);
+  await ctx.addInitScript((s) => { try { if (!sessionStorage.getItem('polseeded')) { localStorage.setItem('hos-sandbox-v1', s); sessionStorage.setItem('polseeded', '1'); } } catch { /* ignore */ } }, wrapDriverSeed(saved));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
   await page.waitForSelector('#root *');
-  await page.waitForTimeout(300);
+  await unlockSplashInBrowser(page);
+  await page.waitForTimeout(200);
   const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
   if (await ack.count()) await ack.first().click();
   await page.evaluate(() => document.fonts && document.fonts.ready);

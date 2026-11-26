@@ -10,7 +10,8 @@ globalThis.confirm = () => true;
 globalThis.alert = (m) => { throw new Error('alert: ' + m); };
 globalThis.__BUILD__ = 'smoke';
 
-const { App } = await import('../src/app.tsx');
+const { App, setDriverGateBypassForTest } = await import('../src/app.tsx');
+setDriverGateBypassForTest(true);
 const { setState, getState, nowMin, clock, clockFull, toInput, DEFAULT_TRIP } = await import('../src/store.ts');
 
 const now = nowMin();

@@ -36,6 +36,7 @@ const E = await import('../../../engine/src/index.ts');
 const { App, setLaunchNotice, openSheet, openWeekPlanner, openRolloutPlanner, openRescuePlanner, openStackPlanner, openMotelPlanner, openLegalPlanner, openFlipPlanner, openMilesPlanner } = A;
 const { setState, getState, parseSaved, loadSaved, exportState, applyImportedState, deviceTz } = S;
 setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];

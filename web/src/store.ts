@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Segment, RulesConfig, DutyStatus, TripInput, TripPlan, TripStrategy, FullEvaluation } from '../../engine/src/index.ts';
 import { DEFAULT_CONFIG, normalize, carrierDayStart, nextCarrierDayStart, dayLabel, evaluate, minutesOf, LIMITS, planTrip, planTripAll, pruneHistory, driveAgainAt, TRIP_STRATEGIES } from '../../engine/src/index.ts';
+import {
+  type HashedSecret, type RecoveryItem, type RecoveryInput,
+  MIN_RECOVERY_QUESTIONS,
+  createHashedSecret, verifyHashedSecret, createRecoveryItem, verifyRecoveryAnswers,
+  isValidPin, isValidHashedSecret, isValidRecoveryItem,
+  sanitizeDriverName, makeDriverId,
+} from './drivers.ts';
 
 /**
  * The live status. `createdAt` is the stamp() taken when it was tapped: overlap resolution treats the
@@ -175,6 +182,8 @@ const KEY = 'hos-sandbox-v1';
 const BACKUP_KEY = 'hos-sandbox-v1-backup';
 /** The simulated clock's quarantine snapshot: the record as it stood when the simulated clock was set (patch 15; written by setState below, restored by useRealClock in app.tsx). */
 export const SIM_KEY = 'hos-sandbox-v1-sim';
+/** Active driver's pending undo snapshot key (same key as app.tsx's UNDO_KEY; zero new storage keys). */
+const UNDO_STORAGE_KEY = 'hos-sandbox-undo-v1';
 /** The browser's zone — what every `clock()` on screen renders in, which may differ from the terminal. */
 export const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
 
@@ -482,9 +491,20 @@ export function loadSaved(): State {
 export function parseSaved(raw: string | null): State {
   try {
     if (!raw) return INITIAL_STATE;
-    const s = JSON.parse(raw);
-    const merged: State = { ...INITIAL_STATE, ...s,
-      config: sanitizeConfig(s.config),
+    const parsed = JSON.parse(raw);
+    return parseSavedObj(parsed);
+  } catch { return INITIAL_STATE; }
+}
+
+/** Pure sanitizer for an already-parsed state object; strips the `__drivers` vault envelope so State stays clean. */
+function parseSavedObj(rawObj: unknown): State {
+  try {
+    if (!rawObj || typeof rawObj !== 'object' || Array.isArray(rawObj)) return INITIAL_STATE;
+    const rawRec = rawObj as Record<string, unknown>;
+    const s: Record<string, unknown> = '__drivers' in rawRec ? (() => { const c = { ...rawRec }; delete c.__drivers; return c; })() : rawRec;
+    const cfgRaw = isObj(s.config) ? (s.config as Partial<RulesConfig>) : undefined;
+    const merged: State = { ...INITIAL_STATE, ...(s as Partial<State>),
+      config: sanitizeConfig(cfgRaw),
       // The drafts go through the same sanitizers the import path applies (applyImportedState):
       // this merge used to spread them raw, so a damaged save could hang the Split tab on a
       // 1e9-minute draft or print "Range NaN mi" from a string mph (break-test #6).
@@ -496,7 +516,7 @@ export function parseSaved(raw: string | null): State {
       breakPresets: s.breakPresets === undefined ? DEFAULT_BREAKS.map((b) => ({ ...b })) : sanitizeBreaks(s.breakPresets) };
     // A saved zone the engine cannot use was replaced by sanitizeConfig. Replacing it silently would move
     // every day boundary without a word, so ask again through the first-run zone prompt instead.
-    if (typeof s.config?.timeZone === 'string' && s.config.timeZone !== merged.config.timeZone) merged.tzChosen = false;
+    if (typeof cfgRaw?.timeZone === 'string' && cfgRaw.timeZone !== merged.config.timeZone) merged.tzChosen = false;
     // Every launch opens on Now: the screen a driver opens the app for. The last tab is navigation, not
     // data, and reopening into a half-finished planning screen hides the clocks (redesign, 2026-10-10).
     merged.tab = 'now';
@@ -570,10 +590,660 @@ export function parseSaved(raw: string | null): State {
   } catch { return INITIAL_STATE; }
 }
 
-let state: State = loadSaved();
+/* ============================================================ Multi-driver vault (drivers1) */
+
+/** Persisted per-driver state slice (omits transient navigation / dialog flags). */
+export type DriverStateData = Omit<State, 'tab' | 'speakAskOpen'>;
+
+export interface DriverProfile {
+  id: string;
+  name: string;
+  createdAt: number;
+  disclaimerAckedAt: number | null;
+  pin: HashedSecret | null;
+  recovery: RecoveryItem[];
+  needsSetup: boolean;
+  migrated: boolean;
+  data: DriverStateData;
+  undoRaw: string | null;
+  simRaw: string | null;
+}
+
+export interface DriverVault {
+  v: 1;
+  activeId: string | null;
+  order: string[];
+  profiles: Record<string, DriverProfile>;
+}
+
+/** Public summary for UI rendering — never exposes PIN/recovery hashes or another driver's logs. */
+export interface DriverSummary {
+  id: string;
+  name: string;
+  needsSetup: boolean;
+  migrated: boolean;
+  isLastActive: boolean;
+  recoveryQuestions: { qId: string; question: string }[];
+  disclaimerAcked: boolean;
+}
+
+export interface DriverSessionHooks {
+  readUndoRaw: () => string | null;
+  writeUndoRaw: (raw: string | null) => void;
+  onSessionReset: () => void;
+}
+
+function extractDriverData(s: State): DriverStateData {
+  const { tab: _tab, speakAskOpen: _speak, ...rest } = s;
+  return {
+    ...rest,
+    segments: rest.segments.map((x) => ({ ...x })),
+    tentative: rest.tentative.map((x) => ({ ...x })),
+    current: rest.current ? { ...rest.current } : null,
+    config: {
+      ...rest.config,
+      adverseShifts: [...(rest.config.adverseShifts ?? [])],
+      sixteenHourShifts: [...(rest.config.sixteenHourShifts ?? [])],
+    },
+    trip: { ...rest.trip },
+    split: { ...rest.split },
+    loadCheck: { ...rest.loadCheck },
+    weekPlan: {
+      ...rest.weekPlan,
+      loads: rest.weekPlan.loads.map((l) => ({ ...l })),
+      homeTarget: rest.weekPlan.homeTarget ? { ...rest.weekPlan.homeTarget } : null,
+    },
+    dayCloses: rest.dayCloses.map((c) => ({ ...c })),
+    breakPresets: rest.breakPresets.map((b) => ({ ...b })),
+  };
+}
+
+function emptyVault(): DriverVault {
+  return { v: 1, activeId: null, order: [], profiles: {} };
+}
+
+function sanitizeVault(raw: unknown): DriverVault | null {
+  if (!isObj(raw) || raw.v !== 1 || !isObj(raw.profiles)) return null;
+  const profiles: Record<string, DriverProfile> = {};
+  const rawOrder = Array.isArray(raw.order) ? raw.order : Object.keys(raw.profiles);
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const idVal of rawOrder) {
+    if (typeof idVal !== 'string' || !idVal.trim() || seen.has(idVal)) continue;
+    const pRaw = (raw.profiles as Record<string, unknown>)[idVal];
+    if (!isObj(pRaw)) continue;
+    const name = typeof pRaw.name === 'string' ? sanitizeDriverName(pRaw.name) : '';
+    if (!name) continue;
+    const pin = isValidHashedSecret(pRaw.pin) ? pRaw.pin : null;
+    const recovery = Array.isArray(pRaw.recovery) ? pRaw.recovery.filter(isValidRecoveryItem) : [];
+    const migrated = pRaw.migrated === true;
+    const needsSetup = pRaw.needsSetup === true || pin === null || recovery.length < MIN_RECOVERY_QUESTIONS;
+    const dataState = parseSavedObj(pRaw.data);
+    profiles[idVal] = {
+      id: idVal,
+      name,
+      createdAt: typeof pRaw.createdAt === 'number' && Number.isFinite(pRaw.createdAt) ? pRaw.createdAt : Date.now(),
+      disclaimerAckedAt: typeof pRaw.disclaimerAckedAt === 'number' && Number.isFinite(pRaw.disclaimerAckedAt) ? pRaw.disclaimerAckedAt : (dataState.disclaimerAcked ? Date.now() : null),
+      pin,
+      recovery,
+      needsSetup,
+      migrated,
+      data: extractDriverData(dataState),
+      undoRaw: typeof pRaw.undoRaw === 'string' ? pRaw.undoRaw : null,
+      simRaw: typeof pRaw.simRaw === 'string' ? pRaw.simRaw : null,
+    };
+    order.push(idVal);
+    seen.add(idVal);
+  }
+  const activeId = typeof raw.activeId === 'string' && profiles[raw.activeId] ? raw.activeId : (order[0] ?? null);
+  return { v: 1, activeId, order, profiles };
+}
+
+function bootFromStorage(): { state: State; vault: DriverVault } {
+  try {
+    let raw = localStorage.getItem(KEY);
+    if (!usableSave(raw)) {
+      const bak = localStorage.getItem(BACKUP_KEY);
+      raw = usableSave(bak) ? bak : null;
+    }
+    if (!raw) return { state: INITIAL_STATE, vault: emptyVault() };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const topState = parseSavedObj(parsed);
+    if ('__drivers' in parsed) {
+      const v = sanitizeVault(parsed.__drivers);
+      if (v) {
+        if (v.activeId && v.profiles[v.activeId]) {
+          // Keep active driver profile synced with the freshest top-level write.
+          v.profiles[v.activeId].data = extractDriverData(topState);
+          // Adopt live undo/sim keys if present on disk (e.g. cold kill or seeded test),
+          // never overwriting an already-stashed copy when live keys were cleared on lock.
+          try {
+            const liveUndo = localStorage.getItem(UNDO_STORAGE_KEY);
+            if (liveUndo !== null) v.profiles[v.activeId].undoRaw = liveUndo;
+          } catch { /* ignore */ }
+          try {
+            if (topState.nowOverride !== null) {
+              const liveSim = localStorage.getItem(SIM_KEY);
+              if (liveSim !== null) v.profiles[v.activeId].simRaw = liveSim;
+            } else {
+              v.profiles[v.activeId].simRaw = null;
+            }
+          } catch { /* ignore */ }
+          return { state: topState, vault: v };
+        }
+        if (v.order.length > 0) {
+          v.activeId = v.order[0];
+          const s0 = parseSavedObj(v.profiles[v.activeId].data);
+          return { state: s0, vault: v };
+        }
+        return { state: INITIAL_STATE, vault: v };
+      }
+    }
+    // Legacy single-driver save (pre-drivers1): migrate automatically into the first driver
+    // with zero data loss, flagged needsSetup=true so the user is guided to set PIN + recovery.
+    let undoRaw: string | null = null;
+    try { undoRaw = localStorage.getItem(UNDO_STORAGE_KEY); } catch { undoRaw = null; }
+    let simRaw: string | null = null;
+    try { simRaw = topState.nowOverride !== null ? localStorage.getItem(SIM_KEY) : null; } catch { simRaw = null; }
+    const legacyId = 'driver-1';
+    const profile: DriverProfile = {
+      id: legacyId,
+      name: 'Driver 1',
+      createdAt: Date.now(),
+      disclaimerAckedAt: topState.disclaimerAcked ? Date.now() : null,
+      pin: null,
+      recovery: [],
+      needsSetup: true,
+      migrated: true,
+      data: extractDriverData(topState),
+      undoRaw,
+      simRaw,
+    };
+    return {
+      state: topState,
+      vault: { v: 1, activeId: legacyId, order: [legacyId], profiles: { [legacyId]: profile } },
+    };
+  } catch {
+    return { state: INITIAL_STATE, vault: emptyVault() };
+  }
+}
+
+const booted = bootFromStorage();
+let state: State = booted.state;
+let vault: DriverVault = booted.vault;
+/** In-memory only: NEVER persisted so every cold launch always shows the startup splash + picker. */
+let unlockedDriverId: string | null = null;
+/** Test-harness only bypass for pre-existing post-login DOM/SSR unit suites. Never set in production. */
+let driverGateBypassForTest = false;
+let sessionHooks: DriverSessionHooks | null = null;
 const subs = new Set<() => void>();
+const driverSubs = new Set<() => void>();
 
 export function getState() { return state; }
+
+export function registerSessionHooks(hooks: DriverSessionHooks) {
+  sessionHooks = hooks;
+}
+
+/** Test-harness only: bypasses the startup splash gate for post-login unit tests. Never called by app code. */
+export function setDriverGateBypassForTest(bypass: boolean) {
+  driverGateBypassForTest = bypass;
+  driverSubs.forEach((f) => f());
+}
+
+export function isDriverGateOpen(): boolean {
+  return !driverGateBypassForTest && unlockedDriverId === null;
+}
+
+export function getUnlockedDriverId(): string | null {
+  return unlockedDriverId;
+}
+
+export function getActiveDriverName(): string {
+  const id = unlockedDriverId ?? (driverGateBypassForTest ? vault.activeId : null);
+  if (!id) return '';
+  return vault.profiles[id]?.name ?? '';
+}
+
+export function getDriverSummaries(): DriverSummary[] {
+  return vault.order
+    .map((id) => vault.profiles[id])
+    .filter((p): p is DriverProfile => !!p)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      needsSetup: p.needsSetup,
+      migrated: p.migrated,
+      isLastActive: vault.activeId === p.id,
+      recoveryQuestions: p.recovery.map((r) => ({ qId: r.qId, question: r.question })),
+      disclaimerAcked: p.data.disclaimerAcked,
+    }));
+}
+
+export function useDrivers(): {
+  gateOpen: boolean;
+  unlockedId: string | null;
+  activeName: string;
+  drivers: DriverSummary[];
+} {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const f = () => force((x) => x + 1);
+    driverSubs.add(f);
+    return () => { driverSubs.delete(f); };
+  }, []);
+  return {
+    gateOpen: isDriverGateOpen(),
+    unlockedId: unlockedDriverId,
+    activeName: getActiveDriverName(),
+    drivers: getDriverSummaries(),
+  };
+}
+
+function notifyDrivers() {
+  driverSubs.forEach((f) => f());
+}
+
+function persistNow(st: State) {
+  let prev: string | null = null;
+  try { prev = localStorage.getItem(KEY); } catch { /* read blocked: still try primary save without rotation */ }
+  try {
+    const next = vault.order.length > 0 ? JSON.stringify({ ...st, __drivers: vault }) : JSON.stringify(st);
+    if (prev && prev !== next && usableSave(prev)) {
+      try { localStorage.setItem(BACKUP_KEY, prev); } catch { /* quota/blocked: still try primary save */ }
+    }
+    localStorage.setItem(KEY, next);
+  } catch { /* storage blocked or full: keep UI in sync with in-memory state */ }
+}
+
+function stashCurrentProfileRuntime() {
+  const id = vault.activeId;
+  if (!id || !vault.profiles[id]) return;
+  const prof = vault.profiles[id];
+  prof.data = extractDriverData(state);
+  if (sessionHooks) {
+    prof.undoRaw = sessionHooks.readUndoRaw();
+  }
+  try {
+    prof.simRaw = state.nowOverride !== null ? localStorage.getItem(SIM_KEY) : null;
+  } catch { /* ignore */ }
+}
+
+function activateDriverProfile(id: string) {
+  const target = vault.profiles[id];
+  if (!target) return;
+  if (unlockedDriverId !== null && vault.activeId === unlockedDriverId && vault.activeId !== id && vault.profiles[vault.activeId]) {
+    stashCurrentProfileRuntime();
+  }
+  sessionHooks?.onSessionReset();
+  vault.activeId = id;
+  state = parseSavedObj(target.data);
+  state.tab = 'now';
+  state.speakAskOpen = false;
+  unlockedDriverId = id;
+  // Swap per-driver undo & sim quarantine keys cleanly so zero state bleeds across drivers.
+  if (sessionHooks) {
+    sessionHooks.writeUndoRaw(target.undoRaw);
+  }
+  try {
+    if (state.nowOverride !== null && target.simRaw) localStorage.setItem(SIM_KEY, target.simRaw);
+    else localStorage.removeItem(SIM_KEY);
+  } catch { /* ignore */ }
+  persistNow(state);
+  applyTheme(effectiveTheme(state, devicePrefersDark()));
+  subs.forEach((f) => f());
+  notifyDrivers();
+}
+
+/** Keep the active driver profile's stashed undo synced on every live undo write so swipe-away relaunches preserve pending undo. */
+export function syncActiveUndoRaw(raw: string | null) {
+  const id = unlockedDriverId ?? (driverGateBypassForTest ? vault.activeId : null);
+  if (!id || vault.activeId !== id || !vault.profiles[id]) return;
+  if (vault.profiles[id].undoRaw === raw) return;
+  vault.profiles[id].undoRaw = raw;
+  persistNow(state);
+}
+
+/* ---- In-memory per-driver brute-force cooldown (PIN & recovery) ---- */
+export const AUTH_COOLDOWN_MISSES = 5;
+export const AUTH_COOLDOWN_BASE_MS = 30_000;
+const AUTH_COOLDOWN_MAX_MS = 30 * 60_000;
+
+interface AuthCooldownEntry {
+  misses: number;
+  lockedUntil: number;
+}
+
+type AuthChannel = 'pin' | 'recovery';
+const authCooldowns = new Map<string, AuthCooldownEntry>();
+
+function authCooldownKey(driverId: string, channel: AuthChannel): string {
+  return `${channel}:${driverId}`;
+}
+
+/** Human-readable wait time for cooldown copy (honest, plain seconds/minutes). */
+export function formatCooldownWait(ms: number): string {
+  const sec = Math.max(1, Math.ceil(ms / 1000));
+  if (sec <= 90) return `${sec} ${sec === 1 ? 'second' : 'seconds'}`;
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  if (rem === 0) return `${min} ${min === 1 ? 'minute' : 'minutes'}`;
+  return `${min}m ${rem}s`;
+}
+
+function getAuthCooldownRemainingMs(driverId: string, channel: AuthChannel): number {
+  const entry = authCooldowns.get(authCooldownKey(driverId, channel));
+  if (!entry || entry.lockedUntil <= 0) return 0;
+  return Math.max(0, entry.lockedUntil - Date.now());
+}
+
+export function getPinCooldownRemainingMs(driverId: string): number {
+  return getAuthCooldownRemainingMs(driverId, 'pin');
+}
+
+export function getRecoveryCooldownRemainingMs(driverId: string): number {
+  return getAuthCooldownRemainingMs(driverId, 'recovery');
+}
+
+function recordAuthMiss(driverId: string, channel: AuthChannel): number {
+  const key = authCooldownKey(driverId, channel);
+  const cur = authCooldowns.get(key) ?? { misses: 0, lockedUntil: 0 };
+  const misses = cur.misses + 1;
+  let cooldownMs = 0;
+  let lockedUntil = 0;
+  if (misses >= AUTH_COOLDOWN_MISSES) {
+    cooldownMs = Math.min(AUTH_COOLDOWN_MAX_MS, AUTH_COOLDOWN_BASE_MS * Math.pow(2, misses - AUTH_COOLDOWN_MISSES));
+    lockedUntil = Date.now() + cooldownMs;
+  }
+  authCooldowns.set(key, { misses, lockedUntil });
+  return cooldownMs;
+}
+
+function clearAuthCooldown(driverId: string, channel?: AuthChannel) {
+  if (channel) {
+    authCooldowns.delete(authCooldownKey(driverId, channel));
+  } else {
+    authCooldowns.delete(authCooldownKey(driverId, 'pin'));
+    authCooldowns.delete(authCooldownKey(driverId, 'recovery'));
+  }
+}
+
+/** Lock the current session and return to the startup splash + driver picker (zero data bleed). */
+export function lockDriverSession() {
+  if (unlockedDriverId !== null && vault.activeId === unlockedDriverId && vault.profiles[vault.activeId]) {
+    stashCurrentProfileRuntime();
+    persistNow(state);
+  }
+  unlockedDriverId = null;
+  sessionHooks?.writeUndoRaw(null);
+  try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
+  sessionHooks?.onSessionReset();
+  notifyDrivers();
+}
+
+/** Re-read storage as if the app were cold-launched (always starts locked on splash). */
+export function reloadVaultFromStorage() {
+  const next = bootFromStorage();
+  state = next.state;
+  vault = next.vault;
+  unlockedDriverId = null;
+  authCooldowns.clear();
+  sessionHooks?.onSessionReset();
+  subs.forEach((f) => f());
+  notifyDrivers();
+}
+
+export type DriverActionResult = { ok: true; id?: string } | { ok: false; error: string; cooldownMs?: number };
+
+function nameTakenByOther(name: string, excludeId?: string): boolean {
+  const low = name.toLowerCase();
+  return vault.order.some((id) => id !== excludeId && vault.profiles[id]?.name.toLowerCase() === low);
+}
+
+function validateRecoveryInputs(inputs: RecoveryInput[]): string | null {
+  if (!Array.isArray(inputs) || inputs.length < MIN_RECOVERY_QUESTIONS) {
+    return `Choose at least ${MIN_RECOVERY_QUESTIONS} reminder questions.`;
+  }
+  const seen = new Set<string>();
+  for (const item of inputs) {
+    if (!item.qId || !item.question) return 'Choose a reminder question.';
+    if (seen.has(item.qId)) return 'Pick two different reminder questions.';
+    seen.add(item.qId);
+    if (!item.answer || !item.answer.trim()) return 'Enter an answer for each reminder question.';
+  }
+  return null;
+}
+
+/** Register a brand-new driver profile: requires unique name, disclosure acceptance, 4-digit PIN, and 2 recovery questions. */
+export function registerDriver(input: {
+  name: string;
+  pin: string;
+  recovery: RecoveryInput[];
+  disclaimerAcked: boolean;
+}): DriverActionResult {
+  const name = sanitizeDriverName(input.name);
+  if (!name) return { ok: false, error: 'Enter a driver name.' };
+  if (nameTakenByOther(name)) return { ok: false, error: `There is already a driver named "${name}" on this phone.` };
+  if (input.disclaimerAcked !== true) return { ok: false, error: 'Read and accept the Clock 14 notice before continuing.' };
+  if (!isValidPin(input.pin)) return { ok: false, error: 'PIN must be exactly 4 digits.' };
+  const recErr = validateRecoveryInputs(input.recovery);
+  if (recErr) return { ok: false, error: recErr };
+
+  if (unlockedDriverId !== null && vault.activeId === unlockedDriverId && vault.profiles[vault.activeId]) {
+    stashCurrentProfileRuntime();
+  }
+
+  const id = makeDriverId();
+  const nowTs = Date.now();
+  const freshState: State = {
+    ...INITIAL_STATE,
+    config: { ...DEFAULT_CONFIG, timeZone: deviceTz },
+    trip: { ...DEFAULT_TRIP },
+    split: { ...DEFAULT_SPLIT },
+    loadCheck: { ...DEFAULT_LOADCHECK },
+    weekPlan: { ...DEFAULT_WEEK_PLAN, loads: [] },
+    breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
+    disclaimerAcked: true,
+    nowCard: 'timeline',
+  };
+  vault.profiles[id] = {
+    id,
+    name,
+    createdAt: nowTs,
+    disclaimerAckedAt: nowTs,
+    pin: createHashedSecret(input.pin),
+    recovery: input.recovery.map(createRecoveryItem),
+    needsSetup: false,
+    migrated: false,
+    data: extractDriverData(freshState),
+    undoRaw: null,
+    simRaw: null,
+  };
+  vault.order.push(id);
+  activateDriverProfile(id);
+  return { ok: true, id };
+}
+
+/** Finish upgrading a migrated legacy single-driver profile: sets name, hashed PIN, and recovery while preserving 100% of existing data. */
+export function completeLegacyDriverSetup(driverId: string, input: {
+  name: string;
+  pin: string;
+  recovery: RecoveryInput[];
+  disclaimerAcked: boolean;
+}): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver profile not found.' };
+  const name = sanitizeDriverName(input.name);
+  if (!name) return { ok: false, error: 'Enter a driver name.' };
+  if (nameTakenByOther(name, driverId)) return { ok: false, error: `There is already a driver named "${name}" on this phone.` };
+  if (!prof.data.disclaimerAcked && input.disclaimerAcked !== true) {
+    return { ok: false, error: 'Read and accept the Clock 14 notice before continuing.' };
+  }
+  if (!isValidPin(input.pin)) return { ok: false, error: 'PIN must be exactly 4 digits.' };
+  const recErr = validateRecoveryInputs(input.recovery);
+  if (recErr) return { ok: false, error: recErr };
+
+  prof.name = name;
+  prof.pin = createHashedSecret(input.pin);
+  prof.recovery = input.recovery.map(createRecoveryItem);
+  prof.needsSetup = false;
+  prof.data.disclaimerAcked = true;
+  if (!prof.disclaimerAckedAt) prof.disclaimerAckedAt = Date.now();
+  // Legacy undo was already captured at boot in bootFromStorage(); never read live UNDO_KEY
+  // here because another driver may have been active before a cold restart.
+  activateDriverProfile(driverId);
+  return { ok: true, id: driverId };
+}
+
+/** Verify a driver's 4-digit PIN and unlock their profile. Wrong PIN changes nothing; 5 misses trigger an escalating cooldown. */
+export function unlockDriverWithPin(driverId: string, pin: string): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver not found.' };
+  if (prof.needsSetup || !prof.pin) return { ok: false, error: 'Finish setting up this driver first.' };
+  const waitMs = getAuthCooldownRemainingMs(driverId, 'pin');
+  if (waitMs > 0) {
+    return {
+      ok: false,
+      error: `Too many wrong PINs. Wait ${formatCooldownWait(waitMs)} before trying again.`,
+      cooldownMs: waitMs,
+    };
+  }
+  if (!isValidPin(pin) || !verifyHashedSecret(pin, prof.pin)) {
+    const cooldownMs = recordAuthMiss(driverId, 'pin');
+    if (cooldownMs > 0) {
+      return {
+        ok: false,
+        error: `Too many wrong PINs. Wait ${formatCooldownWait(cooldownMs)} before trying again.`,
+        cooldownMs,
+      };
+    }
+    return { ok: false, error: 'Wrong PIN. Try again, or tap Forgot PIN below.' };
+  }
+  clearAuthCooldown(driverId);
+  activateDriverProfile(driverId);
+  return { ok: true, id: driverId };
+}
+
+/** Check a driver's reminder question answers without changing state yet (step 1 of Forgot PIN). */
+export function checkDriverRecoveryAnswers(driverId: string, answers: string[]): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver not found.' };
+  const waitMs = getAuthCooldownRemainingMs(driverId, 'recovery');
+  if (waitMs > 0) {
+    return {
+      ok: false,
+      error: `Too many wrong answers. Wait ${formatCooldownWait(waitMs)} before trying again.`,
+      cooldownMs: waitMs,
+    };
+  }
+  if (!verifyRecoveryAnswers(answers, prof.recovery)) {
+    const cooldownMs = recordAuthMiss(driverId, 'recovery');
+    if (cooldownMs > 0) {
+      return {
+        ok: false,
+        error: `Too many wrong answers. Wait ${formatCooldownWait(cooldownMs)} before trying again.`,
+        cooldownMs,
+      };
+    }
+    return { ok: false, error: "Those answers don't match what you saved. Check spelling and try again." };
+  }
+  clearAuthCooldown(driverId, 'recovery');
+  return { ok: true, id: driverId };
+}
+
+/** Reset a driver's PIN after answering their reminder questions, then unlock their profile. */
+export function resetDriverPinWithRecovery(driverId: string, answers: string[], newPin: string): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver not found.' };
+  const waitMs = getAuthCooldownRemainingMs(driverId, 'recovery');
+  if (waitMs > 0) {
+    return {
+      ok: false,
+      error: `Too many wrong answers. Wait ${formatCooldownWait(waitMs)} before trying again.`,
+      cooldownMs: waitMs,
+    };
+  }
+  if (!verifyRecoveryAnswers(answers, prof.recovery)) {
+    const cooldownMs = recordAuthMiss(driverId, 'recovery');
+    if (cooldownMs > 0) {
+      return {
+        ok: false,
+        error: `Too many wrong answers. Wait ${formatCooldownWait(cooldownMs)} before trying again.`,
+        cooldownMs,
+      };
+    }
+    return { ok: false, error: "Those answers don't match what you saved." };
+  }
+  if (!isValidPin(newPin)) return { ok: false, error: 'PIN must be exactly 4 digits.' };
+  clearAuthCooldown(driverId);
+  prof.pin = createHashedSecret(newPin);
+  prof.needsSetup = false;
+  activateDriverProfile(driverId);
+  return { ok: true, id: driverId };
+}
+
+/** Change the signed-in driver's PIN after confirming their current PIN. */
+export function changeDriverPin(driverId: string, currentPin: string, newPin: string): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof || !prof.pin) return { ok: false, error: 'Driver not found.' };
+  if (!verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  if (!isValidPin(newPin)) return { ok: false, error: 'New PIN must be exactly 4 digits.' };
+  prof.pin = createHashedSecret(newPin);
+  persistNow(state);
+  notifyDrivers();
+  return { ok: true, id: driverId };
+}
+
+/** Rename the signed-in driver. */
+export function renameDriver(driverId: string, newName: string): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver not found.' };
+  const name = sanitizeDriverName(newName);
+  if (!name) return { ok: false, error: 'Enter a driver name.' };
+  if (nameTakenByOther(name, driverId)) return { ok: false, error: `There is already a driver named "${name}" on this phone.` };
+  prof.name = name;
+  persistNow(state);
+  notifyDrivers();
+  return { ok: true, id: driverId };
+}
+
+/** Update the signed-in driver's reminder questions after verifying their current PIN. */
+export function updateDriverRecovery(driverId: string, currentPin: string, recovery: RecoveryInput[]): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof || !prof.pin) return { ok: false, error: 'Driver not found.' };
+  if (!verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  const recErr = validateRecoveryInputs(recovery);
+  if (recErr) return { ok: false, error: recErr };
+  prof.recovery = recovery.map(createRecoveryItem);
+  persistNow(state);
+  notifyDrivers();
+  return { ok: true, id: driverId };
+}
+
+/** Permanently delete ONE driver profile (after verifying their PIN) and lock back to the splash. Other drivers stay untouched. */
+export function removeDriverProfile(driverId: string, currentPin: string): DriverActionResult {
+  const prof = vault.profiles[driverId];
+  if (!prof) return { ok: false, error: 'Driver not found.' };
+  if (prof.pin && !verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  clearAuthCooldown(driverId);
+  delete vault.profiles[driverId];
+  vault.order = vault.order.filter((id) => id !== driverId);
+  unlockedDriverId = null;
+  sessionHooks?.writeUndoRaw(null);
+  try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
+  sessionHooks?.onSessionReset();
+  if (vault.order.length > 0) {
+    vault.activeId = vault.order[0];
+    state = parseSavedObj(vault.profiles[vault.activeId].data);
+  } else {
+    vault.activeId = null;
+    state = INITIAL_STATE;
+  }
+  persistNow(state);
+  subs.forEach((f) => f());
+  notifyDrivers();
+  return { ok: true };
+}
 
 /**
  * Snapshot the record exactly as it stands before a simulated-clock episode, so that
@@ -587,11 +1257,16 @@ export function getState() { return state; }
  * driver who had never confirmed a zone was never asked again). Storage failing
  * leaves the episode unquarantined; it never blocks the write itself.
  */
-function snapshotSimRecord(s: State) {
+function snapshotSimRecord(s: State): string | null {
   try {
     const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, tzChosen: s.tzChosen, weekPlan: s.weekPlan };
-    localStorage.setItem(SIM_KEY, JSON.stringify({ record }));
-  } catch { /* storage failing leaves the session's writes unquarantined, never blocks the write */ }
+    const raw = JSON.stringify({ record });
+    localStorage.setItem(SIM_KEY, raw);
+    return raw;
+  } catch {
+    /* storage failing leaves the session's writes unquarantined, never blocks the write */
+    return null;
+  }
 }
 
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)) {
@@ -605,21 +1280,24 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   // every later write is quarantined by construction. Within an episode there is no
   // second edge — the value changing, or any other write, keeps the first snapshot,
   // which is the real record.
-  if (state.nowOverride === null && p.nowOverride != null) snapshotSimRecord(state);
+  let capturedSimRaw: string | null | undefined;
+  if (state.nowOverride === null && p.nowOverride != null) {
+    capturedSimRaw = snapshotSimRecord(state);
+  }
   state = { ...state, ...p };
+  if (vault.activeId && vault.profiles[vault.activeId]) {
+    vault.profiles[vault.activeId].data = extractDriverData(state);
+    if (capturedSimRaw !== undefined) {
+      vault.profiles[vault.activeId].simRaw = capturedSimRaw;
+    } else if (state.nowOverride === null) {
+      vault.profiles[vault.activeId].simRaw = null;
+    }
+  }
   // Autosave, with the save being replaced kept as the last-known-good copy: if the new write is
   // ever found damaged, loadSaved falls back to it instead of a fresh, empty record. Only a usable
   // save is kept — rotating a damaged one in would destroy the very copy the fallback needs.
   // Wrapped so a storage failure (quota, blocked storage) never blocks the in-memory update or subscribers.
-  let prev: string | null = null;
-  try { prev = localStorage.getItem(KEY); } catch { /* read blocked: still try primary save without rotation */ }
-  try {
-    const next = JSON.stringify(state);
-    if (prev && prev !== next && usableSave(prev)) {
-      try { localStorage.setItem(BACKUP_KEY, prev); } catch { /* quota/blocked: still try primary save */ }
-    }
-    localStorage.setItem(KEY, next);
-  } catch { /* storage blocked or full: keep UI in sync with in-memory state */ }
+  persistNow(state);
   subs.forEach((f) => f());
 }
 
@@ -2268,8 +2946,24 @@ export function segLabel(status: DutyStatus, note?: string): string {
   return n && SUB_STATUS[n] ? `${SUB_STATUS[n]} (${status})` : STATUS_LABEL[status];
 }
 
-/** Everything a bug report needs. Kept small enough to paste into an email. */
-export function exportState(s: State): string {
-  return JSON.stringify({ v: 1, exported: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    ua: navigator.userAgent, segments: s.segments, tentative: s.tentative, current: s.current, config: s.config, mph: s.mph, trip: s.trip, split: s.split, loadCheck: s.loadCheck, weekPlan: s.weekPlan, nowOverride: s.nowOverride });
+/** Everything a bug report or backup export needs. Carries the active driver's name, never other drivers or PINs. */
+export function exportState(s: State, driverName?: string): string {
+  const name = driverName !== undefined ? driverName : getActiveDriverName();
+  return JSON.stringify({
+    v: 1,
+    exported: new Date().toISOString(),
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ua: navigator.userAgent,
+    ...(name ? { driverName: name } : {}),
+    segments: s.segments,
+    tentative: s.tentative,
+    current: s.current,
+    config: s.config,
+    mph: s.mph,
+    trip: s.trip,
+    split: s.split,
+    loadCheck: s.loadCheck,
+    weekPlan: s.weekPlan,
+    nowOverride: s.nowOverride,
+  });
 }

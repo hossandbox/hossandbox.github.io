@@ -29,6 +29,7 @@ const E = await import('../../../engine/src/index.ts');
 const { App, setLaunchNotice, openSheet } = A;
 const { setState, getState, deviceTz, DEFAULT_LOADCHECK } = S;
 setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];
 const pin = async (name, f) => { try { const r = await f(); res.push([r === true ? 'PASS' : 'FAIL', name, r === true ? '' : String(r)]); } catch (e) { res.push(['FAIL', name, 'threw: ' + (e && e.message || e)]); } };

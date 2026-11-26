@@ -26,7 +26,11 @@ import {
 } from '../../engine/src/index.ts';
 import {
   useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useDrivers, getActiveDriverName, lockDriverSession, registerSessionHooks, setDriverGateBypassForTest, reloadVaultFromStorage, syncActiveUndoRaw,
 } from './store.ts';
+import { driverFileSlug, driverInitials } from './drivers.ts';
+import { StartupSplash, ActiveDriverStrip, DriverSettingsCard, DisclosureModal, CLOCK14_DISCLAIMER_TEXT } from './driver-ui.tsx';
+export { setDriverGateBypassForTest, reloadVaultFromStorage, lockDriverSession };
 import { clampDayStartMinute, safeRulesConfig, formatDayStartHM, dayStartWord } from './carrierday.ts';
 import {
   projectRecapVs34, defaultResetStart, wallMinuteInCarrierDay, fmtWallHM, parseIsoDay,
@@ -382,7 +386,7 @@ const REPO = 'hossandbox/hossandbox.github.io';
 
 /** Copies the exported state to the clipboard and opens a prefilled GitHub issue — the only report channel. */
 function reportBug(s: State, ev: FullEvaluation) {
-  const json = exportState(s);
+  const json = exportState(s, '');
   // GitHub rejects issue URLs past ~8 KB (414/500), and the log is URL-encoded at roughly 1.5×, so
   // only a short log rides in the URL; anything longer goes via the clipboard (bug report C4).
   const clocks = `drive now ${dur(ev.driveNow)} (${ev.binding}) · ${ev.shift.limits.drive / 60}-hr left ${dur(ev.shift.driveRemaining)} · ${ev.shift.limits.window / 60}-hr left ${dur(ev.shift.windowRemaining)} · cycle left ${dur(ev.cycle.remaining)}`;
@@ -2276,7 +2280,7 @@ function WelcomeBackChip({ w, now }: { w: WelcomeBack; now: number }) {
   );
 }
 
-function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onExitPeek: () => void }) {
+function NowTab({ s, now, ev, again, onExitPeek, driverName }: { s: State; now: number; ev: FullEvaluation; again: DriveAgain | null; onExitPeek: () => void; driverName: string }) {
   const warn = ev.shift.notes.filter((n) => n.startsWith('⚠'));
   const active = [ev.shift.exceptionKeys.adverse !== null ? 'Adverse conditions' : '', ev.shift.exceptionKeys.sixteen !== null ? '16-hour day' : ''].filter(Boolean);
   /** Today's day-close bookmark, when the day stands closed (patch 13; the store's one rule). */
@@ -2433,6 +2437,7 @@ function NowTab({ s, now, ev, again, onExitPeek }: { s: State; now: number; ev: 
   }, [dayPhase]);
   return (
     <>
+      {!preview && driverName && <ActiveDriverStrip name={driverName} onSwitch={lockDriverSession} />}
       {drivingPeeked(s) && <button class="wide" onClick={onExitPeek}>‹ Back to the driving view</button>}
       {snap && !preview && <span class="pv-snapmark" aria-hidden="true" />}
       <CardSwitchCtx.Provider value={<NowCardSwitch value={s.nowCard} />}>
@@ -3365,9 +3370,11 @@ function setUndo(u: Undo | null) {
   // The offer is persisted too: a driver who deletes an entry and has the app closed on him — the
   // phone restarted, the PWA swiped away — before he reconsiders has not lost the way back. Storage
   // failing (full, blocked) leaves the in-session undo working exactly as before.
+  const raw = u ? JSON.stringify(u) : null;
   try {
-    if (u) localStorage.setItem(UNDO_KEY, JSON.stringify(u)); else localStorage.removeItem(UNDO_KEY);
+    if (raw) localStorage.setItem(UNDO_KEY, raw); else localStorage.removeItem(UNDO_KEY);
   } catch { /* the undo still works for this session */ }
+  syncActiveUndoRaw(raw);
   undoSubs.forEach((f) => f());
 }
 /**
@@ -3412,7 +3419,10 @@ export function currentUndo(): Undo | null {
   // A restored undo's snapshot was re-read from storage, so identity is gone: it stands only while
   // the record still reads exactly as the action left it, compared by value.
   if (undoRestored && sameSaved(s, a)) return undoNow;
-  if (undoRestored) { try { localStorage.removeItem(UNDO_KEY); } catch { /* ignore */ } }
+  if (undoRestored) {
+    try { localStorage.removeItem(UNDO_KEY); } catch { /* ignore */ }
+    syncActiveUndoRaw(null);
+  }
   undoNow = null; undoRestored = false;
   return null;
 }
@@ -11347,12 +11357,14 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
 
 /* ============================================================ Settings */
 
-/** Ask the browser to download the export; returns the file name. */
-export function downloadExport(s: State): string {
-  const blob = new Blob([exportState(s)], { type: 'application/json' });
+/** Ask the browser to download the export; returns the file name (carrying the active driver's name when signed in). */
+export function downloadExport(s: State, driverName?: string): string {
+  const activeName = driverName !== undefined ? driverName : getActiveDriverName();
+  const blob = new Blob([exportState(s, activeName)], { type: 'application/json' });
   const d = new Date();
   const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const name = `clock14-${ymd}.json`;
+  const slug = activeName ? driverFileSlug(activeName) : '';
+  const name = slug ? `clock14-${slug}-${ymd}.json` : `clock14-${ymd}.json`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -11490,6 +11502,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
   }).format(new Date(req.generatedAtMs));
   const twoZones = s.config.timeZone !== deviceTz;
   const dayStartLabel = formatDayStartHM(s.config);
+  const driverName = getActiveDriverName();
 
   return (
     <article class="print-report" data-print-report data-days={days.length} aria-label="Log summary report">
@@ -11503,6 +11516,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
         </div>
         <div class="pr-disclaimer" role="note">{PDF_DISCLAIMER}</div>
         <dl class="pr-meta">
+          {driverName && <div><dt>Driver</dt><dd>{driverName}</dd></div>}
           <div><dt>Date range</dt><dd>{rangeLabel} ({days.length} {days.length === 1 ? 'carrier day' : 'carrier days'}, newest first)</dd></div>
           <div><dt>Generated</dt><dd class="mono">{genStr}</dd></div>
           <div><dt>Carrier day boundary</dt><dd>{dayStartLabel} {s.config.timeZone}{twoZones ? ` · clock times in ${deviceTz}` : ''}</dd></div>
@@ -11580,7 +11594,7 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
 
       <footer class="pr-foot">
         <p class="pr-foot-disclaimer">{PDF_DISCLAIMER}</p>
-        <p class="pr-foot-meta">Clock 14 — HOS What-If Planner · Generated {genStr}</p>
+        <p class="pr-foot-meta">Clock 14 — HOS What-If Planner{driverName ? ` · Driver: ${driverName}` : ''} · Generated {genStr}</p>
       </footer>
     </article>
   );
@@ -11656,7 +11670,7 @@ export const TESTING_LONG_PRESS_MS = 600;
 let testingUnlocked = false;
 export function setTestingUnlocked(v: boolean) { testingUnlocked = v; }
 
-function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
+function SettingsTab({ s, now, ev, driverId, driverName }: { s: State; now: number; ev: FullEvaluation; driverId: string | null; driverName: string }) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
   const [pdfDaysText, setPdfDaysText] = useState(String(PDF_DAYS_DEFAULT));
@@ -11744,6 +11758,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
   };
   return (
     <>
+      <DriverSettingsCard driverId={driverId} driverName={driverName} />
       {/* D18 (audit): the one-release "Hours coming back has moved to Plan ›" row is retired. */}
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
@@ -11797,7 +11812,7 @@ function SettingsTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation
         <p class="muted small">Everything stays on this phone. Nothing is uploaded.</p>
       </Card>
       <Card title="About">
-        <p class="small">Clock 14 — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
+        <p class="small">{CLOCK14_DISCLAIMER_TEXT}</p>
         <p class="muted small build-line" data-build-line onContextMenu={(e) => e.preventDefault()} onPointerDown={startPress} onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress} onMouseDown={startPress} onMouseUp={cancelPress} onMouseLeave={cancelPress} onTouchStart={startPress} onTouchEnd={cancelPress} onTouchCancel={cancelPress}>Build {__BUILD__} · now {clock(now)}</p>
       </Card>
       {/* C5 (taste, 2026-11-20): hidden from casual poking on More behind a long-press on the build
@@ -11914,15 +11929,7 @@ export function acknowledgeDisclaimer() {
  * Body matches More → About verbatim; the single button calls acknowledgeDisclaimer() and dismisses.
  */
 function DisclaimerDialog({ closing = false }: { closing?: boolean }) {
-  return (
-    <div class={`backdrop${closing ? ' is-closing' : ''}`} role={closing ? undefined : 'dialog'} aria-modal={closing ? undefined : 'true'} aria-labelledby={closing ? undefined : 'disclaimer-title'} inert={closing || undefined} aria-hidden={closing || undefined}>
-      <div class="modal">
-        <h2 id="disclaimer-title">Before you start</h2>
-        <p class="small">Clock 14 — HOS What-If Planner. It is not an ELD, is not FMCSA-registered, and does not replace your record of duty status. Your official log and your carrier's ELD govern. Rules: 49 CFR 395.1(b)(1), (g), (o), 395.3; FMCSA HOS FAQ (Nov 2020). Property-carrying, US interstate drivers only — no passenger, Canada, Alaska or oilfield rules.</p>
-        <button type="button" class="primary" onClick={() => acknowledgeDisclaimer()}>Understood — don't show again</button>
-      </div>
-    </div>
-  );
+  return <DisclosureModal closing={closing} onAccept={() => acknowledgeDisclaimer()} />;
 }
 
 /**
@@ -12092,7 +12099,75 @@ const rafOf = (cb: () => void): number => (typeof requestAnimationFrame === 'fun
 const cancelRafOf = (id: number): void => { if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id); else clearTimeout(id as unknown as ReturnType<typeof setTimeout>); };
 const prefersReducedMotion = (): boolean => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** Wire per-driver session isolation hooks into store.ts (called once at module load, after all helpers exist). */
+registerSessionHooks({
+  readUndoRaw: () => {
+    try { return localStorage.getItem(UNDO_KEY); } catch { return null; }
+  },
+  writeUndoRaw: (raw) => {
+    try {
+      if (raw) localStorage.setItem(UNDO_KEY, raw);
+      else localStorage.removeItem(UNDO_KEY);
+    } catch { /* ignore */ }
+    restoreUndo(raw);
+    undoSubs.forEach((f) => f());
+  },
+  onSessionReset: () => {
+    openSheet(null);
+    openMyWeekPlanner(false);
+    openWeekPlanner(false);
+    openRolloutPlanner(false);
+    openRescuePlanner(false);
+    openStackPlanner(false);
+    openMotelPlanner(false);
+    openLegalPlanner(false);
+    openFlipPlanner(false);
+    openMilesPlanner(false);
+    setDrivingPeek(null);
+    setPrintReport(null);
+    clearWeekHubCache();
+    setTestingUnlocked(false);
+    welcomeCheck(INITIAL_STATE, 0, null);
+  },
+});
+
 export function App() {
+  const drv = useDrivers();
+  const pendingGoRef = useRef<GoTarget | null>(null);
+  // Capture home-screen shortcut (?go=…) once on mount and clean the address. If the startup
+  // splash gate is up, hold the shortcut until the driver unlocks with their PIN.
+  useEffect(() => {
+    const go = readGo(typeof location !== 'undefined' ? location.search : '');
+    if (go === null) return;
+    try { window.history.replaceState(window.history.state, '', './'); } catch { /* ignore */ }
+    if (!drv.gateOpen) applyGo(go);
+    else pendingGoRef.current = go;
+  }, []);
+  useEffect(() => {
+    if (!drv.gateOpen && pendingGoRef.current !== null) {
+      const go = pendingGoRef.current;
+      pendingGoRef.current = null;
+      applyGo(go);
+    }
+  }, [drv.gateOpen]);
+  // While locked on the startup splash, keep the page theme synced to the device/stored preference.
+  useEffect(() => {
+    if (!drv.gateOpen) return;
+    applyTheme(effectiveTheme(getState(), devicePrefersDark()));
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onFlip = () => applyTheme(effectiveTheme(getState(), devicePrefersDark()));
+    mq.addEventListener?.('change', onFlip);
+    return () => mq.removeEventListener?.('change', onFlip);
+  }, [drv.gateOpen]);
+
+  if (drv.gateOpen) {
+    return <StartupSplash drivers={drv.drivers} />;
+  }
+  return <AppShell key={drv.unlockedId ?? 'harness'} driverId={drv.unlockedId} driverName={drv.activeName} />;
+}
+
+function AppShell({ driverId, driverName }: { driverId: string | null; driverName: string }) {
   const rawState = useStore();
   const safeCfg = useMemo(() => safeRulesConfig(rawState.config), [rawState.config]);
   const s = useMemo(() => (safeCfg === rawState.config ? rawState : { ...rawState, config: safeCfg }), [rawState, safeCfg]);
@@ -12372,15 +12447,7 @@ export function App() {
     if (s.tab !== 'plan' && s.tab !== 'settings' && milesPlannerOpen) openMilesPlanner(false);
     if (s.tab !== 'plan' && s.tab !== 'settings' && myWeekPlannerOpen) openMyWeekPlanner(false);
   }, [s.tab]);
-  // Capstone C3 (M14): a home-screen shortcut opens the app with ?go=…; read it once, act on it,
-  // and clean the address — keeping history.state, which carries the back-nav marker. Runs
-  // before the back-nav is created, so its entries are built for the screen the shortcut chose.
-  useEffect(() => {
-    const go = readGo(typeof location !== 'undefined' ? location.search : '');
-    if (go === null) return;
-    applyGo(go);
-    try { window.history.replaceState(window.history.state, '', './'); } catch { /* ignore */ }
-  }, []);
+  // Home-screen shortcut (?go=…) is captured and applied by outer App() so it respects the startup splash gate.
   // Capstone C3 (M5): the welcome-back check, on open and on each return to the foreground,
   // against the real clock only.
   useEffect(() => {
@@ -12643,7 +12710,7 @@ export function App() {
           {warnbox}
           {themeNoticeCard}
           <TabBoundary key="now" tab="now">
-            <NowTab s={s} now={now} ev={ev} again={again} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
+            <NowTab s={s} now={now} ev={ev} again={again} driverName={driverName} onExitPeek={() => { setDrivingPeek(null); redraw((x) => x + 1); }} />
           </TabBoundary>
         </section>
         <section class={`page page-log${activeStripPanel === 'log' ? ' is-active' : ''}`} inert={activeStripPanel !== 'log'} aria-hidden={activeStripPanel !== 'log'}>
@@ -12664,12 +12731,18 @@ export function App() {
         <div class="settings-head">
           <button type="button" class="back settings-back" data-settings-back aria-label={`Back to ${returnLabel}`} onClick={() => setState({ tab: settingsReturnTab.current })}><Icon d={I.back} /> {returnLabel}</button>
           <h1 class="settings-title">Settings</h1>
+          {driverName && (
+            <span class="settings-driver-pill" data-settings-driver-name={driverName}>
+              <span class="driver-avatar driver-avatar-xs" aria-hidden="true">{driverInitials(driverName)}</span>
+              <span class="settings-driver-text">{driverName}</span>
+            </span>
+          )}
         </div>
         {warnbox}
         {themeNoticeCard}
         <Notices ev={ev} now={now} s={s} />
         <TabBoundary key="settings" tab="settings">
-          <SettingsTab s={s} now={now} ev={ev} />
+          <SettingsTab s={s} now={now} ev={ev} driverId={driverId} driverName={driverName} />
         </TabBoundary>
       </section>
       <section

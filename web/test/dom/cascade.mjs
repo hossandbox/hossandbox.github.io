@@ -33,6 +33,7 @@ const S = await import('../../src/store.ts');
 const { App, setLaunchNotice, openSheet, currentSheet } = A;
 const { setState, getState, deviceTz } = S;
 setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];
 const pin = async (name, f) => { try { const r = await f(); res.push([r === true ? 'PASS' : 'FAIL', name, r === true ? '' : String(r)]); } catch (e) { res.push(['FAIL', name, 'threw: ' + (e && e.message || e)]); } };

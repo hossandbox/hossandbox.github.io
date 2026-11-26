@@ -29,6 +29,7 @@ const AL = await import('../../src/alerts.ts');
 const { App, tapStatus, setLaunchNotice } = A;
 const { setState, getState, deviceTz } = S;
 setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = []; const ok = (n, c, i = '') => { res.push([c ? 'PASS' : 'FAIL', n, i]); };
 const root = document.createElement('div'); document.body.appendChild(root);

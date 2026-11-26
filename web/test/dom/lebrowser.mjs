@@ -13,6 +13,7 @@ import { createServer } from 'node:http';
 import { readFileSync, statSync, existsSync, mkdirSync } from 'node:fs';
 import { join, normalize, extname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { wrapDriverSeed, unlockSplashInBrowser } from './driver-test-seed.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i < 0 ? d : process.argv[i + 1]; };
 const ROOT = resolve(arg('--root', 'dist')) + '/';
@@ -49,12 +50,13 @@ const res = []; const ok = (name, cond, info = '') => { res.push({ pass: !!cond,
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] });
 const open = async (W, H, saved) => {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((s) => { try { if (!sessionStorage.getItem('leseeded')) { localStorage.setItem('hos-sandbox-v1', s); sessionStorage.setItem('leseeded', '1'); } } catch { /* ignore */ } }, saved);
+  await ctx.addInitScript((s) => { try { if (!sessionStorage.getItem('leseeded')) { localStorage.setItem('hos-sandbox-v1', s); sessionStorage.setItem('leseeded', '1'); } } catch { /* ignore */ } }, wrapDriverSeed(saved));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
   await page.waitForSelector('#root *');
-  await page.waitForTimeout(300);
+  await unlockSplashInBrowser(page);
+  await page.waitForTimeout(200);
   const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
   if (await ack.count()) await ack.first().click();
   await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -139,7 +141,7 @@ for (const [W, H] of [[412, 915], [360, 640], [350, 640], [344, 882], [340, 640]
     const card2 = await page.evaluate(() => ({ taxis: !!document.querySelector('.taxis') }));
     ok(`${tag} item 5: Timeline picked in More → the Now card is the timeline and its switch says so`, card2.taxis && s2?.keys.find((k) => k.on === 'true')?.t === 'Timeline' && (await stored(page)) === 'timeline', JSON.stringify({ card2, s2 }));
     await page.locator('.card-switch button', { hasText: 'Dial' }).click(); await page.waitForTimeout(200);
-    await page.reload({ waitUntil: 'load' }); await page.waitForSelector('#root *'); await page.waitForTimeout(300);
+    await page.reload({ waitUntil: 'load' }); await page.waitForSelector('#root *'); await unlockSplashInBrowser(page); await page.waitForTimeout(200);
     const s3 = await switchInfo(page);
     ok(`${tag} item 5: the card's choice survives a reload`, (await page.locator('main .dial').count()) >= 1 && s3?.keys.find((k) => k.on === 'true')?.t === 'Dial', JSON.stringify(s3));
     const ov = await overflow(page);

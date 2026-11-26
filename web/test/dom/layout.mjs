@@ -34,6 +34,7 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
 import { join, normalize, extname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { wrapDriverSeed, unlockSplashInBrowser } from './driver-test-seed.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i < 0 ? d : process.argv[i + 1]; };
 const ROOT = resolve(arg('--root', 'dist')) + '/';
@@ -94,12 +95,13 @@ const browser = await chromium.launch({ executablePath: CHROME, headless: true, 
 for (const [W, H] of SIZES) {
   for (const nowCard of ['dial', 'timeline']) {
     const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-    await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord(nowCard)));
+    await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(seedRecord(nowCard)));
     const page = await ctx.newPage();
     const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
     await page.waitForSelector('#root *');
-    await page.waitForTimeout(300);
+    await unlockSplashInBrowser(page);
+    await page.waitForTimeout(200);
     const ack = page.getByRole('button', { name: /^(I understand|Understood|Got it|OK|Continue)/ });
     if (await ack.count()) await ack.first().click();
     await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -240,12 +242,13 @@ for (const [W, H] of SIZES) {
     try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
     window.__vib = [];
     Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { const m = document.querySelector('main.pages'); window.__vib.push({ p, t: performance.now(), sl: m ? m.scrollLeft : -1, w: m ? m.clientWidth : 0 }); return true; } });
-  }, JSON.stringify(seedRecord('dial')));
+  }, wrapDriverSeed(seedRecord('dial')));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
   await page.waitForSelector('#root *');
-  await page.waitForTimeout(300);
+  await unlockSplashInBrowser(page);
+  await page.waitForTimeout(200);
   const ack = page.getByRole('button', { name: /^(I understand|Got it|OK|Continue)/ });
   if (await ack.count()) await ack.first().click();
   await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -453,12 +456,13 @@ const geminiSeed = (nowCard) => ({ segments: [], current: { status: 'OFF', since
 for (const [W, H] of SIZES) {
   for (const nowCard of ['dial', 'timeline']) {
     const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-    await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(geminiSeed(nowCard)));
+    await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(geminiSeed(nowCard)));
     const page = await ctx.newPage();
     const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
     await page.waitForSelector('#root *');
-    await page.waitForTimeout(300);
+    await unlockSplashInBrowser(page);
+    await page.waitForTimeout(200);
     const ack = page.getByRole('button', { name: /^(I understand|Understood|Got it|OK|Continue)/ });
     if (await ack.count()) await ack.first().click();
     await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -574,10 +578,11 @@ for (const [W, H] of SIZES) {
         });
       });
       obs.observe(document, { childList: true, subtree: true });
-    }, JSON.stringify({ ...seedRecord('dial'), theme }));
+    }, wrapDriverSeed({ ...seedRecord('dial'), theme }));
     const page = await ctx.newPage();
     const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+    await unlockSplashInBrowser(page);
     await page.waitForSelector('main.pages');
     await page.waitForFunction(() => window.__firstFrame !== null, null, { timeout: 2000 });
     await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -862,10 +867,11 @@ for (const [W, H] of SIZES) {
       try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
       window.__vib = [];
       Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { window.__vib.push(p); return true; } });
-    }, JSON.stringify({ ...seedRecord('dial'), current: { status: 'D', since: nowMinute - 20, createdAt: 13 }, drivingView: true, tab: 'now' }));
+    }, wrapDriverSeed({ ...seedRecord('dial'), current: { status: 'D', since: nowMinute - 20, createdAt: 13 }, drivingView: true, tab: 'now' }));
     const page = await ctx.newPage();
     const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+    await unlockSplashInBrowser(page);
     await page.waitForSelector('main.drive');
     await page.waitForTimeout(150);
     await page.evaluate(() => { window.__vib.length = 0; });
@@ -929,10 +935,11 @@ const longLogSeed = () => {
 };
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(longLogSeed()));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(longLogSeed()));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('main.pages');
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
@@ -1161,10 +1168,11 @@ for (const [W, H] of SIZES) {
     try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ }
     window.__printCalls = 0;
     window.print = () => { window.__printCalls++; };
-  }, JSON.stringify(pdfSeed()));
+  }, wrapDriverSeed(pdfSeed()));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('main.pages');
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
@@ -1311,10 +1319,11 @@ const nowstripSeed = () => {
 };
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(nowstripSeed()));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(nowstripSeed()));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now button.lever', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -1477,10 +1486,11 @@ for (const [W, H] of SIZES) {
 /* ---------- (i) dialfade (2026-11-22, Lorico): Now hero card soft dissolve (Timeline <-> Dial) ---------- */
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord('timeline')));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(seedRecord('timeline')));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now .hero .card-switch', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -1580,10 +1590,11 @@ for (const [W, H] of SIZES) {
 /* ---------- (j) eldslide / morph4 (2026-11-22): "Check against my ELD" DriftSheet origin-morph ---------- */
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord('timeline')));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(seedRecord('timeline')));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now button.plan-item', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -1735,10 +1746,11 @@ for (const [W, H] of SIZES) {
 /* ---------- (k) retime / morph4 (2026-11-22): LeverSheet keeps 0.32s slide-up / 0.2s slide-down; DriftSheet uses 0.32s morph-in / 0.2s morph-out ---------- */
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(nowstripSeed()));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(nowstripSeed()));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now button.lever', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -1852,10 +1864,11 @@ const motionSeed = () => {
 };
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(motionSeed()));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(motionSeed()));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now.is-active', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -1989,10 +2002,11 @@ for (const [W, H] of SIZES) {
 // M5: Centered modal (DisclaimerDialog) enters at 0.24s cubic-bezier(0.22, 0.14, 0.45, 1) and exits at 0.2s ease-out (.is-closing, inert), neutralized under reduced motion
 {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify({ ...seedRecord('timeline'), disclaimerAcked: false }));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed({ ...seedRecord('timeline'), disclaimerAcked: false }));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('.backdrop > .modal', { timeout: 5000 });
   const modalOpen = await page.evaluate(() => {
     const bd = document.querySelector('.backdrop');
@@ -2024,10 +2038,11 @@ for (const [W, H] of SIZES) {
 /* ---------- (n) morph4 (2026-11-22): Four converted sheets (drift, since, exceptions, status) origin-morph + fallback + unconverted slide-up ---------- */
 for (const [W, H] of SIZES) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, serviceWorkers: 'block' });
-  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, JSON.stringify(seedRecord('timeline')));
+  await ctx.addInitScript((save) => { try { localStorage.setItem('hos-sandbox-v1', save); } catch { /* ignore */ } }, wrapDriverSeed(seedRecord('timeline')));
   const page = await ctx.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('section.page-now.is-active', { timeout: 5000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(100);
@@ -2143,6 +2158,7 @@ for (const [W, H] of SIZES) {
 
   // Missing opener on open (?go=stopped shortcut opens StatusSheet without a tapped button): still uses .morph-origin + sheet-morph-in (never sheet-slide-up)
   await page.goto(ORIGIN + '/?go=stopped', { waitUntil: 'load' });
+  await unlockSplashInBrowser(page);
   await page.waitForSelector('.sheet.morph-origin', { timeout: 3000 });
   const shortcutOpen = await page.evaluate(() => {
     const sh = document.querySelector('.sheet');

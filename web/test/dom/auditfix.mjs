@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { join, normalize, extname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { wrapDriverSeed, unlockSplashInBrowser } from './driver-test-seed.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i < 0 ? d : process.argv[i + 1]; };
 const ROOT = resolve(arg('--root', 'dist')) + '/';
@@ -70,14 +71,16 @@ async function section(f) {
 async function open(seed, W = 412, H = 915) {
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
   await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
-  await ctx.addInitScript((s) => { if (!sessionStorage.getItem('af-seeded')) { sessionStorage.setItem('af-seeded', '1'); localStorage.clear(); if (s) localStorage.setItem('hos-sandbox-v1', s); } }, seed ? JSON.stringify(seed) : null);
+  const wrapped = wrapDriverSeed(seed ?? { segments: [], tentative: [], current: null, disclaimerAcked: true });
+  await ctx.addInitScript((s) => { if (!sessionStorage.getItem('af-seeded')) { sessionStorage.setItem('af-seeded', '1'); localStorage.clear(); if (s) localStorage.setItem('hos-sandbox-v1', s); } }, wrapped);
   const page = await ctx.newPage();
   page.errors = []; page.dialogs = 0;
   page.on('pageerror', (e) => page.errors.push(String(e)));
   page.on('dialog', (d) => { page.dialogs++; d.dismiss().catch(() => {}); });
   await page.goto(ORIGIN + '/', { waitUntil: 'load' });
   await page.waitForSelector('#root *');
-  await page.waitForTimeout(300);
+  await unlockSplashInBrowser(page);
+  await page.waitForTimeout(200);
   const ack = page.locator('button', { hasText: /I understand|Understood — don't show again/ });
   if (await ack.count()) { await ack.first().click(); await page.waitForTimeout(300); }
   page.ctx = ctx; OPEN.add(ctx);
@@ -514,7 +517,7 @@ await section(async () => {
   await p.ctx.close();
 });
 
-/* ---------------- Startup disclaimer pop-up + C1 (real browser) ---------------- */
+/* ---------------- Multi-driver startup splash, registration disclosure, PIN, recovery, separation, migration + C1 (real browser) ---------------- */
 await section(async () => {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
   await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
@@ -523,34 +526,50 @@ await section(async () => {
   p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e)));
   OPEN.add(ctx);
   await p.goto(ORIGIN + '/', { waitUntil: 'load' });
-  await p.waitForSelector('#root *'); await wait(p, 300);
-  const fresh = await p.evaluate(() => {
+  await p.waitForSelector('[data-splash-screen="1"]'); await wait(p, 300);
+  const tapPin = async (digits) => {
+    for (const ch of digits) {
+      await p.locator(`[data-pin-pad="1"] button[data-pin-digit="${ch}"]`).click();
+    }
+    await wait(p, 200);
+  };
+
+  // Re-aimed (drivers1): fresh launch shows Startup Splash (logo + "Clock 14" + "Add a driver") with zero overflow.
+  const splash0 = await p.evaluate(() => ({
+    splash: !!document.querySelector('[data-splash-screen="1"]'),
+    logo: !!document.querySelector('img.splash-logo[src="./icon-512.png"]'),
+    title: document.querySelector('h1.splash-title')?.textContent?.trim() ?? '',
+    addBtn: document.querySelector('button[data-add-driver="1"]')?.textContent?.trim() ?? '',
+    over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  }));
+  ok('Drivers1 fresh launch: startup splash renders logo, "Clock 14", and "Add a driver" with no horizontal overflow',
+    splash0.splash && splash0.logo && splash0.title === 'Clock 14' && /Add a driver/.test(splash0.addBtn) && !splash0.over, splash0);
+
+  // Register Driver 1 ("Marcus"): name -> mandatory disclosure popup -> PIN -> recovery questions.
+  await p.locator('button[data-add-driver="1"]').click(); await wait(p, 200);
+  await p.locator('input[data-reg-name="1"]').fill('Marcus');
+  await p.locator('button[data-reg-next="1"]').click(); await wait(p, 260);
+
+  const discModal = await p.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]');
     const modal = dlg?.querySelector('.modal');
     const btns = [...(dlg?.querySelectorAll('button') ?? [])].map((b) => b.textContent.trim());
     const modalText = modal?.querySelector('p')?.textContent?.trim() ?? '';
-    const aboutCard = [...document.querySelectorAll('section.page-settings .card')].find((c) => c.querySelector('h2')?.textContent?.trim() === 'About');
-    const aboutText = aboutCard?.querySelector('p.small')?.textContent?.trim() ?? '';
     const mr = modal?.getBoundingClientRect();
     return {
       hasDialog: !!dlg,
       ariaModal: dlg?.getAttribute('aria-modal') ?? null,
       btns,
       modalText,
-      aboutText,
-      exactMatch: modalText.length > 100 && modalText === aboutText,
-      oldBanner: !!document.querySelector('.disclaimer-banner'),
-      oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
-      hdrInert: document.querySelector('header.top')?.hasAttribute('inert') ?? false,
-      mainInert: document.querySelector('main.pages')?.hasAttribute('inert') ?? false,
-      navInert: document.querySelector('nav.tabs')?.hasAttribute('inert') ?? false,
+      shellInert: document.querySelector('.splash-shell')?.hasAttribute('inert') ?? false,
       fitsViewport: !!mr && mr.left >= 0 && mr.right <= window.innerWidth && mr.top >= 0 && mr.bottom <= window.innerHeight,
       over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok('Disclaimer fresh launch: startup pop-up renders with verbatim More → About text, single "Understood — don\'t show again" button, inert background, and fits viewport cleanly',
-    fresh.hasDialog && fresh.ariaModal === 'true' && fresh.exactMatch && fresh.btns.length === 1 && fresh.btns[0] === "Understood — don't show again" && fresh.hdrInert && fresh.mainInert && fresh.navInert && fresh.fitsViewport && !fresh.over, fresh);
-  ok('Disclaimer fresh launch: old TopBar header line "Planning only — not a log, not an ELD" and .disclaimer-banner are absent', !fresh.oldBanner && !fresh.oldHeaderLine, fresh);
+  ok('Disclaimer on new-driver registration: pop-up renders with Clock 14 notice, single "Understood — don\'t show again" button, inert background, and fits viewport cleanly',
+    discModal.hasDialog && discModal.ariaModal === 'true' && /Clock 14 — HOS What-If Planner\. It is not an ELD/.test(discModal.modalText)
+    && discModal.btns.length === 1 && discModal.btns[0] === "Understood — don't show again" && discModal.shellInert && discModal.fitsViewport && !discModal.over, discModal);
+
   // Narrow phone (360×740): modal still fits cleanly with no horizontal overflow.
   await p.setViewportSize({ width: 360, height: 740 }); await wait(p, 200);
   const narrow = await p.evaluate(() => {
@@ -559,26 +578,64 @@ await section(async () => {
   });
   ok('Disclaimer modal at 360×740: fits viewport with no horizontal overflow', narrow.fits && !narrow.over, narrow);
   await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 200);
-  // Tapping the single button dismisses the pop-up and persists disclaimerAcked=true.
+
+  // Accept disclosure -> set PIN 1357 + confirm -> set 2 recovery questions -> enters Now.
   await p.locator('[role="dialog"][aria-labelledby="disclaimer-title"] button', { hasText: "Understood — don't show again" }).click({ timeout: 5000 });
   await wait(p, 300);
-  const afterAck = await p.evaluate(() => ({
-    hasDialog: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
-    persistedAck: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').disclaimerAcked === true,
-    hdrInert: document.querySelector('header.top')?.hasAttribute('inert') ?? false,
-    oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
-  }));
-  ok('Disclaimer tap "Understood — don\'t show again": dismisses pop-up, persists disclaimerAcked=true, unlocks UI, and Now has no header disclaimer line',
-    !afterAck.hasDialog && afterAck.persistedAck && !afterAck.hdrInert && !afterAck.oldHeaderLine, afterAck);
-  // Reload with persisted state: pop-up must NOT reappear.
+  await tapPin('1357');
+  await tapPin('1357');
+  await p.locator('input[data-rec-a="0"]').fill('Peterbilt');
+  await p.locator('input[data-rec-a="1"]').fill('Memphis');
+  await p.locator('button[data-reg-finish="1"]').click();
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 });
+  await wait(p, 250);
+
+  const afterReg = await p.evaluate(() => {
+    const aboutCard = [...document.querySelectorAll('section.page-settings .card')].find((c) => c.querySelector('h2')?.textContent?.trim() === 'About');
+    const aboutText = aboutCard?.querySelector('p.small')?.textContent?.trim() ?? '';
+    return {
+      hasDialog: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
+      persistedAck: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').disclaimerAcked === true,
+      aboutText,
+      oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
+      driverStrip: document.querySelector('button[data-driver-strip="1"]')?.textContent?.trim() ?? '',
+    };
+  });
+  ok('Registration completes: disclosure persists & matches Settings -> About verbatim, active driver shown, and Now has no header disclaimer line',
+    !afterReg.hasDialog && afterReg.persistedAck && afterReg.aboutText === discModal.modalText && !afterReg.oldHeaderLine && /Marcus/.test(afterReg.driverStrip), afterReg);
+
+  // Reload with 1 driver: Startup Splash MUST render (no straight-in shortcut); wrong PIN stays locked; right PIN enters without re-showing disclosure.
   await p.reload({ waitUntil: 'load' });
-  await p.waitForSelector('#root *'); await wait(p, 300);
-  const afterReload = await p.evaluate(() => ({
+  await p.waitForSelector('[data-splash-screen="1"]'); await wait(p, 250);
+  const splash1 = await p.evaluate(() => ({
+    splash: !!document.querySelector('[data-splash-screen="1"]'),
+    drivers: [...document.querySelectorAll('button.driver-tile')].map((b) => b.getAttribute('data-driver-name')),
+    hasAdd: !!document.querySelector('button[data-add-driver="1"]'),
+    over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  }));
+  ok('Drivers1 reload (1 driver): splash ALWAYS renders with registered driver and "Add a driver" (no straight-in shortcut)',
+    splash1.splash && JSON.stringify(splash1.drivers) === '["Marcus"]' && splash1.hasAdd && !splash1.over, splash1);
+
+  await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 200);
+  await tapPin('0000');
+  const wrongPin = await p.evaluate(() => ({
+    stillOnPin: !!document.querySelector('[data-pin-screen="1"]'),
+    err: document.querySelector('[data-pin-error="1"]')?.textContent?.trim() ?? '',
+    inApp: !!document.querySelector('nav.tabs'),
+  }));
+  ok('Drivers1 wrong PIN: rejected with alert, stays locked on PIN screen', wrongPin.stillOnPin && /Wrong PIN/i.test(wrongPin.err) && !wrongPin.inApp, wrongPin);
+
+  await tapPin('1357');
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 });
+  await wait(p, 250);
+  const afterReloadUnlock = await p.evaluate(() => ({
     hasDialog: !!document.querySelector('[role="dialog"][aria-labelledby="disclaimer-title"]'),
     persistedAck: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').disclaimerAcked === true,
     oldHeaderLine: !!document.querySelector('header.top details.disclaimer-line') || /Planning only — not a log, not an ELD/.test(document.querySelector('header.top')?.textContent ?? ''),
   }));
-  ok('Disclaimer reload with persisted ack: no startup pop-up on launch and no old header line on Now', !afterReload.hasDialog && afterReload.persistedAck && !afterReload.oldHeaderLine, afterReload);
+  ok('Disclaimer reload with persisted ack: no disclosure pop-up after PIN unlock and no old header line on Now',
+    !afterReloadUnlock.hasDialog && afterReloadUnlock.persistedAck && !afterReloadUnlock.oldHeaderLine, afterReloadUnlock);
+
   // Home-terminal timezone picker stays reachable under More → Rules.
   await go(p, 'More');
   const tzMore = await p.evaluate(() => {
@@ -589,6 +646,7 @@ await section(async () => {
   });
   ok('Home-terminal timezone picker is reachable and visible under More → Rules', tzMore.present && tzMore.visible && !!tzMore.value, tzMore);
   await go(p, 'Now');
+
   // C1 (taste, 2026-11-20): first Driving tap must NEVER pop the read-aloud dialog; first non-Driving tap on Now pops it once.
   await p.locator('.status-buttons button', { hasText: 'Driving' }).click({ timeout: 5000 }); await wait(p, 350);
   const c1Drive = await p.evaluate(() => ({ inDrive: !!document.querySelector('main.drive'), dlg: /Want the alerts read out loud\?/.test(document.body.innerText) }));
@@ -600,7 +658,197 @@ await section(async () => {
   await tap(p, 'button', /^No thanks$/, 250);
   await p.locator('.status-buttons button', { hasText: 'Sleeper' }).click({ timeout: 5000 }); await wait(p, 250);
   ok('C1 answered once: subsequent non-Driving tap never re-asks', !/Want the alerts read out loud\?/.test(await p.evaluate(() => document.body.innerText)));
-  ok('Disclaimer/C1 no page errors', p.errors.length === 0, p.errors.join(' | '));
+
+  // Switch driver mid-session via Now's active driver strip, register Driver 2 ("Elena"), verify 2-driver splash + isolation + Forgot-PIN recovery.
+  await go(p, 'More');
+  await p.locator('section.page-settings label', { hasText: 'Cycle' }).locator('button', { hasText: '60 hr / 7 days' }).click();
+  await wait(p, 200);
+  await p.locator('button[data-switch-driver="1"]').click();
+  await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 });
+  await p.locator('button[data-add-driver="1"]').click(); await wait(p, 200);
+  await p.locator('input[data-reg-name="1"]').fill('Elena');
+  await p.locator('button[data-reg-next="1"]').click(); await wait(p, 260);
+  const elenaHasDisc = await p.locator('[role="dialog"][aria-labelledby="disclaimer-title"]').count();
+  await p.locator('[role="dialog"][aria-labelledby="disclaimer-title"] button').click(); await wait(p, 300);
+  await tapPin('2468');
+  await tapPin('2468');
+  await p.locator('input[data-rec-a="0"]').fill('Kenworth');
+  await p.locator('input[data-rec-a="1"]').fill('Dallas');
+  await p.locator('button[data-reg-finish="1"]').click();
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 }); await wait(p, 250);
+
+  const elenaCheck = await p.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+    return {
+      segs: (st.segments || []).length,
+      cur: st.current,
+      cycle: st.config?.cycle,
+      strip: document.querySelector('button[data-driver-strip="1"]')?.textContent?.trim() ?? '',
+    };
+  });
+  ok('Drivers1 per-driver separation: Driver 2 sees disclosure at registration and enters a clean world (0 of Driver 1 logs, 70/8 cycle)',
+    elenaHasDisc === 1 && elenaCheck.segs === 0 && elenaCheck.cur === null && elenaCheck.cycle === '70/8' && /Elena/.test(elenaCheck.strip), { elenaHasDisc, elenaCheck });
+
+  // Verify 2-driver splash at 360x640 (zero overflow) + Forgot-PIN recovery for Marcus.
+  await p.locator('button[data-driver-strip="1"]').click();
+  await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 });
+  await p.setViewportSize({ width: 360, height: 640 }); await wait(p, 200);
+  const splash2 = await p.evaluate(() => ({
+    drivers: [...document.querySelectorAll('button.driver-tile')].map((b) => b.getAttribute('data-driver-name')),
+    hasAdd: !!document.querySelector('button[data-add-driver="1"]'),
+    over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  }));
+  ok('Drivers1 2-driver splash at 360×640: lists both drivers + "Add a driver" with zero horizontal overflow',
+    JSON.stringify(splash2.drivers) === '["Marcus","Elena"]' && splash2.hasAdd && !splash2.over, splash2);
+  await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 150);
+
+  await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 200);
+  await p.locator('button[data-forgot-pin="1"]').click(); await wait(p, 200);
+  await p.locator('input[data-recovery-answer="0"]').fill('peterbilt');
+  await p.locator('input[data-recovery-answer="1"]').fill('MEMPHIS');
+  await p.locator('button[data-recovery-submit="1"]').click(); await wait(p, 200);
+  await tapPin('4321');
+  await tapPin('4321');
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 }); await wait(p, 200);
+  const marcusBack = await p.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+    return { cycle: st.config?.cycle, status: st.current?.status, strip: document.querySelector('button[data-driver-strip="1"]')?.textContent?.trim() ?? '' };
+  });
+  ok('Drivers1 Forgot-PIN recovery: resets Marcus PIN and restores his Sleeper status + 60/7 cycle intact',
+    marcusBack.cycle === '60/7' && marcusBack.status === 'SB' && /Marcus/.test(marcusBack.strip), marcusBack);
+
+  // Drivers1fix P1 + P2 + Cooldown in real Chromium:
+  // 1) Arm an undo by deleting a log entry, then hard-reload (swipe-away) without locking -> undo MUST survive reload + PIN unlock!
+  await go(p, 'Log');
+  const firstEditBtn = p.locator('section.page-log button.entry').first();
+  if (await firstEditBtn.count()) {
+    await firstEditBtn.click(); await wait(p, 200);
+    const delBtn = p.locator('.sheet button.danger', { hasText: /Delete/ }).first();
+    if (await delBtn.count()) {
+      await delBtn.click(); await wait(p, 250);
+    }
+  }
+  const undoBeforeReload = await p.evaluate(() => localStorage.getItem('hos-sandbox-undo-v1'));
+  await p.reload({ waitUntil: 'load' });
+  await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 }); await wait(p, 200);
+  // Test PIN cooldown on Elena (5 wrong PINs -> 30s cooldown & disabled keypad), while Marcus remains unlocked-able!
+  await p.locator('button.driver-tile[data-driver-name="Elena"]').click(); await wait(p, 150);
+  for (const bad of ['0000', '0001', '0002', '0003', '0004']) await tapPin(bad);
+  const cdCheck = await p.evaluate(() => ({
+    err: document.querySelector('[data-pin-error="1"]')?.textContent?.trim() ?? '',
+    disabledCount: [...document.querySelectorAll('[data-pin-pad="1"] button[data-pin-digit]')].filter((b) => b.disabled).length,
+  }));
+  ok('Drivers1fix PIN cooldown (real browser): 5 wrong PINs disable keypad and show honest 30-second wait',
+    /Too many wrong PINs.*Wait \d+ seconds/i.test(cdCheck.err) && cdCheck.disabledCount === 10, cdCheck);
+
+  // Switch back to picker and unlock Marcus (per-driver cooldown: Marcus unaffected!) -> verify undo survived reload!
+  await p.locator('.splash-flow-head button.back').click(); await wait(p, 150);
+  await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 150);
+  await tapPin('4321');
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 }); await wait(p, 200);
+  const undoAfterReload = await p.evaluate(() => localStorage.getItem('hos-sandbox-undo-v1'));
+  ok('Drivers1fix P1 (real browser): pending Undo survives hard reload + PIN unlock (not wiped on unlock)',
+    !!undoBeforeReload && undoAfterReload === undoBeforeReload, { hadBefore: !!undoBeforeReload, hadAfter: !!undoAfterReload });
+
+  // 2) Drivers1fix P2 (real browser): arm simulated clock + sim write, hard-reload without locking -> unlock -> Use real clock discards sim write!
+  await go(p, 'More');
+  const simSetup = await p.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+    return { segCount: (raw.segments || []).length };
+  });
+  // Long-press the build line in Settings -> About to reveal the Testing card.
+  const buildLine = p.locator('section.page-settings [data-build-line]').first();
+  await buildLine.dispatchEvent('pointerdown', { pointerId: 1 });
+  await wait(p, 700);
+  await buildLine.dispatchEvent('pointerup', { pointerId: 1 });
+  await wait(p, 200);
+  const simInput = p.locator('section.page-settings input[type="datetime-local"]').first();
+  if (await simInput.count()) {
+    await simInput.fill('2026-11-26T14:30');
+    await simInput.dispatchEvent('change');
+    await wait(p, 250);
+    await go(p, 'Now');
+    await p.locator('.status-buttons button', { hasText: 'On Duty' }).click({ timeout: 5000 }); await wait(p, 250);
+    const simBeforeReload = await p.evaluate(() => ({
+      simKey: !!localStorage.getItem('hos-sandbox-v1-sim'),
+      curStatus: JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}').current?.status,
+    }));
+    await p.reload({ waitUntil: 'load' });
+    await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 }); await wait(p, 200);
+    await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 150);
+    await tapPin('4321');
+    await p.waitForSelector('section.page-now.is-active', { timeout: 5000 }); await wait(p, 200);
+    const simAfterReload = await p.evaluate(() => !!localStorage.getItem('hos-sandbox-v1-sim'));
+    await p.locator('section.page-now.is-active .warnbox button', { hasText: /Use real clock/ }).click(); await wait(p, 250);
+    const afterRealClock = await p.evaluate(() => {
+      const st = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+      return {
+        nowOverride: st.nowOverride,
+        curStatus: st.current?.status,
+        segCount: (st.segments || []).length,
+        simKey: !!localStorage.getItem('hos-sandbox-v1-sim'),
+      };
+    });
+    ok('Drivers1fix P2 (real browser): simulated-clock quarantine survives hard reload and Use real clock discards sim writes',
+      simBeforeReload.simKey && simBeforeReload.curStatus === 'ON' && simAfterReload
+      && afterRealClock.nowOverride === null && afterRealClock.curStatus === 'SB' && afterRealClock.segCount === simSetup.segCount && !afterRealClock.simKey,
+      { simBeforeReload, simAfterReload, afterRealClock, simSetup });
+  } else {
+    ok('Drivers1fix P2 (real browser): Testing simulated-clock input reachable', false, 'Testing input did not open');
+  }
+
+  ok('Disclaimer/Drivers1/C1 no page errors', p.errors.length === 0, p.errors.join(' | '));
+  await ctx.close();
+});
+
+/* ---------------- Drivers1 legacy single-driver migration (real browser) ---------------- */
+await section(async () => {
+  const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, serviceWorkers: 'block' });
+  await ctx.addInitScript((t) => { const D = Date; const off = t - D.now(); class F extends D { constructor(...a) { if (a.length) super(...a); else super(D.now() + off); } static now() { return D.now() + off; } } globalThis.Date = F; }, NOW_MS);
+  const rawLegacy = JSON.stringify({
+    ...DAY,
+    config: { cycle: '60/7', dayStartHour: 5, dayStartMinute: 30, timeZone: 'America/Denver', shortHaul: false, adverseShifts: [], sixteenHourShifts: [] },
+  });
+  await ctx.addInitScript((s) => { if (!sessionStorage.getItem('af-leg')) { sessionStorage.setItem('af-leg', '1'); localStorage.clear(); localStorage.setItem('hos-sandbox-v1', s); } }, rawLegacy);
+  const p = await ctx.newPage();
+  p.errors = []; p.on('pageerror', (e) => p.errors.push(String(e)));
+  OPEN.add(ctx);
+  await p.goto(ORIGIN + '/', { waitUntil: 'load' });
+  await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 }); await wait(p, 250);
+  const legSplash = await p.evaluate(() => ({
+    tiles: [...document.querySelectorAll('button.driver-tile')].map((b) => ({ name: b.getAttribute('data-driver-name'), text: b.textContent.trim() })),
+  }));
+  ok('Drivers1 legacy migration: pre-drivers1 save appears automatically as first driver with Finish setup prompt',
+    legSplash.tiles.length === 1 && /Finish setup/.test(legSplash.tiles[0].text), legSplash);
+
+  await p.locator('button.driver-tile').first().click(); await wait(p, 200);
+  await p.locator('input[data-reg-name="1"]').fill('Lorico');
+  await p.locator('button[data-reg-next="1"]').click(); await wait(p, 200);
+  for (const ch of '7788') await p.locator(`[data-pin-pad="1"] button[data-pin-digit="${ch}"]`).click();
+  await wait(p, 150);
+  for (const ch of '7788') await p.locator(`[data-pin-pad="1"] button[data-pin-digit="${ch}"]`).click();
+  await wait(p, 150);
+  await p.locator('input[data-rec-a="0"]').fill('Mack');
+  await p.locator('input[data-rec-a="1"]').fill('Denver');
+  await p.locator('button[data-reg-finish="1"]').click();
+  await p.waitForSelector('section.page-now.is-active', { timeout: 5000 }); await wait(p, 250);
+
+  const afterMig = await p.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+    return {
+      segs: (st.segments || []).length,
+      cur: st.current?.status,
+      cycle: st.config?.cycle,
+      dayStart: `${st.config?.dayStartHour}:${st.config?.dayStartMinute}`,
+      tz: st.config?.timeZone,
+      strip: document.querySelector('button[data-driver-strip="1"]')?.textContent?.trim() ?? '',
+      keys: Object.keys(localStorage).sort(),
+    };
+  });
+  ok('Drivers1 legacy migration: guided PIN + recovery setup preserves 100% of legacy logs & rules and uses zero new storage keys',
+    afterMig.segs === DAY.segments.length && afterMig.cur === 'ON' && afterMig.cycle === '60/7' && afterMig.dayStart === '5:30' && afterMig.tz === 'America/Denver' && /Lorico/.test(afterMig.strip)
+    && afterMig.keys.every((k) => ['hos-sandbox-v1', 'hos-sandbox-v1-backup', 'hos-sandbox-v1-sim', 'hos-sandbox-undo-v1'].includes(k)) && p.errors.length === 0,
+    { afterMig, errors: p.errors });
   await ctx.close();
 });
 

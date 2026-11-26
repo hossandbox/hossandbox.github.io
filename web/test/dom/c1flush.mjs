@@ -23,6 +23,7 @@ const { evaluate } = await import('../../../engine/src/index.ts');
 const { App } = A;
 const { setState, INITIAL_STATE: INIT, allSegments } = S;
 A.setLaunchNotice?.(false);
+A.setDriverGateBypassForTest?.(true);
 const sleep = (ms) => new Promise((r) => rawSetTimeout(r, ms));
 const res = [];
 const ok = (n, c, i = '') => { res.push([c ? 'PASS' : 'FAIL', n, i]); };
