@@ -20,7 +20,7 @@ if (!existsSync(CHROME)) { console.log(`AUDITFIX LANE CANNOT RUN: no browser at 
 if (!existsSync(join(ROOT, 'app.js'))) { console.log(`AUDITFIX LANE CANNOT RUN: no built app under ${ROOT} (build first)`); process.exit(2); }
 if (process.env.TZ !== 'America/Chicago') { console.log('AUDITFIX LANE CANNOT RUN: set TZ=America/Chicago (the pins read wall-clock times)'); process.exit(2); }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.map': 'application/json', '.woff2': 'font/woff2' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.map': 'application/json', '.woff2': 'font/woff2' };
 const server = createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p === '/') p = '/index.html';
@@ -534,16 +534,44 @@ await section(async () => {
     await wait(p, 200);
   };
 
-  // Re-aimed (drivers1): fresh launch shows Startup Splash (logo + "Clock 14" + "Add a driver") with zero overflow.
-  const splash0 = await p.evaluate(() => ({
-    splash: !!document.querySelector('[data-splash-screen="1"]'),
-    logo: !!document.querySelector('img.splash-logo[src="./icon-512.png"]'),
-    title: document.querySelector('h1.splash-title')?.textContent?.trim() ?? '',
-    addBtn: document.querySelector('button[data-add-driver="1"]')?.textContent?.trim() ?? '',
-    over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  }));
-  ok('Drivers1 fresh launch: startup splash renders logo, "Clock 14", and "Add a driver" with no horizontal overflow',
-    splash0.splash && splash0.logo && splash0.title === 'Clock 14' && /Add a driver/.test(splash0.addBtn) && !splash0.over, splash0);
+  // Re-aimed (splashart): fresh launch shows artwork background (no DOM logo/title duplication), frosted lower-zone controls, and "Add a driver" with zero overflow.
+  const splash0 = await p.evaluate(async () => {
+    const app = document.querySelector('[data-splash-screen="1"]');
+    const cs = app ? getComputedStyle(app) : null;
+    const m = cs?.backgroundImage?.match(/url\("?([^")]+)"?\)/);
+    let imgOk = false;
+    if (m?.[1]) {
+      const r = await fetch(m[1]);
+      imgOk = r.ok && (r.headers.get('content-type') || '').includes('image/webp');
+    }
+    const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
+    const emptyCs = document.querySelector('[data-driver-empty="1"]') ? getComputedStyle(document.querySelector('[data-driver-empty="1"]')) : null;
+    const addR = document.querySelector('button[data-add-driver="1"]')?.getBoundingClientRect();
+    return {
+      splash: !!app,
+      bgColor: cs?.backgroundColor ?? '',
+      bgImage: cs?.backgroundImage ?? '',
+      bgSize: cs?.backgroundSize ?? '',
+      bgRepeat: cs?.backgroundRepeat ?? '',
+      bgPos: cs?.backgroundPosition ?? '',
+      imgOk,
+      dupLogo: !!document.querySelector('img.splash-logo, img[src="./icon-512.png"]'),
+      dupTitle: !!document.querySelector('h1.splash-title, .splash-brand'),
+      bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
+      emptyBg: emptyCs?.backgroundColor ?? '',
+      emptyBorder: emptyCs?.borderTopColor ?? '',
+      addBtn: document.querySelector('button[data-add-driver="1"]')?.textContent?.trim() ?? '',
+      addBottom: addR?.bottom ?? 9999,
+      over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  ok('Splashart fresh launch (0 drivers, 412×915): 19.5:9 artwork applied & loaded, no DOM logo/title duplication, frosted empty prompt + Add in lower dark zone (~50%), zero overflow',
+    splash0.splash && splash0.bgColor === 'rgb(2, 6, 20)' && /splash-1179x2556\.webp/.test(splash0.bgImage)
+    && splash0.bgSize === 'cover' && splash0.bgRepeat === 'no-repeat' && splash0.bgPos === '50% 0%' && splash0.imgOk
+    && !splash0.dupLogo && !splash0.dupTitle
+    && splash0.bodyTopPct >= 48 && splash0.bodyTopPct <= 55
+    && splash0.emptyBg === 'rgba(6, 17, 46, 0.72)' && splash0.emptyBorder === 'rgba(145, 228, 255, 0.22)'
+    && /Add a driver/.test(splash0.addBtn) && splash0.addBottom <= 915 && !splash0.over, splash0);
 
   // Register Driver 1 ("Marcus"): name -> mandatory disclosure popup -> PIN -> recovery questions.
   await p.locator('button[data-add-driver="1"]').click(); await wait(p, 200);
@@ -616,44 +644,83 @@ await section(async () => {
   ok('Drivers1 reload (1 driver): splash ALWAYS renders with registered driver and "Add a driver" (no straight-in shortcut)',
     splash1.splash && JSON.stringify(splash1.drivers) === '["Marcus"]' && splash1.hasAdd && !splash1.over, splash1);
 
-  // Splashlogo geometry pins (1 driver): large phone (412x915) and small phone (360x640).
+  // Splashart placement & frosted-style pins (1 driver): tall phone (412x915, 19.5:9) and standard 9:16 phone (360x640).
   await wait(p, 400); // let splash entrance animation finish so bounding box reflects resting size
-  const logo412 = await p.evaluate(() => {
+  const art412 = await p.evaluate(async () => {
     const app = document.querySelector('.splash-app');
-    const fr = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
-    const tr = document.querySelector('h1.splash-title')?.getBoundingClientRect();
-    const tSize = parseFloat(getComputedStyle(document.querySelector('h1.splash-title')).fontSize);
-    const tile = document.querySelector('button.driver-tile')?.getBoundingClientRect();
-    const add = document.querySelector('button[data-add-driver="1"]')?.getBoundingClientRect();
+    const cs = app ? getComputedStyle(app) : null;
+    const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
+    const tile = document.querySelector('button.driver-tile');
+    const tileR = tile?.getBoundingClientRect();
+    const tileCs = tile ? getComputedStyle(tile) : null;
+    const add = document.querySelector('button[data-add-driver="1"]');
+    const addR = add?.getBoundingClientRect();
+    const addCs = add ? getComputedStyle(add) : null;
     return {
-      w: fr?.width ?? 0, h: fr?.height ?? 0, left: fr?.left ?? -1, right: fr?.right ?? 9999, top: fr?.top ?? -1, bottom: fr?.bottom ?? 0,
-      tSize, titleBelow: !!tr && !!fr && tr.top >= fr.bottom,
-      tileBottom: tile?.bottom ?? 9999, addBottom: add?.bottom ?? 9999,
+      bgColor: cs?.backgroundColor ?? '',
+      bgImage: cs?.backgroundImage ?? '',
+      bgSize: cs?.backgroundSize ?? '',
+      bgRepeat: cs?.backgroundRepeat ?? '',
+      bgPos: cs?.backgroundPosition ?? '',
+      dupLogo: !!document.querySelector('img.splash-logo, img[src="./icon-512.png"]'),
+      dupTitle: !!document.querySelector('h1.splash-title, .splash-brand'),
+      bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
+      tileBg: tileCs?.backgroundColor ?? '',
+      tileBorder: tileCs?.borderTopColor ?? '',
+      addBg: addCs?.backgroundColor ?? '',
+      tileBottom: tileR?.bottom ?? 9999,
+      addBottom: addR?.bottom ?? 9999,
       overX: document.documentElement.scrollWidth > document.documentElement.clientWidth || (app?.scrollWidth ?? 0) > (app?.clientWidth ?? 0),
     };
   });
-  ok('Splashlogo 412×915 (1 driver): hero logo >= 360px square, unclipped bezel, Clock 14 below logo, picker + Add above fold',
-    logo412.w >= 360 && Math.abs(logo412.w - logo412.h) <= 1 && logo412.left >= 0 && logo412.right <= 412 && logo412.top >= 0
-    && logo412.tSize >= 28 && logo412.titleBelow && logo412.tileBottom <= 915 && logo412.addBottom <= 915 && !logo412.overX, logo412);
+  ok('Splashart 412×915 (1 driver): 19.5:9 artwork background, no DOM logo/title duplication, frosted picker + Add in lower dark zone (~50%) above fold, zero overflow',
+    art412.bgColor === 'rgb(2, 6, 20)' && /splash-1179x2556\.webp/.test(art412.bgImage)
+    && art412.bgSize === 'cover' && art412.bgRepeat === 'no-repeat' && art412.bgPos === '50% 0%'
+    && !art412.dupLogo && !art412.dupTitle
+    && art412.bodyTopPct >= 48 && art412.bodyTopPct <= 55
+    && art412.tileBg === 'rgba(6, 17, 46, 0.72)' && art412.tileBorder === 'rgba(145, 228, 255, 0.22)'
+    && art412.addBg === 'rgba(6, 17, 46, 0.72)'
+    && art412.tileBottom <= 915 && art412.addBottom <= 915 && !art412.overX, art412);
 
   await p.setViewportSize({ width: 360, height: 640 }); await wait(p, 200);
-  const logo360 = await p.evaluate(() => {
+  const art360 = await p.evaluate(async () => {
     const app = document.querySelector('.splash-app');
-    const fr = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
-    const tr = document.querySelector('h1.splash-title')?.getBoundingClientRect();
-    const tSize = parseFloat(getComputedStyle(document.querySelector('h1.splash-title')).fontSize);
-    const tile = document.querySelector('button.driver-tile')?.getBoundingClientRect();
-    const add = document.querySelector('button[data-add-driver="1"]')?.getBoundingClientRect();
+    const cs = app ? getComputedStyle(app) : null;
+    const m = cs?.backgroundImage?.match(/url\("?([^")]+)"?\)/);
+    let imgOk = false;
+    if (m?.[1]) {
+      const r = await fetch(m[1]);
+      imgOk = r.ok && (r.headers.get('content-type') || '').includes('image/webp');
+    }
+    const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
+    const tile = document.querySelector('button.driver-tile');
+    const tileR = tile?.getBoundingClientRect();
+    const tileCs = tile ? getComputedStyle(tile) : null;
+    const addR = document.querySelector('button[data-add-driver="1"]')?.getBoundingClientRect();
     return {
-      w: fr?.width ?? 0, h: fr?.height ?? 0, left: fr?.left ?? -1, right: fr?.right ?? 9999, top: fr?.top ?? -1, bottom: fr?.bottom ?? 0,
-      tSize, titleBelow: !!tr && !!fr && tr.top >= fr.bottom,
-      tileBottom: tile?.bottom ?? 9999, addBottom: add?.bottom ?? 9999,
+      bgColor: cs?.backgroundColor ?? '',
+      bgImage: cs?.backgroundImage ?? '',
+      bgSize: cs?.backgroundSize ?? '',
+      bgRepeat: cs?.backgroundRepeat ?? '',
+      bgPos: cs?.backgroundPosition ?? '',
+      imgOk,
+      dupLogo: !!document.querySelector('img.splash-logo, img[src="./icon-512.png"]'),
+      dupTitle: !!document.querySelector('h1.splash-title, .splash-brand'),
+      bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
+      tileBg: tileCs?.backgroundColor ?? '',
+      tileBorder: tileCs?.borderTopColor ?? '',
+      tileBottom: tileR?.bottom ?? 9999,
+      addBottom: addR?.bottom ?? 9999,
       overX: document.documentElement.scrollWidth > document.documentElement.clientWidth || (app?.scrollWidth ?? 0) > (app?.clientWidth ?? 0),
     };
   });
-  ok('Splashlogo 360×640 (1 driver): hero logo >= 300px square, unclipped bezel, Clock 14 below logo, picker + Add fully visible above fold',
-    logo360.w >= 300 && Math.abs(logo360.w - logo360.h) <= 1 && logo360.left >= 0 && logo360.right <= 360 && logo360.top >= 0
-    && logo360.tSize >= 24 && logo360.titleBelow && logo360.tileBottom <= 640 && logo360.addBottom <= 640 && !logo360.overX, logo360);
+  ok('Splashart 360×640 (1 driver): 9:16 artwork background loaded, no DOM logo/title duplication, frosted picker + Add in lower dark zone (~58%) above fold, zero overflow',
+    art360.bgColor === 'rgb(2, 6, 20)' && /splash-1080x1920\.webp/.test(art360.bgImage)
+    && art360.bgSize === 'cover' && art360.bgRepeat === 'no-repeat' && art360.bgPos === '50% 0%' && art360.imgOk
+    && !art360.dupLogo && !art360.dupTitle
+    && art360.bodyTopPct >= 56 && art360.bodyTopPct <= 62
+    && art360.tileBg === 'rgba(6, 17, 46, 0.72)' && art360.tileBorder === 'rgba(145, 228, 255, 0.22)'
+    && art360.tileBottom <= 640 && art360.addBottom <= 640 && !art360.overX, art360);
   await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 150);
 
   await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 200);
@@ -735,27 +802,29 @@ await section(async () => {
   await p.setViewportSize({ width: 360, height: 640 }); await wait(p, 600);
   const splash2 = await p.evaluate(() => {
     const app = document.querySelector('.splash-app');
-    const fr = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
+    const cs = app ? getComputedStyle(app) : null;
+    const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
     const tiles = [...document.querySelectorAll('button.driver-tile')];
     const addBtn = document.querySelector('button[data-add-driver="1"]');
     const maxScroll = Math.max(0, (app?.scrollHeight ?? 0) - (app?.clientHeight ?? 0));
     if (app) app.scrollTop = maxScroll;
     const addAfterScroll = addBtn?.getBoundingClientRect();
     if (app) app.scrollTop = 0;
-    const frAtTop = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
     return {
       drivers: tiles.map((b) => b.getAttribute('data-driver-name')),
       hasAdd: !!addBtn,
+      bgImage: cs?.backgroundImage ?? '',
+      dupLogo: !!document.querySelector('img.splash-logo, img[src="./icon-512.png"]'),
+      dupTitle: !!document.querySelector('h1.splash-title, .splash-brand'),
+      bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
       over: document.documentElement.scrollWidth > document.documentElement.clientWidth || (app?.scrollWidth ?? 0) > (app?.clientWidth ?? 0),
-      logoW: fr?.width ?? 0,
-      logoH: fr?.height ?? 0,
-      bezelOk: !!frAtTop && frAtTop.left >= 0 && frAtTop.right <= 360 && frAtTop.top >= 0,
       addReachable: !!addAfterScroll && addAfterScroll.top >= 0 && addAfterScroll.bottom <= 640,
     };
   });
-  ok('Drivers1 2-driver splash at 360×640: lists both drivers + "Add a driver" with zero horizontal overflow, hero logo >= 300px, and full reachability',
+  ok('Splashart 2-driver splash at 360×640: lists both drivers + "Add a driver" in lower zone (~58%) over 9:16 artwork with no DOM duplication, zero overflow, and full reachability',
     JSON.stringify(splash2.drivers) === '["Marcus","Elena"]' && splash2.hasAdd && !splash2.over
-    && splash2.logoW >= 300 && Math.abs(splash2.logoW - splash2.logoH) <= 1 && splash2.bezelOk && splash2.addReachable, splash2);
+    && /splash-1080x1920\.webp/.test(splash2.bgImage) && !splash2.dupLogo && !splash2.dupTitle
+    && splash2.bodyTopPct >= 56 && splash2.bodyTopPct <= 62 && splash2.addReachable, splash2);
   await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 150);
 
   await p.locator('button.driver-tile[data-driver-name="Marcus"]').click(); await wait(p, 200);
@@ -908,7 +977,7 @@ await section(async () => {
   await ctx.close();
 });
 
-/* ---------------- Splashlogo: 4 drivers across Night / Day / Wind-down at 360x640 ---------------- */
+/* ---------------- Splashart: 4 drivers across Night / Day / Wind-down at 360x640 & 412x915 ---------------- */
 await section(async () => {
   for (const theme of ['night', 'day', 'winddown']) {
     const baseVault = JSON.parse(wrapDriverSeed({ ...base, theme, themeChosen: true }, 'Marcus'));
@@ -926,10 +995,42 @@ await section(async () => {
     OPEN.add(ctx);
     await p.goto(ORIGIN + '/', { waitUntil: 'load' });
     await p.waitForSelector('[data-splash-screen="1"]', { timeout: 5000 });
-    await wait(p, 650);
+    await wait(p, 500);
     const res4 = await p.evaluate(() => {
       const app = document.querySelector('.splash-app');
-      const fr = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
+      const cs = app ? getComputedStyle(app) : null;
+      const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
+      const tiles = [...document.querySelectorAll('button.driver-tile')];
+      const tileCs = tiles[0] ? getComputedStyle(tiles[0]) : null;
+      const nameCs = tiles[0]?.querySelector('b') ? getComputedStyle(tiles[0].querySelector('b')) : null;
+      const addBtn = document.querySelector('button[data-add-driver="1"]');
+      const maxScroll = Math.max(0, (app?.scrollHeight ?? 0) - (app?.clientHeight ?? 0));
+      if (app) app.scrollTop = maxScroll;
+      const lastTileR = tiles[tiles.length - 1]?.getBoundingClientRect();
+      const addR = addBtn?.getBoundingClientRect();
+      if (app) app.scrollTop = 0;
+      return {
+        theme: document.documentElement.dataset.theme ?? 'night',
+        count: tiles.length,
+        bgColor: cs?.backgroundColor ?? '',
+        bgImage: cs?.backgroundImage ?? '',
+        dupLogo: !!document.querySelector('img.splash-logo, img[src="./icon-512.png"]'),
+        dupTitle: !!document.querySelector('h1.splash-title, .splash-brand'),
+        bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
+        tileBg: tileCs?.backgroundColor ?? '',
+        tileBorder: tileCs?.borderTopColor ?? '',
+        nameColor: nameCs?.color ?? '',
+        overX: document.documentElement.scrollWidth > document.documentElement.clientWidth || (app?.scrollWidth ?? 0) > (app?.clientWidth ?? 0),
+        lastReachable: !!lastTileR && lastTileR.top >= 0 && lastTileR.bottom <= 640,
+        addReachable: !!addR && addR.top >= 0 && addR.bottom <= 640,
+      };
+    });
+    // Also verify 412x915 (19.5:9) with 4 drivers before tapping Sofia.
+    await p.setViewportSize({ width: 412, height: 915 }); await wait(p, 180);
+    const res4Tall = await p.evaluate(() => {
+      const app = document.querySelector('.splash-app');
+      const cs = app ? getComputedStyle(app) : null;
+      const bodyR = document.querySelector('.splash-body')?.getBoundingClientRect();
       const tiles = [...document.querySelectorAll('button.driver-tile')];
       const addBtn = document.querySelector('button[data-add-driver="1"]');
       const maxScroll = Math.max(0, (app?.scrollHeight ?? 0) - (app?.clientHeight ?? 0));
@@ -937,25 +1038,29 @@ await section(async () => {
       const lastTileR = tiles[tiles.length - 1]?.getBoundingClientRect();
       const addR = addBtn?.getBoundingClientRect();
       if (app) app.scrollTop = 0;
-      const frTop = document.querySelector('.splash-logo-frame')?.getBoundingClientRect();
       return {
-        theme: document.documentElement.dataset.theme ?? 'night',
-        count: tiles.length,
-        w: fr?.width ?? 0, h: fr?.height ?? 0,
-        bezelOk: !!frTop && frTop.left >= 0 && frTop.right <= 360 && frTop.top >= 0,
+        bgImage: cs?.backgroundImage ?? '',
+        bodyTopPct: bodyR ? +(bodyR.top / window.innerHeight * 100).toFixed(1) : 0,
         overX: document.documentElement.scrollWidth > document.documentElement.clientWidth || (app?.scrollWidth ?? 0) > (app?.clientWidth ?? 0),
-        lastReachable: !!lastTileR && lastTileR.top >= 0 && lastTileR.bottom <= 640,
-        addReachable: !!addR && addR.top >= 0 && addR.bottom <= 640,
+        lastReachable: !!lastTileR && lastTileR.top >= 0 && lastTileR.bottom <= 915,
+        addReachable: !!addR && addR.top >= 0 && addR.bottom <= 915,
       };
     });
-    // Also prove 4th driver tile is genuinely interactive on 360x640 by tapping Sofia -> opens PIN screen.
+    await p.setViewportSize({ width: 360, height: 640 }); await wait(p, 150);
+    // Prove 4th driver tile is genuinely interactive on 360x640 by tapping Sofia -> opens PIN screen.
     await p.locator('button.driver-tile[data-driver-name="Sofia"]').scrollIntoViewIfNeeded();
     await p.locator('button.driver-tile[data-driver-name="Sofia"]').click();
     await wait(p, 200);
     const openedPin = await p.evaluate(() => !!document.querySelector('[data-pin-screen="1"]') && /Sofia/.test(document.querySelector('.splash-flow-title')?.textContent ?? ''));
-    ok(`Splashlogo 360×640 (${theme}, 4 drivers): hero logo >= 300px, unclipped bezel, zero overflow, 4th driver + Add reachable & interactive`,
-      res4.count === 4 && res4.w >= 300 && Math.abs(res4.w - res4.h) <= 1 && res4.bezelOk && !res4.overX && res4.lastReachable && res4.addReachable && openedPin && p.errors.length === 0,
-      { res4, openedPin, errors: p.errors });
+    ok(`Splashart 360×640 & 412×915 (${theme}, 4 drivers): artwork background, frosted light-on-dark tiles, lower-zone placement, zero overflow, 4th driver + Add reachable & interactive`,
+      res4.count === 4 && res4.bgColor === 'rgb(2, 6, 20)' && /splash-1080x1920\.webp/.test(res4.bgImage)
+      && !res4.dupLogo && !res4.dupTitle && res4.bodyTopPct >= 56 && res4.bodyTopPct <= 62
+      && res4.tileBg === 'rgba(6, 17, 46, 0.72)' && res4.tileBorder === 'rgba(145, 228, 255, 0.22)' && res4.nameColor === 'rgb(238, 245, 253)'
+      && !res4.overX && res4.lastReachable && res4.addReachable
+      && /splash-1179x2556\.webp/.test(res4Tall.bgImage) && res4Tall.bodyTopPct >= 48 && res4Tall.bodyTopPct <= 55
+      && !res4Tall.overX && res4Tall.lastReachable && res4Tall.addReachable
+      && openedPin && p.errors.length === 0,
+      { res4, res4Tall, openedPin, errors: p.errors });
     await ctx.close();
   }
 });

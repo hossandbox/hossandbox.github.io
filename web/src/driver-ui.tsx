@@ -518,18 +518,10 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
   };
 
   return (
-    <div class="app splash-app" data-splash-screen="1">
+    <div class="app splash-app" data-splash-screen="1" data-splash-view={view.kind} aria-label="Clock 14">
       <div class="splash-shell" inert={showRegDisc && !regDiscClosing ? true : undefined}>
         {view.kind === 'picker' && (
           <div class="splash-picker">
-            <div class="splash-brand">
-              <div class="splash-logo-frame">
-                <img class="splash-logo" src="./icon-512.png" alt="Clock 14 logo" width={512} height={512} />
-              </div>
-              <h1 class="splash-title">Clock 14</h1>
-              <p class="splash-sub muted">HOS What-If Planner</p>
-            </div>
-
             <div class="splash-body">
               {drivers.length > 0 ? (
                 <section class="splash-drivers" aria-label="Registered drivers">

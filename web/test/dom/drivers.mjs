@@ -183,15 +183,25 @@ const pin = async (name, fn) => {
 render(h(App, {}), root);
 await sleep(80);
 
-/* ---- DR1: Fresh launch renders startup splash with logo, Clock 14, and Add a driver ---- */
-await pin('DR1. fresh launch (0 drivers): startup splash shows logo, Clock 14, empty prompt, and Add a driver; app chrome hidden', async () => {
+/* ---- DR1: Fresh launch renders artwork startup splash (no DOM logo/title duplication), empty prompt, Add a driver, and SW/CSS asset contract ---- */
+await pin('DR1. fresh launch (0 drivers): artwork splash renders with no DOM logo/title duplication, empty prompt, Add a driver, hidden app chrome, and valid CSS/SW assets', async () => {
+  const { existsSync, readFileSync } = await import('node:fs');
   const splash = all((n) => n.attributes?.['data-splash-screen'] === '1')[0];
-  const logo = all((n) => n.localName === 'img' && n.attributes?.src === './icon-512.png')[0];
-  const h1 = all((n) => n.localName === 'h1' && n.textContent.trim() === 'Clock 14')[0];
+  const dupLogo = all((n) => n.localName === 'img' && (n.attributes?.src === './icon-512.png' || /\bsplash-logo\b/.test(n.attributes?.class ?? ''))).length;
+  const dupTitle = all((n) => n.localName === 'h1' && (/\bsplash-title\b/.test(n.attributes?.class ?? '') || n.textContent.trim() === 'Clock 14')).length;
+  const emptyCard = all((n) => n.attributes?.['data-driver-empty'] === '1')[0];
   const addBtn = all((n) => n.localName === 'button' && n.attributes?.['data-add-driver'] === '1')[0];
   const hasAppChrome = all((n) => n.localName === 'nav' || n.localName === 'header').length > 0;
-  return (!!splash && !!logo && !!h1 && !!addBtn && !hasAppChrome)
-    || JSON.stringify({ splash: !!splash, logo: !!logo, h1: !!h1, addBtn: !!addBtn, hasAppChrome });
+  const css = readFileSync('public/styles.css', 'utf8');
+  const sw = readFileSync('public/sw.js', 'utf8');
+  const cssOk = /\.splash-app\s*\{[\s\S]*?background-color:\s*#020614[\s\S]*?url\('\.\/splash-1080x1920\.webp'\)[\s\S]*?background-position:\s*top center[\s\S]*?background-repeat:\s*no-repeat[\s\S]*?background-size:\s*cover/.test(css)
+    && css.includes("url('./splash-1179x2556.webp')")
+    && /min-height:\s*100dvh/.test(css);
+  const assetsOk = existsSync('public/splash-1080x1920.webp') && existsSync('public/splash-1179x2556.webp');
+  const swOk = sw.includes("'./splash-1080x1920.webp'") && sw.includes("'./splash-1179x2556.webp'") && /r\.ok && sameOrigin/.test(sw);
+  return (!!splash && splash.attributes?.['data-splash-view'] === 'picker' && splash.attributes?.['aria-label'] === 'Clock 14'
+    && dupLogo === 0 && dupTitle === 0 && !!emptyCard && !!addBtn && !hasAppChrome && cssOk && assetsOk && swOk)
+    || JSON.stringify({ splash: !!splash, view: splash?.attributes?.['data-splash-view'], dupLogo, dupTitle, emptyCard: !!emptyCard, addBtn: !!addBtn, hasAppChrome, cssOk, assetsOk, swOk });
 });
 
 /* ---- DR2: Registration requires disclosure acceptance + 4-digit PIN + 2 recovery questions; P4(c) secret/salt scan ---- */

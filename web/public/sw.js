@@ -1,5 +1,6 @@
 const CACHE = 'clock14-' + (self.__BUILD__ || 'dev');
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png',
+  './splash-1080x1920.webp', './splash-1179x2556.webp',
   './fonts/atkinson-next-400.woff2', './fonts/atkinson-next-600.woff2', './fonts/atkinson-next-700.woff2', './fonts/atkinson-next-800.woff2',
   './fonts/atkinson-mono-500.woff2', './fonts/atkinson-mono-700.woff2'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())); });

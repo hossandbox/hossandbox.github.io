@@ -45,7 +45,7 @@ try { ({ chromium } = createRequire(PW.endsWith('/') ? PW : PW + '/')('playwrigh
 if (!existsSync(CHROME)) { console.log(`LAYOUT LANE CANNOT RUN: no browser at ${CHROME}`); process.exit(2); }
 if (!existsSync(join(ROOT, 'app.js'))) { console.log(`LAYOUT LANE CANNOT RUN: no built app under ${ROOT} (run npm run build first)`); process.exit(2); }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.map': 'application/json', '.woff2': 'font/woff2' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.map': 'application/json', '.woff2': 'font/woff2' };
 const server = createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p === '/') p = '/index.html';
