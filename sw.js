@@ -1,4 +1,4 @@
-const CACHE = 'clock14-' + ("2026-11-26 22:56");
+const CACHE = 'clock14-' + ("2026-11-27 06:10");
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png',
   './splash-1080x1920.webp', './splash-1179x2556.webp',
   './fonts/atkinson-next-400.woff2', './fonts/atkinson-next-600.woff2', './fonts/atkinson-next-700.woff2', './fonts/atkinson-next-800.woff2',

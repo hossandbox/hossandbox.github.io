@@ -3445,3 +3445,133 @@ html[data-theme="winddown"] {
   }
   .pin-dot { transition: none; }
 }
+
+/* ===================================================================================
+   Receptionfix additions: Stay unlocked, ELD refresh & staleness, Log scratchpad,
+   Email bug report, Settings backup nudge, iOS install warning, Inline clock override.
+   =================================================================================== */
+.stay-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--muted);
+  background: var(--screen);
+  border: 1px solid var(--line);
+}
+.stay-pill.is-on {
+  color: var(--good);
+  border-color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, var(--screen));
+}
+.splash-stay-card label.check {
+  align-items: flex-start;
+  margin: 0;
+}
+.eld-stale-chip {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  border-radius: var(--r-12);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.eld-stale-chip span { flex: 1; min-width: 0; }
+.eld-stale-chip.is-never,
+.eld-stale-chip.is-stale {
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--line));
+  background: var(--tint-warn);
+}
+.eld-stale-chip.is-fresh {
+  min-height: 36px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--line);
+}
+.eld-shot-cta {
+  margin: 6px 0 8px;
+}
+.log-scratchpad-note {
+  margin: 0 0 6px;
+  text-align: center;
+}
+.bug-email-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  margin-bottom: 6px;
+}
+.backup-nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--r-12);
+  background: var(--tint-accent);
+  border: 1px solid color-mix(in srgb, var(--ring) 45%, var(--line));
+}
+.backup-nudge-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ios-install-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0;
+}
+.clock-override-bar {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-12);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clock-override-bar.is-custom {
+  border-color: color-mix(in srgb, var(--ring) 60%, var(--line));
+  background: var(--tint-accent);
+}
+.clock-override-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.clock-override-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.clock-override-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
