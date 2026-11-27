@@ -2960,21 +2960,70 @@ html[data-theme="winddown"] {
 }
 
 /* ===================================================================================
-   DRIVERS1: MULTI-DRIVER STARTUP SPLASH, PIN KEYPAD, REGISTRATION & DRIVER CHROME
-   Uses 100% existing Day / Night / Wind-down design tokens and the 48/56/64 touch scale.
+   DRIVERS1 / SPLASHART: MULTI-DRIVER STARTUP SPLASH, PIN KEYPAD, REGISTRATION & DRIVER CHROME
+   Splash uses Lorico's full-screen obsidian artwork with dark frosted lower-zone controls;
+   post-unlock driver chrome keeps 100% existing Day / Night / Wind-down design tokens.
    =================================================================================== */
 .splash-app {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: #020614;
+  background-image: url('./splash-1080x1920.webp');
+  background-position: top center;
+  background-repeat: no-repeat;
+  background-size: cover;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  /* Scoped obsidian palette over the dark splash artwork so Day / Night / Wind-down all read clearly */
+  color-scheme: dark;
+  --bg: #020614;
+  --panel: #0b1a3c;
+  --panel2: #11244d;
+  --surface-hi: #102352;
+  --line: rgba(145, 228, 255, 0.22);
+  --tick: #3c5f9e;
+  --text: #eef5fd;
+  --muted: #b0c4e0;
+  --link: #8fdcf4;
+  --accent: #5ccbea;
+  --accent-solid: #1857c8;
+  --on-accent: #ffffff;
+  --ring: #5ccbea;
+  --screen: rgba(6, 17, 46, 0.72);
+  --key-hi: rgba(14, 33, 76, 0.80);
+  --key-lo: rgba(6, 17, 46, 0.84);
+  --key-base: #020614;
+  --edge-hi: rgba(145, 228, 255, 0.14);
+  --drop: rgba(0, 4, 20, 0.62);
+  --glow: rgba(92, 203, 234, 0.5);
+  --good: #3ee08f;
+  --warn: #ffbd4a;
+  --bad: #ff6b6b;
+  --tint-warn: rgba(255, 189, 74, 0.18);
+  --tint-bad: rgba(255, 107, 107, 0.18);
+  --tint-accent: rgba(92, 203, 234, 0.14);
+  color: var(--text);
+}
+.splash-app[data-splash-view]:not([data-splash-view="picker"]) {
+  background-image: linear-gradient(180deg, rgba(2, 6, 20, 0.90) 0%, rgba(2, 6, 20, 0.96) 100%), url('./splash-1080x1920.webp');
+}
+@media (max-aspect-ratio: 1/2) {
+  .splash-app {
+    background-image: url('./splash-1179x2556.webp');
+  }
+  .splash-app[data-splash-view]:not([data-splash-view="picker"]) {
+    background-image: linear-gradient(180deg, rgba(2, 6, 20, 0.90) 0%, rgba(2, 6, 20, 0.96) 100%), url('./splash-1179x2556.webp');
+  }
 }
 .splash-shell {
   width: 100%;
   max-width: 460px;
   min-height: 100%;
   margin: 0 auto;
-  padding: calc(clamp(12px, 2vh, 20px) + env(safe-area-inset-top)) 16px calc(clamp(16px, 2.8vh, 28px) + env(safe-area-inset-bottom));
-  padding: calc(clamp(12px, 2dvh, 20px) + env(safe-area-inset-top)) 16px calc(clamp(16px, 2.8dvh, 28px) + env(safe-area-inset-bottom));
+  padding: 0 16px calc(clamp(16px, 2.8vh, 28px) + env(safe-area-inset-bottom));
+  padding: 0 16px calc(clamp(16px, 2.8dvh, 28px) + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
 }
@@ -2982,58 +3031,17 @@ html[data-theme="winddown"] {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  justify-content: safe center;
-  gap: clamp(12px, 2.4vh, 20px);
-  gap: clamp(12px, 2.4dvh, 20px);
-  padding: 2px 0;
+  justify-content: flex-start;
+  /* Lower dark obsidian zone below the glowing horizon: ~58% on 9:16, ~50% on 19.5:9 */
+  padding-top: 58vh;
+  padding-top: 58dvh;
+  padding-bottom: 4px;
 }
-.splash-brand {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 4px;
-}
-.splash-logo-frame {
-  --logo-r: clamp(28px, 9vw, 40px);
-  width: clamp(160px, min(100%, 52vh), 420px);
-  width: clamp(160px, min(100%, 52dvh), 420px);
-  aspect-ratio: 1 / 1;
-  flex-shrink: 0;
-  border-radius: var(--logo-r);
-  padding: 4px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ring) 42%, var(--line)), var(--line));
-  box-shadow: 0 14px 32px var(--drop), 0 0 22px -6px var(--glow);
-  opacity: 0;
-  transform: scale(0.94);
-  animation: splash-logo-in 520ms var(--ease-enter) both;
-}
-.splash-logo {
-  width: 100%;
-  height: 100%;
-  display: block;
-  border-radius: calc(var(--logo-r) - 4px);
-  object-fit: cover;
-}
-.splash-title {
-  margin: 6px 0 0;
-  font-size: clamp(26px, 7.6vw, 36px);
-  font-weight: 800;
-  letter-spacing: -.025em;
-  line-height: 1.06;
-  color: var(--text);
-  opacity: 0;
-  animation: splash-fade-in 380ms var(--ease-enter) 100ms both;
-}
-.splash-sub {
-  margin: 0;
-  font-size: clamp(12px, 3.3vw, 14px);
-  font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  opacity: 0;
-  animation: splash-fade-in 380ms var(--ease-enter) 140ms both;
+@media (max-aspect-ratio: 1/2) {
+  .splash-picker {
+    padding-top: 50vh;
+    padding-top: 50dvh;
+  }
 }
 .splash-body {
   display: flex;
@@ -3041,7 +3049,7 @@ html[data-theme="winddown"] {
   gap: clamp(10px, 1.8vh, 14px);
   gap: clamp(10px, 1.8dvh, 14px);
   opacity: 0;
-  animation: splash-fade-in 380ms var(--ease-enter) 180ms both;
+  animation: splash-fade-in 320ms var(--ease-enter) 80ms both;
 }
 .splash-sec-head {
   display: flex;
@@ -3077,12 +3085,14 @@ html[data-theme="winddown"] {
   align-items: center;
   gap: var(--s-12);
   text-align: left;
-  background: linear-gradient(180deg, var(--surface-hi), var(--panel));
-  border: 1px solid color-mix(in srgb, var(--ring) 22%, var(--line));
-  box-shadow: inset 0 1px 0 var(--edge-hi), 0 6px 16px var(--drop);
+  background: rgba(6, 17, 46, 0.72);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop);
 }
 .driver-tile.needs-setup {
-  border-color: color-mix(in srgb, var(--warn) 65%, var(--line));
+  border-color: color-mix(in srgb, var(--warn) 65%, rgba(145, 228, 255, 0.22));
 }
 .driver-avatar {
   width: 44px;
@@ -3151,6 +3161,17 @@ html[data-theme="winddown"] {
 .splash-empty {
   text-align: center;
 }
+.splash-app .card,
+.splash-app .splash-empty {
+  background: rgba(6, 17, 46, 0.72);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 8px 20px var(--drop);
+}
+.splash-app .card.good {
+  border-color: color-mix(in srgb, var(--good) 50%, rgba(145, 228, 255, 0.22));
+}
 .splash-empty-title {
   margin: 0 0 4px;
   font-size: 17px;
@@ -3161,6 +3182,28 @@ html[data-theme="winddown"] {
   justify-content: center;
   gap: var(--s-8);
 }
+.splash-app .splash-add-btn:not(.primary) {
+  background: rgba(6, 17, 46, 0.72);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 6px 16px var(--drop);
+}
+.splash-app .splash-add-btn.primary {
+  border: 1px solid rgba(145, 228, 255, 0.34);
+}
+.splash-app label input,
+.splash-app label select {
+  background: rgba(6, 17, 46, 0.72);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  color: var(--text);
+}
+.splash-app .modal {
+  background: #0b1a3c;
+  border: 1px solid rgba(145, 228, 255, 0.28);
+  color: var(--text);
+}
 
 /* ---- PIN / Registration / Recovery flows inside Splash ---- */
 .splash-flow {
@@ -3168,6 +3211,8 @@ html[data-theme="winddown"] {
   display: flex;
   flex-direction: column;
   gap: var(--s-14);
+  padding-top: calc(clamp(12px, 2vh, 20px) + env(safe-area-inset-top));
+  padding-top: calc(clamp(12px, 2dvh, 20px) + env(safe-area-inset-top));
   animation: splash-fade-in 220ms var(--ease-enter) both;
 }
 .splash-flow-head {
@@ -3180,8 +3225,8 @@ html[data-theme="winddown"] {
 .splash-step-pill {
   padding: 4px 10px;
   border-radius: var(--r-pill);
-  border: 1px solid var(--line);
-  background: var(--screen);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  background: rgba(6, 17, 46, 0.72);
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
@@ -3273,8 +3318,10 @@ html[data-theme="winddown"] {
   align-items: center;
   justify-content: center;
   padding: 0;
-  background: linear-gradient(180deg, var(--key-hi), var(--key-lo));
-  border: 1px solid var(--line);
+  background: rgba(6, 17, 46, 0.72);
+  border: 1px solid rgba(145, 228, 255, 0.22);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--key-base), 0 6px 12px var(--drop);
 }
 .pin-key-util {
@@ -3368,10 +3415,6 @@ html[data-theme="winddown"] {
   gap: var(--s-8);
 }
 
-@keyframes splash-logo-in {
-  from { opacity: 0; transform: scale(0.94); }
-  to { opacity: 1; transform: scale(1); }
-}
 @keyframes splash-fade-in {
   from { opacity: 0; transform: translate3d(0, 6px, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
@@ -3383,6 +3426,9 @@ html[data-theme="winddown"] {
 }
 
 @media (max-height: 700px) {
+  .splash-body { gap: 8px; }
+  .driver-list { gap: 8px; }
+  .driver-tile { min-height: 60px; padding: 10px 14px; }
   .pin-key { min-height: 54px; font-size: 22px; }
 }
 @media (max-width: 360px) {
@@ -3390,9 +3436,6 @@ html[data-theme="winddown"] {
   .pin-pad { max-width: 288px; gap: var(--s-8); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .splash-logo-frame,
-  .splash-title,
-  .splash-sub,
   .splash-body,
   .splash-flow,
   .pin-dots.is-shake {
