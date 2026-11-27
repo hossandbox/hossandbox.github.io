@@ -175,6 +175,14 @@ export interface State {
    * actually logs it as. Device setting, like the alerts: not exported.
    */
   breakPresets: BreakPreset[];
+  /** Epoch minute when the driver last completed an ELD drift check or ELD seed/OCR refresh (receptionfix, additive). */
+  lastEldCheckAt?: number | null;
+  /** Epoch minute when the driver last saved a JSON export (receptionfix, additive). */
+  lastExportAt?: number | null;
+  /** Epoch minute when the 30-day backup nudge in Settings was dismissed (receptionfix, additive). */
+  exportNudgeDismissedAt?: number | null;
+  /** One-time dismissal of the iOS Safari non-standalone home-screen reminder (receptionfix, additive). */
+  iosInstallNoteDismissed?: boolean;
 }
 
 const KEY = 'hos-sandbox-v1';
@@ -349,6 +357,7 @@ export const INITIAL_STATE: State = {
   disclaimerAcked: false, seededAt: null, dayCloses: [],
   tzChosen: false, zoneAck: null, nowOverride: null, tab: 'now', planReturn: 'plan', alertsOn: true, keepAwake: true, drivingView: true, darkDriveAtNight: true, speakAlerts: false, speechAsked: false, speakAskOpen: false,
   breakPresets: DEFAULT_BREAKS.map((b) => ({ ...b })),
+  lastEldCheckAt: null, lastExportAt: null, exportNudgeDismissedAt: null, iosInstallNoteDismissed: false,
 };
 
 /**
@@ -569,6 +578,11 @@ function parseSavedObj(rawObj: unknown): State {
     // The ELD seed stamp counts only as a real minute: a save from before patch 8 (missing) and
     // a damaged one (anything else) both read as never seeded.
     if (typeof s.seededAt !== 'number' || !Number.isFinite(s.seededAt)) merged.seededAt = null;
+    // Additive receptionfix stamps: absent/invalid always fall back to null / false (today's behavior).
+    merged.lastEldCheckAt = typeof s.lastEldCheckAt === 'number' && Number.isFinite(s.lastEldCheckAt) && dateable(s.lastEldCheckAt) ? s.lastEldCheckAt : null;
+    merged.lastExportAt = typeof s.lastExportAt === 'number' && Number.isFinite(s.lastExportAt) && dateable(s.lastExportAt) ? s.lastExportAt : null;
+    merged.exportNudgeDismissedAt = typeof s.exportNudgeDismissedAt === 'number' && Number.isFinite(s.exportNudgeDismissedAt) && dateable(s.exportNudgeDismissedAt) ? s.exportNudgeDismissedAt : null;
+    merged.iosInstallNoteDismissed = s.iosInstallNoteDismissed === true;
     // The day-close bookmarks (patch 13) are labels, not record — a damaged one costs the label,
     // never the log. The list is rebuilt from its well-formed entries only, the same treatment
     // the other self-sanitising fields get above; usableSave never has to reject a whole save
@@ -614,6 +628,10 @@ export interface DriverVault {
   activeId: string | null;
   order: string[];
   profiles: Record<string, DriverProfile>;
+  /** Additive device-level opt-in (receptionfix): skip PIN on cold launch ONLY when exactly one driver is registered. */
+  stayUnlocked?: boolean;
+  /** Additive device-level one-time dismissal for iOS Safari non-standalone home-screen warning. */
+  iosInstallNoteDismissed?: boolean;
 }
 
 /** Public summary for UI rendering — never exposes PIN/recovery hashes or another driver's logs. */
@@ -666,14 +684,16 @@ function sanitizeVault(raw: unknown): DriverVault | null {
   if (!isObj(raw) || raw.v !== 1 || !isObj(raw.profiles)) return null;
   const profiles: Record<string, DriverProfile> = {};
   const rawOrder = Array.isArray(raw.order) ? raw.order : Object.keys(raw.profiles);
+  const rawProfileKeys = Object.keys(raw.profiles);
   const order: string[] = [];
   const seen = new Set<string>();
+  let droppedProfile = false;
   for (const idVal of rawOrder) {
-    if (typeof idVal !== 'string' || !idVal.trim() || seen.has(idVal)) continue;
+    if (typeof idVal !== 'string' || !idVal.trim() || seen.has(idVal)) { droppedProfile = true; continue; }
     const pRaw = (raw.profiles as Record<string, unknown>)[idVal];
-    if (!isObj(pRaw)) continue;
+    if (!isObj(pRaw)) { droppedProfile = true; continue; }
     const name = typeof pRaw.name === 'string' ? sanitizeDriverName(pRaw.name) : '';
-    if (!name) continue;
+    if (!name) { droppedProfile = true; continue; }
     const pin = isValidHashedSecret(pRaw.pin) ? pRaw.pin : null;
     const recovery = Array.isArray(pRaw.recovery) ? pRaw.recovery.filter(isValidRecoveryItem) : [];
     const migrated = pRaw.migrated === true;
@@ -696,7 +716,18 @@ function sanitizeVault(raw: unknown): DriverVault | null {
     seen.add(idVal);
   }
   const activeId = typeof raw.activeId === 'string' && profiles[raw.activeId] ? raw.activeId : (order[0] ?? null);
-  return { v: 1, activeId, order, profiles };
+  // B2 (receptionfix2): stayUnlocked is valid ONLY on an intact single-driver vault.
+  // If any malformed profile was dropped or the vault had 2+ profiles, clear stayUnlocked so
+  // partial corruption can never silently re-arm no-PIN auto-unlock.
+  const keepStayUnlocked = raw.stayUnlocked === true && !droppedProfile && order.length === 1 && rawProfileKeys.length === 1;
+  return {
+    v: 1,
+    activeId,
+    order,
+    profiles,
+    ...(keepStayUnlocked ? { stayUnlocked: true } : {}),
+    ...(raw.iosInstallNoteDismissed === true ? { iosInstallNoteDismissed: true } : {}),
+  };
 }
 
 function bootFromStorage(): { state: State; vault: DriverVault } {
@@ -768,11 +799,24 @@ function bootFromStorage(): { state: State; vault: DriverVault } {
   }
 }
 
+/** Brief splash artwork moment (ms) before landing unlocked when stayUnlocked applies to a solo driver. */
+export const STAY_UNLOCKED_SPLASH_MS = 420;
+
+function computePendingAutoUnlock(v: DriverVault): string | null {
+  if (v.stayUnlocked !== true || v.order.length !== 1) return null;
+  const soloId = v.order[0];
+  const prof = v.profiles[soloId];
+  if (!prof || prof.needsSetup || !prof.pin) return null;
+  return soloId;
+}
+
 const booted = bootFromStorage();
 let state: State = booted.state;
 let vault: DriverVault = booted.vault;
-/** In-memory only: NEVER persisted so every cold launch always shows the startup splash + picker. */
+/** In-memory only: NEVER persisted so cold launch gates unless stayUnlocked applies to a single driver. */
 let unlockedDriverId: string | null = null;
+/** Cold-launch solo-driver auto-unlock target (cleared on unlock or explicit Switch driver lock). */
+let pendingAutoUnlockId: string | null = computePendingAutoUnlock(vault);
 /** Test-harness only bypass for pre-existing post-login DOM/SSR unit suites. Never set in production. */
 let driverGateBypassForTest = false;
 let sessionHooks: DriverSessionHooks | null = null;
@@ -797,6 +841,50 @@ export function isDriverGateOpen(): boolean {
 
 export function getUnlockedDriverId(): string | null {
   return unlockedDriverId;
+}
+
+export function getStayUnlocked(): boolean {
+  return vault.stayUnlocked === true;
+}
+
+export function isStayUnlockedEffective(): boolean {
+  return computePendingAutoUnlock(vault) !== null;
+}
+
+export function getPendingAutoUnlockId(): string | null {
+  return driverGateBypassForTest ? null : pendingAutoUnlockId;
+}
+
+/** Finish a cold-launch stayUnlocked solo-driver transition after the brief splash artwork beat. */
+export function completeAutoUnlock(): boolean {
+  const id = pendingAutoUnlockId;
+  if (!id || computePendingAutoUnlock(vault) !== id) {
+    pendingAutoUnlockId = null;
+    notifyDrivers();
+    return false;
+  }
+  pendingAutoUnlockId = null;
+  activateDriverProfile(id);
+  return true;
+}
+
+export function getIosInstallNoteDismissed(): boolean {
+  return vault.iosInstallNoteDismissed === true || state.iosInstallNoteDismissed === true;
+}
+
+export function dismissIosInstallNote(): void {
+  vault.iosInstallNoteDismissed = true;
+  if (unlockedDriverId !== null || driverGateBypassForTest) {
+    setState({ iosInstallNoteDismissed: true });
+  } else {
+    state = { ...state, iosInstallNoteDismissed: true };
+    if (vault.activeId && vault.profiles[vault.activeId]) {
+      vault.profiles[vault.activeId].data = extractDriverData(state);
+    }
+    persistNow(state);
+    subs.forEach((f) => f());
+  }
+  notifyDrivers();
 }
 
 export function getActiveDriverName(): string {
@@ -825,6 +913,8 @@ export function useDrivers(): {
   unlockedId: string | null;
   activeName: string;
   drivers: DriverSummary[];
+  stayUnlocked: boolean;
+  pendingAutoUnlockId: string | null;
 } {
   const [, force] = useState(0);
   useEffect(() => {
@@ -837,6 +927,8 @@ export function useDrivers(): {
     unlockedId: unlockedDriverId,
     activeName: getActiveDriverName(),
     drivers: getDriverSummaries(),
+    stayUnlocked: getStayUnlocked(),
+    pendingAutoUnlockId: getPendingAutoUnlockId(),
   };
 }
 
@@ -975,18 +1067,20 @@ export function lockDriverSession() {
     persistNow(state);
   }
   unlockedDriverId = null;
+  pendingAutoUnlockId = null;
   sessionHooks?.writeUndoRaw(null);
   try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
   sessionHooks?.onSessionReset();
   notifyDrivers();
 }
 
-/** Re-read storage as if the app were cold-launched (always starts locked on splash). */
+/** Re-read storage as if the app were cold-launched (honors stayUnlocked for a single driver, else gates on splash). */
 export function reloadVaultFromStorage() {
   const next = bootFromStorage();
   state = next.state;
   vault = next.vault;
   unlockedDriverId = null;
+  pendingAutoUnlockId = computePendingAutoUnlock(vault);
   authCooldowns.clear();
   sessionHooks?.onSessionReset();
   subs.forEach((f) => f());
@@ -1020,6 +1114,7 @@ export function registerDriver(input: {
   pin: string;
   recovery: RecoveryInput[];
   disclaimerAcked: boolean;
+  stayUnlocked?: boolean;
 }): DriverActionResult {
   const name = sanitizeDriverName(input.name);
   if (!name) return { ok: false, error: 'Enter a driver name.' };
@@ -1060,6 +1155,13 @@ export function registerDriver(input: {
     simRaw: null,
   };
   vault.order.push(id);
+  if (vault.order.length > 1) {
+    // B2 (receptionfix2): reaching 2+ drivers clears stayUnlocked on disk so it cannot silently re-arm later.
+    delete vault.stayUnlocked;
+  } else if (input.stayUnlocked === true) {
+    vault.stayUnlocked = true;
+  }
+  pendingAutoUnlockId = null;
   activateDriverProfile(id);
   return { ok: true, id };
 }
@@ -1070,6 +1172,7 @@ export function completeLegacyDriverSetup(driverId: string, input: {
   pin: string;
   recovery: RecoveryInput[];
   disclaimerAcked: boolean;
+  stayUnlocked?: boolean;
 }): DriverActionResult {
   const prof = vault.profiles[driverId];
   if (!prof) return { ok: false, error: 'Driver profile not found.' };
@@ -1089,9 +1192,82 @@ export function completeLegacyDriverSetup(driverId: string, input: {
   prof.needsSetup = false;
   prof.data.disclaimerAcked = true;
   if (!prof.disclaimerAckedAt) prof.disclaimerAckedAt = Date.now();
+  if (vault.order.length > 1) {
+    // B2 (receptionfix2): reaching 2+ drivers clears stayUnlocked on disk.
+    delete vault.stayUnlocked;
+  } else if (input.stayUnlocked === true) {
+    vault.stayUnlocked = true;
+  }
+  pendingAutoUnlockId = null;
   // Legacy undo was already captured at boot in bootFromStorage(); never read live UNDO_KEY
   // here because another driver may have been active before a cold restart.
   activateDriverProfile(driverId);
+  return { ok: true, id: driverId };
+}
+
+/**
+ * Shared PIN check for sensitive in-session driver actions (N2: receptionfix2).
+ * Enforces the same per-driver escalating `pin` cooldown as unlockDriverWithPin:
+ * refuses during cooldown, refuses malformed input without recording a miss,
+ * records misses on wrong PINs, and clears the PIN cooldown on success.
+ */
+function verifyDriverPinWithCooldown(
+  driverId: string,
+  prof: DriverProfile,
+  currentPin: string | undefined,
+  missingMsg = 'Enter your 4-digit PIN.',
+): DriverActionResult | null {
+  if (!prof.pin) return { ok: false, error: 'Driver not found.' };
+  const waitMs = getAuthCooldownRemainingMs(driverId, 'pin');
+  if (waitMs > 0) {
+    return {
+      ok: false,
+      error: `Too many wrong PINs. Wait ${formatCooldownWait(waitMs)} before trying again.`,
+      cooldownMs: waitMs,
+    };
+  }
+  if (!currentPin || !isValidPin(currentPin)) {
+    return { ok: false, error: missingMsg };
+  }
+  if (!verifyHashedSecret(currentPin, prof.pin)) {
+    const cooldownMs = recordAuthMiss(driverId, 'pin');
+    if (cooldownMs > 0) {
+      return {
+        ok: false,
+        error: `Too many wrong PINs. Wait ${formatCooldownWait(cooldownMs)} before trying again.`,
+        cooldownMs,
+      };
+    }
+    return { ok: false, error: 'Current PIN is wrong.' };
+  }
+  clearAuthCooldown(driverId, 'pin');
+  return null;
+}
+
+/**
+ * Enable or disable device-level Stay unlocked (receptionfix).
+ * Enabling is a security-reducing action and ALWAYS requires verifying the driver's 4-digit PIN,
+ * and is refused at the store level unless exactly one driver is on the phone (B2).
+ * Disabling never requires a PIN.
+ */
+export function setStayUnlocked(driverId: string, enabled: boolean, currentPin?: string): DriverActionResult {
+  if (!enabled) {
+    delete vault.stayUnlocked;
+    pendingAutoUnlockId = null;
+    persistNow(state);
+    notifyDrivers();
+    return { ok: true, id: driverId };
+  }
+  if (vault.order.length !== 1) {
+    return { ok: false, error: 'Stay unlocked turns off while more than one driver is on this phone.' };
+  }
+  const prof = vault.profiles[driverId];
+  if (!prof || !prof.pin || prof.needsSetup) return { ok: false, error: 'Driver not found.' };
+  const pinErr = verifyDriverPinWithCooldown(driverId, prof, currentPin, 'Enter your 4-digit PIN to turn on Stay unlocked.');
+  if (pinErr) return pinErr;
+  vault.stayUnlocked = true;
+  persistNow(state);
+  notifyDrivers();
   return { ok: true, id: driverId };
 }
 
@@ -1182,11 +1358,12 @@ export function resetDriverPinWithRecovery(driverId: string, answers: string[], 
   return { ok: true, id: driverId };
 }
 
-/** Change the signed-in driver's PIN after confirming their current PIN. */
+/** Change the signed-in driver's PIN after confirming their current PIN (shares per-driver PIN cooldown). */
 export function changeDriverPin(driverId: string, currentPin: string, newPin: string): DriverActionResult {
   const prof = vault.profiles[driverId];
   if (!prof || !prof.pin) return { ok: false, error: 'Driver not found.' };
-  if (!verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  const pinErr = verifyDriverPinWithCooldown(driverId, prof, currentPin, 'Enter your current 4-digit PIN.');
+  if (pinErr) return pinErr;
   if (!isValidPin(newPin)) return { ok: false, error: 'New PIN must be exactly 4 digits.' };
   prof.pin = createHashedSecret(newPin);
   persistNow(state);
@@ -1207,11 +1384,12 @@ export function renameDriver(driverId: string, newName: string): DriverActionRes
   return { ok: true, id: driverId };
 }
 
-/** Update the signed-in driver's reminder questions after verifying their current PIN. */
+/** Update the signed-in driver's reminder questions after verifying their current PIN (shares per-driver PIN cooldown). */
 export function updateDriverRecovery(driverId: string, currentPin: string, recovery: RecoveryInput[]): DriverActionResult {
   const prof = vault.profiles[driverId];
   if (!prof || !prof.pin) return { ok: false, error: 'Driver not found.' };
-  if (!verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  const pinErr = verifyDriverPinWithCooldown(driverId, prof, currentPin, 'Enter your current 4-digit PIN.');
+  if (pinErr) return pinErr;
   const recErr = validateRecoveryInputs(recovery);
   if (recErr) return { ok: false, error: recErr };
   prof.recovery = recovery.map(createRecoveryItem);
@@ -1220,15 +1398,20 @@ export function updateDriverRecovery(driverId: string, currentPin: string, recov
   return { ok: true, id: driverId };
 }
 
-/** Permanently delete ONE driver profile (after verifying their PIN) and lock back to the splash. Other drivers stay untouched. */
+/** Permanently delete ONE driver profile (after verifying their PIN with cooldown) and lock back to the splash. Other drivers stay untouched. */
 export function removeDriverProfile(driverId: string, currentPin: string): DriverActionResult {
   const prof = vault.profiles[driverId];
   if (!prof) return { ok: false, error: 'Driver not found.' };
-  if (prof.pin && !verifyHashedSecret(currentPin, prof.pin)) return { ok: false, error: 'Current PIN is wrong.' };
+  if (prof.pin) {
+    const pinErr = verifyDriverPinWithCooldown(driverId, prof, currentPin, 'Enter your 4-digit PIN to remove this driver.');
+    if (pinErr) return pinErr;
+  }
   clearAuthCooldown(driverId);
   delete vault.profiles[driverId];
   vault.order = vault.order.filter((id) => id !== driverId);
   unlockedDriverId = null;
+  pendingAutoUnlockId = null;
+  if (vault.order.length === 0) delete vault.stayUnlocked;
   sessionHooks?.writeUndoRaw(null);
   try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
   sessionHooks?.onSessionReset();
@@ -1259,7 +1442,7 @@ export function removeDriverProfile(driverId: string, currentPin: string): Drive
  */
 function snapshotSimRecord(s: State): string | null {
   try {
-    const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, tzChosen: s.tzChosen, weekPlan: s.weekPlan };
+    const record = { segments: s.segments, tentative: s.tentative, current: s.current, dayCloses: s.dayCloses, historyAcknowledged: s.historyAcknowledged, config: s.config, seededAt: s.seededAt, lastEldCheckAt: s.lastEldCheckAt ?? null, tzChosen: s.tzChosen, weekPlan: s.weekPlan };
     const raw = JSON.stringify({ record });
     localStorage.setItem(SIM_KEY, raw);
     return raw;
@@ -1910,6 +2093,8 @@ export function applyImportedState(cur: State, d: Partial<State>): Partial<State
     split: 'split' in d ? sanitizeSplit(d.split, cur.split) : cur.split,
     loadCheck: 'loadCheck' in d ? sanitizeLoadCheck(d.loadCheck, cur.loadCheck) : cur.loadCheck,
     weekPlan: 'weekPlan' in d ? sanitizeWeekPlan(d.weekPlan, cur.weekPlan) : cur.weekPlan,
+    // N3 (receptionfix2): an imported log must not inherit "ELD-checked just now" from the prior record.
+    lastEldCheckAt: null,
   };
 }
 
@@ -2497,7 +2682,7 @@ export function applyEldSeed(s: State, input: EldClocks, now: number): { patch: 
     patch: {
       segments: seed.segments, tentative: [],
       current: { status: 'OFF', since: now, createdAt: stamp() },
-      seededAt: now, tab: 'now',
+      seededAt: now, lastEldCheckAt: now, tab: 'now',
     },
   };
 }

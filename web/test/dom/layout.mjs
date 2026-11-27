@@ -1195,8 +1195,8 @@ for (const [W, H] of SIZES) {
       over: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
-  ok(`${tag} (g) More Data card has Days (default 14, >=56px) and "Log summary (PDF)" with zero overflow and no report initially`,
-    init.hasExport && init.daysVal === '14' && init.daysH >= 56 && init.btnText === 'Log summary (PDF)' && init.btnH >= 56 && !init.hasReport && !init.over,
+  ok(`${tag} (g) More Data card has Days (default 14, >=56px) and "Planning worksheet (PDF)" with zero overflow and no report initially`,
+    init.hasExport && init.daysVal === '14' && init.daysH >= 56 && init.btnText === 'Planning worksheet (PDF)' && init.btnH >= 56 && !init.hasReport && !init.over,
     JSON.stringify(init));
 
   // Invalid inputs: 0, blank, 500 -> visible feedback, no report, no window.print()
@@ -1237,12 +1237,13 @@ for (const [W, H] of SIZES) {
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(80);
   const print8 = await page.evaluate(() => {
-    const DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+    const DISC = 'PERSONAL HOS PLANNING WORKSHEET — NOT A LEGAL RODS / NOT AN ELD';
     const rep = document.querySelector('.print-report');
     const secs = [...rep.querySelectorAll('section.pr-day')];
     const head = rep.querySelector('header.pr-head');
     const foot = rep.querySelector('footer.pr-foot');
     const cellsOf = (sec) => [...sec.querySelectorAll('.daytotals > div')].map((d) => d.textContent.trim());
+    const fn = rep.getAttribute('data-worksheet-filename') || '';
     return {
       repDisplay: getComputedStyle(rep).display,
       appHeaderDisplay: getComputedStyle(document.querySelector('header.top')).display,
@@ -1256,18 +1257,19 @@ for (const [W, H] of SIZES) {
       day1Totals: cellsOf(secs[1]),
       day2NoDuty: /no-duty day/i.test(secs[2].textContent) && secs[2].querySelectorAll('li.pr-entry').length === 0,
       day3Totals: cellsOf(secs[3]),
-      headOk: head.textContent.includes('Clock 14') && head.textContent.includes('8 days') && head.textContent.includes('Generated') && head.textContent.includes(DISC),
+      headOk: head.textContent.includes('Clock 14') && head.textContent.includes('Planning Worksheet') && head.textContent.includes('8 days') && head.textContent.includes('Generated') && head.textContent.includes(DISC),
       footOk: foot.textContent.includes(DISC),
+      filenameOk: /^clock14-worksheet-[a-z0-9-]+-\d{8}\.pdf$/.test(fn),
     };
   });
-  ok(`${tag} (g) @media print hides app chrome and shows 8-day report (newest-first) with visible Grids, exact engine totals, no-duty day, and header+footer disclaimers`,
+  ok(`${tag} (g) @media print hides app chrome and shows 8-day worksheet (newest-first) with visible Grids, exact engine totals, no-duty day, worksheet filename, and header+footer disclaimers`,
     print8.repDisplay === 'block' && print8.appHeaderDisplay === 'none' && print8.appNavDisplay === 'none' && print8.appMainDisplay === 'none' && print8.appSettingsDisplay === 'none'
     && print8.secCount === 8 && print8.svgCount === 8 && print8.newestFirst
     && JSON.stringify(print8.day0Totals) === JSON.stringify(['Driving2h 00m', 'On Duty2h 00m', 'Off Duty1h 00m', 'Sleeper0m'])
     && JSON.stringify(print8.day1Totals) === JSON.stringify(['Driving5h 00m', 'On Duty1h 00m', 'Off Duty0m', 'Sleeper10h 00m'])
     && print8.day2NoDuty
     && JSON.stringify(print8.day3Totals) === JSON.stringify(['Driving4h 00m', 'On Duty0m', 'Off Duty8h 00m', 'Sleeper0m'])
-    && print8.headOk && print8.footOk,
+    && print8.headOk && print8.footOk && print8.filenameOk,
     JSON.stringify(print8));
 
   // Switch back to screen, request 14 days

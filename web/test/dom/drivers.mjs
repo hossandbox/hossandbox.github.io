@@ -765,10 +765,524 @@ await pin('DR11. legacy migration with disclaimerAcked=false requires disclosure
   return !!dlg || 'expected disclosure popup for legacy user with disclaimerAcked=false';
 });
 
+/* ---- DR12: Receptionfix Scope 1 — registration stayUnlocked toggle (default OFF), 2nd-driver notice, DriverSettingsCard PIN gate ---- */
+await pin('DR12. receptionfix Scope 1: registration stayUnlocked toggle (default OFF), 2nd-driver notice, Settings PIN-to-enable & no-PIN-to-disable, PIN invariants intact', async () => {
+  mem.clear();
+  reloadVaultFromStorage();
+  await sleep(60);
+
+  // Register Driver 1 via UI wizard and verify step 4 has Stay unlocked checkbox (default OFF).
+  await clickNode(all((n) => n.localName === 'button' && n.attributes?.['data-add-driver'] === '1')[0]);
+  await setInput(all((n) => n.localName === 'input' && n.attributes?.['data-reg-name'] === '1')[0], 'Alex');
+  fire(all((n) => n.localName === 'form')[0], 'submit');
+  await sleep(40);
+  await clickNode(all((n) => n.localName === 'button' && /Understood/.test(n.textContent))[0]);
+  await sleep(240);
+  await enterPin('1357');
+  await enterPin('1357');
+  const regStayBox = all((n) => n.localName === 'input' && n.attributes?.['data-reg-stay-unlocked'] === '1')[0];
+  const defaultOff = !!regStayBox && !regStayBox.checked;
+  if (!defaultOff) return `expected stayUnlocked checkbox default OFF on reg step 4: found=${!!regStayBox}, checked=${regStayBox?.checked}`;
+  await setInput(all((n) => n.localName === 'input' && n.attributes?.['data-rec-a'] === '0')[0], 'Peterbilt');
+  await setInput(all((n) => n.localName === 'input' && n.attributes?.['data-rec-a'] === '1')[0], 'Memphis');
+  fire(all((n) => n.localName === 'form')[0], 'submit');
+  await sleep(60);
+  if (A.getStayUnlocked()) return 'stayUnlocked should remain OFF when checkbox left unchecked';
+
+  // Open Settings -> DriverSettingsCard: try turning Stay unlocked ON with wrong PIN -> fails; right PIN -> succeeds; turning OFF -> no PIN needed!
+  setState({ tab: 'settings' });
+  await sleep(40);
+  const toggleBtn = () => all((n) => n.localName === 'button' && n.attributes?.['data-stay-unlocked-toggle'] === '1')[0];
+  await clickNode(toggleBtn());
+  const pinInput = all((n) => n.localName === 'input' && n.attributes?.['data-stay-unlocked-pin'] === '1')[0];
+  if (!pinInput) return 'clicking Stay unlocked while OFF did not open PIN confirmation form';
+  await setInput(pinInput, '9999');
+  fire(all((n) => n.localName === 'form' && n.attributes?.['data-stay-unlocked-form'] === '1')[0], 'submit');
+  await sleep(30);
+  const wrongErr = all((n) => n.attributes?.['data-stay-unlocked-err'] === '1')[0];
+  if (!wrongErr || A.getStayUnlocked()) return 'wrong PIN should fail to enable stayUnlocked';
+
+  await setInput(pinInput, '1357');
+  fire(all((n) => n.localName === 'form' && n.attributes?.['data-stay-unlocked-form'] === '1')[0], 'submit');
+  await sleep(40);
+  if (!A.getStayUnlocked()) return 'valid PIN failed to enable stayUnlocked';
+
+  // Verify PIN invariants remain required regardless of stayUnlocked (change PIN, recovery, erase).
+  const drvId = S.getUnlockedDriverId();
+  const badChg = S.changeDriverPin(drvId, '0000', '2222');
+  const badRec = S.updateDriverRecovery(drvId, '0000', [
+    { qId: D.REMINDER_QUESTIONS[0].id, question: D.REMINDER_QUESTIONS[0].text, answer: 'Mack' },
+    { qId: D.REMINDER_QUESTIONS[1].id, question: D.REMINDER_QUESTIONS[1].text, answer: 'Tulsa' },
+  ]);
+  const badRem = S.removeDriverProfile(drvId, '0000');
+  if (badChg.ok || badRec.ok || badRem.ok) return 'PIN invariants must stay enforced even when stayUnlocked is ON';
+
+  // Lock to splash, click Add a driver -> MUST show the 2nd-driver notice while stayUnlocked is ON!
+  lockDriverSession();
+  await sleep(40);
+  await clickNode(all((n) => n.localName === 'button' && n.attributes?.['data-add-driver'] === '1')[0]);
+  const notice1 = all((n) => n.attributes?.['data-stay-unlocked-multi-notice'] === '1')[0];
+  if (!notice1 || !/Stay unlocked turns off while more than one driver is on this phone\./.test(notice1.textContent)) {
+    return `missing 2nd-driver notice during registration: ${notice1?.textContent ?? 'none'}`;
+  }
+  // Cancel back, unlock Alex, and disable Stay unlocked WITHOUT entering any PIN.
+  await clickNode(all((n) => n.localName === 'button' && /Cancel/.test(n.textContent))[0]);
+  await sleep(30);
+  unlockDriverWithPin(drvId, '1357');
+  await sleep(40);
+  setState({ tab: 'settings' });
+  await sleep(40);
+  await clickNode(toggleBtn());
+  await sleep(30);
+  if (A.getStayUnlocked()) return 'disabling stayUnlocked should succeed immediately without PIN';
+  return true;
+});
+
+/* ---- DR13: Receptionfix Scope 2 — ELD screenshot refresh CTA (fresh & active), staleness chip, and Plan inline clock overrides ---- */
+await pin('DR13. receptionfix Scope 2: Refresh from ELD screenshot on Now (fresh & active), lastEldCheckAt staleness chip, and Plan tool inline overrides', async () => {
+  const T = Math.floor(Tms / 60000);
+  setState({ tab: 'now', segments: [], tentative: [], current: null, seededAt: null, lastEldCheckAt: null, nowOverride: T });
+  await sleep(40);
+  const nowPg = () => all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
+  const shotFresh = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0];
+  const staleNever = all((n) => n.attributes?.['data-eld-staleness'] === 'never', nowPg())[0];
+  if (!shotFresh || !/Refresh from ELD screenshot/.test(shotFresh.textContent)) return 'missing Refresh from ELD screenshot in fresh state';
+  if (!staleNever || !/Not checked against your ELD yet — tap to check/.test(staleNever.textContent)) return `wrong never-checked chip: ${staleNever?.textContent}`;
+
+  // Clicking Refresh from ELD screenshot opens the existing eldocr QuickStartSheet directly.
+  await clickNode(shotFresh);
+  const chooseShot = all((n) => n.attributes?.['data-eld-choose-shot'] === '1')[0];
+  const fileIn = all((n) => n.localName === 'input' && n.attributes?.type === 'file' && n.attributes?.accept === 'image/*')[0];
+  if (!chooseShot || !fileIn) return 'Refresh from ELD screenshot did not launch existing eldocr QuickStartSheet';
+  A.openSheet(null);
+  await sleep(30);
+
+  // Active state: seed via applyEldSeed -> sets lastEldCheckAt=T -> fresh chip; advance 6h -> stale chip -> tap opens DriftSheet.
+  const seed = S.applyEldSeed(getState(), { driveLeft: 480, windowLeft: 600, breakDueIn: 300, cycleLeft: 3000 }, T);
+  setState(seed.patch);
+  await sleep(40);
+  const shotActive = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0];
+  const staleFresh = all((n) => n.attributes?.['data-eld-staleness'] === 'fresh', nowPg())[0];
+  if (!shotActive || !staleFresh || !/ELD-checked/.test(staleFresh.textContent)) {
+    return `active state CTA/fresh chip failed: cta=${!!shotActive}, fresh=${staleFresh?.textContent}`;
+  }
+  setState({ nowOverride: T + 360 }); // 6 hours later
+  await sleep(40);
+  const stale6h = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
+  if (!stale6h || !/Checked against your ELD 6h ago — tap to check/.test(stale6h.textContent)) {
+    return `expected 6h stale chip, got: ${stale6h?.textContent}`;
+  }
+  // N4 (receptionfix2): >= 24h formats as <N>d ago (not e.g. 312h ago).
+  setState({ nowOverride: T + 24 * 60 });
+  await sleep(30);
+  const stale1d = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
+  if (!stale1d || !/Checked against your ELD 1d ago — tap to check/.test(stale1d.textContent)) {
+    return `expected 1d stale chip, got: ${stale1d?.textContent}`;
+  }
+  setState({ nowOverride: T + 312 * 60 });
+  await sleep(30);
+  const stale13d = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
+  if (!stale13d || !/Checked against your ELD 13d ago — tap to check/.test(stale13d.textContent) || /312h ago/.test(stale13d.textContent)) {
+    return `expected 13d stale chip, got: ${stale13d?.textContent}`;
+  }
+  setState({ nowOverride: T + 360 });
+  await sleep(30);
+  const stale6hAgain = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
+  await clickNode(stale6hAgain);
+  const driftTitle = all((n) => n.localName === 'h2' && /Check against my ELD/.test(n.textContent))[0];
+  if (!driftTitle) return 'tapping staleness chip did not open DriftSheet';
+  A.openSheet(null);
+  await sleep(30);
+
+  // Verify inline clock override in MilesTab changes calculation without mutating the live log.
+  const segsBefore = JSON.stringify(getState().segments);
+  A.openMilesPlanner(true);
+  setState({ tab: 'plan' });
+  await sleep(40);
+  const toggleMiles = all((n) => n.attributes?.['data-clock-override-toggle'] === 'miles')[0];
+  if (!toggleMiles) return 'MilesTab missing inline clock override';
+  await clickNode(toggleMiles);
+  const cycH = all((n) => n.attributes?.['data-co-h'] === 'cycleLeft')[0];
+  const cycM = all((n) => n.attributes?.['data-co-m'] === 'cycleLeft')[0];
+  await setInput(cycH, '10');
+  await setInput(cycM, '0');
+  fire(all((n) => n.attributes?.['data-clock-override-form'] === 'miles')[0], 'submit');
+  await sleep(40);
+  const activeBar = all((n) => n.attributes?.['data-clock-override'] === 'miles' && n.attributes?.['data-clock-override-active'] === '1')[0];
+  const segsAfter = JSON.stringify(getState().segments);
+  A.openMilesPlanner(false);
+  if (!activeBar || segsBefore !== segsAfter) return 'inline clock override failed or mutated live log';
+  return true;
+});
+
+/* ---- DR14: Receptionfix Scope 3 & Scope 4 — worksheet PDF, Log scratchpad, Email bug report, Scope line, persist(), backup nudge, iOS warning ---- */
+await pin('DR14. receptionfix Scopes 3 & 4: worksheet PDF rename/header/filename, Log scratchpad, Email bug report, About scope line, persist(), backup nudge, iOS Safari warning', async () => {
+  const T = Math.floor(Tms / 60000);
+  setState({ tab: 'log', nowOverride: T, lastExportAt: null, exportNudgeDismissedAt: null });
+  await sleep(40);
+  const logPg = all((n) => n.localName === 'section' && /\bpage-log\b/.test(n.attributes?.class ?? ''))[0];
+  const scratch = all((n) => n.attributes?.['data-log-scratchpad'] === '1', logPg)[0];
+  if (!scratch || scratch.textContent.trim() !== 'Planning scratchpad — your ELD is the record.') {
+    return `missing or wrong Log scratchpad line: ${scratch?.textContent}`;
+  }
+
+  // Settings: Email a bug report (above GitHub), Scope line (leaving legal disclaimer verbatim), Planning worksheet (PDF), backup nudge.
+  setState({ tab: 'settings' });
+  await sleep(40);
+  const setPg = all((n) => n.localName === 'section' && /\bpage-settings\b/.test(n.attributes?.class ?? ''))[0];
+  const emailBtn = all((n) => n.localName === 'a' && n.attributes?.['data-bug-email'] === '1', setPg)[0];
+  const href = emailBtn?.attributes?.href ?? '';
+  const emailOk = !!emailBtn
+    && emailBtn.textContent.trim() === 'Email a bug report'
+    && href.startsWith('mailto:lorico.estrellado@gmail.com?')
+    && href.includes('subject=Clock%2014%20bug%20report')
+    && decodeURIComponent(href).includes('Build:')
+    && decodeURIComponent(href).includes('Theme:')
+    && decodeURIComponent(href).includes('Clocks:');
+  if (!emailOk) return `email bug report link invalid: ${href}`;
+
+  const scopeEl = all((n) => n.attributes?.['data-scope-line'] === '1', setPg)[0];
+  const scopeOk = scopeEl?.textContent.trim() === 'Clock 14 covers US interstate property-carrying rules (49 CFR 395). No Canada, oilfield, or passenger-carrying rules.';
+  if (!scopeOk) return `wrong About scope line: ${scopeEl?.textContent}`;
+
+  const pdfBtn = all((n) => n.localName === 'button' && /\bpdf-btn\b/.test(n.attributes?.class ?? ''), setPg)[0];
+  if (pdfBtn?.textContent.trim() !== 'Planning worksheet (PDF)') return `PDF button not renamed: ${pdfBtn?.textContent}`;
+  const fn = A.worksheetFilename('Alex', new Date(2026, 10, 26, 10, 0).getTime());
+  if (fn !== 'clock14-worksheet-alex-20261126.pdf') return `wrong worksheet filename: ${fn}`;
+  if (A.PDF_DISCLAIMER !== 'PERSONAL HOS PLANNING WORKSHEET — NOT A LEGAL RODS / NOT AN ELD') return `wrong worksheet header: ${A.PDF_DISCLAIMER}`;
+
+  // Backup nudge: visible because driver has data and never exported; dismiss hides for 30 days; reappears at +30d; clears on export.
+  const nudge0 = all((n) => n.attributes?.['data-backup-nudge'] === '1', setPg)[0];
+  if (!nudge0 || !/Back up your clocks — save a copy somewhere safe\./.test(nudge0.textContent)) return 'backup nudge missing with data + no export';
+  await clickNode(all((n) => n.attributes?.['data-backup-nudge-dismiss'] === '1', setPg)[0]);
+  await sleep(30);
+  if (all((n) => n.attributes?.['data-backup-nudge'] === '1', setPg).length !== 0) return 'backup nudge did not dismiss';
+  if (A.shouldShowBackupNudge(getState(), T + 29 * 1440)) return 'backup nudge reappeared before 30 days';
+  if (!A.shouldShowBackupNudge(getState(), T + 30 * 1440)) return 'backup nudge did not reappear after 30 days';
+  const origDoc = globalThis.document;
+  const origCreate = URL.createObjectURL;
+  const origRevoke = URL.revokeObjectURL;
+  try {
+    globalThis.document = { ...origDoc, createElement: () => ({ href: '', download: '', click() {} }) };
+    URL.createObjectURL = () => 'blob:test';
+    URL.revokeObjectURL = () => {};
+    A.downloadExport(getState());
+  } finally {
+    globalThis.document = origDoc;
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+  }
+  if (A.shouldShowBackupNudge(getState(), T + 29 * 1440)) return 'backup nudge did not clear after export';
+  if (!A.shouldShowBackupNudge(getState(), T + 30 * 1440)) return 'backup nudge did not reappear 30 days after export';
+
+  // Scope 4 item 16: navigator.storage.persist() called silently when available, no-op when unsupported.
+  let persistCalls = 0;
+  const origNav = globalThis.navigator;
+  A.resetPersistentStorageGuardForTest();
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { ...origNav, storage: { persist: () => { persistCalls++; return Promise.resolve(true); } } },
+    configurable: true, writable: true,
+  });
+  A.requestPersistentStorage();
+  A.resetPersistentStorageGuardForTest();
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'no-storage' }, configurable: true, writable: true });
+  A.requestPersistentStorage(); // must be silent no-op
+  Object.defineProperty(globalThis, 'navigator', { value: origNav, configurable: true, writable: true });
+  if (persistCalls !== 1) return `expected persist() called once, got ${persistCalls}`;
+
+  // Scope 4 item 18: iOS Safari non-standalone detection + one-time dismissible warning on Now.
+  const iosUa = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+  const detBrowser = A.isIosSafariNonStandalone({ userAgent: iosUa, standalone: false }, { matchMedia: () => ({ matches: false }) });
+  const detStandalone = A.isIosSafariNonStandalone({ userAgent: iosUa, standalone: true }, { matchMedia: () => ({ matches: true }) });
+  const detChrome = A.isIosSafariNonStandalone({ userAgent: iosUa.replace('Version/18.0', 'CriOS/120.0'), standalone: false }, { matchMedia: () => ({ matches: false }) });
+  if (!detBrowser || detStandalone || detChrome) return `iOS detection wrong: ${JSON.stringify({ detBrowser, detStandalone, detChrome })}`;
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: iosUa, standalone: false, vibrate: () => false }, configurable: true, writable: true });
+  setState({ tab: 'now', iosInstallNoteDismissed: false });
+  await sleep(40);
+  const iosNote = all((n) => n.attributes?.['data-ios-install-note'] === '1')[0];
+  if (!iosNote || !/Add Clock 14 to your Home Screen — Safari can erase web-app data after about a week\./.test(iosNote.textContent)) {
+    Object.defineProperty(globalThis, 'navigator', { value: origNav, configurable: true, writable: true });
+    return `iOS warning missing on Now: ${iosNote?.textContent}`;
+  }
+  await clickNode(all((n) => n.attributes?.['data-ios-install-dismiss'] === '1')[0]);
+  await sleep(30);
+  const iosGone = all((n) => n.attributes?.['data-ios-install-note'] === '1').length === 0 && A.getIosInstallNoteDismissed();
+  Object.defineProperty(globalThis, 'navigator', { value: origNav, configurable: true, writable: true });
+  if (!iosGone) return 'iOS warning did not persist dismissal';
+
+  // N3 (receptionfix2): applyImportedState clears lastEldCheckAt so imported logs do not inherit "ELD-checked just now".
+  setState({ tab: 'now', nowOverride: T, lastEldCheckAt: T });
+  await sleep(30);
+  const impPatch = S.applyImportedState(getState(), { segments: [{ status: 'OFF', start: T - 600, end: T, createdAt: 1 }] });
+  if (impPatch.lastEldCheckAt !== null) return `applyImportedState must clear lastEldCheckAt, got: ${impPatch.lastEldCheckAt}`;
+  setState(impPatch);
+  await sleep(40);
+  const nowPg2 = all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
+  const staleAfterImp = all((n) => n.attributes?.['data-eld-staleness'] === 'never', nowPg2)[0];
+  if (!staleAfterImp) return 'imported log still rendered ELD-checked instead of never-checked';
+  return true;
+});
+
+/* ---- DR15 (B1): Non-destructive ELD screenshot flow on populated log, override form clean, forced reseed confirm + Undo ---- */
+await pin('DR15. B1: populated log Now screenshot CTA routes to DriftSheet (prefilled, log byte-unchanged), override has no reseed button, forced reseed confirms & Undo restores all rows', async () => {
+  const T = Math.floor(Tms / 60000);
+  // Build a populated 6-day / 18-row log + active Off Duty (matching Opus B1 reproduction).
+  const segs18 = [];
+  for (let d = 6; d >= 1; d--) {
+    const day0 = T - d * 1440;
+    segs18.push(
+      { status: 'OFF', start: day0, end: day0 + 600, note: `Rest D${d}`, createdAt: d * 10 + 1 },
+      { status: 'D', start: day0 + 600, end: day0 + 900, note: `Drive D${d}`, createdAt: d * 10 + 2 },
+      { status: 'ON', start: day0 + 900, end: day0 + 960, note: `Dock D${d}`, createdAt: d * 10 + 3 },
+    );
+  }
+  const origCurrent = { status: 'OFF', since: T - 120, createdAt: 999 };
+  setState({ tab: 'now', segments: segs18, tentative: [], current: origCurrent, seededAt: null, lastEldCheckAt: null, nowOverride: T });
+  await sleep(40);
+  const logSnapBefore = JSON.stringify({ segments: getState().segments, tentative: getState().tentative, current: getState().current });
+
+  // (i) Populated log -> Now CTA -> routes into DriftSheet screenshot mode, NOT QuickStartSheet.
+  const nowPg = all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
+  const shotCta = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg)[0];
+  if (!shotCta) return 'missing Refresh from ELD screenshot CTA on populated Now';
+  await clickNode(shotCta);
+  await sleep(40);
+  if (A.currentSheet()?.kind !== 'drift') return `populated Now CTA should open drift sheet, got: ${JSON.stringify(A.currentSheet())}`;
+  const driftWrap = all((n) => n.attributes?.['data-drift-sheet'] === '1' && n.attributes?.['data-drift-shot-mode'] === '1')[0];
+  if (!driftWrap) return 'DriftSheet did not open in screenshot mode';
+
+  // Simulate OCR reading "Drive 11:00" cleanly -> prefills drift boxes -> Compare stamps lastEldCheckAt with log byte-unchanged!
+  const fakeWords = [
+    { text: 'Drive', confidence: 96, bbox: { x0: 10, y0: 10, x1: 80, y1: 30 } },
+    { text: '11:00', confidence: 96, bbox: { x0: 100, y0: 10, x1: 160, y1: 30 } },
+  ];
+  A.setEldOcrOverrideForTest(async () => ({ auto: fakeWords, sparse: fakeWords }));
+  try {
+    const fileIn = all((n) => n.localName === 'input' && n.attributes?.type === 'file', driftWrap)[0];
+    if (!fileIn) return 'DriftSheet screenshot mode missing file input';
+    fileIn.files = [{}];
+    fire(fileIn, 'change');
+    await sleep(60);
+    const hIn = all((n) => n.attributes?.['data-drift-h'] === '1')[0];
+    const mIn = all((n) => n.attributes?.['data-drift-m'] === '1')[0];
+    const hVal = hIn?.attributes?.value ?? hIn?.value;
+    const mVal = mIn?.attributes?.value ?? mIn?.value;
+    if (String(hVal) !== '11' || String(mVal) !== '0') {
+      return `OCR did not prefill DriftSheet drive-left boxes: h=${hVal}, m=${mVal}`;
+    }
+    const cmpBtn = all((n) => n.attributes?.['data-drift-compare'] === '1')[0];
+    await clickNode(cmpBtn);
+    await sleep(40);
+    const logSnapAfterCompare = JSON.stringify({ segments: getState().segments, tentative: getState().tentative, current: getState().current });
+    if (logSnapAfterCompare !== logSnapBefore) return 'DriftSheet screenshot compare mutated populated log!';
+    if (getState().lastEldCheckAt !== T) return `DriftSheet compare did not stamp lastEldCheckAt: ${getState().lastEldCheckAt}`;
+
+    // Also test OCR failure -> stays in DriftSheet for manual entry, log byte-unchanged.
+    A.openSheet(null);
+    await sleep(40);
+    A.setEldOcrOverrideForTest(async () => { throw new Error('unreadable'); });
+    await clickNode(shotCta);
+    await sleep(40);
+    const driftWrap2 = all((n) => n.attributes?.['data-drift-sheet'] === '1' && n.attributes?.['data-drift-shot-mode'] === '1')[0];
+    const fileIn2 = all((n) => n.localName === 'input' && n.attributes?.type === 'file', driftWrap2)[0];
+    fileIn2.files = [{}];
+    fire(fileIn2, 'change');
+    await sleep(60);
+    const shotErr = all((n) => n.attributes?.['data-drift-shot-err'] === '1')[0];
+    const cmpBtn2 = all((n) => n.attributes?.['data-drift-compare'] === '1')[0];
+    if (!shotErr || !cmpBtn2 || A.currentSheet()?.kind !== 'drift') {
+      return `OCR failure did not land in DriftSheet for manual entry: err=${shotErr?.textContent}`;
+    }
+    if (JSON.stringify({ segments: getState().segments, tentative: getState().tentative, current: getState().current }) !== logSnapBefore) {
+      return 'OCR failure mutated populated log';
+    }
+  } finally {
+    A.setEldOcrOverrideForTest(null);
+    A.openSheet(null);
+    await sleep(40);
+  }
+
+  // (iii) InlineClockOverride form must NOT contain any Refresh / ELD screenshot / reseed button.
+  A.openMilesPlanner(true);
+  setState({ tab: 'plan' });
+  await sleep(40);
+  await clickNode(all((n) => n.attributes?.['data-clock-override-toggle'] === 'miles')[0]);
+  await sleep(30);
+  const coForm = all((n) => n.attributes?.['data-clock-override-form'] === 'miles')[0];
+  const badCoBtns = all((n) => n.localName === 'button' && /Refresh|screenshot|reseed/i.test(n.textContent), coForm);
+  A.openMilesPlanner(false);
+  await sleep(30);
+  if (badCoBtns.length > 0) return `InlineClockOverride still contains reseed/refresh button: ${badCoBtns.map((b) => b.textContent).join(', ')}`;
+
+  // (ii) Forced reseed path (QuickStartSheet) over populated 18-row log requires explicit confirmation, and Undo restores all 18 rows!
+  setState({ tab: 'now' });
+  await sleep(30);
+  A.openSheet({ kind: 'quickstart' });
+  await sleep(40);
+  const setClocksBtn = all((n) => n.localName === 'button' && /Set my clocks/.test(n.textContent))[0];
+  if (!setClocksBtn) return 'missing Set my clocks button in QuickStartSheet';
+  await clickNode(setClocksBtn);
+  await sleep(40);
+  // Log must still be untouched before confirming!
+  if (getState().segments.length !== 18) return `QuickStartSheet replaced log without confirmation (rows=${getState().segments.length})`;
+  const replaceBox = all((n) => n.attributes?.['data-qs-replace-confirm'] === '1')[0];
+  if (!replaceBox || !/This replaces your 18 logged rows/.test(replaceBox.textContent)) {
+    return `missing explicit row-count confirmation: ${replaceBox?.textContent ?? 'none'}`;
+  }
+  // Cancel -> keeps all 18 rows.
+  await clickNode(all((n) => n.attributes?.['data-qs-replace-cancel'] === '1')[0]);
+  await sleep(30);
+  if (getState().segments.length !== 18) return 'Keep my log did not preserve rows';
+
+  // Confirm replace -> seeds, then pick current status -> Undo STILL restores all 18 prior rows + prior current!
+  await clickNode(all((n) => n.localName === 'button' && /Set my clocks/.test(n.textContent))[0]);
+  await sleep(30);
+  await clickNode(all((n) => n.attributes?.['data-qs-replace-proceed'] === '1')[0]);
+  await sleep(40);
+  if (!currentUndo() || !/Replaced log from ELD clocks/.test(currentUndo().label)) {
+    return `reseed did not arm undoable(): ${JSON.stringify(currentUndo())}`;
+  }
+  // Tap Off Duty on the done screen ("What are you doing right now?")
+  const offBtn = all((n) => n.localName === 'button' && /Off Duty/.test(n.textContent) && n.parentNode?.attributes?.class === 'big-status')[0];
+  if (!offBtn) return 'missing status button on QuickStartSheet done screen';
+  await clickNode(offBtn);
+  await sleep(40);
+  if (!currentUndo()) return 'picking status after reseed cleared the reseed Undo!';
+  const undone = A.undoLast();
+  await sleep(30);
+  const logSnapAfterUndo = JSON.stringify({ segments: getState().segments, tentative: getState().tentative, current: getState().current });
+  if (!undone || logSnapAfterUndo !== logSnapBefore) {
+    return `Undo did not restore all 18 prior rows: undone=${undone}, rows=${getState().segments.length}`;
+  }
+  return true;
+});
+
+/* ---- DR16 (B2 store-level refusal + N2 Change PIN / Recovery / Remove shared PIN cooldown) ---- */
+await pin('DR16. B2+N2: setStayUnlocked refused at store level with 2 drivers; Change PIN form, updateDriverRecovery, and removeDriverProfile enforce shared escalating PIN cooldown', async () => {
+  // N2: Exercise the actual Change PIN form in Settings for active solo driver Alex (PIN '1357').
+  const alexId = S.getUnlockedDriverId();
+  if (!alexId) return 'expected unlocked driver Alex';
+  setState({ tab: 'settings' });
+  await sleep(40);
+  await clickNode(all((n) => n.attributes?.['data-change-pin-btn'] === '1')[0]);
+  await sleep(30);
+  const submitChangePin = async (cur, nw) => {
+    const curIn = all((n) => n.attributes?.['data-change-pin-cur'] === '1')[0];
+    const newIn = all((n) => n.attributes?.['data-change-pin-new'] === '1')[0];
+    const cfmIn = all((n) => n.attributes?.['data-change-pin-confirm'] === '1')[0];
+    await setInput(curIn, cur);
+    await setInput(newIn, nw);
+    await setInput(cfmIn, nw);
+    fire(all((n) => n.attributes?.['data-change-pin-form'] === '1')[0], 'submit');
+    await sleep(30);
+  };
+  for (let i = 0; i < 4; i++) {
+    await submitChangePin('0000', '2468');
+    if (getPinCooldownRemainingMs(alexId) !== 0) return `Change PIN triggered cooldown early at miss ${i + 1}`;
+  }
+  await submitChangePin('0000', '2468');
+  const cdErr = all((n) => n.attributes?.['data-change-pin-err'] === '1')[0];
+  if (getPinCooldownRemainingMs(alexId) !== 30_000 || !cdErr || !/Wait 30 seconds/i.test(cdErr.textContent)) {
+    return `5th wrong PIN in Change PIN form did not trigger 30s cooldown: rem=${getPinCooldownRemainingMs(alexId)}, err=${cdErr?.textContent}`;
+  }
+  // Correct PIN MUST be refused during the wait (in Change PIN form, updateDriverRecovery, and removeDriverProfile)!
+  await submitChangePin('1357', '2468');
+  const refusedErr = all((n) => n.attributes?.['data-change-pin-err'] === '1')[0];
+  const recDuring = S.updateDriverRecovery(alexId, '1357', [
+    { qId: D.REMINDER_QUESTIONS[0].id, question: D.REMINDER_QUESTIONS[0].text, answer: 'Volvo' },
+    { qId: D.REMINDER_QUESTIONS[1].id, question: D.REMINDER_QUESTIONS[1].text, answer: 'Omaha' },
+  ]);
+  const remDuring = S.removeDriverProfile(alexId, '1357');
+  if (!refusedErr || !/Wait/i.test(refusedErr.textContent) || recDuring.ok || !recDuring.cooldownMs || remDuring.ok || !remDuring.cooldownMs) {
+    return `correct PIN was not refused during cooldown across sibling forms: ${JSON.stringify({ err: refusedErr?.textContent, recDuring, remDuring })}`;
+  }
+  // Advance past 30s cooldown -> 1 wrong PIN on updateDriverRecovery escalates to 60s; then advance 60s -> correct PIN succeeds and resets!
+  Tms += 30_000;
+  const recMiss6 = S.updateDriverRecovery(alexId, '9999', [
+    { qId: D.REMINDER_QUESTIONS[0].id, question: D.REMINDER_QUESTIONS[0].text, answer: 'Volvo' },
+    { qId: D.REMINDER_QUESTIONS[1].id, question: D.REMINDER_QUESTIONS[1].text, answer: 'Omaha' },
+  ]);
+  if (recMiss6.ok || getPinCooldownRemainingMs(alexId) !== 60_000) {
+    return `updateDriverRecovery did not share escalated 60s cooldown: ${JSON.stringify(recMiss6)}`;
+  }
+  Tms += 60_000;
+  await submitChangePin('1357', '1357');
+  if (getPinCooldownRemainingMs(alexId) !== 0) return 'successful Change PIN after cooldown did not clear cooldown';
+  // Verify removeDriverProfile also records misses on wrong PIN (5 misses -> 30s cooldown, then clear via unlock).
+  for (let i = 0; i < 4; i++) {
+    const r = S.removeDriverProfile(alexId, '8888');
+    if (r.ok || getPinCooldownRemainingMs(alexId) !== 0) return `removeDriverProfile cooldown triggered early at miss ${i + 1}`;
+  }
+  const rem5 = S.removeDriverProfile(alexId, '8888');
+  if (rem5.ok || getPinCooldownRemainingMs(alexId) !== 30_000) return `removeDriverProfile 5th miss did not trigger 30s cooldown: ${JSON.stringify(rem5)}`;
+  Tms += 30_000;
+  S.changeDriverPin(alexId, '1357', '1357'); // clears cooldown cleanly
+
+  // B2 store-level refusal: register a 2nd driver -> enabling stayUnlocked directly via store MUST fail!
+  const onFirst = S.setStayUnlocked(alexId, true, '1357');
+  if (!onFirst.ok || !A.getStayUnlocked()) return `precondition: solo setStayUnlocked failed: ${JSON.stringify(onFirst)}`;
+  const reg2 = registerDriver({
+    name: 'SecondCoDriver',
+    pin: '2468',
+    recovery: [
+      { qId: D.REMINDER_QUESTIONS[0].id, question: D.REMINDER_QUESTIONS[0].text, answer: 'Mack' },
+      { qId: D.REMINDER_QUESTIONS[1].id, question: D.REMINDER_QUESTIONS[1].text, answer: 'Dallas' },
+    ],
+    disclaimerAcked: true,
+  });
+  await sleep(40);
+  if (!reg2.ok) return `failed to register 2nd driver: ${JSON.stringify(reg2)}`;
+  if (A.getStayUnlocked()) return 'registering 2nd driver did not clear vault.stayUnlocked';
+  const directEnable = S.setStayUnlocked(alexId, true, '1357');
+  const directEnable2 = S.setStayUnlocked(reg2.id, true, '2468');
+  if (directEnable.ok || directEnable2.ok || A.getStayUnlocked()) {
+    return `setStayUnlocked must refuse at store level when 2 drivers exist: ${JSON.stringify({ directEnable, directEnable2, flag: A.getStayUnlocked() })}`;
+  }
+  return true;
+});
+
+/* ---- DR17 (N1): Split tool disables "Put plan on log" while custom clocks are active ---- */
+await pin('DR17. N1: SplitTab disables "Put plan on log as what-if" with plain note while custom clocks are active, and re-enables when cleared', async () => {
+  const T = Math.floor(Tms / 60000);
+  setState({
+    tab: 'split',
+    nowOverride: T,
+    segments: [{ status: 'OFF', start: T - 600, end: T - 180, createdAt: 1 }, { status: 'D', start: T - 180, end: T, createdAt: 2 }],
+    tentative: [],
+    current: { status: 'ON', since: T, createdAt: 3 },
+  });
+  await sleep(50);
+  const splitBtn = () => all((n) => n.attributes?.['data-split-commit'] === '1')[0];
+  const isDisabled = (el) => Boolean(el && (el.disabled === true || el.hasAttribute?.('disabled')));
+  const noteEl = () => all((n) => n.attributes?.['data-split-override-note'] === '1')[0];
+  if (!splitBtn() || isDisabled(splitBtn())) return `Split commit button should be enabled without override (found=${!!splitBtn()}, disabled=${isDisabled(splitBtn())})`;
+  if (noteEl()) return 'override note should not show when custom clocks are off';
+
+  // Turn on custom clocks in SplitTab.
+  await clickNode(all((n) => n.attributes?.['data-clock-override-toggle'] === 'split')[0]);
+  await sleep(30);
+  const dH = all((n) => n.attributes?.['data-co-h'] === 'driveLeft')[0];
+  await setInput(dH, '5');
+  fire(all((n) => n.attributes?.['data-clock-override-form'] === 'split')[0], 'submit');
+  await sleep(40);
+  if (!isDisabled(splitBtn())) return 'Split commit button MUST be disabled while custom clocks are active';
+  if (!noteEl() || !/Custom clocks are on/.test(noteEl().textContent)) {
+    return `missing plain override note in SplitTab: ${noteEl()?.textContent ?? 'none'}`;
+  }
+  // Clicking disabled commit must not write tentative rows.
+  if (getState().tentative.length !== 0) return 'SplitTab wrote tentative rows while custom clocks active';
+
+  // Turn off custom clocks -> button re-enables and note disappears!
+  await clickNode(all((n) => n.attributes?.['data-clock-override-clear'] === 'split')[0]);
+  await sleep(40);
+  if (isDisabled(splitBtn()) || noteEl()) return `Split commit did not re-enable after clearing custom clocks (disabled=${isDisabled(splitBtn())}, note=${!!noteEl()})`;
+  return true;
+});
+
 let fails = 0;
 for (const [status, name, info] of res) {
   if (status !== 'PASS') fails++;
   console.log(`${status} ${name}${info ? ' — ' + info : ''}`);
 }
 console.log(`\ndrivers: ${res.length - fails}/${res.length} pins pass`);
-if (fails) process.exit(1);
+process.exit(fails ? 1 : 0);

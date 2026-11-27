@@ -25,12 +25,13 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, dayLabel, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, synthesizeEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
   useDrivers, getActiveDriverName, lockDriverSession, registerSessionHooks, setDriverGateBypassForTest, reloadVaultFromStorage, syncActiveUndoRaw,
+  STAY_UNLOCKED_SPLASH_MS, completeAutoUnlock, getStayUnlocked, isStayUnlockedEffective, getPendingAutoUnlockId, setStayUnlocked, getIosInstallNoteDismissed, dismissIosInstallNote,
 } from './store.ts';
 import { driverFileSlug, driverInitials } from './drivers.ts';
 import { StartupSplash, ActiveDriverStrip, DriverSettingsCard, DisclosureModal, CLOCK14_DISCLAIMER_TEXT } from './driver-ui.tsx';
-export { setDriverGateBypassForTest, reloadVaultFromStorage, lockDriverSession };
+export { setDriverGateBypassForTest, reloadVaultFromStorage, lockDriverSession, STAY_UNLOCKED_SPLASH_MS, completeAutoUnlock, getStayUnlocked, isStayUnlockedEffective, getPendingAutoUnlockId, setStayUnlocked, getIosInstallNoteDismissed, dismissIosInstallNote };
 import { clampDayStartMinute, safeRulesConfig, formatDayStartHM, dayStartWord } from './carrierday.ts';
 import {
   projectRecapVs34, defaultResetStart, wallMinuteInCarrierDay, fmtWallHM, parseIsoDay,
@@ -94,7 +95,7 @@ import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
-import { extractEldClocks, mergeExtractions } from './eldocr.ts';
+import { extractEldClocks, mergeExtractions, type OcrWord } from './eldocr.ts';
 import { computeLevers, pickChips, leverTitle, leverSub, leverRule, leverAfter, leverSplitPrefill, type Lever } from './levers.ts';
 
 /* ============================================================ shared bits */
@@ -383,8 +384,20 @@ const violationLabel: Record<Violation['kind'], string> = {
 };
 
 const REPO = 'hossandbox/hossandbox.github.io';
+export const BUG_REPORT_EMAIL = 'lorico.estrellado@gmail.com';
+export const BUG_REPORT_SUBJECT = 'Clock 14 bug report';
 
-/** Copies the exported state to the clipboard and opens a prefilled GitHub issue — the only report channel. */
+/** Zero-account mailto: link carrying build stamp, active theme, and a one-line clock summary (status + four clocks). */
+export function bugReportMailtoHref(s: State, ev: FullEvaluation): string {
+  const theme = effectiveTheme(s, devicePrefersDark());
+  const statusStr = s.current ? segLabel(s.current.status, s.current.note) : 'none';
+  const breakStr = Number.isFinite(ev.shift.breakRemaining) ? dur(ev.shift.breakRemaining) : 'exempt';
+  const summary = `Status: ${statusStr} | Drive: ${dur(ev.shift.driveRemaining)} | Window: ${dur(ev.shift.windowRemaining)} | Break: ${breakStr} | Cycle: ${dur(ev.cycle.remaining)}`;
+  const body = `Build: ${__BUILD__}\nTheme: ${theme}\nClocks: ${summary}\n\nWhat happened:\n`;
+  return `mailto:${BUG_REPORT_EMAIL}?subject=${encodeURIComponent(BUG_REPORT_SUBJECT)}&body=${encodeURIComponent(body)}`;
+}
+
+/** Copies the exported state to the clipboard and opens a prefilled GitHub issue. */
 function reportBug(s: State, ev: FullEvaluation) {
   const json = exportState(s, '');
   // GitHub rejects issue URLs past ~8 KB (414/500), and the log is URL-encoded at roughly 1.5×, so
@@ -396,6 +409,201 @@ function reportBug(s: State, ev: FullEvaluation) {
 }
 function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
   return <button class="ghost" onClick={() => reportBug(s, ev)}>🐞 Report a bug (GitHub)</button>;
+}
+
+/* ============================================================ Reception-fix helpers (ELD staleness, storage safety, iOS Safari, inline clock overrides) */
+
+/** Four hours in minutes: threshold after which the ELD staleness chip prompts a re-check. */
+export const ELD_STALE_MINUTES = 240;
+
+export function eldStalenessInfo(lastEldCheckAt: number | null | undefined, now: number): { kind: 'never' | 'stale' | 'fresh'; text: string } {
+  if (lastEldCheckAt == null || !Number.isFinite(lastEldCheckAt)) {
+    return { kind: 'never', text: 'Not checked against your ELD yet — tap to check' };
+  }
+  const elapsed = Math.max(0, Math.round(now - lastEldCheckAt));
+  if (elapsed >= ELD_STALE_MINUTES) {
+    const h = Math.floor(elapsed / 60);
+    const ago = h >= 24 ? `${Math.floor(h / 24)}d ago` : `${h}h ago`;
+    return { kind: 'stale', text: `Checked against your ELD ${ago} — tap to check` };
+  }
+  const h = Math.floor(elapsed / 60);
+  const ago = h >= 1 ? `${h}h ago` : elapsed <= 1 ? 'just now' : `${elapsed}m ago`;
+  return { kind: 'fresh', text: `ELD-checked ${ago}` };
+}
+
+/** 30 days in minutes for the Settings backup nudge & dismissal window. */
+export const BACKUP_NUDGE_WINDOW_MIN = 30 * 1440;
+
+export function shouldShowBackupNudge(s: Pick<State, 'segments' | 'tentative' | 'current' | 'lastExportAt' | 'exportNudgeDismissedAt'>, now: number): boolean {
+  const hasData = s.segments.length > 0 || s.tentative.length > 0 || s.current !== null;
+  if (!hasData) return false;
+  if (s.lastExportAt != null && Number.isFinite(s.lastExportAt) && now - s.lastExportAt < BACKUP_NUDGE_WINDOW_MIN) return false;
+  if (s.exportNudgeDismissedAt != null && Number.isFinite(s.exportNudgeDismissedAt) && now - s.exportNudgeDismissedAt < BACKUP_NUDGE_WINDOW_MIN) return false;
+  return true;
+}
+
+let persistentStorageRequested = false;
+/** Request browser persistent storage silently at boot when available; no-op where unsupported. */
+export function requestPersistentStorage(): void {
+  if (persistentStorageRequested) return;
+  persistentStorageRequested = true;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function') {
+      void Promise.resolve(navigator.storage.persist()).catch(() => {});
+    }
+  } catch { /* unsupported or blocked: silent no-op */ }
+}
+/** Test hook: reset the one-shot guard so unit tests can verify requestPersistentStorage(). */
+export function resetPersistentStorageGuardForTest(): void { persistentStorageRequested = false; }
+
+/** True only in iOS Safari when NOT running as a standalone Home Screen web app. */
+export function isIosSafariNonStandalone(
+  nav?: { userAgent?: string; maxTouchPoints?: number; standalone?: boolean },
+  win?: { matchMedia?: (q: string) => { matches: boolean } },
+): boolean {
+  const n = nav ?? (typeof navigator !== 'undefined' ? (navigator as unknown as { userAgent?: string; maxTouchPoints?: number; standalone?: boolean }) : undefined);
+  const w = win ?? (typeof window !== 'undefined' ? window : undefined);
+  if (!n || typeof n.userAgent !== 'string') return false;
+  const ua = n.userAgent;
+  const isIos = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (n.maxTouchPoints ?? 0) > 1);
+  if (!isIos) return false;
+  const isSafari = /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo/i.test(ua);
+  if (!isSafari) return false;
+  if (n.standalone === true) return false;
+  try {
+    if (typeof w?.matchMedia === 'function' && w.matchMedia('(display-mode: standalone)').matches) return false;
+  } catch { /* ignore */ }
+  return true;
+}
+
+/**
+ * Shared inline session-only clock override bar for Plan tools (receptionfix Scope 2 item 11).
+ * Collapsed by default (zero extra inputs, zero log mutation) so existing tool flows and layouts
+ * stay untouched; expanding lets any driver punch in their 4 ELD clocks for this planning check
+ * without maintaining an up-to-date live log.
+ */
+function InlineClockOverride({
+  s,
+  now,
+  override,
+  onChange,
+  toolId,
+}: {
+  s: State;
+  now: number;
+  override: EldClocks | null;
+  onChange: (clocks: EldClocks | null) => void;
+  toolId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cyc = cycleParamsOf(s.config);
+  const liveEv = useMemo(
+    () => evaluate(loggedSegments(s, now), { asOf: now, config: safeRulesConfig(s.config) }),
+    [s.segments, s.current, s.config, now],
+  );
+  const defaultClocks = (): EldClocks => ({
+    driveLeft: Math.max(0, Math.round(liveEv.shift.driveRemaining)),
+    windowLeft: Math.max(0, Math.round(liveEv.shift.windowRemaining)),
+    breakDueIn: Number.isFinite(liveEv.shift.breakRemaining) ? Math.max(0, Math.round(liveEv.shift.breakRemaining)) : LIMITS.BREAK_AFTER,
+    cycleLeft: Math.max(0, Math.round(liveEv.cycle.remaining)),
+  });
+  const toBoxes = (c: EldClocks): Record<keyof EldClocks, [string, string]> => ({
+    driveLeft: [String(Math.floor(c.driveLeft / 60)), String(c.driveLeft % 60)],
+    windowLeft: [String(Math.floor(c.windowLeft / 60)), String(c.windowLeft % 60)],
+    breakDueIn: [String(Math.floor(c.breakDueIn / 60)), String(c.breakDueIn % 60)],
+    cycleLeft: [String(Math.floor(c.cycleLeft / 60)), String(c.cycleLeft % 60)],
+  });
+  const [txt, setTxt] = useState<Record<keyof EldClocks, [string, string]>>(() => toBoxes(override ?? defaultClocks()));
+  const fields: { key: keyof EldClocks; label: string; max: number }[] = [
+    { key: 'driveLeft', label: 'Drive left', max: LIMITS.DRIVE },
+    { key: 'windowLeft', label: '14h window left', max: LIMITS.WINDOW },
+    { key: 'breakDueIn', label: 'Break due in', max: LIMITS.BREAK_AFTER },
+    { key: 'cycleLeft', label: `${cyc.limit / 60}h cycle left`, max: cyc.limit },
+  ];
+  const openEditor = () => {
+    setTxt(toBoxes(override ?? defaultClocks()));
+    setErr(null);
+    setOpen(true);
+  };
+  const apply = (e: Event) => {
+    e.preventDefault();
+    const next = {} as EldClocks;
+    for (const f of fields) {
+      const r = readEldEntry(txt[f.key][0], txt[f.key][1]);
+      if (!r.ok) {
+        setErr(r.problem === 'fraction'
+          ? `${f.label}: use whole hours and minutes (e.g. 7h 15m, not 7.25).`
+          : `${f.label}: enter plain whole numbers.`);
+        return;
+      }
+      next[f.key] = Math.min(f.max, Math.max(0, r.minutes));
+    }
+    setErr(null);
+    onChange(next);
+    setOpen(false);
+  };
+  const activeClocks = override ?? defaultClocks();
+  return (
+    <div class={`clock-override-bar${override ? ' is-custom' : ''}`} data-clock-override={toolId} data-clock-override-active={override ? '1' : '0'}>
+      <div class="clock-override-head">
+        <span class="small">
+          {override ? (
+            <><b>Custom ELD clocks</b> · <span class="mono">{dur(activeClocks.driveLeft)}</span> drive · <span class="mono">{dur(activeClocks.windowLeft)}</span> win · <span class="mono">{dur(activeClocks.cycleLeft)}</span> cycle</>
+          ) : (
+            <span class="muted">Planning from your log — want to plug in your ELD clocks instead?</span>
+          )}
+        </span>
+        <span class="clock-override-acts">
+          {override && (
+            <button type="button" class="mini" data-clock-override-clear={toolId} onClick={() => { onChange(null); setOpen(false); }}>Use my log</button>
+          )}
+          <button type="button" class="mini" data-clock-override-toggle={toolId} onClick={() => (open ? setOpen(false) : openEditor())}>
+            {open ? 'Hide' : override ? 'Edit clocks' : 'Use custom clocks'}
+          </button>
+        </span>
+      </div>
+      {open && (
+        <form class="clock-override-form" data-clock-override-form={toolId} onSubmit={apply}>
+          <p class="muted small" style="margin:0">Session-only — runs this check on the four clocks below without changing your log.</p>
+          {fields.map((f) => (
+            <div class="qs-row" key={f.key}>
+              <span class="qs-label">{f.label}</span>
+              <span class="qs-inputs">
+                <input
+                  type="number"
+                  class="num"
+                  inputMode="numeric"
+                  min={0}
+                  aria-label={`${f.label}, hours`}
+                  data-co-h={f.key}
+                  value={txt[f.key][0]}
+                  onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => ({ ...p, [f.key]: [v, p[f.key][1]] })); }}
+                />
+                <span aria-hidden="true">h</span>
+                <input
+                  type="number"
+                  class="num"
+                  inputMode="numeric"
+                  min={0}
+                  aria-label={`${f.label}, minutes`}
+                  data-co-m={f.key}
+                  value={txt[f.key][1]}
+                  onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => ({ ...p, [f.key]: [p[f.key][0], v] })); }}
+                />
+                <span aria-hidden="true">m</span>
+              </span>
+            </div>
+          ))}
+          {err && <p class="warnbox small" role="alert" style="margin:0">{err}</p>}
+          <div class="row">
+            <button type="submit" class="primary" data-clock-override-apply={toolId}>Apply to this check</button>
+          </div>
+          <p class="muted small" style="margin:0">To check your live log against your ELD, use Now → Check against my ELD.</p>
+        </form>
+      )}
+    </div>
+  );
 }
 
 /* ============================================================ icons */
@@ -496,8 +704,8 @@ export type SheetKind =
   // `done` (BUG-2026-11-20) carries the saved minute in sheet state so the confirmation screen
   // survives even if a DrivingView/Now transition re-seats the sheet.
   | { kind: 'since'; done?: number }
-  | { kind: 'quickstart' }
-  | { kind: 'drift' }
+  | { kind: 'quickstart'; mode?: 'screenshot' }
+  | { kind: 'drift'; mode?: 'screenshot' }
   | { kind: 'why' }
   | { kind: 'exceptions' }
   // A lever chip's sheet (capstone C1): the chip's sentence, its ghost axis, the rule and
@@ -822,7 +1030,7 @@ export function tapStatus(st: DutyStatus, note?: string, minutesAgo = 0): boolea
  * clock is set; this section holds the reading side: the shape checks a stored
  * snapshot must pass, and useRealClock, which restores it. */
 
-type SimSnap = Pick<State, 'segments' | 'tentative' | 'current' | 'dayCloses' | 'historyAcknowledged' | 'config' | 'seededAt' | 'tzChosen'> & { weekPlan?: WeekPlanDraft };
+type SimSnap = Pick<State, 'segments' | 'tentative' | 'current' | 'dayCloses' | 'historyAcknowledged' | 'config' | 'seededAt' | 'lastEldCheckAt' | 'tzChosen'> & { weekPlan?: WeekPlanDraft };
 const SIM_STATUSES = new Set(['OFF', 'SB', 'D', 'ON']);
 /**
  * A row read back from storage (a sim snapshot, a stored undo) is only trusted when it is
@@ -855,6 +1063,7 @@ const storedSnapOk = (v: unknown): v is SimSnap => {
   // neither) is still trusted on the fields it does carry; sim snapshots are
   // per-episode and dropped at episode end, so nothing older outlives its episode.
   if (s.seededAt !== undefined && s.seededAt !== null && !dateable(s.seededAt)) return false;
+  if (s.lastEldCheckAt !== undefined && s.lastEldCheckAt !== null && !dateable(s.lastEldCheckAt)) return false;
   if (s.tzChosen !== undefined && typeof s.tzChosen !== 'boolean') return false;
   return true;
 };
@@ -889,6 +1098,7 @@ export function useRealClock() {
           // snapshot took, so they come back with it — storedSnapOk has already
           // vouched for their shapes.
           if (snap.record.seededAt !== undefined) restore.seededAt = snap.record.seededAt;
+          if (snap.record.lastEldCheckAt !== undefined) restore.lastEldCheckAt = snap.record.lastEldCheckAt;
           if (typeof snap.record.tzChosen === 'boolean') restore.tzChosen = snap.record.tzChosen;
           restore.weekPlan = snap.record.weekPlan !== undefined
             ? sanitizeWeekPlan(snap.record.weekPlan, DEFAULT_WEEK_PLAN)
@@ -2481,6 +2691,50 @@ function NowTab({ s, now, ev, again, onExitPeek, driverName }: { s: State; now: 
       {timeline && !preview && <LeverChips chips={chips} />}
       {/* M5: never in a preview (and never in the driving view, which does not render NowTab). */}
       {welcome && !preview && <WelcomeBackChip w={welcome} now={now} />}
+      {/* Receptionfix Scope 4 item 18: one-time dismissible iOS Safari non-standalone warning. */}
+      {!preview && isIosSafariNonStandalone() && !getIosInstallNoteDismissed() && (
+        <div class="ios-install-note warnbox small" role="note" data-ios-install-note="1">
+          <span>Add Clock 14 to your Home Screen — Safari can erase web-app data after about a week.</span>
+          <button type="button" class="mini" data-ios-install-dismiss="1" onClick={() => dismissIosInstallNote()}>Got it</button>
+        </div>
+      )}
+      {/* Receptionfix Scope 2 item 10: ELD staleness chip tapping into the existing drift-check sheet. */}
+      {!preview && (() => {
+        const stale = eldStalenessInfo(s.lastEldCheckAt, now);
+        return (
+          <button
+            type="button"
+            class={`eld-stale-chip is-${stale.kind}`}
+            data-eld-staleness={stale.kind}
+            onClick={(e) => openMorphSheet({ kind: 'drift' }, e.currentTarget)}
+          >
+            <Icon d={I.check} size={16} />
+            <span>{stale.text}</span>
+            <Icon d={I.next} size={16} />
+          </button>
+        );
+      })()}
+      {/* Receptionfix Scope 2 item 9 & B1 (receptionfix2): prominent ELD screenshot refresh front door.
+          Fresh logs launch QuickStartSheet (screenshot mode) to seed; populated logs route into
+          DriftSheet (screenshot mode) so a mid-week check compares against the ELD without wiping rows. */}
+      {!preview && (
+        <button
+          type="button"
+          class="plan-item eld-shot-cta"
+          data-eld-screenshot-btn="1"
+          onClick={(e) => {
+            if (historyBasis(s, now) === 'fresh') openSheet({ kind: 'quickstart', mode: 'screenshot' });
+            else openMorphSheet({ kind: 'drift', mode: 'screenshot' }, e.currentTarget);
+          }}
+        >
+          <span class="plan-icon"><Icon d={I.share} size={24} /></span>
+          <span class="plan-text">
+            <b>Refresh from ELD screenshot</b>
+            <span class="muted small">Snap your ELD clocks screen — read on this phone, never uploaded.</span>
+          </span>
+          <Icon d={I.next} />
+        </button>
+      )}
       {/* The record's notices ride under the answer as one-line chips (patch 16, P2): the hero
           leads the screen now — in the cab and in the 3 a.m. review alike, the wrap-up business
           (splitting, ending the day) waits below the number it wraps up. */}
@@ -2662,7 +2916,16 @@ export function eldActualClocks(clocks: EldClocks, evAfter: FullEvaluation, shor
   };
 }
 
-function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
+/** Test-only hook to deterministically exercise OCR screenshot flows in Node DOM tests without loading Tesseract WASM. */
+type EldOcrRunner = (file: File) => Promise<{ auto: OcrWord[]; sparse: OcrWord[] }>;
+let eldOcrOverrideForTest: EldOcrRunner | null = null;
+export function setEldOcrOverrideForTest(fn: EldOcrRunner | null): void { eldOcrOverrideForTest = fn; }
+
+const SEED_UNDO_LABEL = 'Replaced log from ELD clocks';
+
+function QuickStartSheet({ s, now, mode, closing = false }: { s: State; now: number; mode?: 'screenshot'; closing?: boolean }) {
+  const isShotMode = mode === 'screenshot';
+  const sheetTitle = isShotMode ? 'Refresh from ELD screenshot' : 'Start from my ELD clocks';
   const cyc = cycleParamsOf(s.config);
   const fields: { key: keyof EldClocks; label: string; sub: string; max: number }[] = [
     { key: 'driveLeft', label: 'Drive time left', sub: '11-hour driving clock', max: LIMITS.DRIVE },
@@ -2676,6 +2939,7 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
   const [txt, setTxt] = useState<Record<string, [string, string]>>(() =>
     Object.fromEntries(fields.map((f) => [f.key, [String(Math.floor(f.max / 60)), String(f.max % 60)]])));
   const [err, setErr] = useState<string | null>(null);
+  const [replaceConfirm, setReplaceConfirm] = useState<{ clocks: EldClocks; count: number } | null>(null);
   const [done, setDone] = useState<{ notes: string[]; clocks: EldClocks; actual: EldClocks; at: number } | null>(null);
   // Voice entry (patch 11): the same four clocks, spoken one at a time into the same
   // boxes. The session itself is pure state (voiceclocks.ts) — this component owns only
@@ -2776,8 +3040,9 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
     setShotNote(null);
     setErr(null);
     try {
-      const { recognizeEldScreenshot } = await import('./eldocr-run.ts');
-      const reads = await recognizeEldScreenshot(file);
+      const reads = eldOcrOverrideForTest
+        ? await eldOcrOverrideForTest(file)
+        : await (await import('./eldocr-run.ts')).recognizeEldScreenshot(file);
       const specs = fields.map((f) => ({ key: f.key, max: f.max }));
       const r = mergeExtractions(extractEldClocks(reads.auto, specs), extractEldClocks(reads.sparse, specs));
       setTxt((p) => {
@@ -2806,6 +3071,24 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
       setShotBusy(false);
     }
   };
+  const applySeedNow = (clocks: EldClocks) => {
+    const cur = getState();
+    const { patch, notes } = applyEldSeed(cur, clocks, now);
+    // C2 (taste): compute the actual clocks from the seeded record so adjusted clocks print
+    // "6h 20m → 6h 00m", and hold off on forcing Off Duty — the result screen asks for the
+    // driver's real status with the four status buttons.
+    const seeded: State = { ...cur, ...patch, current: null };
+    const evAfter = evaluate(allSegments(seeded, now), { asOf: now, config: safeRulesConfig(cur.config) });
+    const actual = eldActualClocks(clocks, evAfter, cur.config.shortHaul);
+    // B1 (receptionfix2): wrap every reseed over a non-empty log in undoable(...) so Undo restores all prior rows.
+    if (cur.segments.length > 0) {
+      undoable(SEED_UNDO_LABEL, () => setState({ ...patch, current: null }));
+    } else {
+      setState({ ...patch, current: null });
+    }
+    setReplaceConfirm(null);
+    setDone({ notes, clocks, actual, at: now });
+  };
   const confirm = () => {
     const clocks = {} as EldClocks;
     for (const f of fields) {
@@ -2822,22 +3105,41 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
       clocks[f.key] = r.minutes;
     }
     const cur = getState();
-    const { patch, notes } = applyEldSeed(cur, clocks, now);
-    // C2 (taste): compute the actual clocks from the seeded record so adjusted clocks print
-    // "6h 20m → 6h 00m", and hold off on forcing Off Duty — the result screen asks for the
-    // driver's real status with the four status buttons.
-    const seeded: State = { ...cur, ...patch, current: null };
-    const evAfter = evaluate(allSegments(seeded, now), { asOf: now, config: safeRulesConfig(cur.config) });
-    const actual = eldActualClocks(clocks, evAfter, cur.config.shortHaul);
-    setState({ ...patch, current: null });
-    setDone({ notes, clocks, actual, at: now });
+    // B1 (receptionfix2): belt-and-braces confirmation whenever a reseed would overwrite a populated log.
+    if (cur.segments.length > 0) {
+      setErr(null);
+      setReplaceConfirm({ clocks, count: cur.segments.length });
+      return;
+    }
+    applySeedNow(clocks);
   };
+  if (replaceConfirm) {
+    const rowWord = replaceConfirm.count === 1 ? 'row' : 'rows';
+    return (
+      <Sheet title={sheetTitle} focusKey="qs-replace" closing={closing}>
+        <div class="warnbox" role="alert" data-qs-replace-confirm="1" tabIndex={-1} data-first>
+          <b>This replaces your {replaceConfirm.count} logged {rowWord}.</b>
+          <p class="small" style="margin:6px 0 0">Your current log will be replaced with an estimate built from these four ELD clocks. If you only want to line up your log with your ELD without replacing it, use <b>Check against my ELD</b> instead. Undo on the Log restores your prior rows.</p>
+        </div>
+        <ul class="small">{fields.map((f) => <li key={f.key}>{f.label}: <b>{dur(replaceConfirm.clocks[f.key])}</b></li>)}</ul>
+        <div class="row">
+          <button class="danger" data-qs-replace-proceed="1" onClick={() => applySeedNow(replaceConfirm.clocks)}>Replace my log &amp; set clocks</button>
+          <button class="primary" data-qs-replace-cancel="1" onClick={() => setReplaceConfirm(null)}>Keep my log</button>
+        </div>
+      </Sheet>
+    );
+  }
   if (done) {
     const finishStatus = (st: DutyStatus) => {
       unlockAudio();
       const cur = getState();
       const at = done.at;
+      const prevUndo = currentUndo();
       setState({ current: { status: st, since: at, createdAt: stamp() } });
+      // B1 (receptionfix2): keep the reseed Undo armed after the driver picks their current status.
+      if (prevUndo?.label === SEED_UNDO_LABEL) {
+        setUndo({ label: prevUndo.label, before: prevUndo.before, after: pick(getState()) });
+      }
       openSheet(null);
       const sim = cur.nowOverride !== null;
       if (st !== 'D' && shouldAskSpeech(cur, sim)) {
@@ -2855,7 +3157,7 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
       }
     };
     return (
-      <Sheet title="Start from my ELD clocks" focusKey="qs-done" closing={closing}>
+      <Sheet title={sheetTitle} focusKey="qs-done" closing={closing}>
         <p tabIndex={-1} data-first>Your clocks are set from those four numbers.</p>
         <p class="small">The four clocks:</p>
         <ul class="small">{fields.map((f) => {
@@ -2879,15 +3181,27 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
     );
   }
   return (
-    <Sheet title="Start from my ELD clocks" focusKey="qs-form">
+    <Sheet title={sheetTitle} focusKey="qs-form" closing={closing}>
       {/* A10 (taste): focus starts at the top of the sheet (not "Set my clocks" at the bottom) so
           the sheet opens at scrollTop 0 with its grabber and top padding intact, matching every
           other sheet. Order: Import from screenshot → Say my clocks → type the four clocks. */}
-      <p class="small" tabIndex={-1} data-first>Import a screenshot, say your clocks, or type the four clocks your ELD shows. The app builds a starting record from them — an estimate that firms up as you log your real day.</p>
+      <p class="small" tabIndex={-1} data-first={isShotMode ? undefined : true}>
+        {isShotMode
+          ? 'Pick a screenshot of your ELD clocks screen — it is read on this phone (never sent anywhere) and fills the four clocks below so you can check and apply them.'
+          : 'Import a screenshot, say your clocks, or type the four clocks your ELD shows. The app builds a starting record from them — an estimate that firms up as you log your real day.'}
+      </p>
       {!voice && (
-        <div class="qs-section">
+        <div class="qs-section" data-eld-ocr-section="1">
           <div class="row">
-            <button class="ghost" disabled={shotBusy} onClick={() => shotRef.current?.click()}>{shotBusy ? 'Reading screenshot…' : 'Import from a screenshot'}</button>
+            <button
+              class={isShotMode ? 'primary wide' : 'ghost'}
+              data-first={isShotMode ? true : undefined}
+              data-eld-choose-shot="1"
+              disabled={shotBusy}
+              onClick={() => shotRef.current?.click()}
+            >
+              {shotBusy ? 'Reading screenshot…' : isShotMode ? 'Choose ELD screenshot' : 'Import from a screenshot'}
+            </button>
           </div>
           <input type="file" accept="image/*" style="display:none" ref={shotRef}
             onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importShot(f); }} />
@@ -2954,11 +3268,16 @@ function QuickStartSheet({ s, now, closing = false }: { s: State; now: number; c
  * (planDriftFill). ELD shows more: no fix is offered — this check never takes driving out of
  * a log; the likely missing break belongs on the Log.
  */
-function DriftSheet({ s, now, closing = false }: { s: State; now: number; closing?: boolean }) {
+function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; mode?: 'screenshot'; closing?: boolean }) {
+  const isShotMode = mode === 'screenshot';
   const [txt, setTxt] = useState<[string, string]>(['', '']);
   const [err, setErr] = useState<string | null>(null);
   const [found, setFound] = useState<{ check: DriftComparison; at: number; eld: number } | null>(null);
   const [filled, setFilled] = useState<{ plan: DriftFillPlan; after: DriftComparison } | null>(null);
+  const [shotBusy, setShotBusy] = useState(false);
+  const [shotNote, setShotNote] = useState<string | null>(null);
+  const [shotErr, setShotErr] = useState<string | null>(null);
+  const shotRef = useRef<HTMLInputElement | null>(null);
 
   // On the DEMO clock there is no real day to compare against — send the driver to the quick
   // start that creates one instead of running a comparison against assumed numbers.
@@ -2966,10 +3285,46 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
     return (
       <Sheet title="Check against my ELD" closing={closing}>
         <p class="small">There's nothing to check yet — this app is still on its demo clock, so there's no real day to compare with your ELD. Start from your ELD clocks first; the check works once your real day is in.</p>
-        <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart' })}>Start from my ELD clocks</button></div>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart', ...(isShotMode ? { mode: 'screenshot' as const } : {}) })}>Start from my ELD clocks</button></div>
       </Sheet>
     );
   }
+
+  // B1 (receptionfix2): on a populated log, "Refresh from ELD screenshot" reads the screenshot
+  // on-device and prefills the drift-compare drive-left boxes — never reseeding or wiping rows.
+  const importDriftShot = async (file: File) => {
+    setShotBusy(true);
+    setShotNote(null);
+    setShotErr(null);
+    setErr(null);
+    try {
+      const cyc = cycleParamsOf(s.config);
+      const specs = [
+        { key: 'driveLeft' as const, max: LIMITS.DRIVE },
+        { key: 'windowLeft' as const, max: LIMITS.WINDOW },
+        { key: 'breakDueIn' as const, max: LIMITS.BREAK_AFTER },
+        { key: 'cycleLeft' as const, max: cyc.limit },
+      ];
+      const reads = eldOcrOverrideForTest
+        ? await eldOcrOverrideForTest(file)
+        : await (await import('./eldocr-run.ts')).recognizeEldScreenshot(file);
+      const r = mergeExtractions(extractEldClocks(reads.auto, specs), extractEldClocks(reads.sparse, specs));
+      const got = r.filled.driveLeft;
+      if (got) {
+        setTxt([String(Math.floor(got.minutes / 60)), String(got.minutes % 60)]);
+        setShotNote(`Drive time left: read ${dur(got.minutes)} from the screenshot — check it against your ELD, then tap Compare.`);
+      } else if (r.disagreed.driveLeft) {
+        const [a, b] = r.disagreed.driveLeft;
+        setShotErr(`The screenshot read Drive time left two different ways (${dur(a)} and ${dur(b)}) — type the drive time left your ELD shows below and tap Compare.`);
+      } else {
+        setShotErr("Couldn't read drive time left from that screenshot — type the drive time left your ELD shows below and tap Compare.");
+      }
+    } catch {
+      setShotErr("That screenshot couldn't be read — type the drive time left your ELD shows below and tap Compare.");
+    } finally {
+      setShotBusy(false);
+    }
+  };
 
   const compare = () => {
     const [hs, ms] = txt;
@@ -2986,7 +3341,9 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
     }
     const eld = r.minutes;
     setErr(null);
-    setFound({ check: driftCheck(getState(), eld, now), at: now, eld });
+    const cmp = driftCheck(getState(), eld, now);
+    setState({ lastEldCheckAt: now });
+    setFound({ check: cmp, at: now, eld });
   };
 
   if (filled && found) {
@@ -3057,21 +3414,49 @@ function DriftSheet({ s, now, closing = false }: { s: State; now: number; closin
 
   return (
     <Sheet title="Check against my ELD" closing={closing}>
-      <p class="small">Your ELD is the official record — this just lines the app up with it. Type the drive time left your ELD shows, and the app compares it with its own.</p>
-      <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
-      <div class="qs-row">
-        <span class="qs-label">Drive time left on your ELD<span class="muted small"> — the {LIMITS.DRIVE / 60}-hour driving clock</span></span>
-        <span class="qs-inputs">
-          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, hours" value={txt[0]}
-            onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [v, p[1]]); }} />
-          <span aria-hidden="true">h</span>
-          <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, minutes" value={txt[1]}
-            onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [p[0], v]); }} />
-          <span aria-hidden="true">m</span>
-        </span>
+      <div data-drift-sheet="1" data-drift-shot-mode={isShotMode ? '1' : '0'}>
+        <p class="small">Your ELD is the official record — this just lines the app up with it. {isShotMode ? 'Pick a screenshot of your ELD clocks screen (or type your drive time left below) to compare against your log without replacing your entries.' : 'Type the drive time left your ELD shows, and the app compares it with its own.'}</p>
+        {isShotMode && (
+          <div class="qs-section" data-eld-ocr-section="1">
+            <div class="row">
+              <button
+                type="button"
+                class="primary wide"
+                data-first
+                data-eld-choose-shot="1"
+                disabled={shotBusy}
+                onClick={() => shotRef.current?.click()}
+              >
+                {shotBusy ? 'Reading screenshot…' : 'Choose ELD screenshot'}
+              </button>
+            </div>
+            <input
+              type="file"
+              accept="image/*"
+              style="display:none"
+              ref={shotRef}
+              onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importDriftShot(f); }}
+            />
+            <p class="muted small">Read on this phone and thrown away — never sent or saved anywhere. Prefills your drive time left below; your log stays untouched.</p>
+            {shotNote && <p class="ok small" data-drift-shot-note="1">{shotNote}</p>}
+            {shotErr && <p class="warnbox small" data-drift-shot-err="1">{shotErr}</p>}
+          </div>
+        )}
+        <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box.</p>
+        <div class="qs-row">
+          <span class="qs-label">Drive time left on your ELD<span class="muted small"> — the {LIMITS.DRIVE / 60}-hour driving clock</span></span>
+          <span class="qs-inputs">
+            <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, hours" data-drift-h="1" value={txt[0]}
+              onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [v, p[1]]); }} />
+            <span aria-hidden="true">h</span>
+            <input type="number" class="num" inputMode="numeric" min={0} aria-label="Drive time left on your ELD, minutes" data-drift-m="1" value={txt[1]}
+              onInput={(e) => { const v = (e.target as HTMLInputElement).value; setTxt((p) => [p[0], v]); }} />
+            <span aria-hidden="true">m</span>
+          </span>
+        </div>
+        {err && <p class="warnbox small">{err}</p>}
+        <div class="row"><button class="primary" data-first={isShotMode ? undefined : true} data-drift-compare="1" onClick={compare}>Compare</button></div>
       </div>
-      {err && <p class="warnbox small">{err}</p>}
-      <div class="row"><button class="primary" data-first onClick={compare}>Compare</button></div>
     </Sheet>
   );
 }
@@ -3529,7 +3914,7 @@ export function addDriftFill(eldLeftMin: number, now: number): { row: Segment; p
   const plan = planDriftFill(getState(), -check.gap, now);
   if (!plan || plan.filled <= 0) return null;
   const row: Segment = { status: 'D', start: plan.start, end: plan.end, note: DRIFT_NOTE, createdAt: stamp() };
-  undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row] })));
+  undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row], lastEldCheckAt: now })));
   return { row, plan, check, after: driftCheck(getState(), eldLeftMin, now) };
 }
 /** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
@@ -3671,6 +4056,7 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
           <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {formatDayStartHM(s.config)}{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
           <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
         </div>
+        <p class="muted small log-scratchpad-note" data-log-scratchpad="1">Planning scratchpad — your ELD is the record.</p>
         <section class="card log-graph-card">
           {/* The resolved timeline, as the clocks read it: drawn raw, a break added inside a drive showed the
               drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
@@ -4501,6 +4887,9 @@ export interface RolloutPrefill {
   chainedPriorSegments?: Segment[];
   chainedCursor?: number;
   chainedFromLabel?: string;
+  /** B3 (receptionfix2): My Week custom ELD clocks & synthesized base carried into drill-downs (Load 1 & Load 2+). */
+  chainedCustomClocks?: EldClocks;
+  chainedBaseSegments?: Segment[];
 }
 let pendingRolloutPrefill: RolloutPrefill | null = null;
 let rolloutReturnToMyWeek = false;
@@ -4576,6 +4965,9 @@ export interface RescuePrefill {
   chainedPriorSegments?: Segment[];
   chainedCursor?: number;
   chainedFromLabel?: string;
+  /** B3 (receptionfix2): My Week custom ELD clocks & synthesized base carried into drill-downs (Load 1 & Load 2+). */
+  chainedCustomClocks?: EldClocks;
+  chainedBaseSegments?: Segment[];
 }
 let pendingRescuePrefill: RescuePrefill | null = null;
 let rescueReturnToMyWeek = false;
@@ -5422,6 +5814,16 @@ function SplitBlockSheet({ s, now, ev, block, closing = false }: { s: State; now
 function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) {
   // The what-if lives in the store: a detour to the Log tab used to reset the plan being compared.
   const sd = s.split;
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const effState = useMemo(() => {
+    if (!customClocks) return s;
+    const seed = synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0);
+    return { ...s, segments: seed.segments, tentative: [], current: null };
+  }, [s, customClocks, now]);
+  const effEv = useMemo(
+    () => (customClocks ? evaluate(effState.segments, { asOf: now, config: safeRulesConfig(s.config) }) : ev),
+    [customClocks, effState, now, s.config, ev],
+  );
   // A partial carrying every draft key is a whole-draft load ("Try an example split"):
   // it keeps the draft it replaces behind the one-level undo (audit §2.4). Any partial
   // edit — a slider, a toggle — retires the offer instead (the Log undo's N2 rule).
@@ -5437,14 +5839,14 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
     if (!sameDraft(f, DEFAULT_SPLIT)) setState({ split: f });
   }, []);
   const { b1, b1s, dwell, drive, b2, b2s } = sd;
-  const sc = useMemo(() => splitScenario(s, now, ev), [s, now, ev]);
+  const sc = useMemo(() => splitScenario(effState, now, effEv), [effState, now, effEv]);
   const { timeline, t0, plan, endDrive, endB2, after, paired, longOk, totalOk, planViol, strictViol } = sc;
   const sh = safeHaven(after, s.mph);
   // The pair the clocks use now, and the rest that could start the next one — shown as two different
   // things. Side by side as "Period A … counts against your 14" and "Active split", a tester read them
   // as a contradiction (2026-11-04): the clocks were excluding the very rest that line said counted.
-  const activeNow = activePair(ev);
-  const pl = ev.shift.pendingSplitLeg;
+  const activeNow = activePair(effEv);
+  const pl = effEv.shift.pendingSplitLeg;
   const nextLeg = activeNow && pl && pl.start === activeNow[1].start && pl.end === activeNow[1].end ? pl : null;
   const nextMin = nextLeg ? Math.max(nextLeg.qualifiesLongSB ? LIMITS.SPLIT_MIN_SHORT : LIMITS.SPLIT_MIN_SB, LIMITS.SPLIT_TOTAL - nextLeg.duration) : 0;
   const nextNeed = !nextLeg ? '' : nextLeg.qualifiesLongSB ? `a later rest of at least ${dur(nextMin)}`
@@ -5452,8 +5854,12 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
 
   // D13 (audit): putting the plan on the log answers back — an undo chip, and the button says
   // the plan is there (or offers to update it when the draft has changed since).
+  // N1 (receptionfix2): never write an override-derived plan onto the live log while custom clocks are active.
   const PLAN_ON_LOG = 'Plan added to your log as what-if';
-  const commit = () => undoable(PLAN_ON_LOG, () => setState({ tentative: plan }));
+  const commit = () => {
+    if (customClocks) return;
+    undoable(PLAN_ON_LOG, () => setState({ tentative: plan }));
+  };
   const clear = () => setState({ tentative: [] });
   const undo = useUndo();
   const planOnLog = s.tentative.length === plan.length && plan.length > 0
@@ -5549,7 +5955,13 @@ function SplitTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation })
           <button class="mini" onClick={undoLast}>Undo</button>
         </div>
       )}
-      <div class="row"><button class="primary" disabled={planOnLog} onClick={commit}>{planOnLog ? 'Plan is on your log ✓' : s.tentative.length ? 'Update the what-if on your log' : 'Put plan on log as what-if'}</button><button onClick={clear} disabled={!s.tentative.length}>Clear what-if</button></div>
+      <div class="row"><button class="primary" data-split-commit="1" disabled={planOnLog || Boolean(customClocks)} onClick={commit}>{planOnLog ? 'Plan is on your log ✓' : s.tentative.length ? 'Update the what-if on your log' : 'Put plan on log as what-if'}</button><button onClick={clear} disabled={!s.tentative.length}>Clear what-if</button></div>
+      {customClocks && (
+        <p class="muted small" data-split-override-note="1" style="margin:6px 0 0">
+          Custom clocks are on — turn them off to put this plan on your log.
+        </p>
+      )}
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="split" />
     </>
   );
 }
@@ -5858,8 +6270,12 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
   const [resetDayOffset, setResetDayOffset] = useState(1); // Tomorrow by default
   const [resetWallMin, setResetWallMin] = useState(8 * 60); // 08:00 parking sweet spot
   const [homeTarget, setHomeTarget] = useState<number | null>(null);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s, now, customClocks],
+  );
   const resetStart = useMemo(
     () => defaultResetStart(now, s.config, resetDayOffset, resetWallMin),
     [now, s.config, resetDayOffset, resetWallMin],
@@ -6277,6 +6693,7 @@ function WeekRecapTab({ s, now, onBack }: { s: State; now: number; onBack: () =>
           })()}
         </ul>
       </Card>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="week" />
     </>
   );
 }
@@ -6342,14 +6759,22 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
   const [dockMin, setDockMin] = useState(prefill?.dockMinutes ?? DEFAULT_DOCK_MIN);
   const [preTripMin, setPreTripMin] = useState(prefill?.preTripMinutes ?? DEFAULT_PRETRIP_MIN);
   const [copyNote, setCopyNote] = useState('');
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(prefill?.chainedCustomClocks ?? null);
 
+  const hasChainedPrior = Boolean(prefill?.chainedPriorSegments?.length);
   const evalNow = prefill?.chainedCursor ?? now;
   const logged = useMemo(() => {
-    const base = loggedSegments(s, now);
-    if (!prefill?.chainedPriorSegments?.length) return base;
-    const prior = prefill.chainedPriorSegments.map(({ tentative: _t, ...rest }) => rest);
+    const base = hasChainedPrior
+      ? (prefill?.chainedBaseSegments ?? loggedSegments(s, now))
+      : customClocks
+        ? (customClocks === prefill?.chainedCustomClocks && prefill?.chainedBaseSegments
+          ? prefill.chainedBaseSegments
+          : synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments)
+        : loggedSegments(s, now);
+    if (!hasChainedPrior) return base;
+    const prior = prefill!.chainedPriorSegments!.map(({ tentative: _t, ...rest }) => rest);
     return [...base, ...prior];
-  }, [s, now, prefill]);
+  }, [s, now, prefill, hasChainedPrior, customClocks]);
   const zoneChoices = useMemo(() => {
     const set = new Set<string>([s.config.timeZone, deviceTz, ...COMMON_APPT_ZONES]);
     return [...set].filter((z) => isValidTimeZone(z));
@@ -6411,7 +6836,15 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
           <p class="rollout-headline">{plan.headline}</p>
           <p class="rollout-subline">{plan.reason}</p>
           <p class="muted small" style="margin:0">
-            {prefill?.chainedFromLabel ? `Seeded from My Week chain (${prefill.chainedFromLabel})` : 'Seeded from your log'} · {plan.cycleLimit / 60}h/{plan.cycleWindowDays}d cycle ({dur(plan.cycleRemainingNow)} left) · Home terminal: <b>{plan.homeZoneName}</b>
+            {hasChainedPrior
+              ? (prefill?.chainedCustomClocks
+                ? `Seeded from My Week custom clocks + chain (${prefill.chainedFromLabel})`
+                : `Seeded from My Week chain (${prefill?.chainedFromLabel})`)
+              : customClocks
+                ? (prefill?.chainedCustomClocks && customClocks === prefill.chainedCustomClocks
+                  ? 'Seeded from My Week custom clocks'
+                  : 'Seeded from custom ELD clocks')
+                : 'Seeded from your log'} · {plan.cycleLimit / 60}h/{plan.cycleWindowDays}d cycle ({dur(plan.cycleRemainingNow)} left) · Home terminal: <b>{plan.homeZoneName}</b>
             {!plan.sameZone && <> · Appointment: <b>{plan.apptZoneName}</b></>}.
           </p>
         </div>
@@ -6852,6 +7285,18 @@ function RolloutTab({ s, now, onBack }: { s: State; now: number; onBack: () => v
           </div>
         </div>
       </Card>
+      {!hasChainedPrior ? (
+        <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="rollout" />
+      ) : prefill?.chainedCustomClocks ? (
+        <div class="clock-override-bar is-custom" data-clock-override="rollout" data-clock-override-active="1" data-chained-custom-clocks="1">
+          <div class="clock-override-head">
+            <span class="small">
+              <b>Custom ELD clocks (from My Week)</b> · <span class="mono">{dur(prefill.chainedCustomClocks.driveLeft)}</span> drive · <span class="mono">{dur(prefill.chainedCustomClocks.windowLeft)}</span> win · <span class="mono">{dur(prefill.chainedCustomClocks.cycleLeft)}</span> cycle
+            </span>
+          </div>
+          <p class="muted small" style="margin:4px 0 0">Carried from My Week for this chained load — go back to My Week to change these clocks.</p>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -7005,14 +7450,22 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
   const [driveMins, setDriveMins] = useState(initDrive % 60);
   const [useDeadline, setUseDeadline] = useState(Boolean(prefill?.deadlineMinute != null));
   const [deadlineMin, setDeadlineMin] = useState<number>(() => prefill?.deadlineMinute ?? (now + 10 * 60));
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(prefill?.chainedCustomClocks ?? null);
 
+  const hasChainedPrior = Boolean(prefill?.chainedPriorSegments?.length);
   const evalNow = prefill?.chainedCursor ?? now;
   const logged = useMemo(() => {
-    const base = loggedSegments(s, now);
-    if (!prefill?.chainedPriorSegments?.length) return base;
-    const prior = prefill.chainedPriorSegments.map(({ tentative: _t, ...rest }) => rest);
+    const base = hasChainedPrior
+      ? (prefill?.chainedBaseSegments ?? loggedSegments(s, now))
+      : customClocks
+        ? (customClocks === prefill?.chainedCustomClocks && prefill?.chainedBaseSegments
+          ? prefill.chainedBaseSegments
+          : synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments)
+        : loggedSegments(s, now);
+    if (!hasChainedPrior) return base;
+    const prior = prefill!.chainedPriorSegments!.map(({ tentative: _t, ...rest }) => rest);
     return [...base, ...prior];
-  }, [s, now, prefill]);
+  }, [s, now, prefill, hasChainedPrior, customClocks]);
   const dockWaitMinutes = waitHours * 60 + waitMins;
   const driveMinutesDirect = driveHours * 60 + driveMins;
 
@@ -7066,7 +7519,15 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
             </div>
           </div>
           <p class="muted small" style="margin:0">
-            {prefill?.chainedFromLabel ? `Seeded from My Week chain (${prefill.chainedFromLabel})` : 'Seeded from your log'} at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
+            {hasChainedPrior
+              ? (prefill?.chainedCustomClocks
+                ? `Seeded from My Week custom clocks + chain (${prefill.chainedFromLabel})`
+                : `Seeded from My Week chain (${prefill?.chainedFromLabel})`)
+              : customClocks
+                ? (prefill?.chainedCustomClocks && customClocks === prefill.chainedCustomClocks
+                  ? 'Seeded from My Week custom clocks'
+                  : 'Seeded from custom ELD clocks')
+                : 'Seeded from your log'} at <b class="mono">{sim.nowShort}</b> ({sim.homeZoneName})
             {sim.pendingSplitLeg && (
               <> · Pending split leg on log: <b>{dur(sim.pendingSplitLeg.duration)}</b> ({sim.pendingSplitLeg.qualifiesLongSB ? 'Sleeper Berth' : 'OFF/SB'})</>
             )}
@@ -7269,6 +7730,18 @@ function RescueTab({ s, now, onBack }: { s: State; now: number; onBack: () => vo
           )}
         </div>
       </Card>
+      {!hasChainedPrior ? (
+        <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="rescue" />
+      ) : prefill?.chainedCustomClocks ? (
+        <div class="clock-override-bar is-custom" data-clock-override="rescue" data-clock-override-active="1" data-chained-custom-clocks="1">
+          <div class="clock-override-head">
+            <span class="small">
+              <b>Custom ELD clocks (from My Week)</b> · <span class="mono">{dur(prefill.chainedCustomClocks.driveLeft)}</span> drive · <span class="mono">{dur(prefill.chainedCustomClocks.windowLeft)}</span> win · <span class="mono">{dur(prefill.chainedCustomClocks.cycleLeft)}</span> cycle
+            </span>
+          </div>
+          <p class="muted small" style="margin:4px 0 0">Carried from My Week for this chained load — go back to My Week to change these clocks.</p>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -7730,7 +8203,11 @@ function StackTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
     return () => clearTimeout(t);
   }, [timelineView]);
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s, now, customClocks],
+  );
   const hasPinnedDeparture = departureMinute !== null && departureMinute > now;
   const departure = departureMinute !== null ? Math.max(now, departureMinute) : now;
   const sim: StackResult = useMemo(
@@ -8096,6 +8573,7 @@ function StackTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
           </button>
         </div>
       </Card>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="stack" />
     </>
   );
 }
@@ -8158,8 +8636,12 @@ function MotelTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
 
   const driveBox = useDurationBoxes('Return drive time', driveMinutesDirect, 0, MOTEL_MAX_DRIVE_MIN, setDriveMinutesDirect);
   const hookBox = useDurationBoxes('Swap / hook time', hookMinutes, 0, MOTEL_MAX_HOOK_MIN, setHookMinutes);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s, now, customClocks],
+  );
   const res: MotelResult = useMemo(
     () => evaluateMotel({
       segments: logged,
@@ -8171,9 +8653,9 @@ function MotelTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
       driveMinutesDirect,
       hookMinutes,
       bigDay,
-      currentStatus: s.current?.status ?? null,
+      currentStatus: customClocks ? 'OFF' : (s.current?.status ?? null),
     }),
-    [logged, now, s.config, distanceMode, miles, mph, driveMinutesDirect, hookMinutes, bigDay, s.current?.status],
+    [logged, now, s.config, distanceMode, miles, mph, driveMinutesDirect, hookMinutes, bigDay, s.current?.status, customClocks],
   );
 
   const copyAlert = async () => {
@@ -8526,6 +9008,7 @@ function MotelTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
       <p class="motel-foot">
         Planning estimate only — not legal advice and not an ELD. Your official log and your carrier's ELD govern.
       </p>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="motel" />
     </>
   );
 }
@@ -8918,7 +9401,11 @@ function FlipTimeSheet({ k, now, closing = false }: { k: Extract<SheetKind, { ki
  * Session-only state (zero new localStorage keys); shared ClockPick for shutdown & custom target.
  */
 function FlipTab({ s, now, onBack }: { s: State; now: number; onBack: () => void }) {
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s, now, customClocks],
+  );
   const defShutdown = useMemo(() => defaultShutdownMinute(logged, now), [logged, now]);
   const [customShutdown, setCustomShutdown] = useState<number | null>(null);
   const [targetHour, setTargetHour] = useState<number>(21);
@@ -9233,6 +9720,7 @@ function FlipTab({ s, now, onBack }: { s: State; now: number; onBack: () => void
           </Card>
         )}
       </div>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="flip" />
     </>
   );
 }
@@ -9373,7 +9861,11 @@ function MilesTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
     setOverheadMinutes,
   );
 
-  const logged = useMemo(() => loggedSegments(s, now), [s, now]);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s, now, customClocks],
+  );
   const res = useMemo(
     () => evaluateMilesLeft({
       segments: logged,
@@ -9389,6 +9881,7 @@ function MilesTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
     }),
     [logged, now, s.config, milesAlreadyRun, goalMiles, mph, overheadMinutes, cutoffDow, cutoffHour, cutoffMinuteOfHour],
   );
+  const hist = cycleBasis(s, now, cycleParamsOf(s.config).windowDays);
 
   const cutoffDowInfo = MILES_DOW_LABELS.find((d) => d.dow === res.cutoffDow) ?? MILES_DOW_LABELS[6];
 
@@ -9682,6 +10175,12 @@ function MilesTab({ s, now, onBack }: { s: State; now: number; onBack: () => voi
           ))}
         </div>
       </Card>
+      {!customClocks && hist !== 'known' && (
+        <div class="warnbox small" style="margin-top:10px">
+          Your log does not cover a full {cycleParamsOf(s.config).windowDays}-day cycle yet, so unlogged past days count as 0h. Use custom clocks below, or update past days in <b>Log</b>.
+        </div>
+      )}
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="miles" />
     </>
   );
 }
@@ -9836,9 +10335,13 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
     });
   };
 
-  const logged = useMemo(() => loggedSegments(s, now), [s.segments, s.current, now]);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const logged = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : loggedSegments(s, now)),
+    [s.segments, s.current, s.config, now, customClocks],
+  );
   const { windowDays } = cycleParamsOf(s.config);
-  const basis = useMemo(() => cycleBasis(s, now, windowDays), [s, now, windowDays]);
+  const basis = useMemo(() => (customClocks ? 'known' : cycleBasis(s, now, windowDays)), [s, now, windowDays, customClocks]);
 
   const baseRes: WeekSynthesisResult = useMemo(() => {
     // H1: Never re-synthesize while the room is closing/dissolving off-screen.
@@ -9853,17 +10356,19 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
       previewTradeId: null,
     });
     lastBaseResRef.current = out;
-    primeWeekHubCache({
-      segments: s.segments,
-      current: s.current,
-      now,
-      config: s.config,
-      mph: s.mph,
-      draft,
-      historyBasis: basis,
-    }, out);
+    if (!customClocks) {
+      primeWeekHubCache({
+        segments: s.segments,
+        current: s.current,
+        now,
+        config: s.config,
+        mph: s.mph,
+        draft,
+        historyBasis: basis,
+      }, out);
+    }
     return out;
-  }, [active, logged, now, s.segments, s.current, s.config, s.mph, draft, basis]);
+  }, [active, logged, now, s.segments, s.current, s.config, s.mph, draft, basis, customClocks]);
 
   const activePreviewConflict = previewTradeId
     ? baseRes.conflicts.find((c) => c.previewTrade?.id === previewTradeId) ?? null
@@ -9973,16 +10478,28 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
     }
   };
 
-  // H4: Seed Rollout & Rescue drill-downs from the CHAINED state at Load `o` (prior planned loads' simulated
-  // segments + chained evaluation cursor), so Load 2+ never claim an illegal roll-out "Fits cleanly".
+  // H4 & B3 (receptionfix2): Seed Rollout & Rescue drill-downs from the CHAINED state at Load `o`
+  // (prior planned loads' simulated segments + chained evaluation cursor + any active My Week
+  // custom clocks & synthesized base, including for Load 1), so drill-downs never contradict My Week.
   const chainContextFor = (o: WeekLoadOutcome) => {
-    if (o.index <= 0) return { chainedPriorSegments: undefined, chainedCursor: res.now, chainedFromLabel: undefined };
+    const customCtx = customClocks
+      ? { chainedCustomClocks: customClocks, chainedBaseSegments: logged }
+      : { chainedCustomClocks: undefined, chainedBaseSegments: undefined };
+    if (o.index <= 0) {
+      return {
+        chainedPriorSegments: undefined,
+        chainedCursor: res.now,
+        chainedFromLabel: undefined,
+        ...customCtx,
+      };
+    }
     const priorLoads = shownStrat.loads.slice(0, o.index);
     const prev = priorLoads[priorLoads.length - 1];
     return {
       chainedPriorSegments: priorLoads.flatMap((pl) => pl.simSegments),
       chainedCursor: prev ? prev.pta.minute : res.now,
       chainedFromLabel: prev ? `after ${prev.displayName}` : undefined,
+      ...customCtx,
     };
   };
 
@@ -10708,6 +11225,7 @@ function MyWeekTab({ s, now, onBack, active = true }: { s: State; now: number; o
           )}
         </Card>
       )}
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="myweek" />
     </>
   );
 }
@@ -10954,9 +11472,13 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const milesProblem = milesText === null ? null : loadMilesProblem(milesText);
   // each question is its own screen: start it at the top, not wherever the last Next button was
   useEffect(() => { window.scrollTo(0, 0); document.querySelector('.app')?.scrollTo?.(0, 0); document.querySelector('.page.plan-room.is-active, .pages .page.is-active')?.scrollTo?.(0, 0); }, [step]);
-  const hist = cycleBasis(s, now, ev.cycle.windowDays);
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const hist = customClocks ? 'known' : cycleBasis(s, now, ev.cycle.windowDays);
   const departure = now + lc.leaveIn;
-  const loadSegs = allSegments(s, now).filter((x) => !x.tentative);
+  const loadSegs = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : allSegments(s, now).filter((x) => !x.tentative)),
+    [s, now, customClocks],
+  );
   const loadInput: TripInput = {
     departure, distanceMiles: lc.miles, mph: s.mph,
     stops: lc.dwell ? [{ atMile: lc.miles, minutes: lc.dwell, status: lc.dwellOff ? 'OFF' : 'ON', label: 'Receiver' }] : [],
@@ -10964,7 +11486,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
     // Waiting to leave is not rest unless he says so: shown as an assumed row, never an unlogged gap.
     ...(lc.leaveIn > 0 ? { untilDeparture: { from: now, status: lc.waitOff ? 'OFF' as DutyStatus : 'ON' as DutyStatus, label: `${lc.waitOff ? 'Off duty' : 'On duty'} until departure` } } : {}),
   };
-  const both = useMemo(() => planTripAll(loadSegs, loadInput), [s, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
+  const both = useMemo(() => planTripAll(loadSegs, loadInput), [loadSegs, s.mph, s.config, now, lc.miles, lc.dwell, lc.dwellOff, lc.leaveIn, lc.waitOff]);
   const strategyKey = earliestStrategy(both);
   const best = both[strategyKey];
   // Patch 10: the verdict's two follow-up answers, computed with the same simulation on shifted
@@ -11143,6 +11665,7 @@ function LoadTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <p class="trust">Assumes {s.mph} mph average, fuel and traffic included — change it under More.</p>
       <button class="primary wide" onClick={() => setState({ tab: 'now' })}>Done</button>
       <button class="wide" onClick={() => { clearLoadDraftUndo(); initStock.current = false; setState({ loadCheck: { ...FRESH_LOADCHECK } }); setStep(1); }}>Check another load</button>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="load" />
       </div>
     </>
   );
@@ -11196,14 +11719,23 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
   const pastDeparture = departure < now;
   /** A stop past the destination is passed through so the planner reports it rather than dropping it. */
   const stopPastDest = d.stopMin > 0 && d.stopMile > d.miles;
-  const both = useMemo(() => planTripAll(allSegments(s, now).filter((x) => !x.tentative), {
+  const [customClocks, setCustomClocks] = useState<EldClocks | null>(null);
+  const tripSegs = useMemo(
+    () => (customClocks ? synthesizeEldSeed(customClocks, safeRulesConfig(s.config), now, 0).segments : allSegments(s, now).filter((x) => !x.tentative)),
+    [s, now, customClocks],
+  );
+  const effEv = useMemo(
+    () => (customClocks ? evaluate(tripSegs, { asOf: now, config: safeRulesConfig(s.config) }) : ev),
+    [customClocks, tripSegs, now, s.config, ev],
+  );
+  const both = useMemo(() => planTripAll(tripSegs, {
     departure, distanceMiles: d.miles, mph: s.mph, preTripMinutes: d.pre,
     stops: d.stopMin > 0 && d.stopMile > 0 ? [{ atMile: d.stopMile, minutes: d.stopMin, status: d.stopOff ? 'OFF' : 'ON', label: d.stopOff ? 'Stop (off duty)' : 'Stop (on duty)' }] : [],
     config: s.config,
     // Never let the wait before departure read as an unlogged gap: say what it is, and show it.
     ...(waiting ? { untilDeparture: { from: now, status: untilStatus, label: `${STATUS_LABEL[untilStatus]} until departure` } } : {}),
-  }), [s, now, departure, d.miles, d.pre, d.stopMile, d.stopMin, d.stopOff, untilStatus, waiting]);
-  const sh = safeHaven(ev, s.mph);
+  }), [tripSegs, s.mph, s.config, now, departure, d.miles, d.pre, d.stopMile, d.stopMin, d.stopOff, untilStatus, waiting]);
+  const sh = safeHaven(effEv, s.mph);
   const halfMile = Math.max(1, Math.round(d.miles / 2));
 
   return (
@@ -11211,10 +11743,10 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <BackToPlan s={s} />
       <h1 class="screen-title">Plan a run</h1>
       <p class="muted small tool-sub">Clock-to-parking range right now, plus three legal ways to run your trip.</p>
-      <Card title="Clock-to-parking (right now)" tone={ev.driveNow < 60 ? 'bad' : ev.driveNow < 120 ? 'warn' : 'good'} statusBadge={ev.driveNow < 60 ? { tone: 'bad', label: '✕ Under 1h' } : ev.driveNow < 120 ? { tone: 'warn', label: '⚠ Under 2h' } : { tone: 'good', label: '✓ Plenty of time' }}>
+      <Card title="Clock-to-parking (right now)" tone={effEv.driveNow < 60 ? 'bad' : effEv.driveNow < 120 ? 'warn' : 'good'} statusBadge={effEv.driveNow < 60 ? { tone: 'bad', label: '✕ Under 1h' } : effEv.driveNow < 120 ? { tone: 'warn', label: '⚠ Under 2h' } : { tone: 'good', label: '✓ Plenty of time' }}>
         <div class="clocks">
-          <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(ev.driveNow)} @ ${s.mph} mph`} />
-          <Stat label="Hard stop" value={clockFull(ev.mustStopBy)} sub={bindingLabel(ev)} />
+          <Stat label="Range" value={`${sh.miles} mi`} sub={`${dur(effEv.driveNow)} @ ${s.mph} mph`} />
+          <Stat label="Hard stop" value={clockFull(effEv.mustStopBy)} sub={bindingLabel(effEv)} />
         </div>
         <table class="cutoffs"><tbody>{sh.cutoffs.map((c) => <tr key={c.bufferMinutes}><td>{c.bufferMinutes} min buffer</td><td>park by <b>{clock(c.by, false)}</b></td><td>≤ {c.miles} mi</td></tr>)}</tbody></table>
         <p class="muted small">Net speed (fuel, traffic, scales) is what matters — set it under More. Parking after 17:00 fills fast; plan the 60-min line, not the 0.</p>
@@ -11351,6 +11883,7 @@ function TripTab({ s, now, ev }: { s: State; now: number; ev: FullEvaluation }) 
       <Card title="Itinerary — three ways to rest">
         <PlanCompare both={both} from={departure} view={d.view} onView={(v) => setTrip({ view: v })} />
       </Card>
+      <InlineClockOverride s={s} now={now} override={customClocks} onChange={setCustomClocks} toolId="trip" />
     </>
   );
 }
@@ -11368,16 +11901,25 @@ export function downloadExport(s: State, driverName?: string): string {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try { setState({ lastExportAt: s.nowOverride ?? nowMin() }); } catch { /* ignore during fallback recovery */ }
   return name;
 }
 
-/* ============================================================ Log summary (PDF / print) */
+/* ============================================================ Planning worksheet (PDF / print) */
 
-/** Log summary PDF (2026-11-20 follow-on): day-count bounds and mandatory non-ELD disclaimer. */
+/** Planning worksheet PDF: day-count bounds and mandatory non-RODS / non-ELD header disclaimer. */
 export const PDF_DAYS_DEFAULT = 14;
 export const PDF_DAYS_MIN = 1;
 export const PDF_DAYS_MAX = 92;
-export const PDF_DISCLAIMER = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+export const PDF_DISCLAIMER = 'PERSONAL HOS PLANNING WORKSHEET — NOT A LEGAL RODS / NOT AN ELD';
+
+/** Filename for the exported planning worksheet PDF: clock14-worksheet-<driver>-<YYYYMMDD>.pdf */
+export function worksheetFilename(driverName: string, generatedAtMs: number): string {
+  const d = new Date(generatedAtMs);
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const slug = driverName ? driverFileSlug(driverName) : '';
+  return `clock14-worksheet-${slug || 'driver'}-${ymd}.pdf`;
+}
 
 /**
  * Validate the driver's requested day count for the printable log summary.
@@ -11503,20 +12045,22 @@ function LogSummaryReport({ s, req }: { s: State; req: PrintReportRequest }) {
   const twoZones = s.config.timeZone !== deviceTz;
   const dayStartLabel = formatDayStartHM(s.config);
   const driverName = getActiveDriverName();
+  const fileName = worksheetFilename(driverName, req.generatedAtMs);
 
   return (
-    <article class="print-report" data-print-report data-days={days.length} aria-label="Log summary report">
+    <article class="print-report" data-print-report data-days={days.length} data-worksheet-filename={fileName} aria-label="Planning worksheet">
       <header class="pr-head">
         <div class="pr-brand-row">
           <div>
             <div class="pr-app">Clock 14 <span class="pr-app-sub">— HOS What-If Planner</span></div>
-            <h1 class="pr-title">Log Summary</h1>
+            <h1 class="pr-title">Planning Worksheet</h1>
           </div>
           <div class="pr-count-badge">{days.length} {days.length === 1 ? 'day' : 'days'}</div>
         </div>
         <div class="pr-disclaimer" role="note">{PDF_DISCLAIMER}</div>
         <dl class="pr-meta">
           {driverName && <div><dt>Driver</dt><dd>{driverName}</dd></div>}
+          <div><dt>Worksheet file</dt><dd class="mono">{fileName}</dd></div>
           <div><dt>Date range</dt><dd>{rangeLabel} ({days.length} {days.length === 1 ? 'carrier day' : 'carrier days'}, newest first)</dd></div>
           <div><dt>Generated</dt><dd class="mono">{genStr}</dd></div>
           <div><dt>Carrier day boundary</dt><dd>{dayStartLabel} {s.config.timeZone}{twoZones ? ` · clock times in ${deviceTz}` : ''}</dd></div>
@@ -11670,7 +12214,11 @@ export const TESTING_LONG_PRESS_MS = 600;
 let testingUnlocked = false;
 export function setTestingUnlocked(v: boolean) { testingUnlocked = v; }
 
-function SettingsTab({ s, now, ev, driverId, driverName }: { s: State; now: number; ev: FullEvaluation; driverId: string | null; driverName: string }) {
+function SettingsTab({
+  s, now, ev, driverId, driverName, stayUnlocked, driverCount,
+}: {
+  s: State; now: number; ev: FullEvaluation; driverId: string | null; driverName: string; stayUnlocked: boolean; driverCount: number;
+}) {
   const c = s.config;
   const [ioNote, setIoNote] = useState<string | null>(null);
   const [pdfDaysText, setPdfDaysText] = useState(String(PDF_DAYS_DEFAULT));
@@ -11758,7 +12306,7 @@ function SettingsTab({ s, now, ev, driverId, driverName }: { s: State; now: numb
   };
   return (
     <>
-      <DriverSettingsCard driverId={driverId} driverName={driverName} />
+      <DriverSettingsCard driverId={driverId} driverName={driverName} stayUnlocked={stayUnlocked} driverCount={driverCount} />
       {/* D18 (audit): the one-release "Hours coming back has moved to Plan ›" row is retired. */}
       <Card title="Rules">
         <label>Cycle<Toggle options={[['70/8', '70 hr / 8 days'], ['60/7', '60 hr / 7 days']]} value={c.cycle} onChange={(v) => setC({ cycle: v })} /></label>
@@ -11795,14 +12343,25 @@ function SettingsTab({ s, now, ev, driverId, driverName }: { s: State; now: numb
       <DrivingAlertsCard s={s} />
       <BreakButtonsCard s={s} />
       <Card title="Bug reports">
+        <a class="btn primary wide bug-email-btn" data-bug-email="1" href={bugReportMailtoHref(s, ev)}>Email a bug report</a>
+        <p class="muted small">Opens your email app with your build stamp, theme, and clocks pre-filled — no account needed.</p>
         <BugButton s={s} ev={ev} />
         <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
       </Card>
       <Card title="Data">
+        {shouldShowBackupNudge(s, now) && (
+          <div class="backup-nudge" data-backup-nudge="1" role="status">
+            <span class="small">Back up your clocks — save a copy somewhere safe.</span>
+            <span class="backup-nudge-acts">
+              <button type="button" class="mini primary" onClick={exportJson}>Export JSON</button>
+              <button type="button" class="mini" data-backup-nudge-dismiss="1" onClick={() => setState({ exportNudgeDismissedAt: now })}>Dismiss</button>
+            </span>
+          </div>
+        )}
         <div class="row"><button onClick={exportJson}>Export JSON</button><label class="filebtn">Import JSON<input type="file" accept="application/json" onChange={importJson} /></label></div>
         <div class="pdf-export-row">
           <label class="pdf-days">Days<input ref={pdfDaysRef} type="number" class="num" inputMode="numeric" min={PDF_DAYS_MIN} max={PDF_DAYS_MAX} step={1} value={pdfDaysText} aria-invalid={pdfErr ? 'true' : undefined} onInput={onPdfDaysInput} /></label>
-          <button type="button" class="pdf-btn" onClick={openPdfSummary}>Log summary (PDF)</button>
+          <button type="button" class="pdf-btn" onClick={openPdfSummary}>Planning worksheet (PDF)</button>
         </div>
         {pdfErr && <div class="warnbox small" role="alert">{pdfErr}</div>}
         {ioNote && <p class="muted small">{ioNote}</p>}
@@ -11813,6 +12372,7 @@ function SettingsTab({ s, now, ev, driverId, driverName }: { s: State; now: numb
       </Card>
       <Card title="About">
         <p class="small">{CLOCK14_DISCLAIMER_TEXT}</p>
+        <p class="small" data-scope-line="1">Clock 14 covers US interstate property-carrying rules (49 CFR 395). No Canada, oilfield, or passenger-carrying rules.</p>
         <p class="muted small build-line" data-build-line onContextMenu={(e) => e.preventDefault()} onPointerDown={startPress} onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress} onMouseDown={startPress} onMouseUp={cancelPress} onMouseLeave={cancelPress} onTouchStart={startPress} onTouchEnd={cancelPress} onTouchCancel={cancelPress}>Build {__BUILD__} · now {clock(now)}</p>
       </Card>
       {/* C5 (taste, 2026-11-20): hidden from casual poking on More behind a long-press on the build
@@ -11880,7 +12440,7 @@ function DayStartSheet({ s, closing = false }: { s: State; closing?: boolean }) 
 /** A9 (audit): "Erase all data" — everything the app holds on this phone, the way it always did. */
 export function eraseAll() {
   try { localStorage.removeItem(SIM_KEY); } catch { /* ignore */ }
-  setState((cur) => ({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, dayCloses: [], config: { ...cur.config, adverseShifts: [], sixteenHourShifts: [] } }));
+  setState((cur) => ({ segments: [], tentative: [], current: null, nowOverride: null, historyAcknowledged: false, seededAt: null, lastEldCheckAt: null, dayCloses: [], config: { ...cur.config, adverseShifts: [], sixteenHourShifts: [] } }));
 }
 /**
  * A9 (audit): Start over and Erase confirm in the app's own sheet, in plain words — what goes,
@@ -12134,8 +12694,17 @@ registerSessionHooks({
 export function App() {
   const drv = useDrivers();
   const pendingGoRef = useRef<GoTarget | null>(null);
+  // Request persistent storage silently once at boot (receptionfix Scope 4 item 16).
+  useEffect(() => { requestPersistentStorage(); }, []);
+  // Brief splash artwork beat when stayUnlocked applies to a single driver, then land unlocked.
+  useEffect(() => {
+    if (!drv.gateOpen || !drv.pendingAutoUnlockId) return;
+    const delay = prefersReducedMotion() ? 20 : STAY_UNLOCKED_SPLASH_MS;
+    const id = setTimeout(() => { completeAutoUnlock(); }, delay);
+    return () => clearTimeout(id);
+  }, [drv.gateOpen, drv.pendingAutoUnlockId]);
   // Capture home-screen shortcut (?go=…) once on mount and clean the address. If the startup
-  // splash gate is up, hold the shortcut until the driver unlocks with their PIN.
+  // splash gate is up, hold the shortcut until the driver unlocks (auto-unlock or PIN).
   useEffect(() => {
     const go = readGo(typeof location !== 'undefined' ? location.search : '');
     if (go === null) return;
@@ -12162,12 +12731,24 @@ export function App() {
   }, [drv.gateOpen]);
 
   if (drv.gateOpen) {
-    return <StartupSplash drivers={drv.drivers} />;
+    return <StartupSplash drivers={drv.drivers} stayUnlocked={drv.stayUnlocked} autoUnlockId={drv.pendingAutoUnlockId} />;
   }
-  return <AppShell key={drv.unlockedId ?? 'harness'} driverId={drv.unlockedId} driverName={drv.activeName} />;
+  return (
+    <AppShell
+      key={drv.unlockedId ?? 'harness'}
+      driverId={drv.unlockedId}
+      driverName={drv.activeName}
+      stayUnlocked={drv.stayUnlocked}
+      driverCount={drv.drivers.length}
+    />
+  );
 }
 
-function AppShell({ driverId, driverName }: { driverId: string | null; driverName: string }) {
+function AppShell({
+  driverId, driverName, stayUnlocked, driverCount,
+}: {
+  driverId: string | null; driverName: string; stayUnlocked: boolean; driverCount: number;
+}) {
   const rawState = useStore();
   const safeCfg = useMemo(() => safeRulesConfig(rawState.config), [rawState.config]);
   const s = useMemo(() => (safeCfg === rawState.config ? rawState : { ...rawState, config: safeCfg }), [rawState, safeCfg]);
@@ -12292,12 +12873,27 @@ function AppShell({ driverId, driverName }: { driverId: string | null; driverNam
     if (!printReport || printReport.seq === lastPrintedSeq.current) return;
     lastPrintedSeq.current = printReport.seq;
     let r1 = 0, r2 = 0;
+    let restoreTimer: ReturnType<typeof setTimeout> | null = null;
+    const prevTitle = typeof document !== 'undefined' ? document.title : '';
+    const pdfBase = worksheetFilename(driverName, printReport.generatedAtMs).replace(/\.pdf$/i, '');
+    const restore = () => {
+      if (restoreTimer !== null) { clearTimeout(restoreTimer); restoreTimer = null; }
+      if (typeof document !== 'undefined' && document.title === pdfBase) document.title = prevTitle;
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('afterprint', restore);
+      }
+    };
     const go = () => {
+      if (typeof document !== 'undefined') document.title = pdfBase;
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('afterprint', restore, { once: true });
+      }
       if (typeof window !== 'undefined' && typeof window.print === 'function') window.print();
+      restoreTimer = setTimeout(restore, 1500);
     };
     r1 = rafOf(() => { r2 = rafOf(go); });
-    return () => { cancelRafOf(r1); if (r2) cancelRafOf(r2); };
-  }, [printReport]);
+    return () => { cancelRafOf(r1); if (r2) cancelRafOf(r2); restore(); };
+  }, [printReport, driverName]);
   // The screen wears the theme the SCREEN rule gives (patch 7's effective theme, with patch
   // 16's dark-driving rule on top — decision D1-A): an un-chosen default follows the phone, so
   // a phone that flips to dark at sunset takes an un-chosen app with it; a chosen theme never
@@ -12658,8 +13254,8 @@ function AppShell({ driverId, driverName }: { driverId: string | null; driverNam
     switch (sh.kind) {
       case 'status': inner = <StatusSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
       case 'since': inner = <SinceSheet key={mk} s={s} now={now} done={sh.done ?? null} closing={sheetClosing} />; break;
-      case 'quickstart': inner = <QuickStartSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
-      case 'drift': inner = <DriftSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
+      case 'quickstart': inner = <QuickStartSheet key={mk} s={s} now={now} mode={sh.mode} closing={sheetClosing} />; break;
+      case 'drift': inner = <DriftSheet key={mk} s={s} now={now} mode={sh.mode} closing={sheetClosing} />; break;
       case 'why': inner = <WhySheet key={mk} s={s} now={now} ev={ev} closing={sheetClosing} />; break;
       case 'exceptions': inner = <ExceptionsSheet key={mk} ev={ev} closing={sheetClosing} />; break;
       case 'lever': inner = <LeverSheet key={mk} s={s} now={now} ev={ev} lever={sh.lever} closing={sheetClosing} />; break;
@@ -12742,7 +13338,7 @@ function AppShell({ driverId, driverName }: { driverId: string | null; driverNam
         {themeNoticeCard}
         <Notices ev={ev} now={now} s={s} />
         <TabBoundary key="settings" tab="settings">
-          <SettingsTab s={s} now={now} ev={ev} driverId={driverId} driverName={driverName} />
+          <SettingsTab s={s} now={now} ev={ev} driverId={driverId} driverName={driverName} stayUnlocked={stayUnlocked} driverCount={driverCount} />
         </TabBoundary>
       </section>
       <section

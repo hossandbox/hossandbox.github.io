@@ -16,12 +16,20 @@ const arg = (flag) => {
 
 const STAGE = arg('--stage');
 const FILE = arg('--file');
+const SEARCH = arg('--search') ?? '';
 const SELF = fileURLToPath(import.meta.url);
 
 /* ============================================================ Child process stage runner */
 if (STAGE) {
   if (!FILE) { console.error('missing --file'); process.exit(2); }
   await import('./domshim.mjs');
+  if (SEARCH) {
+    Object.defineProperty(globalThis, 'location', {
+      value: { protocol: 'http:', search: SEARCH, href: `http://localhost/${SEARCH}`, pathname: '/' },
+      configurable: true,
+      writable: true,
+    });
+  }
 
   const rawSetTimeout = globalThis.setTimeout;
   const Tms = new Date(2026, 10, 26, 10, 0, 0).getTime();
@@ -60,11 +68,11 @@ if (STAGE) {
   const S = await import('../../src/store.ts');
   const D = await import('../../src/drivers.ts');
 
-  const { App, deleteEntry, currentUndo, undoLast, useRealClock } = A;
+  const { App, deleteEntry, currentUndo, undoLast, useRealClock, currentSheet, STAY_UNLOCKED_SPLASH_MS } = A;
   const {
-    getState, setState, registerDriver, completeLegacyDriverSetup, unlockDriverWithPin,
+    getState, setState, registerDriver, completeLegacyDriverSetup, unlockDriverWithPin, removeDriverProfile,
     lockDriverSession, getActiveDriverName, getUnlockedDriverId, getDriverSummaries,
-    setDriverGateBypassForTest, DEFAULT_WEEK_PLAN, DEFAULT_WEEK_LOAD, SIM_KEY,
+    setDriverGateBypassForTest, setStayUnlocked, getStayUnlocked, DEFAULT_WEEK_PLAN, DEFAULT_WEEK_LOAD, SIM_KEY,
   } = S;
 
   setDriverGateBypassForTest(false);
@@ -247,6 +255,149 @@ if (STAGE) {
     if (!uB.ok || !currentUndo() || !undoLast() || !getState().segments.some((s) => s.note === 'BOB-SECRET-ROW')) {
       fail('legacy-b lost Bob undo after Lena completed legacy setup');
     }
+  } else if (STAGE === 'stay-solo-a') {
+    // Register 1 driver with stayUnlocked OFF initially, then enable via PIN.
+    const r = registerDriver({ name: 'SoloStay', pin: '5678', recovery: makeRec('Peterbilt', 'Denver'), disclaimerAcked: true });
+    if (!r.ok) fail(`stay-solo-a register failed: ${JSON.stringify(r)}`);
+    // Verify enabling WITHOUT PIN or with WRONG PIN fails!
+    const noPin = setStayUnlocked(r.id, true, '');
+    const wrongPin = setStayUnlocked(r.id, true, '0000');
+    if (noPin.ok || wrongPin.ok || getStayUnlocked()) {
+      fail(`stay-solo-a allowed stayUnlocked without valid PIN: ${JSON.stringify({ noPin, wrongPin, flag: getStayUnlocked() })}`);
+    }
+    const okOn = setStayUnlocked(r.id, true, '5678');
+    if (!okOn.ok || !getStayUnlocked()) fail(`stay-solo-a failed to enable with PIN: ${JSON.stringify(okOn)}`);
+    setState({
+      segments: [{ status: 'OFF', start: T - 600, end: T - 60, note: 'STAY-ROW', createdAt: 5 }],
+      current: { status: 'ON', since: T - 60, createdAt: 6 },
+    });
+    flush();
+  } else if (STAGE === 'stay-solo-b') {
+    // Immediately on mount, brief splash artwork renders with auto-selected driver (no PIN pad).
+    // After STAY_UNLOCKED_SPLASH_MS, lands UNLOCKED straight into the app with SoloStay's data.
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const navCount = all((n) => n.localName === 'nav').length;
+    const unlocked = getUnlockedDriverId();
+    const active = getActiveDriverName();
+    const hasRow = getState().segments.some((s) => s.note === 'STAY-ROW');
+    if (splash !== 0 || navCount !== 1 || !unlocked || active !== 'SoloStay' || !hasRow) {
+      fail(`stay-solo-b failed to auto-unlock solo driver: ${JSON.stringify({ splash, navCount, unlocked, active, hasRow })}`);
+    }
+  } else if (STAGE === 'stay-nopin-a') {
+    const r = registerDriver({ name: 'NoPinSolo', pin: '5678', recovery: makeRec('Peterbilt', 'Denver'), disclaimerAcked: true });
+    if (!r.ok) fail('stay-nopin-a register failed');
+    const noPin = setStayUnlocked(r.id, true);
+    const badPin = setStayUnlocked(r.id, true, '1111');
+    if (noPin.ok || badPin.ok || getStayUnlocked()) {
+      fail(`stay-nopin-a should reject missing/wrong PIN: ${JSON.stringify({ noPin, badPin, flag: getStayUnlocked() })}`);
+    }
+    flush();
+  } else if (STAGE === 'stay-nopin-b') {
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const unlocked = getUnlockedDriverId();
+    if (splash !== 1 || unlocked !== null) {
+      fail(`stay-nopin-b should remain gated at splash: ${JSON.stringify({ splash, unlocked })}`);
+    }
+  } else if (STAGE === 'stay-add2nd-a') {
+    // Wait for solo stayUnlocked to finish auto-unlocking, lock to splash, then add 2nd driver.
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    if (getActiveDriverName() !== 'SoloStay') fail(`stay-add2nd-a expected SoloStay unlocked, got ${getActiveDriverName()}`);
+    const soloId = getUnlockedDriverId();
+    lockDriverSession();
+    await sleep(40);
+    const r2 = registerDriver({ name: 'SecondDriver', pin: '2468', recovery: makeRec('Kenworth', 'Dallas'), disclaimerAcked: true });
+    if (!r2.ok) fail(`stay-add2nd-a register 2nd driver failed: ${JSON.stringify(r2)}`);
+    // B2: registering 2nd driver must clear stayUnlocked on disk AND store must refuse re-enabling with 2 drivers.
+    if (getStayUnlocked()) fail('stay-add2nd-a: vault.stayUnlocked was NOT cleared when 2nd driver registered');
+    const refused = setStayUnlocked(soloId, true, '5678');
+    if (refused.ok || getStayUnlocked()) fail(`stay-add2nd-a: store allowed setStayUnlocked with 2 drivers: ${JSON.stringify(refused)}`);
+    flush();
+  } else if (STAGE === 'stay-self-erase-a') {
+    // B2 scenario 1: Alice enables stayUnlocked, Bob registers (clears stayUnlocked), Bob erases himself -> Alice is solo again.
+    const r1 = registerDriver({ name: 'Alice', pin: '5678', recovery: makeRec('Peterbilt', 'Denver'), disclaimerAcked: true });
+    if (!r1.ok) fail('stay-self-erase-a Alice register failed');
+    const on = setStayUnlocked(r1.id, true, '5678');
+    if (!on.ok || !getStayUnlocked()) fail('stay-self-erase-a enable stayUnlocked failed');
+    lockDriverSession();
+    await sleep(30);
+    const r2 = registerDriver({ name: 'Bob', pin: '2468', recovery: makeRec('Kenworth', 'Dallas'), disclaimerAcked: true });
+    if (!r2.ok) fail('stay-self-erase-a Bob register failed');
+    if (getStayUnlocked()) fail('stay-self-erase-a stayUnlocked stayed true after Bob registered');
+    const raw2 = JSON.parse(mem.get('hos-sandbox-v1') || '{}');
+    if ('stayUnlocked' in (raw2.__drivers || {})) fail('stay-self-erase-a stayUnlocked still persisted on disk with 2 drivers');
+    const rem = removeDriverProfile(r2.id, '2468');
+    if (!rem.ok || getDriverSummaries().length !== 1 || getDriverSummaries()[0].name !== 'Alice') {
+      fail(`stay-self-erase-a Bob self-erase failed: ${JSON.stringify(rem)}`);
+    }
+    flush();
+  } else if (STAGE === 'stay-corrupt2-a') {
+    // B2 scenario 2: 2-driver vault where Bob's profile is corrupted on disk (blank name) so sanitizeVault drops Bob -> Alice left solo.
+    // Test BOTH the natural cleared vault AND a tampered disk payload with stayUnlocked: true + corrupt Bob.
+    const r1 = registerDriver({ name: 'Alice', pin: '5678', recovery: makeRec('Peterbilt', 'Denver'), disclaimerAcked: true });
+    if (!r1.ok) fail('stay-corrupt2-a Alice register failed');
+    setStayUnlocked(r1.id, true, '5678');
+    lockDriverSession();
+    await sleep(30);
+    const r2 = registerDriver({ name: 'Bob', pin: '2468', recovery: makeRec('Kenworth', 'Dallas'), disclaimerAcked: true });
+    if (!r2.ok) fail('stay-corrupt2-a Bob register failed');
+    const parsed = JSON.parse(mem.get('hos-sandbox-v1') || '{}');
+    // Blank Bob's name on disk (Opus reproduction), and if --search tamper is passed also force stayUnlocked: true on disk to test sanitizeVault defense-in-depth!
+    parsed.__drivers.profiles[r2.id].name = '';
+    if (SEARCH === '?tamper=1') parsed.__drivers.stayUnlocked = true;
+    mem.set('hos-sandbox-v1', JSON.stringify(parsed));
+    mem.delete('hos-sandbox-v1-backup');
+    flush();
+  } else if (STAGE === 'stay-rearm-gated-b') {
+    // Cold relaunch after self-erase or corrupt-profile drop MUST gate at picker/PIN and NEVER auto-unlock Alice!
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const navCount = all((n) => n.localName === 'nav').length;
+    const unlocked = getUnlockedDriverId();
+    const summaries = getDriverSummaries();
+    if (splash !== 1 || navCount !== 0 || unlocked !== null || getStayUnlocked() || summaries.length !== 1 || summaries[0].name !== 'Alice') {
+      fail(`stay-rearm-gated-b silently re-armed stayUnlocked! ${JSON.stringify({ splash, navCount, unlocked, flag: getStayUnlocked(), drivers: summaries.map((d) => d.name) })}`);
+    }
+  } else if (STAGE === 'stay-2drv-b') {
+    // Cold relaunch with stayUnlocked=true + 2 drivers MUST still gate at picker/PIN!
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const navCount = all((n) => n.localName === 'nav').length;
+    const unlocked = getUnlockedDriverId();
+    const tiles = all((n) => n.localName === 'button' && n.attributes?.['data-driver-id']).map((b) => b.attributes['data-driver-name']);
+    if (splash !== 1 || navCount !== 0 || unlocked !== null || tiles.length !== 2) {
+      fail(`stay-2drv-b auto-unlocked with 2 drivers: ${JSON.stringify({ splash, navCount, unlocked, tiles })}`);
+    }
+  } else if (STAGE === 'stay-go-unlocked') {
+    // ?go=load (or ?go=stopped) with stayUnlocked single-driver lands straight on target!
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 160);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const unlocked = getUnlockedDriverId();
+    const tab = getState().tab;
+    const sh = currentSheet();
+    const okLoad = SEARCH === '?go=load' && tab === 'load';
+    const okStopped = SEARCH === '?go=stopped' && sh?.kind === 'status';
+    if (splash !== 0 || !unlocked || (!okLoad && !okStopped)) {
+      fail(`stay-go-unlocked did not land on target: ${JSON.stringify({ SEARCH, splash, unlocked, tab, sh })}`);
+    }
+  } else if (STAGE === 'stay-go-gated') {
+    // ?go=load when stayUnlocked does NOT apply (off or 2 drivers) MUST remain gated at splash!
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 160);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const unlocked = getUnlockedDriverId();
+    if (splash !== 1 || unlocked !== null) {
+      fail(`stay-go-gated bypassed splash gate: ${JSON.stringify({ SEARCH, splash, unlocked, tab: getState().tab })}`);
+    }
+  } else if (STAGE === 'legacy-nostay-b') {
+    // Vault with NO stayUnlocked field on disk behaves identically to today (gates at splash).
+    await sleep(STAY_UNLOCKED_SPLASH_MS + 140);
+    const splash = all((n) => n.attributes?.['data-splash-screen'] === '1').length;
+    const unlocked = getUnlockedDriverId();
+    const raw = JSON.parse(mem.get('hos-sandbox-v1') || '{}');
+    if (splash !== 1 || unlocked !== null || 'stayUnlocked' in (raw.__drivers || {})) {
+      fail(`legacy-nostay-b failed: ${JSON.stringify({ splash, unlocked, hasField: 'stayUnlocked' in (raw.__drivers || {}) })}`);
+    }
   } else {
     fail(`unknown stage ${STAGE}`);
   }
@@ -257,8 +408,8 @@ if (STAGE) {
 const dir = mkdtempSync(join(tmpdir(), 'c14-drv-relaunch-'));
 const res = [];
 
-function runStage(stage, file) {
-  execFileSync(process.execPath, [SELF, '--stage', stage, '--file', file], {
+function runStage(stage, file, extraArgs = []) {
+  execFileSync(process.execPath, [SELF, '--stage', stage, '--file', file, ...extraArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
   });
@@ -324,6 +475,66 @@ try {
     writeFileSync(f, JSON.stringify(legacySeed), 'utf8');
     runStage('legacy-a', f);
     runStage('legacy-b', f);
+  });
+
+  // DRR7: Receptionfix Scope 1 — stayUnlocked single-driver cold relaunch lands unlocked (no picker tap, no PIN).
+  pin('DRR7. receptionfix two-process cold relaunch: stayUnlocked + 1 driver lands unlocked without picker tap or PIN', () => {
+    const f = join(dir, 'stay-solo.json');
+    runStage('stay-solo-a', f);
+    runStage('stay-solo-b', f);
+  });
+
+  // DRR8: Receptionfix Scope 1 — enabling stayUnlocked without PIN (or wrong PIN) fails and relaunch stays gated.
+  pin('DRR8. receptionfix two-process cold relaunch: enabling stayUnlocked without valid PIN fails and relaunch stays gated', () => {
+    const f = join(dir, 'stay-nopin.json');
+    runStage('stay-nopin-a', f);
+    runStage('stay-nopin-b', f);
+  });
+
+  // DRR9: Receptionfix Scope 1 — adding a 2nd driver while stayUnlocked is ON restores gating on next cold relaunch.
+  pin('DRR9. receptionfix two-process cold relaunch: adding a 2nd driver while stayUnlocked is ON restores picker+PIN gating on next relaunch', () => {
+    const f = join(dir, 'stay-solo.json');
+    runStage('stay-add2nd-a', f);
+    runStage('stay-2drv-b', f);
+  });
+
+  // DRR10: Receptionfix Scope 1 — shortcut deep-links (?go=load, ?go=stopped) land straight in when stayUnlocked applies.
+  pin('DRR10. receptionfix two-process cold relaunch: ?go=load and ?go=stopped land straight on target when stayUnlocked single-driver applies', () => {
+    const f = join(dir, 'stay-go.json');
+    runStage('stay-solo-a', f);
+    runStage('stay-go-unlocked', f, ['--search', '?go=load']);
+    runStage('stay-go-unlocked', f, ['--search', '?go=stopped']);
+  });
+
+  // DRR11: Receptionfix Scope 1 — shortcut deep-link (?go=load) still gates at splash when stayUnlocked is OFF or 2+ drivers exist.
+  pin('DRR11. receptionfix two-process cold relaunch: ?go=load stays gated at splash when stayUnlocked is OFF or 2 drivers exist', () => {
+    const fOff = join(dir, 'stay-nopin.json');
+    const fTwo = join(dir, 'stay-solo.json'); // has 2 drivers + stayUnlocked=true from DRR9
+    runStage('stay-go-gated', fOff, ['--search', '?go=load']);
+    runStage('stay-go-gated', fTwo, ['--search', '?go=load']);
+  });
+
+  // DRR12: Receptionfix Scope 1 — legacy vault save with NO stayUnlocked field behaves identically to today (gates at splash).
+  pin('DRR12. receptionfix two-process cold relaunch: legacy save with no stayUnlocked field gates identically to today', () => {
+    const f = join(dir, 'solo.json'); // written by DRR1 solo-a with no stayUnlocked key
+    runStage('legacy-nostay-b', f);
+  });
+
+  // DRR13: B2 — 2nd driver self-erase never silently re-arms stayUnlocked for Driver 1 on cold relaunch.
+  pin('DRR13. B2 two-process cold relaunch: after 2nd driver erases themselves, cold relaunch gates at picker/PIN (no auto-unlock)', () => {
+    const f = join(dir, 'b2-self-erase.json');
+    runStage('stay-self-erase-a', f);
+    runStage('stay-rearm-gated-b', f);
+  });
+
+  // DRR14: B2 — corrupt 2nd profile dropped by sanitizeVault never silently re-arms stayUnlocked on cold relaunch (natural & tampered disk).
+  pin('DRR14. B2 two-process cold relaunch: after corrupt 2nd profile drops to 1 driver, cold relaunch gates at picker/PIN (no auto-unlock)', () => {
+    const f1 = join(dir, 'b2-corrupt-natural.json');
+    runStage('stay-corrupt2-a', f1);
+    runStage('stay-rearm-gated-b', f1);
+    const f2 = join(dir, 'b2-corrupt-tampered.json');
+    runStage('stay-corrupt2-a', f2, ['--search', '?tamper=1']);
+    runStage('stay-rearm-gated-b', f2);
   });
 } finally {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }

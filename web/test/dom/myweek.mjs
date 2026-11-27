@@ -1613,6 +1613,140 @@ await pin('MW19. H5: Dock-0 & dock-OFF early-wait split absorbs wait into traili
   });
 });
 
+/* ---------------- MW20 (B3): My Week custom clocks carry into chained Rollout & Rescue (Load 1 & Load 2) ---------------- */
+await pin('MW20. B3: My Week custom ELD clocks carry into Rollout & Rescue drill-downs (Load 1 & Load 2), never reverting to live-log "Fits cleanly"', async () => {
+  // Live log: fresh 10h OFF rest ending Mon 06:00 -> full 11h drive / 14h window / 70h cycle.
+  const NOW_B3 = chi(9, 6, 0);
+  const LIVE_SEGS = makeContinuousLog([{ status: 'OFF', start: chi(8, 18, 0), end: NOW_B3 }], NOW_B3);
+  const mkB3Load = (o) => makeLoad({ mph: 55, preTripMinutes: 15, bufferMinutes: 0, apptTimeZone: 'America/Chicago', hasAppt: true, ...o });
+  // Two 4h-drive loads: Load 1 (Mon 11:00, 60m dock -> live PTA Mon 12:00) and Load 2 (Tue 04:00,
+  // 30m dock — 16h after live PTA so live Rollout takes a 10h break and literally says "Fits cleanly").
+  // Under tight custom clocks (2h drive / 3h window / 2h break / 6h cycle), neither Load 1 nor
+  // Load 2 fits, so Load 2 Rollout MUST report "Does not fit" (never live-log "Fits cleanly").
+  const b3Draft = makeDraft({
+    allowSplits: true,
+    fillOpenNights: false,
+    defaultBufferMinutes: 0,
+    loads: [
+      mkB3Load({ id: 'b3-l1', label: 'Load 1 Chi', miles: 220, apptDate: '2026-11-09', apptTime: '11:00', dockMinutes: 60 }),
+      mkB3Load({ id: 'b3-l2', label: 'Load 2 Ind', miles: 220, apptDate: '2026-11-10', apptTime: '04:00', dockMinutes: 30 }),
+    ],
+  });
+
+  // Control: open My Week on live log (no custom clocks) and drill Load 2 -> MUST report "Fits cleanly"!
+  await seed({ nowOverride: NOW_B3, segments: LIVE_SEGS, current: { status: 'OFF', since: NOW_B3, createdAt: 99 }, weekPlan: b3Draft });
+  await openMyWeekViaCapstone();
+  const l2CardLive = all((n) => n.attributes?.['data-myweek-load-card'] === 'b3-l2', planRoom())[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'mw-load-head'), l2CardLive)[0], 'click');
+  await sleep(50);
+  fire(all((n) => n.localName === 'button' && n.attributes?.['data-myweek-drill-rollout'] === 'b3-l2', planRoom())[0], 'click');
+  await sleep(70);
+  const liveVerdictEl = all((n) => n.attributes?.['data-rollout-verdict'] === '1', planRoom())[0];
+  const liveVerdictTxt = liveVerdictEl?.textContent || '';
+  if (!/Fits cleanly/i.test(liveVerdictTxt)) {
+    return `precondition failed: live-log Load 2 Rollout should say Fits cleanly, got: ${liveVerdictTxt}`;
+  }
+  // Return to My Week.
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), planRoom())[0], 'click');
+  await sleep(70);
+
+  // Helper to enter tight custom clocks in My Week: 2h drive, 3h window, 2h break, 6h cycle.
+  const applyTightCustomClocks = async () => {
+    const rm = planRoom();
+    const toggle = all((n) => n.attributes?.['data-clock-override-toggle'] === 'myweek', rm)[0];
+    if (!toggle) throw new Error('missing InlineClockOverride toggle in MyWeekTab');
+    fire(toggle, 'click');
+    await sleep(40);
+    const setBox = (attr, key, val) => {
+      const el = all((n) => n.attributes?.[attr] === key, planRoom())[0];
+      el.value = val;
+      el.attributes.value = val;
+      fire(el, 'input');
+    };
+    setBox('data-co-h', 'driveLeft', '2'); setBox('data-co-m', 'driveLeft', '0');
+    setBox('data-co-h', 'windowLeft', '3'); setBox('data-co-m', 'windowLeft', '0');
+    setBox('data-co-h', 'breakDueIn', '2'); setBox('data-co-m', 'breakDueIn', '0');
+    setBox('data-co-h', 'cycleLeft', '6'); setBox('data-co-m', 'cycleLeft', '0');
+    await sleep(30);
+    fire(all((n) => n.attributes?.['data-clock-override-form'] === 'myweek', planRoom())[0], 'submit');
+    await sleep(60);
+  };
+
+  await applyTightCustomClocks();
+  // Verify My Week shows the tight override clocks (6h 00m cycle, 2h 00m drive) and Load 2 fails to fit cleanly!
+  const mwClocksTxt = all((n) => n.attributes?.['data-myweek-clocks'] === '1', planRoom())[0]?.textContent || '';
+  const mwVerdictStatus = all((n) => n.attributes?.['data-myweek-verdict'] === '1', planRoom())[0]?.attributes?.['data-myweek-status'];
+  if (!/6h 00m/.test(mwClocksTxt) || !/2h 00m/.test(mwClocksTxt) || mwVerdictStatus === 'clear') {
+    return `My Week did not apply tight override clocks: clocks=${mwClocksTxt}, status=${mwVerdictStatus}`;
+  }
+
+  // Drill into Load 2 "When to roll & PTA" under the tight override!
+  const l2CardCustom = all((n) => n.attributes?.['data-myweek-load-card'] === 'b3-l2', planRoom())[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'mw-load-head'), l2CardCustom)[0], 'click');
+  await sleep(50);
+  fire(all((n) => n.localName === 'button' && n.attributes?.['data-myweek-drill-rollout'] === 'b3-l2', planRoom())[0], 'click');
+  await sleep(70);
+  const customRollRoom = planRoom();
+  const customVerdictTxt = all((n) => n.attributes?.['data-rollout-verdict'] === '1', customRollRoom)[0]?.textContent || '';
+  const customBarL2 = all((n) => n.attributes?.['data-clock-override'] === 'rollout' && n.attributes?.['data-clock-override-active'] === '1' && n.attributes?.['data-chained-custom-clocks'] === '1', customRollRoom)[0];
+  const l2RolloutOk = /Does not fit/i.test(customVerdictTxt)
+    && !/Fits cleanly|Fits current shift/i.test(customVerdictTxt)
+    && /My Week custom clocks/i.test(customVerdictTxt)
+    && !/64h 45m left|70h 00m left/.test(customVerdictTxt)
+    && Boolean(customBarL2)
+    && /2h 00m/.test(customBarL2.textContent)
+    && /6h 00m/.test(customBarL2.textContent);
+
+  // Return to My Week, re-apply tight clocks, and verify Load 1 Rollout (no prior chain) ALSO carries custom clocks!
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), customRollRoom)[0], 'click');
+  await sleep(70);
+  await applyTightCustomClocks();
+  const l1CardCustom = all((n) => n.attributes?.['data-myweek-load-card'] === 'b3-l1', planRoom())[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'mw-load-head'), l1CardCustom)[0], 'click');
+  await sleep(50);
+  fire(all((n) => n.localName === 'button' && n.attributes?.['data-myweek-drill-rollout'] === 'b3-l1', planRoom())[0], 'click');
+  await sleep(70);
+  const l1RollRoom = planRoom();
+  const l1VerdictTxt = all((n) => n.attributes?.['data-rollout-verdict'] === '1', l1RollRoom)[0]?.textContent || '';
+  const l1Bar = all((n) => n.attributes?.['data-clock-override'] === 'rollout' && n.attributes?.['data-clock-override-active'] === '1', l1RollRoom)[0];
+  const l1RolloutOk = /Does not fit/i.test(l1VerdictTxt)
+    && !/Fits cleanly|Fits current shift/i.test(l1VerdictTxt)
+    && /6h 00m left/.test(l1VerdictTxt)
+    && Boolean(l1Bar);
+
+  // Return to My Week, re-apply tight clocks, and verify Load 2 Rescue ALSO carries custom clocks!
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), l1RollRoom)[0], 'click');
+  await sleep(70);
+  await applyTightCustomClocks();
+  const l2CardRes = all((n) => n.attributes?.['data-myweek-load-card'] === 'b3-l2', planRoom())[0];
+  fire(all((n) => n.localName === 'button' && has(n, 'mw-load-head'), l2CardRes)[0], 'click');
+  await sleep(50);
+  fire(all((n) => n.localName === 'button' && n.attributes?.['data-myweek-drill-rescue'] === 'b3-l2', planRoom())[0], 'click');
+  await sleep(70);
+  const l2ResRoom = planRoom();
+  const l2ResVerdictTxt = all((n) => n.attributes?.['data-rescue-verdict'] === '1', l2ResRoom)[0]?.textContent || '';
+  const l2ResBar = all((n) => n.attributes?.['data-clock-override'] === 'rescue' && n.attributes?.['data-clock-override-active'] === '1' && n.attributes?.['data-chained-custom-clocks'] === '1', l2ResRoom)[0];
+  const l2RescueOk = /My Week custom clocks/i.test(l2ResVerdictTxt)
+    && !/64h 45m|70h 00m/.test(l2ResVerdictTxt)
+    && Boolean(l2ResBar);
+
+  // Cleanly close Rescue back out
+  fire(all((n) => n.localName === 'button' && has(n, 'back'), l2ResRoom)[0], 'click');
+  await sleep(50);
+  A.openMyWeekPlanner(false);
+  await sleep(40);
+
+  return (l2RolloutOk && l1RolloutOk && l2RescueOk) || JSON.stringify({
+    l2RolloutOk, l1RolloutOk, l2RescueOk,
+    customVerdictTxt,
+    l1VerdictTxt,
+    l2ResVerdictTxt,
+    hasL2Bar: Boolean(customBarL2),
+    hasL1Bar: Boolean(l1Bar),
+    hasResBar: Boolean(l2ResBar),
+  });
+});
+
 let fail = 0;
 for (const [st, name, why] of res) {
   console.log(`${st.padEnd(5)} ${name}${why ? '\n      ' + why : ''}`);

@@ -6241,7 +6241,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const gotClocks = A.eldActualClocks(typedClocks, evSeed, false);
   need(gotClocks.driveLeft === 360 && gotClocks.breakDueIn === 180 && seedRes.notes.length > 0, `C2: eldActualClocks must report strict-adjusted driveLeft=360 (got ${JSON.stringify(gotClocks)}, notes=${JSON.stringify(seedRes.notes)})`);
   const qsSrc = (await readFile(new URL('../src/app.tsx', import.meta.url), 'utf8'));
-  const qsDoneSrc = qsSrc.slice(qsSrc.indexOf('if (done) {'), qsSrc.indexOf('return (\n    <Sheet title="Start from my ELD clocks" focusKey="qs-form">'));
+  const qsDoneSrc = qsSrc.slice(qsSrc.indexOf('if (done) {'), qsSrc.indexOf('focusKey="qs-form"'));
   need(/What are you doing right now\?/.test(qsDoneSrc) && /class="big-status"/.test(qsDoneSrc) && !/See my clocks/.test(qsDoneSrc), 'C2: QuickStartSheet done screen ends with the four status buttons, not "See my clocks"');
 
   // C3: hero break wording uses "30-min break due in …" consistently everywhere (Dial, Timeline, DrivingView, shareText, PreviewCard).
@@ -6449,9 +6449,10 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const E = await import('../../engine/src/index.ts');
   const bad = [];
   const need = (cond, msg) => { if (!cond) bad.push(msg); };
-  const DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+  const DISC = 'PERSONAL HOS PLANNING WORKSHEET — NOT A LEGAL RODS / NOT AN ELD';
   need(A.PDF_DAYS_DEFAULT === 14 && A.PDF_DAYS_MIN === 1 && A.PDF_DAYS_MAX === 92, 'pdf: defaults/bounds must be 14, 1..92');
   need(A.PDF_DISCLAIMER === DISC, 'pdf: exact disclaimer string');
+  need(A.worksheetFilename('Marcus J.', Date.UTC(2026, 10, 26, 18, 0)) === 'clock14-worksheet-marcus-j-20261126.pdf', 'pdf: worksheet filename pattern must carry driver slug + YYYYMMDD');
   for (const [raw, badIn] of [['0', false], ['', false], ['   ', false], ['500', false], ['-1', false], ['93', false], ['14.5', false], ['abc', false], ['', true]]) {
     const r = A.parseSummaryDays(raw, badIn);
     need(!r.ok && r.problem.length > 0, `pdf: invalid input "${raw}" (badInput=${badIn}) must be rejected with feedback`);
@@ -6492,7 +6493,7 @@ for (const tab of ['log', 'split', 'recap', 'trip', 'settings']) {
   const idleHtml = render(h(App, {}));
   const moreHtml = pageOut(idleHtml, 'page-settings');
   need(!/data-print-report/.test(idleHtml), 'pdf: no print-report rendered before requested');
-  need(/<h2>Data<\/h2>[\s\S]*?Export JSON[\s\S]*?<label class="pdf-days">Days<input[^>]*type="number"[^>]*value="14"[\s\S]*?>Log summary \(PDF\)<\/button>/.test(moreHtml), 'pdf: More Data card must render Days (default 14) and "Log summary (PDF)" next to Export JSON');
+  need(/<h2>Data<\/h2>[\s\S]*?Export JSON[\s\S]*?<label class="pdf-days">Days<input[^>]*type="number"[^>]*value="14"[\s\S]*?>Planning worksheet \(PDF\)<\/button>/.test(moreHtml), 'pdf: More Data card must render Days (default 14) and "Planning worksheet (PDF)" next to Export JSON');
 
   // Verify buildLogSummaryDays matches engine evaluation and day boundaries (newest-first order).
   const ev = E.evaluate(S.allSegments(rec, nowT), { asOf: nowT, config: cfg });

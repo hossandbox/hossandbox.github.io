@@ -20,6 +20,8 @@ import {
   renameDriver,
   updateDriverRecovery,
   removeDriverProfile,
+  setStayUnlocked,
+  completeAutoUnlock,
   getPinCooldownRemainingMs,
   getRecoveryCooldownRemainingMs,
   formatCooldownWait,
@@ -239,9 +241,19 @@ type SplashView =
 
 /**
  * Full-screen startup splash & multi-driver gate.
- * Shown on EVERY launch — even when exactly one driver is registered (no straight-in shortcut).
+ * When stayUnlocked is ON and exactly one driver is registered, shows the splash artwork briefly
+ * with that driver auto-selected, then lands unlocked without picker tap or PIN.
+ * Otherwise gates at the driver picker + 4-digit PIN.
  */
-export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
+export function StartupSplash({
+  drivers,
+  stayUnlocked = false,
+  autoUnlockId = null,
+}: {
+  drivers: DriverSummary[];
+  stayUnlocked?: boolean;
+  autoUnlockId?: string | null;
+}) {
   const [view, setView] = useState<SplashView>({ kind: 'picker' });
 
   // PIN unlock state
@@ -261,6 +273,7 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
   const [regQ2, setRegQ2] = useState(REMINDER_QUESTIONS[1].id);
   const [regA1, setRegA1] = useState('');
   const [regA2, setRegA2] = useState('');
+  const [regStayUnlocked, setRegStayUnlocked] = useState(false);
   const [wizardErr, setWizardErr] = useState<string | null>(null);
 
   // Recovery flow state
@@ -307,6 +320,7 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
     setRecErr(null);
     setRegPinFirst('');
     setRegPinConfirm('');
+    setRegStayUnlocked(false);
     setRecNewPin('');
     setRecConfirmPin('');
     setShowRegDisc(false);
@@ -499,15 +513,20 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
     e.preventDefault();
     if (view.kind !== 'register' && view.kind !== 'legacy-setup') return;
     const recovery = buildRecoveryInputs(regQ1, regQ2, regA1, regA2);
+    const soloRegister = (view.kind === 'register' && drivers.length === 0) || (view.kind === 'legacy-setup' && drivers.length === 1);
     const res = view.kind === 'register'
-      ? registerDriver({ name: regName, pin: regPinFirst, recovery, disclaimerAcked: regDiscAcked })
-      : completeLegacyDriverSetup(view.driverId, { name: regName, pin: regPinFirst, recovery, disclaimerAcked: regDiscAcked });
+      ? registerDriver({ name: regName, pin: regPinFirst, recovery, disclaimerAcked: regDiscAcked, stayUnlocked: soloRegister ? regStayUnlocked : false })
+      : completeLegacyDriverSetup(view.driverId, { name: regName, pin: regPinFirst, recovery, disclaimerAcked: regDiscAcked, stayUnlocked: soloRegister ? regStayUnlocked : false });
     if (!res.ok) {
       setWizardErr(res.error);
       return;
     }
     setWizardErr(null);
   };
+
+  const autoDriver = autoUnlockId ? drivers.find((d) => d.id === autoUnlockId) ?? null : null;
+  const addingSecondWhileStayOn = view.kind === 'register' && drivers.length >= 1 && stayUnlocked;
+  const offerStayInReg = (view.kind === 'register' && drivers.length === 0) || (view.kind === 'legacy-setup' && drivers.length === 1);
 
   const wizardStepNumber = () => {
     if (view.kind !== 'register' && view.kind !== 'legacy-setup') return 1;
@@ -516,6 +535,33 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
     if (view.step === 'confirm-pin') return 3;
     return 4;
   };
+
+  if (autoDriver) {
+    return (
+      <div class="app splash-app" data-splash-screen="1" data-splash-view="picker" data-splash-auto="1" aria-label="Clock 14">
+        <div class="splash-shell">
+          <div class="splash-picker">
+            <div class="splash-body">
+              <button
+                type="button"
+                class="driver-tile splash-auto-tile"
+                data-driver-id={autoDriver.id}
+                data-driver-name={autoDriver.name}
+                data-splash-auto-driver="1"
+                onClick={() => completeAutoUnlock()}
+              >
+                <span class="driver-avatar" aria-hidden="true">{driverInitials(autoDriver.name)}</span>
+                <span class="driver-tile-info">
+                  <b>{autoDriver.name}</b>
+                  <span class="muted small">Stay unlocked · opening your clocks…</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div class="app splash-app" data-splash-screen="1" data-splash-view={view.kind} aria-label="Clock 14">
@@ -723,6 +769,11 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
                     <b>Zero data lost.</b> Everything already saved on this phone moves straight into your driver profile.
                   </div>
                 )}
+                {addingSecondWhileStayOn && (
+                  <div class="warnbox small" role="note" data-stay-unlocked-multi-notice="1">
+                    Stay unlocked turns off while more than one driver is on this phone.
+                  </div>
+                )}
                 <div class="card">
                   <label>
                     Driver name
@@ -804,6 +855,27 @@ export function StartupSplash({ drivers }: { drivers: DriverSummary[] }) {
                   />
                   {wizardErr && <div class="warnbox small" role="alert" style="margin-top:10px">{wizardErr}</div>}
                 </div>
+                {offerStayInReg && (
+                  <div class="card splash-stay-card">
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        checked={regStayUnlocked}
+                        data-reg-stay-unlocked="1"
+                        onChange={(e) => setRegStayUnlocked((e.target as HTMLInputElement).checked)}
+                      />
+                      <span>
+                        <b>Stay unlocked on this phone?</b><br />
+                        <span class="muted small">You'll skip the PIN when you open Clock 14. Anyone holding this phone can open your clocks. You can change this in Settings.</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+                {addingSecondWhileStayOn && (
+                  <div class="warnbox small" role="note" data-stay-unlocked-multi-notice="1">
+                    Stay unlocked turns off while more than one driver is on this phone.
+                  </div>
+                )}
                 <button type="submit" class="primary wide" data-reg-finish="1">
                   Finish &amp; open Clock 14
                 </button>
@@ -846,9 +918,19 @@ export function ActiveDriverStrip({ name, onSwitch }: { name: string; onSwitch: 
   );
 }
 
-/** Top card in Settings for managing the signed-in driver: switch, rename, change PIN, update recovery, or remove profile. */
-export function DriverSettingsCard({ driverId, driverName }: { driverId: string | null; driverName: string }) {
-  const [panel, setPanel] = useState<'none' | 'rename' | 'pin' | 'recovery' | 'remove'>('none');
+/** Top card in Settings for managing the signed-in driver: switch, stay unlocked, rename, change PIN, update recovery, or remove profile. */
+export function DriverSettingsCard({
+  driverId,
+  driverName,
+  stayUnlocked = false,
+  driverCount = 1,
+}: {
+  driverId: string | null;
+  driverName: string;
+  stayUnlocked?: boolean;
+  driverCount?: number;
+}) {
+  const [panel, setPanel] = useState<'none' | 'rename' | 'pin' | 'recovery' | 'remove' | 'stay-unlocked'>('none');
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -863,6 +945,8 @@ export function DriverSettingsCard({ driverId, driverName }: { driverId: string 
 
   if (!driverId || !driverName) return null;
 
+  const multiDriver = driverCount > 1;
+
   const openPanel = (next: typeof panel) => {
     setPanel((cur) => (cur === next ? 'none' : next));
     setMsg(null);
@@ -873,6 +957,34 @@ export function DriverSettingsCard({ driverId, driverName }: { driverId: string 
     setConfirmPin('');
     setA1('');
     setA2('');
+  };
+
+  const onToggleStayUnlocked = () => {
+    setErr(null);
+    setMsg(null);
+    if (stayUnlocked) {
+      // Disabling Stay unlocked never requires a PIN.
+      const res = setStayUnlocked(driverId, false);
+      if (!res.ok) { setErr(res.error); return; }
+      setPanel('none');
+      setMsg('Stay unlocked turned off — Clock 14 will ask for your PIN when you open it.');
+      return;
+    }
+    if (multiDriver) {
+      setMsg('Stay unlocked turns off while more than one driver is on this phone.');
+      return;
+    }
+    openPanel('stay-unlocked');
+  };
+
+  const doEnableStayUnlocked = (e: Event) => {
+    e.preventDefault();
+    const res = setStayUnlocked(driverId, true, curPin);
+    if (!res.ok) { setErr(res.error); return; }
+    setErr(null);
+    setCurPin('');
+    setMsg('Stay unlocked is on — Clock 14 will open straight to your clocks on this phone.');
+    setPanel('none');
   };
 
   const doRename = (e: Event) => {
@@ -926,7 +1038,28 @@ export function DriverSettingsCard({ driverId, driverName }: { driverId: string 
       </button>
 
       <div class="driver-card-actions">
-        <button type="button" class="rowbtn" onClick={() => openPanel('pin')}>
+        <button
+          type="button"
+          class="rowbtn"
+          data-stay-unlocked-toggle="1"
+          data-stay-unlocked-state={stayUnlocked && !multiDriver ? 'on' : 'off'}
+          onClick={onToggleStayUnlocked}
+        >
+          <span>
+            <b>Stay unlocked on this phone</b>{' '}
+            <span class={`stay-pill${stayUnlocked && !multiDriver ? ' is-on' : ''}`}>{stayUnlocked && !multiDriver ? 'On' : 'Off'}</span>
+            <br />
+            <span class="muted small">
+              {multiDriver
+                ? 'Stay unlocked turns off while more than one driver is on this phone.'
+                : stayUnlocked
+                  ? 'Skips the PIN when you open Clock 14. Tap to turn off.'
+                  : 'Skip the PIN on this phone (requires your PIN to turn on).'}
+            </span>
+          </span>
+          <SvgIcon d={ICON_LOCK} size={18} />
+        </button>
+        <button type="button" class="rowbtn" data-change-pin-btn="1" onClick={() => openPanel('pin')}>
           <span><b>Change PIN</b><br /><span class="muted small">Update your 4-digit unlock code</span></span>
           <SvgIcon d={ICON_KEY} size={18} />
         </button>
@@ -941,6 +1074,21 @@ export function DriverSettingsCard({ driverId, driverName }: { driverId: string 
       </div>
 
       {msg && <p class="ok small" style="margin-top:8px">{msg}</p>}
+
+      {panel === 'stay-unlocked' && (
+        <form class="driver-subform" data-stay-unlocked-form="1" onSubmit={doEnableStayUnlocked}>
+          <p class="small"><b>Stay unlocked on this phone?</b> You'll skip the PIN when you open Clock 14. Anyone holding this phone can open your clocks. PIN is still required for changing PIN, recovery questions, or erasing a driver.</p>
+          <label>
+            Enter {driverName}'s 4-digit PIN to turn on
+            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={curPin} data-stay-unlocked-pin="1" onInput={(e) => setCurPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
+          </label>
+          {err && <div class="warnbox small" role="alert" data-stay-unlocked-err="1">{err}</div>}
+          <div class="row">
+            <button type="submit" class="primary" data-stay-unlocked-confirm="1">Turn on Stay unlocked</button>
+            <button type="button" onClick={() => setPanel('none')}>Cancel</button>
+          </div>
+        </form>
+      )}
 
       {panel === 'rename' && (
         <form class="driver-subform" onSubmit={doRename}>
@@ -957,20 +1105,20 @@ export function DriverSettingsCard({ driverId, driverName }: { driverId: string 
       )}
 
       {panel === 'pin' && (
-        <form class="driver-subform" onSubmit={doChangePin}>
+        <form class="driver-subform" data-change-pin-form="1" onSubmit={doChangePin}>
           <label>
             Current 4-digit PIN
-            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={curPin} onInput={(e) => setCurPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
+            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={curPin} data-change-pin-cur="1" onInput={(e) => setCurPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
           </label>
           <label>
             New 4-digit PIN
-            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={newPin} onInput={(e) => setNewPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
+            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={newPin} data-change-pin-new="1" onInput={(e) => setNewPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
           </label>
           <label>
             Confirm new PIN
-            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={confirmPin} onInput={(e) => setConfirmPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
+            <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={confirmPin} data-change-pin-confirm="1" onInput={(e) => setConfirmPin((e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 4))} />
           </label>
-          {err && <div class="warnbox small" role="alert">{err}</div>}
+          {err && <div class="warnbox small" role="alert" data-change-pin-err="1">{err}</div>}
           <div class="row">
             <button type="submit" class="primary">Update PIN</button>
             <button type="button" onClick={() => setPanel('none')}>Cancel</button>

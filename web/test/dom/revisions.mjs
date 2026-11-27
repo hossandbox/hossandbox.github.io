@@ -773,13 +773,13 @@ await pin('R2. removals: Log undo row is ABSENT on page-log even when undo is ar
 
 /* ---------------- (p) log summary PDF follow-on (2026-11-20) ---------------- */
 const E = await import('../../../engine/src/index.ts');
-const PDF_DISC = 'Planning only — not a log, not an ELD. This printout is not an official record of duty status.';
+const PDF_DISC = 'PERSONAL HOS PLANNING WORKSHEET — NOT A LEGAL RODS / NOT AN ELD';
 const dataCard = () => all((n) => n.localName === 'section' && has(n, 'card') && all((h2) => h2.localName === 'h2' && h2.textContent.trim() === 'Data', n).length > 0, settingsRoom())[0];
 const daysInput = () => { const c = dataCard(); return c && all((n) => n.localName === 'input' && n.attributes.type === 'number', c)[0]; };
-const pdfBtn = () => { const c = dataCard(); return c && all((n) => n.localName === 'button' && n.textContent.trim() === 'Log summary (PDF)', c)[0]; };
+const pdfBtn = () => { const c = dataCard(); return c && all((n) => n.localName === 'button' && n.textContent.trim() === 'Planning worksheet (PDF)', c)[0]; };
 const reportEl = () => all((n) => n.localName === 'article' && has(n, 'print-report'))[0] ?? null;
 
-await pin('P1. log summary PDF: More Data card has Days field (default 14) and "Log summary (PDF)" button next to Export JSON; no report mounted initially', async () => {
+await pin('P1. planning worksheet PDF: More Data card has Days field (default 14) and "Planning worksheet (PDF)" button next to Export JSON; no report mounted initially', async () => {
   A.setPrintReport(null);
   await seed({ tab: 'settings', ...segs });
   const c = dataCard();
