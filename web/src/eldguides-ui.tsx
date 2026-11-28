@@ -12,13 +12,27 @@ import {
   type EldGuide,
 } from './eldguides.ts';
 
-export function EldGuideFlow({ onDone }: { onDone: () => void }) {
+export function EldGuideFlow({
+  onDone,
+  targetDayLabel,
+  compareMode = 'clocks',
+}: {
+  onDone: () => void;
+  targetDayLabel?: string;
+  compareMode?: 'clocks' | 'totals';
+}) {
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<EldGuide | null>(null);
+  const isTotals = compareMode === 'totals';
 
   if (picked) {
     return (
-      <div class="eld-guide-detail" data-eld-guide-detail={picked.id} data-eld-guide-kind={picked.kind}>
+      <div
+        class="eld-guide-detail"
+        data-eld-guide-detail={picked.id}
+        data-eld-guide-kind={picked.kind}
+        data-eld-guide-mode={compareMode}
+      >
         <div class="eld-guide-detail-head">
           <button
             type="button"
@@ -44,16 +58,35 @@ export function EldGuideFlow({ onDone }: { onDone: () => void }) {
         )}
         <div class="eld-guide-screen-note" data-eld-which-screen="1" data-eld-split={picked.splitScreen ? '1' : undefined}>
           <b>Which screen to screenshot</b>
-          <p class="small" style="margin:4px 0 0">{picked.whichScreen}</p>
+          <p class="small" style="margin:4px 0 0">
+            {isTotals
+              ? `Screenshot ${targetDayLabel ?? 'that day'}’s Daily Log screen showing your Driving and On-Duty totals — we'll compare the day's totals against your log.`
+              : picked.whichScreen}
+          </p>
         </div>
-        <ol class="eld-guide-steps" data-eld-guide-steps="1">
-          {picked.steps.map((step, idx) => (
-            <li key={idx}>{step}</li>
-          ))}
-        </ol>
-        <p class="small eld-guide-day" data-eld-switch-day="1">
-          <b>Change the day:</b> {picked.switchDay}
-        </p>
+        {isTotals ? (
+          <>
+            <p class="small eld-guide-day" data-eld-switch-day="1">
+              <b>{targetDayLabel ? `Open ${targetDayLabel}’s Daily Log:` : 'Change the day:'}</b> {picked.switchDay}
+            </p>
+            <ol class="eld-guide-steps" data-eld-guide-steps="1">
+              {picked.steps.map((step, idx) => (
+                <li key={idx}>{step}</li>
+              ))}
+            </ol>
+          </>
+        ) : (
+          <>
+            <ol class="eld-guide-steps" data-eld-guide-steps="1">
+              {picked.steps.map((step, idx) => (
+                <li key={idx}>{step}</li>
+              ))}
+            </ol>
+            <p class="small eld-guide-day" data-eld-switch-day="1">
+              <b>{targetDayLabel ? `Change the day to ${targetDayLabel}:` : 'Change the day:'}</b> {picked.switchDay}
+            </p>
+          </>
+        )}
         {picked.caveat && (
           <p class="muted small" data-eld-guide-caveat="1">{picked.caveat}</p>
         )}
@@ -70,9 +103,13 @@ export function EldGuideFlow({ onDone }: { onDone: () => void }) {
   const showDiscontinued = matchesDiscontinuedEld(query);
 
   return (
-    <div class="eld-guide-picker" data-eld-guide-picker="1">
+    <div class="eld-guide-picker" data-eld-guide-picker="1" data-eld-guide-mode={compareMode}>
       <p class="small" style="margin:0 0 8px">
-        Pick your ELD for step-by-step taps to the screen Clock 14 reads (your four countdown clocks: Drive, Shift, Break, Cycle). Everything works offline.
+        {isTotals
+          ? `Pick your ELD for step-by-step taps to open ${targetDayLabel ?? 'that day'}’s Daily Log — we'll compare the day's totals (Driving and On Duty). Everything works offline.`
+          : targetDayLabel
+            ? `Pick your ELD for step-by-step taps to your live countdown clocks (Drive, Shift, Break, Cycle) for ${targetDayLabel}. Everything works offline.`
+            : 'Pick your ELD for step-by-step taps to the screen Clock 14 reads (your four countdown clocks: Drive, Shift, Break, Cycle). Everything works offline.'}
       </p>
       <input
         type="search"
@@ -107,7 +144,9 @@ export function EldGuideFlow({ onDone }: { onDone: () => void }) {
         ))}
       </div>
       <p class="muted small" style="margin:8px 0 6px">
-        ELD on a dash-mounted cab tablet? Use your carrier’s phone app if you have one, snap a straight-on photo of the screen, or type your 4 clocks manually.
+        {isTotals
+          ? 'ELD on a dash-mounted cab tablet? Use your carrier’s phone app if you have one, snap a straight-on photo of that day’s Daily Log totals, or type the totals manually.'
+          : 'ELD on a dash-mounted cab tablet? Use your carrier’s phone app if you have one, snap a straight-on photo of the screen, or type your 4 clocks manually.'}
       </p>
       <div class="row">
         <button type="button" class="ghost wide" data-eld-guide-return="1" onClick={onDone}>

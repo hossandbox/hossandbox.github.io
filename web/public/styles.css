@@ -1239,7 +1239,8 @@ details.disclaimer-line > summary:focus-visible { outline: 2px solid var(--accen
   position: relative;
   z-index: 2;
 }
-.page.page-log > .log-pin > .log-graph-card { padding: var(--s-10) var(--s-12); }
+.page.page-log > .log-pin > .daynav { touch-action: pan-y; }
+.page.page-log > .log-pin > .log-graph-card { padding: var(--s-10) var(--s-12); touch-action: pan-y; }
 .page.page-log > .log-pin .daytotals { margin-top: var(--s-8); padding-top: var(--s-6); }
 .page.page-log > .log-scroll {
   flex: 1 1 0;
@@ -3558,6 +3559,32 @@ html[data-theme="winddown"] {
 .log-scratchpad-note {
   margin: 0 0 6px;
   text-align: center;
+}
+.log-compare-cta {
+  margin: 0;
+}
+.drift-day-banner {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--r-8);
+  background: var(--tint-accent);
+  border: 1px solid color-mix(in srgb, var(--ring) 40%, var(--line));
+  font-size: 14px;
+}
+.totals-compare-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.totals-compare-row {
+  padding: 10px 12px;
+  border-radius: var(--r-8);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .bug-email-btn {
   display: flex;

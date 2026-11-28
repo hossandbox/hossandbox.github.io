@@ -286,17 +286,46 @@ for (const [W, H] of SIZES) {
   const css = await page.evaluate(() => { const c = getComputedStyle(document.querySelector('.page')); return `${c.overscrollBehaviorX}/${c.overscrollBehaviorY}`; });
   ok(`${tag} (c) a page hands sideways overscroll up to the strip (overscroll-behavior x auto), and keeps vertical closed (y none)`, css === 'auto/none', css);
   await seated();
-  // Re-aimed (2026-11-21 transitions, Lorico): 3-panel strip Plan(0) — Now(1) — Log(2); Settings is no longer a swipe destination.
+  // Logpatch2 (F4): day-cycling swipe lives on the pinned day/graph area (.daynav + .log-graph-card),
+  // while the rest of the Log page (.log-scroll entries + .log-foot) preserves strip paging Log → Now.
+  // Prove BOTH gestures from the Log screen in real Chromium: day-cycling on .log-graph-card/.daynav
+  // AND strip paging Log → Now starting right on a Log entry (button.entry).
+  const spotRaw = (sel) => page.evaluate((q) => {
+    const pg = document.querySelector('.page.is-active');
+    for (const el of pg.querySelectorAll(q)) {
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height) return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), hit: `${el.tagName.toLowerCase()}.${String(el.className || '').split(' ')[0]}`, inControl: !!el.closest('button, a, input, select, textarea, label') };
+    }
+    return null;
+  }, sel);
   // [from-panel, content selector, dx, expected panel, label]
   const legs = [
     ['now', '.hero, .card, section', -1, 'log', 'Now content'],
-    ['log', 'button.entry', 1, 'now', 'a Log entry, rightward'],
+    ['log', 'button.entry', 1, 'now', 'a Log entry (button)'],
     ['now', '.hero, .card, section', 1, 'plan', 'Now content, rightward'],
     ['plan', 'button.plan-item b, button.plan-item', -1, 'now', 'a Plan row (button)'],
   ];
   for (const [from, sel, dir, want, label] of legs) {
     const b = await st();
     if (b.active !== from) { ok(`${tag} (c) leg setup on ${from}`, false, `active ${b.active}`); break; }
+    if (from === 'log') {
+      // Prove F4 day-cycling in real Chromium: rightward swipe on .log-graph-card cycles to previous day
+      // (stays on Log, 0 strip haptics), leftward swipe on .daynav returns to Today (stays on Log).
+      const dayTitle = () => page.evaluate(() => document.querySelector('.page-log .daynav-title')?.textContent?.trim() || '');
+      const t0 = await dayTitle();
+      const atGraph = await spotRaw('.log-graph-card');
+      if (atGraph) { await drag(atGraph.x, atGraph.y, Math.round(W * 0.45), 4); await page.waitForTimeout(300); }
+      const t1 = await dayTitle();
+      const s1 = await st();
+      ok(`${tag} (c) logpatch2 F4: rightward swipe on Log graph card cycles to previous day and stays on Log`,
+        s1.active === 'log' && t1 !== t0 && s1.vib === b.vib, `active=${s1.active} day "${t0}"→"${t1}" vib +${s1.vib - b.vib}`);
+      const atDaynav = await spotRaw('.daynav-title');
+      if (atDaynav) { await drag(atDaynav.x, atDaynav.y, -Math.round(W * 0.45), 4); await page.waitForTimeout(300); }
+      const t2 = await dayTitle();
+      const s2 = await st();
+      ok(`${tag} (c) logpatch2 F4: leftward swipe on Log daynav returns to Today and stays on Log`,
+        s2.active === 'log' && t2 === t0 && s2.vib === b.vib, `active=${s2.active} day "${t1}"→"${t2}" vib +${s2.vib - b.vib}`);
+    }
     const at = await spot(sel);
     if (!at) { ok(`${tag} (c) a swipe starting on ${label} pages ${from} → ${want}`, false, `no on-screen ${sel}`); break; }
     await drag(at.x, at.y, dir * Math.round(W * 0.7), 0);

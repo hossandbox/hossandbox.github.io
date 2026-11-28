@@ -629,3 +629,175 @@ export function mergeExtractions(a: EldExtraction, b: EldExtraction): EldExtract
   }
   return { filled, unplaced, rejected: a.rejected + b.rejected, disagreed };
 }
+
+/* ---------- Past-day ELD Daily Log totals extraction (logpatch2, F3) ---------- */
+
+export type EldDayTotalKey = 'driving' | 'onDuty';
+
+export interface EldDayTotalsExtraction {
+  filled: Partial<Record<EldDayTotalKey, EldFieldRead>>;
+  unplaced: number[];
+  rejected: number;
+  disagreed: Partial<Record<EldDayTotalKey, [number, number]>>;
+}
+
+const DAY_TOTAL_MAX_MIN = 24 * 60;
+
+/** Words allowed between a Daily Log total label and its H:MM value on the same line. */
+const TOTAL_PHRASE = new Set([
+  'time', 'total', 'totals', 'duty', 'not', 'driving', 'nd',
+  'hour', 'hours', 'hr', 'hrs', 'logged', 'today', 'day', 'daily', 'summary', 'of', 'the',
+]);
+
+interface TotalLabelToken {
+  key: EldDayTotalKey;
+  bbox: OcrBBox;
+  info: boolean;
+}
+
+function findDayTotalLabels(words: OcrWord[]): TotalLabelToken[] {
+  const out: TotalLabelToken[] = [];
+  const used = new Set<OcrWord>();
+  for (const w of words) {
+    if (used.has(w)) continue;
+    const raw = cleaned(w.text);
+    const a = alphaOf(w.text);
+    const line = words.filter((p) => sameLine(p.bbox, w.bbox)).sort((x, y) => x.bbox.x0 - y.bbox.x0);
+    const pos = line.indexOf(w);
+    const prev = pos > 0 ? line[pos - 1] : null;
+    const next = pos + 1 < line.length ? line[pos + 1] : null;
+    const closePrev = prev && w.bbox.x0 - prev.bbox.x1 <= 2 * Math.max(height(prev.bbox), height(w.bbox));
+    const closeNext = next && next.bbox.x0 - w.bbox.x1 <= 2 * Math.max(height(next.bbox), height(w.bbox));
+
+    if (a === 'onduty') {
+      const info = runWalk(line.slice(0, pos), w);
+      out.push({ key: 'onDuty', bbox: w.bbox, info });
+      continue;
+    }
+    if (a === 'on') {
+      if (closeNext && next && alphaOf(next.text) === 'duty') {
+        used.add(next);
+        const info = runWalk(line.slice(0, pos), w);
+        out.push({ key: 'onDuty', bbox: unionBox(w.bbox, next.bbox), info });
+        continue;
+      }
+      // Standalone uppercase "ON" grid margin label (never "Off" or prose "on")
+      if (raw === 'ON' && !(closePrev && prev && alphaOf(prev.text) === 'off')) {
+        const info = runWalk(line.slice(0, pos), w);
+        out.push({ key: 'onDuty', bbox: w.bbox, info });
+        continue;
+      }
+      continue;
+    }
+    if (a === 'drive' || a === 'driving' || raw === 'D') {
+      // Ignore "Driving" when it is part of "On Duty Not Driving" / "(Not Driving)"
+      if (a === 'driving' && closePrev && prev && (alphaOf(prev.text) === 'not' || alphaOf(prev.text) === 'non')) {
+        continue;
+      }
+      const info = runWalk(line.slice(0, pos), w);
+      out.push({ key: 'driving', bbox: w.bbox, info });
+    }
+  }
+  return out;
+}
+
+function totalClaimScore(value: OcrBBox, label: OcrBBox, words: OcrWord[]): number | null {
+  if (sameLine(value, label) && label.x1 <= value.x0 + 4) {
+    for (const w of words) {
+      if (w.bbox.x1 <= label.x1 || w.bbox.x0 >= value.x0) continue;
+      if (!sameLine(w.bbox, value)) continue;
+      if (TOTAL_PHRASE.has(alphaOf(w.text))) continue;
+      return null;
+    }
+    return Math.max(0, (value.x0 - label.x1) / height(value));
+  }
+  const vGap = value.y0 - label.y1;
+  if (vGap >= -4 && vGap <= 1.5 * height(value)) {
+    const overlap = Math.min(value.x1, label.x1) - Math.max(value.x0, label.x0);
+    if (overlap >= -0.25 * Math.max(1, value.x1 - value.x0)) return 1.5 + Math.max(0, vGap) / height(value);
+  }
+  return null;
+}
+
+/**
+ * Extract past-day ELD Daily Log totals (Driving total and On-Duty total) from OCR words.
+ * Applies the same conservative rules as extractEldClocks: confidence floor, clear-path
+ * labeling, ceiling check (<= 24:00), no bare-hours or limit-annotation fills, and
+ * contest-blanks-field on disagreement.
+ */
+export function extractEldDayTotals(words: OcrWord[]): EldDayTotalsExtraction {
+  const labels = findDayTotalLabels(words);
+  const { candidates, rejected: lowConfidence } = findCandidates(words);
+  let rejected = lowConfidence;
+
+  interface TotalClaim { candidate: Candidate; score: number; info: boolean }
+  const claims = new Map<EldDayTotalKey, TotalClaim[]>();
+  const unplaced: number[] = [];
+
+  for (const c of candidates) {
+    if (c.minutes > DAY_TOTAL_MAX_MIN) { rejected++; continue; }
+    let best: { key: EldDayTotalKey; score: number; info: boolean } | null = null;
+    for (const l of labels) {
+      const s = totalClaimScore(c.bbox, l.bbox, words);
+      if (s !== null && (best === null || s < best.score)) best = { key: l.key, score: s, info: l.info };
+    }
+    if (best === null) { unplaced.push(c.minutes); continue; }
+    const list = claims.get(best.key) ?? [];
+    list.push({ candidate: c, score: best.score, info: best.info });
+    claims.set(best.key, list);
+  }
+
+  const filled: Partial<Record<EldDayTotalKey, EldFieldRead>> = {};
+  const disagreed: Partial<Record<EldDayTotalKey, [number, number]>> = {};
+
+  for (const [key, list] of claims) {
+    list.sort((a, b) => a.score - b.score);
+    const distinct: number[] = [];
+    for (const x of list) if (!distinct.includes(x.candidate.minutes)) distinct.push(x.candidate.minutes);
+    if (distinct.length > 1) {
+      disagreed[key] = [distinct[0], distinct[1]];
+      for (const m of distinct) unplaced.push(m);
+      continue;
+    }
+    const fillable = list.filter((x) => !x.candidate.limitAnnotation && !x.candidate.bareHours && !x.info);
+    if (fillable.length === 0) {
+      for (const x of list) unplaced.push(x.candidate.minutes);
+      continue;
+    }
+    const first = fillable[0];
+    filled[key] = { minutes: first.candidate.minutes, confidence: first.candidate.confidence };
+    for (const x of list) if (x !== first) unplaced.push(x.candidate.minutes);
+  }
+
+  return { filled, unplaced, rejected, disagreed };
+}
+
+export function mergeDayTotalsExtractions(a: EldDayTotalsExtraction, b: EldDayTotalsExtraction): EldDayTotalsExtraction {
+  const filled: Partial<Record<EldDayTotalKey, EldFieldRead>> = {};
+  const disagreed: Partial<Record<EldDayTotalKey, [number, number]>> = {};
+  const unplaced: number[] = [];
+  for (const m of [...a.unplaced, ...b.unplaced]) if (!unplaced.includes(m)) unplaced.push(m);
+  const keys = new Set([
+    ...Object.keys(a.filled), ...Object.keys(b.filled),
+    ...Object.keys(a.disagreed), ...Object.keys(b.disagreed),
+  ] as EldDayTotalKey[]);
+  for (const key of keys) {
+    const da = a.disagreed[key];
+    const db = b.disagreed[key];
+    if (da ?? db) {
+      const pair = (da ?? db) as [number, number];
+      disagreed[key] = [pair[0], pair[1]];
+      for (const v of [...(da ?? []), ...(db ?? [])]) if (!pair.includes(v) && !unplaced.includes(v)) unplaced.push(v);
+      continue;
+    }
+    const ra = a.filled[key];
+    const rb = b.filled[key];
+    if (ra && rb) {
+      if (ra.minutes === rb.minutes) filled[key] = ra.confidence >= rb.confidence ? ra : rb;
+      else disagreed[key] = [ra.minutes, rb.minutes];
+    } else if (ra ?? rb) {
+      filled[key] = (ra ?? rb) as EldFieldRead;
+    }
+  }
+  return { filled, unplaced, rejected: a.rejected + b.rejected, disagreed };
+}

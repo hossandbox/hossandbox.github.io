@@ -2755,6 +2755,8 @@ export const DRIFT_TOLERANCE_MIN = 2;
 
 export type DriftVerdict = 'sync' | 'missing' | 'extra';
 export interface DriftComparison { appLeft: number; eldLeft: number; gap: number; verdict: DriftVerdict }
+/** Carrier-day window [start, end) in epoch minutes for per-day Log ELD comparisons. */
+export interface DriftDayWindow { start: number; end: number }
 
 /**
  * The logged record, materialized to `now`: the rows in `segments` that are not flagged
@@ -2783,14 +2785,21 @@ export function loggedSegments(s: State, now: number): Segment[] {
  * the check can therefore disagree with the screen — deliberately: the ELD can only be
  * lined up against what was actually logged.
  *
+ * When `day` is passed (Log screen Today compare), evaluation STILL reads the FULL logged
+ * history up to `asOf = min(day.end, now)` — never tentative rows and never clipped at
+ * `day.start`, so overnight/midnight-crossing shifts and prior rests stay intact and Today's
+ * Log compare matches the Now flow identically. Only fill placement (`planDriftFill`) is fenced
+ * to `[day.start, min(day.end, now)]`. Past days use `compareDayTotals` (totals-only, no fills).
+ *
  * `gap` is ELD minus app. Negative is the dangerous direction: the ELD shows LESS left, so the
  * driver has driven more than the log knows, and every answer the app gives runs optimistic
  * until the missing driving is in. Positive means the app is the pessimist — something the ELD
  * credited (most often a break or an off-duty stretch) is missing from the log. That direction
  * is only ever reported, never "fixed" by taking logged driving back out (see planDriftFill).
  */
-export function driftCheck(s: State, eldLeftMin: number, now: number): DriftComparison {
-  const ev = evaluate(loggedSegments(s, now), { asOf: now, config: s.config });
+export function driftCheck(s: State, eldLeftMin: number, now: number, day?: DriftDayWindow): DriftComparison {
+  const asOf = day ? Math.min(day.end, now) : now;
+  const ev = evaluate(loggedSegments(s, asOf), { asOf, config: s.config });
   const appLeft = Math.max(0, Math.round(ev.shift.driveRemaining));
   const eldLeft = Math.max(0, Math.round(eldLeftMin));
   const gap = eldLeft - appLeft;
@@ -2809,17 +2818,51 @@ export interface DriftFillPlan { start: number; end: number; filled: number; rem
  * Which stretch: the most recent one that can hold the whole gap. If none can, the most recent
  * stretch there is fills what fits and `remainder` names the rest — the fill is never split
  * across the day and never forced. The fences, all deliberate:
- *  - Logged rows only. Tentative (what-if) rows are never read and never touched, and the fill
- *    takes only time no logged row claims in the resolved timeline — it overlaps nothing.
+ *  - Logged rows only (both unscoped Now flow and day-fenced Today flow). Tentative (what-if)
+ *    rows are never read and never touched, and the fill takes only time no logged row claims
+ *    in the resolved timeline — it overlaps nothing.
+ *  - When `day` is provided, the full logged record is normalized first (preserving cross-day
+ *    context) and only the candidate unlogged stretches are fenced strictly to
+ *    [day.start, min(day.end, now)]; a fill that would fall outside the window is never offered.
  *  - Never past now, and never before the record begins: the time before the first row is the
  *    driver's stated beginning, not a hole to fill.
  *  - The fill only ever ADDS driving. Nothing here deletes, shortens or re-statusses a row, in
  *    either drift direction — a re-sync must not be a tool for erasing duty.
  * Returns null when the record has no unlogged stretch at all.
  */
-export function planDriftFill(s: State, minutes: number, now: number): DriftFillPlan | null {
+export function planDriftFill(s: State, minutes: number, now: number, day?: DriftDayWindow): DriftFillPlan | null {
   const want = Math.max(0, Math.round(minutes));
   if (want <= 0) return null;
+  if (day) {
+    const dayStart = day.start;
+    const dayEnd = Math.min(day.end, now);
+    if (dayEnd <= dayStart) return null;
+    const logged = loggedSegments(s, dayEnd);
+    if (logged.length === 0) return null;
+    const rows = normalize(logged, { merge: false });
+    const stretches: { start: number; end: number }[] = [];
+    let prevEnd: number | null = null;
+    for (const r of rows) {
+      const end = Math.min(r.start, dayEnd);
+      if (prevEnd !== null && end > prevEnd) {
+        const a = Math.max(prevEnd, dayStart);
+        if (end > a) stretches.push({ start: a, end });
+      }
+      prevEnd = prevEnd === null ? r.end : Math.max(prevEnd, r.end);
+    }
+    if (prevEnd !== null && dayEnd > prevEnd) {
+      const a = Math.max(prevEnd, dayStart);
+      if (dayEnd > a) stretches.push({ start: a, end: dayEnd });
+    }
+    if (stretches.length === 0) return null;
+    const whole = [...stretches].reverse().find((g) => g.end - g.start >= want);
+    const best = whole ?? stretches[stretches.length - 1];
+    const filled = Math.min(want, best.end - best.start);
+    const start = best.end - filled;
+    const end = best.end;
+    if (filled <= 0 || start < dayStart || end > dayEnd) return null;
+    return { start, end, filled, remainder: want - filled };
+  }
   const logged = loggedSegments(s, now);
   if (logged.length === 0) return null;
   const rows = normalize(logged, { merge: false });
@@ -2841,6 +2884,66 @@ export function planDriftFill(s: State, minutes: number, now: number): DriftFill
   const best = whole ?? stretches[stretches.length - 1];
   const filled = Math.min(want, best.end - best.start);
   return { start: best.end - filled, end: best.end, filled, remainder: want - filled };
+}
+
+export type DayTotalVerdict = 'sync' | 'more' | 'less';
+export interface DayTotalDiff {
+  appMin: number;
+  eldMin: number;
+  /** eldMin - appMin. Positive = ELD shows more; negative = ELD shows less. */
+  diff: number;
+  verdict: DayTotalVerdict;
+}
+export interface DayTotalsComparison {
+  driving: DayTotalDiff | null;
+  onDuty: DayTotalDiff | null;
+  verdict: 'sync' | 'diff';
+}
+
+/**
+ * Logged totals (in whole minutes) for a single carrier day [day.start, min(day.end, now)).
+ * Reads LOGGED rows only (loggedSegments — never tentative what-if rows), resolved via the
+ * engine's normalize() so overlapping entries are settled the exact way the clocks settle them.
+ */
+export function loggedDayTotals(s: State, now: number, day: DriftDayWindow): Record<DutyStatus, number> {
+  const totals: Record<DutyStatus, number> = { OFF: 0, SB: 0, D: 0, ON: 0 };
+  const until = Math.min(day.end, now);
+  if (until <= day.start) return totals;
+  const resolved = normalize(loggedSegments(s, until), { merge: false });
+  for (const r of resolved) {
+    if (r.end <= day.start || r.start >= until) continue;
+    const a = Math.max(r.start, day.start);
+    const b = Math.min(r.end, until);
+    if (b > a) totals[r.status] += b - a;
+  }
+  return totals;
+}
+
+/**
+ * Past-day ELD Daily Log totals comparison (totals-only; never offers or plans a fill).
+ * Compares the ELD Daily Log's Driving and/or On-Duty totals against the app's logged totals
+ * for that carrier day, using DRIFT_TOLERANCE_MIN (2m) for in-sync agreement.
+ */
+export function compareDayTotals(
+  s: State,
+  eld: { driving?: number | null; onDuty?: number | null },
+  now: number,
+  day: DriftDayWindow,
+): DayTotalsComparison {
+  const app = loggedDayTotals(s, now, day);
+  const cmpOne = (appMin: number, eldMin: number | null | undefined): DayTotalDiff | null => {
+    if (eldMin === null || eldMin === undefined) return null;
+    const a = Math.max(0, Math.round(appMin));
+    const e = Math.max(0, Math.round(eldMin));
+    const diff = e - a;
+    const verdict: DayTotalVerdict = Math.abs(diff) <= DRIFT_TOLERANCE_MIN ? 'sync' : diff > 0 ? 'more' : 'less';
+    return { appMin: a, eldMin: e, diff, verdict };
+  };
+  const driving = cmpOne(app.D, eld.driving);
+  const onDuty = cmpOne(app.ON, eld.onDuty);
+  const verdict: 'sync' | 'diff' =
+    (!driving || driving.verdict === 'sync') && (!onDuty || onDuty.verdict === 'sync') ? 'sync' : 'diff';
+  return { driving, onDuty, verdict };
 }
 
 /* ---------- Patch 10: load-verdict advice + the Why counterfactual ----------

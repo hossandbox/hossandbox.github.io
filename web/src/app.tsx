@@ -25,7 +25,7 @@ import {
   evaluate, driveAgainAt, pruneHistory, planTripAll, carrierDayStart, nextCarrierDayStart, dayLabel, TRIP_STRATEGIES, safeHaven, normalize, restPeriods, LIMITS, type TripStrategy, type Segment, type DutyStatus, type FullEvaluation, type Violation, type TripPlan, type TripInput, type RestPeriod,
 } from '../../engine/src/index.ts';
 import {
-  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, synthesizeEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
+  useStore, setState, useNow, allSegments, loggedSegments, toInput, fromInput, clock, clockFull, dur, hrs, STATUS_LABEL, STATUS_COLOR, segLabel as storeSegLabel, BREAK_NOTE, exportState, applySegmentEdit, adjustCurrentStart, absorbCurrentStart, placeEntry, dropCurrentPatch, type Absorbed, statusBeingLeft, readMinutesAgo, type AdjustStartProblem, sanitizeBreaks, breakNote, noteFits, MAX_BREAKS, type BreakPreset, isValidTimeZone, listedZone, zoneLabel, zoneShort, zonePair, screenTheme, TIME_ZONES, deviceTz, applyImportedState, draftResets, applyTheme, effectiveTheme, devicePrefersDark, chooseTheme, historyBasis, historyDays, cycleBasis, applyDayPatch, dayPatchOverflow, stamp, meaningfulGaps, statusTap, dayClosePatch, reopenDayPatch, dayCloseFor, dayCloseToday, currentRunStart, joinDisplayRows, applyEldSeed, synthesizeEldSeed, splitEstimateActive, cycleParamsOf, type EldClocks, readEldEntry, driftCheck, planDriftFill, compareDayTotals, loggedDayTotals, DRIFT_NOTE, type DriftComparison, type DriftFillPlan, type DriftDayWindow, type DayTotalsComparison, type DayTotalDiff, ELD_SEED_NOTE, latestLegalDeparture, smallestRestFix, whyLever, DEFAULT_TRIP, DEFAULT_SPLIT, DEFAULT_LOADCHECK, DEFAULT_WEEK_LOAD, DEFAULT_WEEK_PLAN, WEEK_MAX_LOADS, sanitizeWeekPlan, type State, type TripDraft, type SplitDraft, type LoadCheckDraft, type WeekPlanDraft, type WeekLoadDraft, type WeekHomeTarget, type Theme, nowMin, importProblem, INITIAL_STATE, getState, dateable, sanitizeDayCloses, sanitizeConfig, SIM_KEY,
   useDrivers, getActiveDriverName, lockDriverSession, registerSessionHooks, setDriverGateBypassForTest, reloadVaultFromStorage, syncActiveUndoRaw,
   STAY_UNLOCKED_SPLASH_MS, completeAutoUnlock, getStayUnlocked, isStayUnlockedEffective, getPendingAutoUnlockId, setStayUnlocked, getIosInstallNoteDismissed, dismissIosInstallNote,
 } from './store.ts';
@@ -96,7 +96,7 @@ import {
   speechRecognitionCtor, speechSynthesisAvailable, speakAloud, parseClockUtterance, composeReadBack,
   beginVoice, voiceAccept, voiceFailure, voiceDiscard, type VoiceFlow, type SpeechRecognitionLike,
 } from './voiceclocks.ts';
-import { extractEldClocks, mergeExtractions, type OcrWord } from './eldocr.ts';
+import { extractEldClocks, mergeExtractions, extractEldDayTotals, mergeDayTotalsExtractions, type OcrWord } from './eldocr.ts';
 import { computeLevers, pickChips, leverTitle, leverSub, leverRule, leverAfter, leverSplitPrefill, type Lever } from './levers.ts';
 
 /* ============================================================ shared bits */
@@ -778,6 +778,13 @@ function Sign({ kind, children }: { kind: SignKind; children: ComponentChildren 
  * by a tap and closed by a tap, the backdrop, or Escape, and everything behind it is inert while open.
  * Kept outside the persisted store on purpose: an open panel is not something to restore on launch.
  */
+export interface DriftTargetDay {
+  start: number;
+  end: number;
+  label: string;
+  back: number;
+}
+
 export type SheetKind =
   | { kind: 'status' }
   // Patch 19: fix the start time of the status the driver is in now (the after-the-fact door).
@@ -785,7 +792,7 @@ export type SheetKind =
   // survives even if a DrivingView/Now transition re-seats the sheet.
   | { kind: 'since'; done?: number }
   | { kind: 'quickstart'; mode?: 'screenshot' }
-  | { kind: 'drift'; mode?: 'screenshot' }
+  | { kind: 'drift'; mode?: 'screenshot'; day?: DriftTargetDay }
   | { kind: 'why' }
   | { kind: 'exceptions' }
   // A lever chip's sheet (capstone C1): the chip's sentence, its ghost axis, the rule and
@@ -3341,11 +3348,17 @@ function QuickStartSheet({ s, now, mode, closing = false }: { s: State; now: num
  * (planDriftFill). ELD shows more: no fix is offered — this check never takes driving out of
  * a log; the likely missing break belongs on the Log.
  */
-function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; mode?: 'screenshot'; closing?: boolean }) {
+function DriftSheet({ s, now, mode, day, closing = false }: { s: State; now: number; mode?: 'screenshot'; day?: DriftTargetDay; closing?: boolean }) {
   const isShotMode = mode === 'screenshot';
+  const isPastDay = !!(day && day.back > 0);
+  const dayWindow: DriftDayWindow | undefined = day ? { start: day.start, end: day.end } : undefined;
+  const dayLabel = day ? (day.back === 0 ? `Today, ${day.label}` : day.label) : null;
   const [txt, setTxt] = useState<[string, string]>(['', '']);
+  const [driveTxt, setDriveTxt] = useState<[string, string]>(['', '']);
+  const [onTxt, setOnTxt] = useState<[string, string]>(['', '']);
   const [err, setErr] = useState<string | null>(null);
   const [found, setFound] = useState<{ check: DriftComparison; at: number; eld: number } | null>(null);
+  const [totalsFound, setTotalsFound] = useState<DayTotalsComparison | null>(null);
   const [filled, setFilled] = useState<{ plan: DriftFillPlan; after: DriftComparison } | null>(null);
   const [shotBusy, setShotBusy] = useState(false);
   const [shotNote, setShotNote] = useState<string | null>(null);
@@ -3353,10 +3366,14 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
   const [eldHelp, setEldHelp] = useState(false);
   const shotRef = useRef<HTMLInputElement | null>(null);
 
+  const dayBanner = dayLabel ? (
+    <p class="drift-day-banner" data-drift-day-banner="1"><b>Comparing {dayLabel}</b></p>
+  ) : null;
+
   if (eldHelp) {
     return (
       <Sheet title="Find your ELD screen" focusKey="drift-eld-help" onBack={() => setEldHelp(false)} closing={closing}>
-        <EldGuideFlow onDone={() => setEldHelp(false)} />
+        <EldGuideFlow onDone={() => setEldHelp(false)} targetDayLabel={day ? day.label : undefined} compareMode={isPastDay ? 'totals' : 'clocks'} />
       </Sheet>
     );
   }
@@ -3366,6 +3383,7 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
   if (historyBasis(s, now) === 'fresh') {
     return (
       <Sheet title="Check against my ELD" closing={closing}>
+        {dayBanner}
         <p class="small">There's nothing to check yet — this app is still on its demo clock, so there's no real day to compare with your ELD. Start from your ELD clocks first; the check works once your real day is in.</p>
         <div class="row"><button class="primary" data-first onClick={() => openSheet({ kind: 'quickstart', ...(isShotMode ? { mode: 'screenshot' as const } : {}) })}>Start from my ELD clocks</button></div>
       </Sheet>
@@ -3373,13 +3391,41 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
   }
 
   // B1 (receptionfix2): on a populated log, "Refresh from ELD screenshot" reads the screenshot
-  // on-device and prefills the drift-compare drive-left boxes — never reseeding or wiping rows.
+  // on-device and prefills the compare boxes — never reseeding or wiping rows.
+  // Past days (back > 0) read Daily Log totals (Driving and On Duty); Today/Now reads live clocks.
   const importDriftShot = async (file: File) => {
     setShotBusy(true);
     setShotNote(null);
     setShotErr(null);
     setErr(null);
     try {
+      const reads = eldOcrOverrideForTest
+        ? await eldOcrOverrideForTest(file)
+        : await (await import('./eldocr-run.ts')).recognizeEldScreenshot(file);
+      if (isPastDay) {
+        const r = mergeDayTotalsExtractions(extractEldDayTotals(reads.auto), extractEldDayTotals(reads.sparse));
+        const gotParts: string[] = [];
+        if (r.filled.driving) {
+          setDriveTxt([String(Math.floor(r.filled.driving.minutes / 60)), String(r.filled.driving.minutes % 60)]);
+          gotParts.push(`Driving ${dur(r.filled.driving.minutes)}`);
+        }
+        if (r.filled.onDuty) {
+          setOnTxt([String(Math.floor(r.filled.onDuty.minutes / 60)), String(r.filled.onDuty.minutes % 60)]);
+          gotParts.push(`On Duty ${dur(r.filled.onDuty.minutes)}`);
+        }
+        const disParts: string[] = [];
+        if (r.disagreed.driving) disParts.push(`Driving two ways (${dur(r.disagreed.driving[0])} and ${dur(r.disagreed.driving[1])})`);
+        if (r.disagreed.onDuty) disParts.push(`On Duty two ways (${dur(r.disagreed.onDuty[0])} and ${dur(r.disagreed.onDuty[1])})`);
+        if (gotParts.length > 0) {
+          setShotNote(`Read ${gotParts.join(' and ')} from the screenshot — check against your ELD, then tap Compare.`);
+          if (disParts.length > 0) setShotErr(`Couldn't settle ${disParts.join('; ')} — check or type it below.`);
+        } else if (disParts.length > 0) {
+          setShotErr(`The screenshot read ${disParts.join('; ')} — type the totals from your ELD Daily Log below and tap Compare.`);
+        } else {
+          setShotErr("Couldn't read Driving or On-Duty totals from that screenshot — type the totals from your ELD Daily Log below and tap Compare.");
+        }
+        return;
+      }
       const cyc = cycleParamsOf(s.config);
       const specs = [
         { key: 'driveLeft' as const, max: LIMITS.DRIVE },
@@ -3387,9 +3433,6 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
         { key: 'breakDueIn' as const, max: LIMITS.BREAK_AFTER },
         { key: 'cycleLeft' as const, max: cyc.limit },
       ];
-      const reads = eldOcrOverrideForTest
-        ? await eldOcrOverrideForTest(file)
-        : await (await import('./eldocr-run.ts')).recognizeEldScreenshot(file);
       const r = mergeExtractions(extractEldClocks(reads.auto, specs), extractEldClocks(reads.sparse, specs));
       const got = r.filled.driveLeft;
       if (got) {
@@ -3402,11 +3445,162 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
         setShotErr("Couldn't read drive time left from that screenshot — type the drive time left your ELD shows below and tap Compare.");
       }
     } catch {
-      setShotErr("That screenshot couldn't be read — type the drive time left your ELD shows below and tap Compare.");
+      setShotErr(isPastDay
+        ? "That screenshot couldn't be read — type the totals from your ELD Daily Log below and tap Compare."
+        : "That screenshot couldn't be read — type the drive time left your ELD shows below and tap Compare.");
     } finally {
       setShotBusy(false);
     }
   };
+
+  const compareTotals = () => {
+    if (!dayWindow) return;
+    const [dh, dm] = driveTxt;
+    const [oh, om] = onTxt;
+    const hasDrive = dh.trim() !== '' || dm.trim() !== '';
+    const hasOn = oh.trim() !== '' || om.trim() !== '';
+    if (!hasDrive && !hasOn) {
+      setErr('Type at least one total from your ELD Daily Log — Driving, On Duty, or both.');
+      return;
+    }
+    let driving: number | null = null;
+    if (hasDrive) {
+      const r = readEldEntry(dh, dm);
+      if (!r.ok) {
+        setErr(r.problem === 'fraction'
+          ? 'Whole hours in the hours box — part of an hour goes in the minutes box (7.25 hours is 7 in the hours box, 15 in the minutes).'
+          : 'The boxes need plain numbers — check them and try again.');
+        return;
+      }
+      driving = r.minutes;
+    }
+    let onDuty: number | null = null;
+    if (hasOn) {
+      const r = readEldEntry(oh, om);
+      if (!r.ok) {
+        setErr(r.problem === 'fraction'
+          ? 'Whole hours in the hours box — part of an hour goes in the minutes box (7.25 hours is 7 in the hours box, 15 in the minutes).'
+          : 'The boxes need plain numbers — check them and try again.');
+        return;
+      }
+      onDuty = r.minutes;
+    }
+    setErr(null);
+    // F5 (logpatch2): past-day totals compares do NOT stamp lastEldCheckAt, which tracks live clocks checks.
+    setTotalsFound(compareDayTotals(getState(), { driving, onDuty }, now, dayWindow));
+  };
+
+  if (isPastDay && totalsFound) {
+    const renderTotalRow = (label: string, d: DayTotalDiff, key: string) => (
+      <div class="totals-compare-row" key={key} data-totals-row={key}>
+        <b>{label}</b>
+        <span class="small">This app: <b>{dur(d.appMin)}</b> · Your ELD: <b>{dur(d.eldMin)}</b></span>
+        <span class={d.verdict === 'sync' ? 'ok small' : 'small'}>
+          {d.verdict === 'sync'
+            ? 'In sync'
+            : d.verdict === 'more'
+              ? `Your ELD shows ${dur(d.diff)} more ${label.toLowerCase()} than this app.`
+              : `Your ELD shows ${dur(-d.diff)} less ${label.toLowerCase()} than this app.`}
+        </span>
+      </div>
+    );
+    return (
+      <Sheet title="Check against my ELD" closing={closing}>
+        <div data-drift-mode="totals" data-totals-result="1">
+          {dayBanner}
+          {totalsFound.verdict === 'sync' ? (
+            <p><b>You're in sync</b> — your logged totals for {dayLabel} match your ELD.</p>
+          ) : (
+            <p><b>Totals differ on {dayLabel}</b> — see the side-by-side difference below.</p>
+          )}
+          <div class="totals-compare-list">
+            {totalsFound.driving && renderTotalRow('Driving', totalsFound.driving, 'driving')}
+            {totalsFound.onDuty && renderTotalRow('On duty', totalsFound.onDuty, 'onDuty')}
+          </div>
+          <p class="small">
+            {totalsFound.verdict === 'sync'
+              ? 'Nothing was changed.'
+              : 'Past-day checks never change your log automatically — edit that day on the Log tab by hand if you want to line it up.'}
+          </p>
+          <div class="row">
+            <button class="primary" data-first onClick={() => openSheet(null)}>
+              {totalsFound.verdict === 'sync' ? 'Done' : 'Back to Log'}
+            </button>
+          </div>
+        </div>
+      </Sheet>
+    );
+  }
+
+  if (isPastDay) {
+    return (
+      <Sheet title="Check against my ELD" closing={closing}>
+        <div
+          data-drift-sheet="1"
+          data-drift-shot-mode={isShotMode ? '1' : '0'}
+          data-drift-mode="totals"
+          data-drift-day-start={day ? String(day.start) : undefined}
+          data-drift-day-end={day ? String(day.end) : undefined}
+          data-drift-day-label={dayLabel ?? undefined}
+        >
+          {dayBanner}
+          <p class="small">Your ELD is the official record — we'll compare the day's totals against what you logged here. Open {dayLabel}'s Daily Log on your ELD, then pick a screenshot (or type the totals below). Past-day checks never change your log.</p>
+          {isShotMode && (
+            <div class="qs-section" data-eld-ocr-section="1">
+              <div class="row">
+                <button
+                  type="button"
+                  class="primary wide"
+                  data-first
+                  data-eld-choose-shot="1"
+                  disabled={shotBusy}
+                  onClick={() => shotRef.current?.click()}
+                >
+                  {shotBusy ? 'Reading screenshot…' : 'Choose ELD screenshot'}
+                </button>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                style="display:none"
+                ref={shotRef}
+                onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importDriftShot(f); }}
+              />
+              <p class="muted small">Read on this phone and thrown away — never sent or saved anywhere. Prefills that day's totals below; your log stays untouched.</p>
+              <button type="button" class="link eld-help-link" data-eld-help-btn="1" onClick={() => setEldHelp(true)}>How to open {day.label}'s Daily Log on your ELD?</button>
+              {shotNote && <p class="ok small" data-drift-shot-note="1">{shotNote}</p>}
+              {shotErr && <p class="warnbox small" data-drift-shot-err="1">{shotErr}</p>}
+            </div>
+          )}
+          <p class="muted small">Whole hours in the hours box — part of an hour goes in the minutes box. Enter Driving, On Duty, or both.</p>
+          <div class="qs-row">
+            <span class="qs-label">Driving total on your ELD<span class="muted small"> — Daily Log driving total</span></span>
+            <span class="qs-inputs">
+              <input type="number" class="num" inputMode="numeric" min={0} aria-label="Driving total on your ELD, hours" data-totals-drive-h="1" value={driveTxt[0]}
+                onInput={(e) => { const v = (e.target as HTMLInputElement).value; setDriveTxt((p) => [v, p[1]]); }} />
+              <span aria-hidden="true">h</span>
+              <input type="number" class="num" inputMode="numeric" min={0} aria-label="Driving total on your ELD, minutes" data-totals-drive-m="1" value={driveTxt[1]}
+                onInput={(e) => { const v = (e.target as HTMLInputElement).value; setDriveTxt((p) => [p[0], v]); }} />
+              <span aria-hidden="true">m</span>
+            </span>
+          </div>
+          <div class="qs-row">
+            <span class="qs-label">On-duty total on your ELD<span class="muted small"> — Daily Log on-duty total (optional)</span></span>
+            <span class="qs-inputs">
+              <input type="number" class="num" inputMode="numeric" min={0} aria-label="On-duty total on your ELD, hours" data-totals-on-h="1" value={onTxt[0]}
+                onInput={(e) => { const v = (e.target as HTMLInputElement).value; setOnTxt((p) => [v, p[1]]); }} />
+              <span aria-hidden="true">h</span>
+              <input type="number" class="num" inputMode="numeric" min={0} aria-label="On-duty total on your ELD, minutes" data-totals-on-m="1" value={onTxt[1]}
+                onInput={(e) => { const v = (e.target as HTMLInputElement).value; setOnTxt((p) => [p[0], v]); }} />
+              <span aria-hidden="true">m</span>
+            </span>
+          </div>
+          {err && <p class="warnbox small">{err}</p>}
+          <div class="row"><button class="primary" data-first={isShotMode ? undefined : true} data-drift-compare="1" onClick={compareTotals}>Compare</button></div>
+        </div>
+      </Sheet>
+    );
+  }
 
   const compare = () => {
     const [hs, ms] = txt;
@@ -3423,7 +3617,7 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
     }
     const eld = r.minutes;
     setErr(null);
-    const cmp = driftCheck(getState(), eld, now);
+    const cmp = dayWindow ? driftCheck(getState(), eld, now, dayWindow) : driftCheck(getState(), eld, now);
     setState({ lastEldCheckAt: now });
     setFound({ check: cmp, at: now, eld });
   };
@@ -3432,13 +3626,14 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
     const { plan, after } = filled;
     return (
       <Sheet title="Check against my ELD" closing={closing}>
+        {dayBanner}
         {after.verdict === 'sync' ? (
           <p><b>Now in sync</b> — drive time left matches your ELD: {dur(after.eldLeft)}.</p>
         ) : (
           <p>Added {dur(plan.filled)} of driving. This app now shows {dur(after.appLeft)} of driving left against your ELD's {dur(after.eldLeft)} — the two still differ, so the rest needs a look in the <b>Log</b>.</p>
         )}
         <p class="small">The added driving is on the Log, marked “{DRIFT_NOTE}” — Undo there takes it back out.</p>
-        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>See my clocks</button></div>
+        <div class="row"><button class="primary" data-first onClick={() => openSheet(null)}>{day ? 'Back to Log' : 'See my clocks'}</button></div>
       </Sheet>
     );
   }
@@ -3448,6 +3643,7 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
     if (check.verdict === 'sync') {
       return (
         <Sheet title="Check against my ELD" closing={closing}>
+          {dayBanner}
           <p><b>You're in sync</b> — this app and your ELD agree. Drive time left: {dur(check.appLeft)} either way you read it.</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">Nothing was changed.</p>
@@ -3458,34 +3654,36 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
     if (check.verdict === 'extra') {
       return (
         <Sheet title="Check against my ELD" closing={closing}>
+          {dayBanner}
           <p>Your ELD shows <b>{dur(check.gap)} more</b> driving left than this app ({dur(check.eldLeft)} against {dur(check.appLeft)}).</p>
           <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
           <p class="small">This check never takes driving out of a log, so there's no one-tap fix in this direction. The usual reason: a break or an off-duty stretch your ELD counted isn't in the log yet. Add it on the Log and the two will line up.</p>
           <div class="row">
-            <button class="primary" data-first onClick={() => { setState({ tab: 'log' }); openSheet(null); }}>Open the Log</button>
+            <button class="primary" data-first onClick={() => { if (!day) setState({ tab: 'log' }); openSheet(null); }}>{day ? 'Back to Log' : 'Open the Log'}</button>
             <button onClick={() => openSheet(null)}>Not now</button>
           </div>
         </Sheet>
       );
     }
-    const plan = planDriftFill(getState(), -check.gap, at);
+    const plan = dayWindow ? planDriftFill(getState(), -check.gap, at, dayWindow) : planDriftFill(getState(), -check.gap, at);
     return (
       <Sheet title="Check against my ELD" closing={closing}>
+        {dayBanner}
         <p>Your ELD shows <b>{dur(-check.gap)} less</b> driving left than this app — about {dur(-check.gap)} of driving isn't in the log yet. Until it's in, every answer here runs optimistic.</p>
         <p class="small">Your ELD says: <b>{dur(check.eldLeft)}</b> of drive time left.</p>
         {plan && plan.filled > 0 ? (
           <>
             <p class="small">It fits as Driving, {clock(plan.start)} → {clock(plan.end)}, in the unlogged stretch before what you did next{plan.remainder > 0 ? <> — only {dur(plan.filled)} of the {dur(-check.gap)} fits there; the rest needs a look in the Log</> : ''}. It goes on the Log marked “{DRIFT_NOTE}”, and Undo there takes it back out.</p>
             <div class="row">
-              <button class="primary" data-first onClick={() => { const r = addDriftFill(eld, at); if (r) setFilled({ plan: r.plan, after: r.after }); }}>Add the missing driving</button>
+              <button class="primary" data-first onClick={() => { const r = dayWindow ? addDriftFill(eld, at, dayWindow) : addDriftFill(eld, at); if (r) setFilled({ plan: r.plan, after: r.after }); }}>Add the missing driving</button>
               <button onClick={() => openSheet(null)}>Not now</button>
             </div>
           </>
         ) : (
           <>
-            <p class="small">There's no unlogged stretch in the record to put it in — add the driving on the Log tab instead.</p>
+            <p class="small">{dayLabel ? `There's no unlogged stretch on ${dayLabel} to put it in — add the driving on the Log tab instead.` : "There's no unlogged stretch in the record to put it in — add the driving on the Log tab instead."}</p>
             <div class="row">
-              <button class="primary" data-first onClick={() => { setState({ tab: 'log' }); openSheet(null); }}>Open the Log</button>
+              <button class="primary" data-first onClick={() => { if (!day) setState({ tab: 'log' }); openSheet(null); }}>{day ? 'Back to Log' : 'Open the Log'}</button>
               <button onClick={() => openSheet(null)}>Not now</button>
             </div>
           </>
@@ -3496,8 +3694,16 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
 
   return (
     <Sheet title="Check against my ELD" closing={closing}>
-      <div data-drift-sheet="1" data-drift-shot-mode={isShotMode ? '1' : '0'}>
-        <p class="small">Your ELD is the official record — this just lines the app up with it. {isShotMode ? 'Pick a screenshot of your ELD clocks screen (or type your drive time left below) to compare against your log without replacing your entries.' : 'Type the drive time left your ELD shows, and the app compares it with its own.'}</p>
+      <div
+        data-drift-sheet="1"
+        data-drift-shot-mode={isShotMode ? '1' : '0'}
+        data-drift-mode="clocks"
+        data-drift-day-start={day ? String(day.start) : undefined}
+        data-drift-day-end={day ? String(day.end) : undefined}
+        data-drift-day-label={dayLabel ?? undefined}
+      >
+        {dayBanner}
+        <p class="small">Your ELD is the official record — this just lines the app up with it. {dayLabel ? `Pick a screenshot of your live ELD countdown clocks for ${dayLabel} (or type your drive time left below). Your log only changes where you choose.` : isShotMode ? 'Pick a screenshot of your ELD clocks screen (or type your drive time left below) to compare against your log without replacing your entries.' : 'Type the drive time left your ELD shows, and the app compares it with its own.'}</p>
         {isShotMode && (
           <div class="qs-section" data-eld-ocr-section="1">
             <div class="row">
@@ -3520,7 +3726,7 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
               onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importDriftShot(f); }}
             />
             <p class="muted small">Read on this phone and thrown away — never sent or saved anywhere. Prefills your drive time left below; your log stays untouched.</p>
-            <button type="button" class="link eld-help-link" data-eld-help-btn="1" onClick={() => setEldHelp(true)}>Need help finding your log screen?</button>
+            <button type="button" class="link eld-help-link" data-eld-help-btn="1" onClick={() => setEldHelp(true)}>{day ? 'Need help finding your clocks screen?' : 'Need help finding your log screen?'}</button>
             {shotNote && <p class="ok small" data-drift-shot-note="1">{shotNote}</p>}
             {shotErr && <p class="warnbox small" data-drift-shot-err="1">{shotErr}</p>}
           </div>
@@ -3991,14 +4197,15 @@ export function dropCurrent(): boolean {
  * is missing AND an unlogged stretch can take some of it: the check never writes in the
  * "ELD shows more" direction, and never writes at all when the two already agree.
  */
-export function addDriftFill(eldLeftMin: number, now: number): { row: Segment; plan: DriftFillPlan; check: DriftComparison; after: DriftComparison } | null {
-  const check = driftCheck(getState(), eldLeftMin, now);
+export function addDriftFill(eldLeftMin: number, now: number, day?: DriftDayWindow): { row: Segment; plan: DriftFillPlan; check: DriftComparison; after: DriftComparison } | null {
+  const check = driftCheck(getState(), eldLeftMin, now, day);
   if (check.verdict !== 'missing') return null;
-  const plan = planDriftFill(getState(), -check.gap, now);
+  const plan = planDriftFill(getState(), -check.gap, now, day);
   if (!plan || plan.filled <= 0) return null;
+  if (day && (plan.start < day.start || plan.end > Math.min(day.end, now))) return null;
   const row: Segment = { status: 'D', start: plan.start, end: plan.end, note: DRIFT_NOTE, createdAt: stamp() };
   undoable(`Added ${describe(row)}`, () => setState((cur) => ({ segments: [...cur.segments, row], lastEldCheckAt: now })));
-  return { row, plan, check, after: driftCheck(getState(), eldLeftMin, now) };
+  return { row, plan, check, after: driftCheck(getState(), eldLeftMin, now, day) };
 }
 /** Replace the whole record with a fresh 10-hour rest ending now. Undo-able from the Log. */
 export function startOver(now: number) {
@@ -4043,6 +4250,41 @@ function carrierDay(now: number, back: number, s: State): { start: number; end: 
   return { start, end: nextCarrierDayStart(start, cfg) };
 }
 
+export const LOG_SWIPE_MIN_X = 56;
+export const LOG_SWIPE_RATIO = 1.5;
+
+/**
+ * Classify a completed touch gesture on the Log day view (grid + rows area).
+ * Swipe right (dx > 0) -> +1 (previous day, gated by canBack).
+ * Swipe left (dx < 0) -> -1 (next day, no-op at back === 0).
+ * Vertical-dominant, short, blocked, or mid-swap gestures return 0.
+ */
+export function classifyLogDaySwipe(
+  dx: number,
+  dy: number,
+  opts: { back: number; canBack: boolean; blocked: boolean; swapping: boolean },
+): -1 | 0 | 1 {
+  if (opts.blocked || opts.swapping) return 0;
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < LOG_SWIPE_MIN_X) return 0;
+  if (ay > 0 && ax < ay * LOG_SWIPE_RATIO) return 0;
+  if (dx > 0) return opts.canBack ? 1 : 0;
+  if (dx < 0) return opts.back > 0 ? -1 : 0;
+  return 0;
+}
+
+function isLogSwipeControlTarget(t: EventTarget | null): boolean {
+  let n = t as (HTMLElement & { parentNode?: unknown; localName?: string }) | null;
+  while (n) {
+    const tag = (n.localName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return true;
+    if (typeof n.getAttribute === 'function' && n.getAttribute('data-no-log-swipe') === '1') return true;
+    n = (n.parentNode as typeof n) || null;
+  }
+  return false;
+}
+
 /**
  * The Log (redesign 3/5): one carrier day at a time, on the four-line grid drivers know from paper
  * logs and ELDs, with that day's totals and its entries as full-width rows. A row is one tap to an
@@ -4052,6 +4294,8 @@ function carrierDay(now: number, back: number, s: State): { start: number; end: 
 function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvaluation; notices?: ComponentChildren }) {
   const [back, setBack] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const swipeRef = useRef<{ x: number; y: number; maxDy: number } | null>(null);
+  const suppressClickUntilRef = useRef(0);
   useEffect(() => { scrollRef.current?.scrollTo?.(0, 0); }, [back]);
   const openEditSheet = useSheet();
   const morphSourceKey = openEditSheet?.kind === 'edit' && activeMorphOrigin?.mode === 'log' ? activeMorphOrigin.key ?? null : null;
@@ -4084,6 +4328,55 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   const day = carrierDay(now, back, s);
   const earliest = Math.min(now, ...s.segments.map((x) => x.start), ...s.tentative.map((x) => x.start));
   const canBack = day.start > earliest;
+  const isSwipeBlocked = () => currentSheet() !== null || openEditSheet !== null || !getState().disclaimerAcked || activeMorphOrigin !== null;
+  const daySwipeProps = {
+    onTouchStart: (e: JSX.TargetedTouchEvent<HTMLElement>) => {
+      if (e.touches.length !== 1 || isSwipeBlocked() || isLogSwipeControlTarget(e.target)) {
+        swipeRef.current = null;
+        return;
+      }
+      const t = e.touches[0];
+      swipeRef.current = { x: t.clientX, y: t.clientY, maxDy: 0 };
+    },
+    onTouchMove: (e: JSX.TargetedTouchEvent<HTMLElement>) => {
+      const g = swipeRef.current;
+      if (!g) return;
+      if (e.touches.length !== 1 || isSwipeBlocked()) {
+        swipeRef.current = null;
+        return;
+      }
+      const t = e.touches[0];
+      const dy = Math.abs(t.clientY - g.y);
+      if (dy > g.maxDy) g.maxDy = dy;
+    },
+    onTouchEnd: (e: JSX.TargetedTouchEvent<HTMLElement>) => {
+      const g = swipeRef.current;
+      swipeRef.current = null;
+      if (!g) return;
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      const dx = t.clientX - g.x;
+      const effDy = Math.max(Math.abs(t.clientY - g.y), g.maxDy);
+      const step = classifyLogDaySwipe(dx, effDy, {
+        back,
+        canBack,
+        blocked: isSwipeBlocked(),
+        swapping: !prefersReducedMotion() && activeLogSwapRef.current > 0,
+      });
+      if (step !== 0) {
+        if (e.cancelable) e.preventDefault();
+        suppressClickUntilRef.current = Date.now() + 350;
+        setBack((b) => Math.max(0, b + step));
+      }
+    },
+    onTouchCancel: () => { swipeRef.current = null; },
+    onClickCapture: (e: JSX.TargetedMouseEvent<HTMLElement>) => {
+      if (Date.now() < suppressClickUntilRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+  };
   // The carrier day is the TERMINAL's day, so its date is read in the terminal zone. Read in the phone's
   // zone, a terminal east of the phone showed Saturday as "Fri, Oct 9" (re-check N6).
   const dayName = new Date(day.start * 60000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: s.config.timeZone });
@@ -4134,13 +4427,13 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
   return (
     <>
       <div class="log-pin">
-        <div class="daynav">
+        <div class="daynav" {...daySwipeProps}>
           <button class="icon-btn" aria-label="Previous day" disabled={!canBack} onClick={() => setBack(back + 1)}><Icon d={I.back} /></button>
           <div class="daynav-title"><b>{back === 0 ? `Today, ${dayName}` : dayName}</b><span class="muted small">Carrier day from {formatDayStartHM(s.config)}{twoZones ? <> {s.config.timeZone} · {clock(day.start)} on this phone</> : null}</span></div>
           <button class="icon-btn" aria-label="Next day" disabled={back === 0} onClick={() => setBack(back - 1)}><Icon d={I.next} /></button>
         </div>
         <p class="muted small log-scratchpad-note" data-log-scratchpad="1">Planning scratchpad — your ELD is the record.</p>
-        <section class="card log-graph-card">
+        <section class="card log-graph-card" data-log-swipe-zone="grid" {...daySwipeProps}>
           {/* The resolved timeline, as the clocks read it: drawn raw, a break added inside a drive showed the
               drive running straight through it, on top of the break (log editor redesign, 2026-10-13). */}
           <Grid segments={resolved} from={day.start} to={day.end} tz={s.config.timeZone} />
@@ -4201,6 +4494,19 @@ function LogTab({ s, now, ev, notices }: { s: State; now: number; ev: FullEvalua
             </div>
           )}
         </Card>
+        <button
+          type="button"
+          class="plan-item eld-shot-cta log-compare-cta"
+          data-log-eld-compare="1"
+          onClick={(e) => openMorphSheet({ kind: 'drift', mode: 'screenshot', day: { start: day.start, end: day.end, label: dayName, back } }, e.currentTarget)}
+        >
+          <span class="plan-icon"><Icon d={I.share} size={24} /></span>
+          <span class="plan-text">
+            <b>Compare {back === 0 ? 'today' : dayName} with my ELD</b>
+            <span class="muted small">{back === 0 ? 'Check an ELD screenshot — you pick any change.' : "Compare that day's ELD totals against your log."}</span>
+          </span>
+          <Icon d={I.next} />
+        </button>
         <Card title="Violations in your log"><ViolationList items={ev.violations.filter((v) => !v.tentative)} /></Card>
         {ev.violations.some((v) => v.tentative) && (
           <Card title="This plan would violate" tone="warn" statusBadge={{ tone: 'warn', label: '⚠ What-if' }}>
@@ -13348,7 +13654,7 @@ function AppShell({
       case 'status': inner = <StatusSheet key={mk} s={s} now={now} closing={sheetClosing} />; break;
       case 'since': inner = <SinceSheet key={mk} s={s} now={now} done={sh.done ?? null} closing={sheetClosing} />; break;
       case 'quickstart': inner = <QuickStartSheet key={mk} s={s} now={now} mode={sh.mode} closing={sheetClosing} />; break;
-      case 'drift': inner = <DriftSheet key={mk} s={s} now={now} mode={sh.mode} closing={sheetClosing} />; break;
+      case 'drift': inner = <DriftSheet key={mk} s={s} now={now} mode={sh.mode} day={sh.day} closing={sheetClosing} />; break;
       case 'why': inner = <WhySheet key={mk} s={s} now={now} ev={ev} closing={sheetClosing} />; break;
       case 'exceptions': inner = <ExceptionsSheet key={mk} ev={ev} closing={sheetClosing} />; break;
       case 'lever': inner = <LeverSheet key={mk} s={s} now={now} ev={ev} lever={sh.lever} closing={sheetClosing} />; break;
