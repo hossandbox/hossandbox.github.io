@@ -31,6 +31,7 @@ import {
 } from './store.ts';
 import { driverFileSlug, driverInitials } from './drivers.ts';
 import { StartupSplash, ActiveDriverStrip, DriverSettingsCard, DisclosureModal, CLOCK14_DISCLAIMER_TEXT } from './driver-ui.tsx';
+import { EldGuideFlow } from './eldguides-ui.tsx';
 export { setDriverGateBypassForTest, reloadVaultFromStorage, lockDriverSession, STAY_UNLOCKED_SPLASH_MS, completeAutoUnlock, getStayUnlocked, isStayUnlockedEffective, getPendingAutoUnlockId, setStayUnlocked, getIosInstallNoteDismissed, dismissIosInstallNote };
 import { clampDayStartMinute, safeRulesConfig, formatDayStartHM, dayStartWord } from './carrierday.ts';
 import {
@@ -386,15 +387,112 @@ const violationLabel: Record<Violation['kind'], string> = {
 const REPO = 'hossandbox/hossandbox.github.io';
 export const BUG_REPORT_EMAIL = 'lorico.estrellado@gmail.com';
 export const BUG_REPORT_SUBJECT = 'Clock 14 bug report';
+export const BUG_REPORT_MAILTO_MAX = 1800;
+export const BUG_REPORT_EXPORT_LINE = 'Full log copy: Settings → Data → Export — please attach it to this email.';
 
-/** Zero-account mailto: link carrying build stamp, active theme, and a one-line clock summary (status + four clocks). */
-export function bugReportMailtoHref(s: State, ev: FullEvaluation): string {
+/** Coarse platform classification for bug-report diagnostics (iOS/Android/desktop + standalone vs browser tab). */
+export function detectPlatformClass(
+  nav?: { userAgent?: string; maxTouchPoints?: number; standalone?: boolean },
+  win?: { matchMedia?: (q: string) => { matches: boolean } },
+): string {
+  const n = nav ?? (typeof navigator !== 'undefined' ? (navigator as unknown as { userAgent?: string; maxTouchPoints?: number; standalone?: boolean }) : undefined);
+  const w = win ?? (typeof window !== 'undefined' ? window : undefined);
+  const ua = typeof n?.userAgent === 'string' ? n.userAgent : '';
+  const isIos = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (n?.maxTouchPoints ?? 0) > 1);
+  const isAndroid = !isIos && /Android/i.test(ua);
+  const os = isIos ? 'iOS' : isAndroid ? 'Android' : 'desktop';
+  const standalone = n?.standalone === true
+    || Boolean(w && typeof w.matchMedia === 'function' && w.matchMedia('(display-mode: standalone)').matches);
+  return `${os} (${standalone ? 'standalone' : 'browser tab'})`;
+}
+
+/**
+ * Strictly allowlisted active-driver diagnostics snapshot for mailto bug reports.
+ * HARD PRIVACY FENCE: builds a fresh object solely from active-driver log/HOS State fields;
+ * never reads or includes the driver vault (__drivers), PIN/recovery hashes or salts,
+ * other drivers' states, or any driver name.
+ */
+export function buildDiagnosticsSnapshot(s: State, now: number) {
+  const cfg = safeRulesConfig(s.config);
+  const basis = historyBasis(s, now);
+  return {
+    v: 1 as const,
+    now,
+    nowOverride: s.nowOverride,
+    historyBasis: basis,
+    historyAcknowledged: s.historyAcknowledged,
+    seededAt: s.seededAt,
+    lastEldCheckAt: s.lastEldCheckAt ?? null,
+    tzChosen: s.tzChosen,
+    deviceTz,
+    config: {
+      cycle: cfg.cycle,
+      shortHaul: cfg.shortHaul,
+      timeZone: cfg.timeZone,
+      dayStartHour: cfg.dayStartHour,
+      dayStartMinute: cfg.dayStartMinute,
+      adverseShifts: cfg.adverseShifts,
+      sixteenHourShifts: cfg.sixteenHourShifts,
+    },
+    current: s.current
+      ? {
+          status: s.current.status,
+          since: s.current.since,
+          ...(s.current.note ? { note: s.current.note } : {}),
+          ...(s.current.createdAt !== undefined ? { createdAt: s.current.createdAt } : {}),
+        }
+      : null,
+    segments: s.segments.map((seg) => ({
+      status: seg.status,
+      start: seg.start,
+      end: seg.end,
+      ...(seg.note ? { note: seg.note } : {}),
+      ...(seg.tentative ? { tentative: true } : {}),
+      ...(seg.createdAt !== undefined ? { createdAt: seg.createdAt } : {}),
+    })),
+    tentative: s.tentative.map((seg) => ({
+      status: seg.status,
+      start: seg.start,
+      end: seg.end,
+      ...(seg.note ? { note: seg.note } : {}),
+      ...(seg.createdAt !== undefined ? { createdAt: seg.createdAt } : {}),
+    })),
+    dayCloses: s.dayCloses.map((dc) => ({ dayStart: dc.dayStart, at: dc.at })),
+  };
+}
+
+/**
+ * Zero-account mailto: link carrying build stamp, date/time, current screen, theme, platform class,
+ * 4-clock summary, and compact allowlisted active-driver state JSON. Falls back to a compact summary
+ * + export-attach guidance when the encoded URL would exceed BUG_REPORT_MAILTO_MAX (~1800 chars).
+ */
+export function bugReportMailtoHref(
+  s: State,
+  ev: FullEvaluation,
+  now?: number,
+  opts?: {
+    isoNow?: string;
+    nav?: { userAgent?: string; maxTouchPoints?: number; standalone?: boolean };
+    win?: { matchMedia?: (q: string) => { matches: boolean } };
+  },
+): string {
+  const evalNow = now ?? (s.nowOverride ?? nowMin());
+  const isoNow = opts?.isoNow ?? new Date().toISOString();
   const theme = effectiveTheme(s, devicePrefersDark());
+  const platform = detectPlatformClass(opts?.nav, opts?.win);
   const statusStr = s.current ? segLabel(s.current.status, s.current.note) : 'none';
   const breakStr = Number.isFinite(ev.shift.breakRemaining) ? dur(ev.shift.breakRemaining) : 'exempt';
   const summary = `Status: ${statusStr} | Drive: ${dur(ev.shift.driveRemaining)} | Window: ${dur(ev.shift.windowRemaining)} | Break: ${breakStr} | Cycle: ${dur(ev.cycle.remaining)}`;
-  const body = `Build: ${__BUILD__}\nTheme: ${theme}\nClocks: ${summary}\n\nWhat happened:\n`;
-  return `mailto:${BUG_REPORT_EMAIL}?subject=${encodeURIComponent(BUG_REPORT_SUBJECT)}&body=${encodeURIComponent(body)}`;
+  const header = `Build: ${__BUILD__}\nDate: ${isoNow}\nScreen: ${s.tab}\nTheme: ${theme}\nPlatform: ${platform}\nClocks: ${summary}`;
+  const snap = buildDiagnosticsSnapshot(s, evalNow);
+  const makeUrl = (body: string) =>
+    `mailto:${BUG_REPORT_EMAIL}?subject=${encodeURIComponent(BUG_REPORT_SUBJECT)}&body=${encodeURIComponent(body)}`;
+  const fullUrl = makeUrl(`${header}\n\nState: ${JSON.stringify(snap)}\n\nWhat happened:\n`);
+  if (fullUrl.length <= BUG_REPORT_MAILTO_MAX) return fullUrl;
+  const cfg = snap.config;
+  const curSummary = snap.current ? `${statusStr} since ${snap.current.since}` : 'none';
+  const fallbackSummary = `Summary: segments=${snap.segments.length}, tentative=${snap.tentative.length}, current=${curSummary}, cycle=${cfg.cycle}${cfg.shortHaul ? ' (short-haul)' : ''}, tz=${cfg.timeZone}, dayStart=${formatDayStartHM(cfg)}, basis=${snap.historyBasis}, seededAt=${snap.seededAt ?? 'none'}, lastEldCheckAt=${snap.lastEldCheckAt ?? 'none'}, now=${evalNow}${snap.nowOverride != null ? `, nowOverride=${snap.nowOverride}` : ''}`;
+  return makeUrl(`${header}\n\n${fallbackSummary}\n${BUG_REPORT_EXPORT_LINE}\n\nWhat happened:\n`);
 }
 
 /** Copies the exported state to the clipboard and opens a prefilled GitHub issue. */
@@ -411,25 +509,7 @@ function BugButton({ s, ev }: { s: State; ev: FullEvaluation }) {
   return <button class="ghost" onClick={() => reportBug(s, ev)}>🐞 Report a bug (GitHub)</button>;
 }
 
-/* ============================================================ Reception-fix helpers (ELD staleness, storage safety, iOS Safari, inline clock overrides) */
-
-/** Four hours in minutes: threshold after which the ELD staleness chip prompts a re-check. */
-export const ELD_STALE_MINUTES = 240;
-
-export function eldStalenessInfo(lastEldCheckAt: number | null | undefined, now: number): { kind: 'never' | 'stale' | 'fresh'; text: string } {
-  if (lastEldCheckAt == null || !Number.isFinite(lastEldCheckAt)) {
-    return { kind: 'never', text: 'Not checked against your ELD yet — tap to check' };
-  }
-  const elapsed = Math.max(0, Math.round(now - lastEldCheckAt));
-  if (elapsed >= ELD_STALE_MINUTES) {
-    const h = Math.floor(elapsed / 60);
-    const ago = h >= 24 ? `${Math.floor(h / 24)}d ago` : `${h}h ago`;
-    return { kind: 'stale', text: `Checked against your ELD ${ago} — tap to check` };
-  }
-  const h = Math.floor(elapsed / 60);
-  const ago = h >= 1 ? `${h}h ago` : elapsed <= 1 ? 'just now' : `${elapsed}m ago`;
-  return { kind: 'fresh', text: `ELD-checked ${ago}` };
-}
+/* ============================================================ Reception-fix helpers (storage safety, iOS Safari, inline clock overrides) */
 
 /** 30 days in minutes for the Settings backup nudge & dismissal window. */
 export const BACKUP_NUDGE_WINDOW_MIN = 30 * 1440;
@@ -2698,22 +2778,6 @@ function NowTab({ s, now, ev, again, onExitPeek, driverName }: { s: State; now: 
           <button type="button" class="mini" data-ios-install-dismiss="1" onClick={() => dismissIosInstallNote()}>Got it</button>
         </div>
       )}
-      {/* Receptionfix Scope 2 item 10: ELD staleness chip tapping into the existing drift-check sheet. */}
-      {!preview && (() => {
-        const stale = eldStalenessInfo(s.lastEldCheckAt, now);
-        return (
-          <button
-            type="button"
-            class={`eld-stale-chip is-${stale.kind}`}
-            data-eld-staleness={stale.kind}
-            onClick={(e) => openMorphSheet({ kind: 'drift' }, e.currentTarget)}
-          >
-            <Icon d={I.check} size={16} />
-            <span>{stale.text}</span>
-            <Icon d={I.next} size={16} />
-          </button>
-        );
-      })()}
       {/* Receptionfix Scope 2 item 9 & B1 (receptionfix2): prominent ELD screenshot refresh front door.
           Fresh logs launch QuickStartSheet (screenshot mode) to seed; populated logs route into
           DriftSheet (screenshot mode) so a mid-week check compares against the ELD without wiping rows. */}
@@ -3026,6 +3090,7 @@ function QuickStartSheet({ s, now, mode, closing = false }: { s: State; now: num
   const [shotBusy, setShotBusy] = useState(false);
   const [shotNote, setShotNote] = useState<string[] | null>(null);
   const [shotErr, setShotErr] = useState<string | null>(null);
+  const [eldHelp, setEldHelp] = useState(false);
   const shotRef = useRef<HTMLInputElement | null>(null);
   // A10 (taste): after a screenshot import or voice read-back lands, scroll the sheet so the read-out list is visible.
   useEffect(() => {
@@ -3113,6 +3178,13 @@ function QuickStartSheet({ s, now, mode, closing = false }: { s: State; now: num
     }
     applySeedNow(clocks);
   };
+  if (eldHelp) {
+    return (
+      <Sheet title="Find your ELD screen" focusKey="qs-eld-help" onBack={() => setEldHelp(false)} closing={closing}>
+        <EldGuideFlow onDone={() => setEldHelp(false)} />
+      </Sheet>
+    );
+  }
   if (replaceConfirm) {
     const rowWord = replaceConfirm.count === 1 ? 'row' : 'rows';
     return (
@@ -3206,6 +3278,7 @@ function QuickStartSheet({ s, now, mode, closing = false }: { s: State; now: num
           <input type="file" accept="image/*" style="display:none" ref={shotRef}
             onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importShot(f); }} />
           <p class="muted small">Pick a screenshot of your ELD's clocks screen. It is read on this phone and thrown away — never sent or saved anywhere.</p>
+          <button type="button" class="link eld-help-link" data-eld-help-btn="1" onClick={() => setEldHelp(true)}>Need help finding your log screen?</button>
           {(shotNote || shotErr) && (
             <div ref={shotResultRef} class="qs-result">
               {shotNote && <ul class="small">{shotNote.map((n, i) => <li key={i}>{n}</li>)}</ul>}
@@ -3277,7 +3350,16 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
   const [shotBusy, setShotBusy] = useState(false);
   const [shotNote, setShotNote] = useState<string | null>(null);
   const [shotErr, setShotErr] = useState<string | null>(null);
+  const [eldHelp, setEldHelp] = useState(false);
   const shotRef = useRef<HTMLInputElement | null>(null);
+
+  if (eldHelp) {
+    return (
+      <Sheet title="Find your ELD screen" focusKey="drift-eld-help" onBack={() => setEldHelp(false)} closing={closing}>
+        <EldGuideFlow onDone={() => setEldHelp(false)} />
+      </Sheet>
+    );
+  }
 
   // On the DEMO clock there is no real day to compare against — send the driver to the quick
   // start that creates one instead of running a comparison against assumed numbers.
@@ -3438,6 +3520,7 @@ function DriftSheet({ s, now, mode, closing = false }: { s: State; now: number; 
               onChange={(e) => { const el = e.target as HTMLInputElement; const f = el.files?.[0]; el.value = ''; if (f) void importDriftShot(f); }}
             />
             <p class="muted small">Read on this phone and thrown away — never sent or saved anywhere. Prefills your drive time left below; your log stays untouched.</p>
+            <button type="button" class="link eld-help-link" data-eld-help-btn="1" onClick={() => setEldHelp(true)}>Need help finding your log screen?</button>
             {shotNote && <p class="ok small" data-drift-shot-note="1">{shotNote}</p>}
             {shotErr && <p class="warnbox small" data-drift-shot-err="1">{shotErr}</p>}
           </div>
@@ -12343,8 +12426,18 @@ function SettingsTab({
       <DrivingAlertsCard s={s} />
       <BreakButtonsCard s={s} />
       <Card title="Bug reports">
-        <a class="btn primary wide bug-email-btn" data-bug-email="1" href={bugReportMailtoHref(s, ev)}>Email a bug report</a>
-        <p class="muted small">Opens your email app with your build stamp, theme, and clocks pre-filled — no account needed.</p>
+        <a
+          class="btn primary wide bug-email-btn"
+          data-bug-email="1"
+          href={bugReportMailtoHref(s, ev, now)}
+          onClick={(e) => {
+            const cur = getState();
+            const tapNow = cur.nowOverride ?? nowMin();
+            const tapEv = evaluate(allSegments(cur, tapNow), { asOf: tapNow, config: safeRulesConfig(cur.config) });
+            (e.currentTarget as HTMLAnchorElement).href = bugReportMailtoHref(cur, tapEv, tapNow);
+          }}
+        >Email a bug report</a>
+        <p class="muted small" data-bug-email-disclosure="1">Sends your clock log and app state so we can diagnose the problem. No PIN, no account info.</p>
         <BugButton s={s} ev={ev} />
         <p class="muted small">Opens a GitHub issue form with your clocks, build number and log pre-filled (a free GitHub account is needed to submit). Your log is also copied to the clipboard. Beta rules: <a href={`https://github.com/${REPO}#free-beta`} target="_blank" rel="noopener">github.com/{REPO}</a></p>
       </Card>

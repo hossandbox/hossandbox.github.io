@@ -838,18 +838,19 @@ await pin('DR12. receptionfix Scope 1: registration stayUnlocked toggle (default
   return true;
 });
 
-/* ---- DR13: Receptionfix Scope 2 — ELD screenshot refresh CTA (fresh & active), staleness chip, and Plan inline clock overrides ---- */
-await pin('DR13. receptionfix Scope 2: Refresh from ELD screenshot on Now (fresh & active), lastEldCheckAt staleness chip, and Plan tool inline overrides', async () => {
+/* ---- DR13: Receptionfix Scope 2 (eldpatch Item 1 updated) — ELD screenshot refresh CTA (fresh & active), staleness chip ABSENT, and Plan inline clock overrides ---- */
+await pin('DR13. receptionfix Scope 2 + eldpatch Item 1: Refresh from ELD screenshot on Now (fresh & active), staleness chip absent in all states while lastEldCheckAt & drift CTA work, and Plan inline overrides', async () => {
   const T = Math.floor(Tms / 60000);
+  if (typeof A.eldStalenessInfo !== 'undefined') return 'dead helper eldStalenessInfo should be removed';
   setState({ tab: 'now', segments: [], tentative: [], current: null, seededAt: null, lastEldCheckAt: null, nowOverride: T });
   await sleep(40);
   const nowPg = () => all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
+  const staleChips = () => all((n) => n.attributes?.['data-eld-staleness'] != null, nowPg());
   const shotFresh = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0];
-  const staleNever = all((n) => n.attributes?.['data-eld-staleness'] === 'never', nowPg())[0];
   if (!shotFresh || !/Refresh from ELD screenshot/.test(shotFresh.textContent)) return 'missing Refresh from ELD screenshot in fresh state';
-  if (!staleNever || !/Not checked against your ELD yet — tap to check/.test(staleNever.textContent)) return `wrong never-checked chip: ${staleNever?.textContent}`;
+  if (staleChips().length !== 0) return `staleness chip must be absent in fresh state, found: ${staleChips().map((n) => n.textContent).join(', ')}`;
 
-  // Clicking Refresh from ELD screenshot opens the existing eldocr QuickStartSheet directly.
+  // Clicking Refresh from ELD screenshot on fresh log opens the existing eldocr QuickStartSheet directly.
   await clickNode(shotFresh);
   const chooseShot = all((n) => n.attributes?.['data-eld-choose-shot'] === '1')[0];
   const fileIn = all((n) => n.localName === 'input' && n.attributes?.type === 'file' && n.attributes?.accept === 'image/*')[0];
@@ -857,40 +858,30 @@ await pin('DR13. receptionfix Scope 2: Refresh from ELD screenshot on Now (fresh
   A.openSheet(null);
   await sleep(30);
 
-  // Active state: seed via applyEldSeed -> sets lastEldCheckAt=T -> fresh chip; advance 6h -> stale chip -> tap opens DriftSheet.
+  // Active state: seed via applyEldSeed -> stamps lastEldCheckAt=T; chip stays absent across fresh, +6h, +1d, +13d; CTA reaches DriftSheet.
   const seed = S.applyEldSeed(getState(), { driveLeft: 480, windowLeft: 600, breakDueIn: 300, cycleLeft: 3000 }, T);
   setState(seed.patch);
   await sleep(40);
+  if (getState().lastEldCheckAt !== T) return `applyEldSeed did not stamp lastEldCheckAt: ${getState().lastEldCheckAt}`;
   const shotActive = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0];
-  const staleFresh = all((n) => n.attributes?.['data-eld-staleness'] === 'fresh', nowPg())[0];
-  if (!shotActive || !staleFresh || !/ELD-checked/.test(staleFresh.textContent)) {
-    return `active state CTA/fresh chip failed: cta=${!!shotActive}, fresh=${staleFresh?.textContent}`;
-  }
-  setState({ nowOverride: T + 360 }); // 6 hours later
-  await sleep(40);
-  const stale6h = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
-  if (!stale6h || !/Checked against your ELD 6h ago — tap to check/.test(stale6h.textContent)) {
-    return `expected 6h stale chip, got: ${stale6h?.textContent}`;
-  }
-  // N4 (receptionfix2): >= 24h formats as <N>d ago (not e.g. 312h ago).
-  setState({ nowOverride: T + 24 * 60 });
-  await sleep(30);
-  const stale1d = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
-  if (!stale1d || !/Checked against your ELD 1d ago — tap to check/.test(stale1d.textContent)) {
-    return `expected 1d stale chip, got: ${stale1d?.textContent}`;
-  }
-  setState({ nowOverride: T + 312 * 60 });
-  await sleep(30);
-  const stale13d = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
-  if (!stale13d || !/Checked against your ELD 13d ago — tap to check/.test(stale13d.textContent) || /312h ago/.test(stale13d.textContent)) {
-    return `expected 13d stale chip, got: ${stale13d?.textContent}`;
+  if (!shotActive) return 'missing Refresh from ELD screenshot CTA in active state';
+  if (staleChips().length !== 0) return 'staleness chip rendered in freshly-seeded state';
+
+  for (const offset of [360, 24 * 60, 312 * 60]) {
+    setState({ nowOverride: T + offset });
+    await sleep(25);
+    if (staleChips().length !== 0) return `staleness chip rendered at +${offset}m`;
   }
   setState({ nowOverride: T + 360 });
   await sleep(30);
-  const stale6hAgain = all((n) => n.attributes?.['data-eld-staleness'] === 'stale', nowPg())[0];
-  await clickNode(stale6hAgain);
+
+  // Populated-log CTA reaches DriftSheet in screenshot mode end-to-end (after staleness chip removal).
+  const shotPop = all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0];
+  await clickNode(shotPop);
+  await sleep(30);
   const driftTitle = all((n) => n.localName === 'h2' && /Check against my ELD/.test(n.textContent))[0];
-  if (!driftTitle) return 'tapping staleness chip did not open DriftSheet';
+  const driftShotWrap = all((n) => n.attributes?.['data-drift-sheet'] === '1' && n.attributes?.['data-drift-shot-mode'] === '1')[0];
+  if (!driftTitle || !driftShotWrap) return 'tapping Refresh CTA on active log did not open DriftSheet in screenshot mode';
   A.openSheet(null);
   await sleep(30);
 
@@ -1010,7 +1001,7 @@ await pin('DR14. receptionfix Scopes 3 & 4: worksheet PDF rename/header/filename
   Object.defineProperty(globalThis, 'navigator', { value: origNav, configurable: true, writable: true });
   if (!iosGone) return 'iOS warning did not persist dismissal';
 
-  // N3 (receptionfix2): applyImportedState clears lastEldCheckAt so imported logs do not inherit "ELD-checked just now".
+  // N3 (receptionfix2) + eldpatch Item 1: applyImportedState clears lastEldCheckAt, and no staleness chip renders on Now.
   setState({ tab: 'now', nowOverride: T, lastEldCheckAt: T });
   await sleep(30);
   const impPatch = S.applyImportedState(getState(), { segments: [{ status: 'OFF', start: T - 600, end: T, createdAt: 1 }] });
@@ -1018,8 +1009,8 @@ await pin('DR14. receptionfix Scopes 3 & 4: worksheet PDF rename/header/filename
   setState(impPatch);
   await sleep(40);
   const nowPg2 = all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
-  const staleAfterImp = all((n) => n.attributes?.['data-eld-staleness'] === 'never', nowPg2)[0];
-  if (!staleAfterImp) return 'imported log still rendered ELD-checked instead of never-checked';
+  const staleAfterImp = all((n) => n.attributes?.['data-eld-staleness'] != null, nowPg2);
+  if (staleAfterImp.length !== 0) return 'imported log unexpectedly rendered staleness chip';
   return true;
 });
 
@@ -1276,6 +1267,267 @@ await pin('DR17. N1: SplitTab disables "Put plan on log as what-if" with plain n
   await clickNode(all((n) => n.attributes?.['data-clock-override-clear'] === 'split')[0]);
   await sleep(40);
   if (isDisabled(splitBtn()) || noteEl()) return `Split commit did not re-enable after clearing custom clocks (disabled=${isDisabled(splitBtn())}, note=${!!noteEl()})`;
+  return true;
+});
+
+/* ---- DR18 (eldpatch Item 2): Pick-your-ELD offline help flow in both Refresh entry points ---- */
+await pin('DR18. eldpatch Item 2: ELD help affordance in QuickStartSheet & DriftSheet screenshot flows, 31 documented + 4 undocumented + generic entry, split-screen clocks note, no-phone-graph honest note, generic 3-step, zero persistence/external links', async () => {
+  const T = Math.floor(Tms / 60000);
+  const rawStorageBefore = localStorage.getItem('hos-sandbox-v1');
+  const keysBefore = Object.keys(localStorage).sort().join(',');
+
+  // (1) Fresh log -> Refresh CTA -> QuickStartSheet screenshot mode has help affordance -> picker.
+  setState({ tab: 'now', segments: [], tentative: [], current: null, seededAt: null, lastEldCheckAt: null, nowOverride: T });
+  await sleep(40);
+  const nowPg = () => all((n) => n.localName === 'section' && /\bpage-now\b/.test(n.attributes?.class ?? ''))[0];
+  await clickNode(all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0]);
+  await sleep(40);
+  const qsHelpBtn = all((n) => n.attributes?.['data-eld-help-btn'] === '1')[0];
+  if (!qsHelpBtn || !/Need help finding your log screen\?/.test(qsHelpBtn.textContent)) {
+    return `QuickStartSheet missing ELD help affordance: ${qsHelpBtn?.textContent}`;
+  }
+  await clickNode(qsHelpBtn);
+  await sleep(30);
+  const picker1 = all((n) => n.attributes?.['data-eld-guide-picker'] === '1')[0];
+  if (!picker1) return 'QuickStartSheet help affordance did not open ELD guide picker';
+
+  const docItems = all((n) => n.attributes?.['data-eld-kind'] === 'documented', picker1);
+  const undocItems = all((n) => n.attributes?.['data-eld-kind'] === 'undocumented', picker1);
+  const genItems = all((n) => n.attributes?.['data-eld-kind'] === 'generic', picker1);
+  if (docItems.length !== 31 || undocItems.length !== 4 || genItems.length !== 1) {
+    return `unexpected ELD counts: documented=${docItems.length}, undocumented=${undocItems.length}, generic=${genItems.length}`;
+  }
+  // Verify the 4 undocumented ELDs are present and labeled as generic steps.
+  const undocIds = undocItems.map((n) => n.attributes?.['data-eld-item']).sort().join(',');
+  if (undocIds !== 'anytrek,eld-mandate,lytx,netradyne') return `wrong undocumented ELD IDs: ${undocIds}`;
+  for (const u of undocItems) {
+    if (!/Generic steps/i.test(u.textContent)) return `undocumented ELD not labeled as generic steps: ${u.textContent}`;
+  }
+  if (!/Don't see your ELD\?/.test(genItems[0].textContent)) return `generic fallback label wrong: ${genItems[0].textContent}`;
+  // Zero runtime external links inside the picker.
+  const extLinksPicker = all((n) => n.localName === 'a' && /^https?:\/\//i.test(n.attributes?.href ?? ''), picker1);
+  if (extLinksPicker.length !== 0) return 'ELD picker must not contain external links';
+
+  // (2) Split-screen device #1: Samsara — lands on HoS clocks screen and explains why; no stitching promise.
+  await clickNode(all((n) => n.attributes?.['data-eld-item'] === 'samsara')[0]);
+  await sleep(30);
+  const samsaraDetail = all((n) => n.attributes?.['data-eld-guide-detail'] === 'samsara')[0];
+  const samsaraScreen = all((n) => n.attributes?.['data-eld-which-screen'] === '1' && n.attributes?.['data-eld-split'] === '1', samsaraDetail)[0];
+  const samsaraSteps = all((n) => n.localName === 'li', samsaraDetail);
+  const samsaraDay = all((n) => n.attributes?.['data-eld-switch-day'] === '1', samsaraDetail)[0];
+  if (!samsaraDetail || !samsaraScreen || !/HoS/.test(samsaraScreen.textContent) || !/clocks/i.test(samsaraScreen.textContent) || samsaraSteps.length < 2) {
+    return `Samsara detail missing split-screen clocks guidance: ${samsaraDetail?.textContent}`;
+  }
+  if (!samsaraDay || !/one day at a time/i.test(samsaraDay.textContent) || /stitch/i.test(samsaraDetail.textContent)) {
+    return `Samsara day-switch note invalid: ${samsaraDay?.textContent}`;
+  }
+  if (all((n) => n.localName === 'a' && /^https?:\/\//i.test(n.attributes?.href ?? ''), samsaraDetail).length !== 0) {
+    return 'Samsara detail contains external link';
+  }
+
+  // Back to list -> Split-screen device #2: Geotab Drive.
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-back-list'] === '1')[0]);
+  await sleep(30);
+  await clickNode(all((n) => n.attributes?.['data-eld-item'] === 'geotab')[0]);
+  await sleep(30);
+  const geotabDetail = all((n) => n.attributes?.['data-eld-guide-detail'] === 'geotab')[0];
+  const geotabScreen = all((n) => n.attributes?.['data-eld-which-screen'] === '1' && n.attributes?.['data-eld-split'] === '1', geotabDetail)[0];
+  if (!geotabDetail || !geotabScreen || !/HOS/.test(geotabScreen.textContent) || !/Logs tab/i.test(geotabScreen.textContent)) {
+    return `Geotab detail missing split-screen clocks guidance: ${geotabDetail?.textContent}`;
+  }
+
+  // Back to list -> No-phone-graph dash-mounted terminal: ISAAC InControl (and Omnitracs IVG).
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-back-list'] === '1')[0]);
+  await sleep(30);
+  await clickNode(all((n) => n.attributes?.['data-eld-item'] === 'isaac')[0]);
+  await sleep(30);
+  const isaacDetail = all((n) => n.attributes?.['data-eld-guide-detail'] === 'isaac')[0];
+  const isaacNotice = all((n) => n.attributes?.['data-eld-no-phone-graph'] === '1', isaacDetail)[0];
+  if (!isaacDetail || !isaacNotice || !/no phone screenshot/i.test(isaacNotice.textContent)) {
+    return `ISAAC no-phone-graph honest note missing: ${isaacNotice?.textContent}`;
+  }
+
+  // Back to list -> Undocumented ELD (Lytx) renders generic 3-step pattern honestly.
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-back-list'] === '1')[0]);
+  await sleep(30);
+  await clickNode(all((n) => n.attributes?.['data-eld-item'] === 'lytx')[0]);
+  await sleep(30);
+  const lytxDetail = all((n) => n.attributes?.['data-eld-guide-detail'] === 'lytx')[0];
+  const lytxSteps = all((n) => n.localName === 'li', lytxDetail);
+  if (!lytxDetail || !/Generic steps/i.test(lytxDetail.textContent) || lytxSteps.length !== 3) {
+    return `Lytx undocumented page invalid: steps=${lytxSteps.length}`;
+  }
+
+  // Back to list -> Final generic fallback ("Don't see your ELD?") renders the 3-step pattern.
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-back-list'] === '1')[0]);
+  await sleep(30);
+  await clickNode(all((n) => n.attributes?.['data-eld-item'] === 'generic')[0]);
+  await sleep(30);
+  const genDetail = all((n) => n.attributes?.['data-eld-guide-detail'] === 'generic')[0];
+  const genSteps = all((n) => n.localName === 'li', genDetail);
+  if (!genDetail || genSteps.length !== 3 || !/Park first/i.test(genSteps[0].textContent)) {
+    return `Generic fallback missing 3-step pattern: steps=${genSteps.length}`;
+  }
+
+  // Back to list -> Search discontinued hardware shows quiet notice, then return to screenshot sheet.
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-back-list'] === '1')[0]);
+  await sleep(30);
+  const searchIn = all((n) => n.attributes?.['data-eld-guide-search'] === '1')[0];
+  await setInput(searchIn, 'Stoneridge');
+  await sleep(30);
+  const discNote = all((n) => n.attributes?.['data-eld-discontinued'] === '1')[0];
+  if (!discNote || !/discontinued/i.test(discNote.textContent)) return 'discontinued ELD search note missing';
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-return'] === '1')[0]);
+  await sleep(30);
+  if (!all((n) => n.attributes?.['data-eld-choose-shot'] === '1')[0]) return 'Back to screenshot did not return to QuickStartSheet';
+  A.openSheet(null);
+  await sleep(30);
+
+  // Verify session-only: reopening opens fresh on picker (not persisted) and zero new localStorage keys were created.
+  if (Object.keys(localStorage).sort().join(',') !== keysBefore) return 'ELD guide flow added unexpected localStorage keys';
+  // (Storage may only have changed from our own setState above; check no eld-choice keys exist in storage.)
+  if (/eldGuide|selectedEld|pickedEld/i.test(localStorage.getItem('hos-sandbox-v1') ?? '')) {
+    return 'ELD choice was persisted into storage';
+  }
+  void rawStorageBefore;
+
+  // (3) Populated log -> Refresh CTA -> DriftSheet screenshot mode ALSO has help affordance -> opens fresh picker.
+  setState({
+    tab: 'now',
+    nowOverride: T,
+    segments: [
+      { status: 'OFF', start: T - 720, end: T - 120, createdAt: 1 },
+      { status: 'D', start: T - 120, end: T, createdAt: 2 },
+    ],
+    tentative: [],
+    current: { status: 'ON', since: T, createdAt: 3 },
+  });
+  await sleep(40);
+  await clickNode(all((n) => n.attributes?.['data-eld-screenshot-btn'] === '1', nowPg())[0]);
+  await sleep(40);
+  const driftHelpBtn = all((n) => n.attributes?.['data-eld-help-btn'] === '1')[0];
+  if (!driftHelpBtn || !/Need help finding your log screen\?/.test(driftHelpBtn.textContent)) {
+    return `DriftSheet screenshot mode missing ELD help affordance: ${driftHelpBtn?.textContent}`;
+  }
+  await clickNode(driftHelpBtn);
+  await sleep(30);
+  const picker2 = all((n) => n.attributes?.['data-eld-guide-picker'] === '1')[0];
+  if (!picker2) return 'DriftSheet help affordance did not open fresh ELD picker';
+  // Return to DriftSheet screenshot mode cleanly.
+  await clickNode(all((n) => n.attributes?.['data-eld-guide-return'] === '1')[0]);
+  await sleep(30);
+  const driftBack = all((n) => n.attributes?.['data-drift-sheet'] === '1' && n.attributes?.['data-drift-shot-mode'] === '1')[0];
+  A.openSheet(null);
+  await sleep(30);
+  if (!driftBack) return 'Back to screenshot did not return to DriftSheet';
+  return true;
+});
+
+/* ---- DR19 (eldpatch Item 3): Bug report mailto diagnostics snapshot, hard privacy fence, size-guard fallback, disclosure line ---- */
+await pin('DR19. eldpatch Item 3: bug report mailto carries allowlisted diagnostics JSON on small log with hard privacy fence, falls back under ~1800 chars on large log with export-attach line, and shows disclosure', async () => {
+  const T = Math.floor(Tms / 60000);
+  // Extract live vault secrets (salts, hashes, driver names, IDs) from localStorage to assert strict absence!
+  const vaultEnv = JSON.parse(localStorage.getItem('hos-sandbox-v1') || '{}');
+  const vault = vaultEnv.__drivers;
+  const profiles = vault && vault.profiles ? Object.values(vault.profiles) : [];
+  if (profiles.length < 2) {
+    return `precondition: expected multi-driver vault with >=2 profiles for privacy fence test, got ${profiles.length}`;
+  }
+  const forbiddenStrings = ['__drivers', 'profiles', 'pinHash', 'recovery', 'sha256-2048', 'stayUnlocked', '1357', '2468'];
+  for (const drv of profiles) {
+    if (drv.id) forbiddenStrings.push(drv.id);
+    if (drv.name) forbiddenStrings.push(drv.name);
+    if (drv.pin?.salt) forbiddenStrings.push(drv.pin.salt);
+    if (drv.pin?.hash) forbiddenStrings.push(drv.pin.hash);
+    for (const r of drv.recovery || []) {
+      if (r.salt) forbiddenStrings.push(r.salt);
+      if (r.hash) forbiddenStrings.push(r.hash);
+    }
+  }
+
+  // (1) Small log on Settings: render disclosure line + inspect mailto href + verify tap-time refresh.
+  setState({
+    tab: 'settings',
+    nowOverride: T,
+    seededAt: T - 300,
+    lastEldCheckAt: T - 60,
+    historyAcknowledged: true,
+    segments: [
+      { status: 'OFF', start: T - 720, end: T - 120, createdAt: 10 },
+      { status: 'D', start: T - 120, end: T, createdAt: 11 },
+    ],
+    tentative: [{ status: 'OFF', start: T, end: T + 30, note: 'Break: 30-min break', createdAt: 12 }],
+    current: { status: 'ON', since: T, createdAt: 13 },
+  });
+  await sleep(40);
+  const setPg = all((n) => n.localName === 'section' && /\bpage-settings\b/.test(n.attributes?.class ?? ''))[0];
+  const disc = all((n) => n.attributes?.['data-bug-email-disclosure'] === '1', setPg)[0];
+  if (!disc || disc.textContent.trim() !== 'Sends your clock log and app state so we can diagnose the problem. No PIN, no account info.') {
+    return `wrong or missing disclosure line: ${disc?.textContent}`;
+  }
+  const emailBtn = all((n) => n.localName === 'a' && n.attributes?.['data-bug-email'] === '1', setPg)[0];
+  if (!emailBtn) return 'missing Email a bug report link';
+  // Trigger tap-time click refresh on the anchor.
+  fire(emailBtn, 'click');
+  await sleep(20);
+  const hrefSmall = emailBtn.href || emailBtn.attributes?.href || '';
+  if (!hrefSmall.startsWith('mailto:lorico.estrellado@gmail.com?')) return `bad mailto prefix: ${hrefSmall}`;
+  if (hrefSmall.length > A.BUG_REPORT_MAILTO_MAX) return `small log mailto unexpectedly exceeded ${A.BUG_REPORT_MAILTO_MAX}: len=${hrefSmall.length}`;
+  const decodedSmall = decodeURIComponent(hrefSmall);
+  for (const req of ['Build:', 'Date:', 'Screen: settings', 'Theme:', 'Platform:', 'Clocks:', 'State: ']) {
+    if (!decodedSmall.includes(req)) return `small log mailto missing "${req}"`;
+  }
+  const stateMatch = decodedSmall.match(/State: (\{[^\n]+\})/);
+  if (!stateMatch) return `small log mailto missing compact State JSON: ${decodedSmall}`;
+  const snap = JSON.parse(stateMatch[1]);
+  if (
+    snap.segments?.length !== 2
+    || snap.tentative?.length !== 1
+    || snap.current?.status !== 'ON'
+    || snap.seededAt !== T - 300
+    || snap.lastEldCheckAt !== T - 60
+    || !snap.config?.cycle
+    || !snap.historyBasis
+  ) {
+    return `parsed State JSON missing diagnostic fields: ${stateMatch[1]}`;
+  }
+  for (const secret of forbiddenStrings) {
+    if (hrefSmall.includes(secret) || decodedSmall.includes(secret)) {
+      return `PRIVACY FENCE VIOLATION in small mailto: leaked "${secret}"`;
+    }
+  }
+
+  // (2) Large synthetic log triggers size-guard fallback <= 1800 chars with export-attach guidance & zero leaks.
+  const bigSegs = [];
+  for (let i = 0; i < 45; i++) {
+    const st = i % 3 === 0 ? 'OFF' : i % 3 === 1 ? 'D' : 'ON';
+    bigSegs.push({ status: st, start: T - (45 - i) * 180, end: T - (44 - i) * 180, note: `Leg ${i + 1}`, createdAt: 100 + i });
+  }
+  setState({ tab: 'settings', nowOverride: T, segments: bigSegs, tentative: [], current: { status: 'OFF', since: T, createdAt: 999 } });
+  await sleep(40);
+  const emailBtnBig = all((n) => n.localName === 'a' && n.attributes?.['data-bug-email'] === '1', all((n) => n.localName === 'section' && /\bpage-settings\b/.test(n.attributes?.class ?? ''))[0])[0];
+  const hrefBig = emailBtnBig?.attributes?.href ?? '';
+  const decodedBig = decodeURIComponent(hrefBig);
+  if (hrefBig.length > A.BUG_REPORT_MAILTO_MAX) {
+    return `large log fallback exceeded ${A.BUG_REPORT_MAILTO_MAX} chars: len=${hrefBig.length}`;
+  }
+  if (decodedBig.includes('State: {')) return 'large log failed to fall back from full State JSON';
+  if (!decodedBig.includes('Summary: segments=45') || !decodedBig.includes(A.BUG_REPORT_EXPORT_LINE)) {
+    return `large log fallback missing summary or export-attach line: ${decodedBig}`;
+  }
+  for (const secret of forbiddenStrings) {
+    if (hrefBig.includes(secret) || decodedBig.includes(secret)) {
+      return `PRIVACY FENCE VIOLATION in fallback mailto: leaked "${secret}"`;
+    }
+  }
+
+  // (3) Platform class detection across iOS/Android/desktop x standalone/browser tab.
+  const pIosStandalone = A.detectPlatformClass({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', standalone: true }, { matchMedia: () => ({ matches: false }) });
+  const pAndroidBrowser = A.detectPlatformClass({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)' }, { matchMedia: () => ({ matches: false }) });
+  const pDeskStandalone = A.detectPlatformClass({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' }, { matchMedia: () => ({ matches: true }) });
+  if (pIosStandalone !== 'iOS (standalone)' || pAndroidBrowser !== 'Android (browser tab)' || pDeskStandalone !== 'desktop (standalone)') {
+    return `detectPlatformClass mismatch: ${JSON.stringify({ pIosStandalone, pAndroidBrowser, pDeskStandalone })}`;
+  }
   return true;
 });
 

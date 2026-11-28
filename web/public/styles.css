@@ -3473,39 +3473,87 @@ html[data-theme="winddown"] {
   align-items: flex-start;
   margin: 0;
 }
-.eld-stale-chip {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 12px;
-  margin: 6px 0;
-  border-radius: var(--r-12);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--line);
-}
-.eld-stale-chip span { flex: 1; min-width: 0; }
-.eld-stale-chip.is-never,
-.eld-stale-chip.is-stale {
-  border-color: color-mix(in srgb, var(--warn) 60%, var(--line));
-  background: var(--tint-warn);
-}
-.eld-stale-chip.is-fresh {
-  min-height: 36px;
-  padding: 5px 10px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted);
-  background: transparent;
-  border-color: var(--line);
-}
 .eld-shot-cta {
   margin: 6px 0 8px;
+}
+.eld-help-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.eld-guide-picker,
+.eld-guide-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.eld-guide-search {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--r-12);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+}
+.eld-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+.eld-guide-row {
+  min-height: 52px;
+}
+.eld-guide-row.is-generic {
+  border-color: color-mix(in srgb, var(--ring) 45%, var(--line));
+}
+.eld-guide-chev {
+  font-size: 20px;
+  color: var(--muted);
+  line-height: 1;
+}
+.eld-guide-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.eld-guide-back {
+  min-height: 44px;
+  padding: 4px 0;
+  font-weight: 700;
+}
+.eld-guide-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.eld-guide-screen-note {
+  padding: 10px 12px;
+  border-radius: var(--r-12);
+  background: var(--tint-accent);
+  border: 1px solid color-mix(in srgb, var(--ring) 45%, var(--line));
+}
+.eld-guide-steps {
+  margin: 4px 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.eld-guide-day {
+  margin: 2px 0;
 }
 .log-scratchpad-note {
   margin: 0 0 6px;
